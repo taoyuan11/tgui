@@ -180,7 +180,7 @@ fn build_output_stream(
             let shared = shared.clone();
             device
                 .build_output_stream(
-                    &stream_config,
+                    stream_config.clone(),
                     move |buffer: &mut [i16], _| write_audio_samples(buffer, &shared),
                     error_callback,
                     None,
@@ -193,7 +193,7 @@ fn build_output_stream(
             let shared = shared.clone();
             device
                 .build_output_stream(
-                    &stream_config,
+                    stream_config.clone(),
                     move |buffer: &mut [u16], _| write_audio_samples(buffer, &shared),
                     error_callback,
                     None,
@@ -204,7 +204,7 @@ fn build_output_stream(
         }
         SampleFormat::F32 => device
             .build_output_stream(
-                &stream_config,
+                stream_config,
                 move |buffer: &mut [f32], _| write_audio_samples(buffer, &shared),
                 error_callback,
                 None,

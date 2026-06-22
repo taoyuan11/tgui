@@ -157,47 +157,47 @@ pub(super) fn compute_container_content_bounds<VM>(
 
 pub(super) fn map_align_items(align: Align) -> Option<TaffyAlignItems> {
     Some(match align {
-        Align::Start => TaffyAlignItems::Start,
-        Align::Center => TaffyAlignItems::Center,
-        Align::End => TaffyAlignItems::End,
-        Align::Stretch => TaffyAlignItems::Stretch,
+        Align::Start => TaffyAlignItems::START,
+        Align::Center => TaffyAlignItems::CENTER,
+        Align::End => TaffyAlignItems::END,
+        Align::Stretch => TaffyAlignItems::STRETCH,
     })
 }
 
 pub(super) fn map_align_self(align: Align) -> TaffyAlignItems {
     match align {
-        Align::Start => TaffyAlignItems::Start,
-        Align::Center => TaffyAlignItems::Center,
-        Align::End => TaffyAlignItems::End,
-        Align::Stretch => TaffyAlignItems::Stretch,
+        Align::Start => TaffyAlignItems::START,
+        Align::Center => TaffyAlignItems::CENTER,
+        Align::End => TaffyAlignItems::END,
+        Align::Stretch => TaffyAlignItems::STRETCH,
     }
 }
 
 pub(super) fn map_justify_content(justify: Justify) -> TaffyJustifyContent {
     match justify {
-        Justify::Start => TaffyJustifyContent::Start,
-        Justify::Center => TaffyJustifyContent::Center,
-        Justify::End => TaffyJustifyContent::End,
-        Justify::SpaceBetween => TaffyJustifyContent::SpaceBetween,
-        Justify::SpaceAround => TaffyJustifyContent::SpaceAround,
-        Justify::SpaceEvenly => TaffyJustifyContent::SpaceEvenly,
+        Justify::Start => TaffyJustifyContent::START,
+        Justify::Center => TaffyJustifyContent::CENTER,
+        Justify::End => TaffyJustifyContent::END,
+        Justify::SpaceBetween => TaffyJustifyContent::SPACE_BETWEEN,
+        Justify::SpaceAround => TaffyJustifyContent::SPACE_AROUND,
+        Justify::SpaceEvenly => TaffyJustifyContent::SPACE_EVENLY,
     }
 }
 
 pub(super) fn map_align_content(align: Align) -> TaffyAlignContent {
     match align {
-        Align::Start => TaffyAlignContent::Start,
-        Align::Center => TaffyAlignContent::Center,
-        Align::End => TaffyAlignContent::End,
-        Align::Stretch => TaffyAlignContent::Stretch,
+        Align::Start => TaffyAlignContent::START,
+        Align::Center => TaffyAlignContent::CENTER,
+        Align::End => TaffyAlignContent::END,
+        Align::Stretch => TaffyAlignContent::STRETCH,
     }
 }
 
 pub(super) fn map_justify_items(justify: Justify) -> Option<TaffyAlignItems> {
     match justify {
-        Justify::Start => Some(TaffyAlignItems::Start),
-        Justify::Center => Some(TaffyAlignItems::Center),
-        Justify::End => Some(TaffyAlignItems::End),
+        Justify::Start => Some(TaffyAlignItems::START),
+        Justify::Center => Some(TaffyAlignItems::CENTER),
+        Justify::End => Some(TaffyAlignItems::END),
         Justify::SpaceBetween | Justify::SpaceAround | Justify::SpaceEvenly => None,
     }
 }
