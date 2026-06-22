@@ -55,12 +55,6 @@ export default defineConfig({
           { text: '性能优化建议', link: '/advanced/performance-optimization-recommendations' },
           { text: '示例索引', link: '/advanced/examples' }
         ]
-      },
-      {
-        text: '迁移',
-        items: [
-          { text: 'Theme and Style API v2', link: '/migration/theme-style-v2' }
-        ]
       }
     ],
     socialLinks: [

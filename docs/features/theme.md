@@ -224,14 +224,3 @@ Application::new()
     .root_view(AppVm::view)
     .run()
 ```
-
-## 迁移提示
-
-旧的 mode-only style API 已被主题 token 和 `StateValue<T>` 替代。升级旧代码时：
-
-- `ButtonStyle::default_for(mode)` 改为 `ButtonStyle::default_for_theme(theme, variant)`。
-- `TextWidgetStyle::default_for(mode)` 改为 `TextWidgetStyle::default_for_theme(theme)`。
-- `ContainerStyle::default_for(mode)` 改为 `ContainerStyle::default_for_theme(theme)`。
-- `Stateful<T>` 改为 `StateValue<T>`。
-
-详细迁移说明见[Theme and Style API v2](/migration/theme-style-v2)。
