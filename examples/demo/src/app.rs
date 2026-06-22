@@ -398,14 +398,7 @@ impl ViewModel for App {
 
     fn view(&self) -> Element<Self> {
         let page = self.current_page.get();
-        let content: Element<Self> = match page {
-            DemoPage::Forms | DemoPage::Data => pages::render(self, page).key(page.content_key()),
-            _ => ScrollView::new()
-                .key(page.content_key())
-                .size(pct(100.0), pct(100.0))
-                .child(pages::render(self, page))
-                .into(),
-        };
+        let content: Element<Self> = pages::render(self, page).key(page.content_key());
         Stack::new()
             .size(pct(100.0), pct(100.0))
             .style_full(styles::root_style)

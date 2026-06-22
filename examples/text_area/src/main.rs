@@ -40,7 +40,7 @@ impl App {
 impl ViewModel for App {
     fn new(context: &ViewModelContext) -> Self {
         let source_path =
-            String::from("/Users/sky/Desktop/Project/Rust/libs/tgui/src/runtime/mod.rs");
+            String::from("/Users/sky/Desktop/Project/Rust/libs/tgui/examples/text_area/src/main.rs");
 
         let source = Self::get_source(source_path.as_str());
 

@@ -33,21 +33,7 @@ pub(crate) fn page(
     description: &'static str,
     sections: Vec<Element<App>>,
 ) -> Element<App> {
-    let mut children = Vec::new();
-    children.push(Text::new(title).style_full(styles::title_style).into());
-    children.push(
-        Text::new(description)
-            .style_full(|ctx| styles::muted_text_style(ctx, sp(15.0)))
-            .into(),
-    );
-    children.extend(sections);
-
-    Flex::vertical()
-        .width(pct(100.0))
-        .gap(dp(18.0))
-        .padding(Insets::all(dp(24.0)))
-        .child(children)
-        .into()
+    virtual_page(title, description, sections, dp(520.0))
 }
 
 pub(crate) fn virtual_page(
