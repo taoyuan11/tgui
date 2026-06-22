@@ -3,6 +3,7 @@ import { defineConfig } from 'vitepress'
 export default defineConfig({
   lang: 'zh-CN',
   title: 'tgui',
+  base: '/tgui/',
   description: 'A modern, GPU-accelerated Rust GUI framework with MVVM, Taffy layout, and wgpu rendering.',
   cleanUrls: true,
   lastUpdated: true,

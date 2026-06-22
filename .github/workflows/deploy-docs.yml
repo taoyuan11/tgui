@@ -1,0 +1,71 @@
+name: Deploy VitePress site to Pages
+
+on:
+  # 当 master 分支的 docs 文件夹有变动时触发
+  push:
+    branches: [master]
+    paths:
+      - 'docs/**'
+  # 允许手动触发
+  workflow_dispatch:
+
+# 设置权限
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# 只允许一个并发部署
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # 1. 安装 pnpm 环境
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9 # 或者指定你本地使用的具体版本，如 8
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: docs/pnpm-lock.yaml
+
+      # 2. 使用 pnpm 安装 docs 目录下的依赖
+      - name: Install dependencies
+        run: pnpm --filter ./docs install --frozen-lockfile
+
+      # 3. 使用 pnpm 编译 VitePress
+      - name: Build with VitePress
+        run: pnpm --filter ./docs run docs:build
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v4
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          # VitePress 编译后的默认输出路径
+          path: docs/.vitepress/dist
+
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps: deployment.outputs.page_url }}
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
