@@ -6,7 +6,7 @@
 
 当前 `tgui` 已经适合原型、内部工具、小型桌面应用、可视化面板和需要强自定义绘制的桌面 GUI。核心链路包括 MVVM 启动、声明式 widget tree、`taffy` 布局、`wgpu` 渲染、主题/动画、文本输入、媒体加载、系统通知、原生对话框、AccessKit a11y、无边框窗口控制、多窗口、Canvas，以及可选音频/视频。
 
-生产化的主要剩余风险集中在：跨平台实机矩阵、API 冻结与 public-api 守门、安全默认值、发布自动化、文档完整度、可访问性/IME 的真实设备验证，以及音视频/通知这类强平台能力的打包场景验证。
+生产化的主要剩余风险集中在：跨平台实机矩阵、API 冻结、安全默认值、发布自动化、文档完整度、可访问性/IME 的真实设备验证，以及音视频/通知这类强平台能力的打包场景验证。
 
 ## 一、依赖与发布稳定性
 
@@ -22,7 +22,6 @@
 1.0 前阻塞：
 
 - **公开 API 冻结**：`src/lib.rs` / `crates/tgui-runtime/src/lib.rs` 的 re-export 面已经很大，1.0 前需要系统 review `Application`、`WindowSpec`、widget builder、theme/style、media、dialog、notification、audio/video 的命名和泛型边界。
-- **public API 防回退**：接入 `cargo public-api` 或同等工具，breaking change 需要显式批准。
 - **SemVer 文档化**：README 已说明 0.x / 1.0 节奏，发布检查应把 changelog / migration note 作为必要步骤。
 - **winit 后续升级策略**：未来升级到 `winit 0.31` stable 时需要作为一次显式 minor 迁移，重点复测 IME、窗口透明/无边框、a11y adapter、事件转换和平台扩展方法。
 
@@ -203,7 +202,7 @@
 
 现在就该做：
 
-1. 启用 public API 守门，做 0.2 API 面 review。
+1. 做 0.2 API 面 review。
 2. 补 `CONTRIBUTING.md` / `SECURITY.md` / Issue & PR 模板。
 3. 为 `MediaSource::Url` 和远程 SVG 资源补网络安全默认值。
 4. 跑一轮 Windows / macOS / Linux 的通知、IME、a11y、透明窗口、HiDPI smoke test 并记录结果。

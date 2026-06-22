@@ -22,7 +22,7 @@
 ### 版本承诺与升级节奏
 
 - **0.x**：处于公开 API 调整窗口期，破坏性变更可能出现在任意 minor（`0.x.0`）版本；patch（`0.x.y`）只做兼容性修复。
-- **1.0 之前**：会做一次系统的公开 API review（重点是 `src/lib.rs` 的 re-export、`Application` 链式 API、widget builder），冻结后用 `cargo public-api` 守门。
+- **1.0 之前**：会做一次系统的公开 API review（重点是 `src/lib.rs` 的 re-export、`Application` 链式 API、widget builder）。
 - **1.0 之后**：严格遵循 SemVer，破坏性变更只在 major 版本出现。
 - **wgpu 升级策略**：当前依赖 `wgpu 29`，跟随主版本时只在 minor 升级，不在 patch 升级。
 - **winit 升级策略**：当前使用稳定版 `winit 0.30.13`；升级到未来 `0.31` 稳定线时作为一次显式 minor 升级处理。

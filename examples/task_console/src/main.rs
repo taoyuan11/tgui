@@ -650,7 +650,7 @@ fn seed_tasks() -> Vec<Task> {
     vec![
         Task {
             id: "task-101".to_string(),
-            title: "Enable public API guard".to_string(),
+            title: "Review release checklist".to_string(),
             owner: "Release".to_string(),
             status: TaskStatus::Running,
             progress: 75,

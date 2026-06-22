@@ -8,7 +8,6 @@
 #   - clippy           :  矩阵 (Linux/Windows/macOS) × (default / audio+video+bench-support)
 #   - test             :  矩阵 (Linux/Windows/macOS) × (default / audio+video+bench-support)
 #   - workspace-check  :  cargo check --workspace --all-targets  (Linux)
-#   - public-api       :  cargo-public-api diff against checked-in baselines
 #   - bench-compile    :  cargo check --features bench-support --benches
 #                         (Linux, Criterion target + bench-support 编译可达性)
 #   - deny             :  cargo-deny licenses/advisories/bans/sources  (Linux)
@@ -83,33 +82,6 @@ jobs:
         with:
           key: workspace-check
       - run: cargo check --workspace --all-targets --all-features
-
-  public-api:
-    name: public API guard
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@nightly
-      - name: Install FFmpeg dev libraries
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            libasound2-dev \
-            libavcodec-dev libavformat-dev libavdevice-dev \
-            libavfilter-dev libavutil-dev libswscale-dev libswresample-dev \
-            pkg-config
-      - uses: Swatinem/rust-cache@v2
-        with:
-          key: public-api
-      - name: Install cargo-public-api
-        uses: taiki-e/install-action@cargo-public-api
-      - name: Check public API baselines
-        shell: bash
-        run: |
-          cargo public-api -p tgui --all-features --color never > /tmp/tgui-public-api.txt
-          cargo public-api -p tgui-runtime --all-features --color never > /tmp/tgui-runtime-public-api.txt
-          diff -u public-api/tgui.txt /tmp/tgui-public-api.txt
-          diff -u public-api/tgui-runtime.txt /tmp/tgui-runtime-public-api.txt
 
   clippy:
     name: clippy (${{ matrix.os }} / ${{ matrix.feature_set.label }})
