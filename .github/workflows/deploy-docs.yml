@@ -31,7 +31,7 @@ jobs:
 
       # 1. 安装 pnpm 环境
       - name: Install pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v6
         with:
           version: 9 # 或者指定你本地使用的具体版本，如 8
 
