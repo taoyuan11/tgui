@@ -48,7 +48,7 @@ jobs:
 
       # 3. 使用 pnpm 编译 VitePress
       - name: Build with VitePress
-        run: pnpm --filter ./docs run docs:build
+        run: pnpm --filter ./docs run build
 
       - name: Setup Pages
         uses: actions/configure-pages@v4
