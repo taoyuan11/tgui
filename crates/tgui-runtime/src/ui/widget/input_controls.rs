@@ -1359,7 +1359,7 @@ fn open_toggle_command<VM: 'static>(
 
 fn themed_icon<VM: 'static>(icon: SvgIconId, size: Dp) -> Icon<VM> {
     Icon::internal(icon)
-        .size(size, size)
+        .size(size)
         .style(move |style, context| {
             let (_, _, _, muted, _, _, _) = mode_colors(context);
             style.color = Value::Static(muted);
@@ -1373,7 +1373,7 @@ fn styled_icon<VM: 'static>(
     color: impl Fn(&StyleContext<'_>) -> Color + Send + Sync + 'static,
 ) -> Icon<VM> {
     Icon::internal(icon)
-        .size(size, size)
+        .size(size)
         .style(move |style, context| {
             style.color = Value::Static(color(context));
             style.size = size;
@@ -1456,7 +1456,7 @@ fn upload_badge<VM: 'static>() -> Element<VM> {
         .style_full(accent_badge_style)
         .child(
             Icon::internal(ICON_UPLOAD)
-                .size(icon_box, icon_box)
+                .size(icon_box)
                 .style(move |style, context| {
                     let (_, primary, _, _, _, _, _) = mode_colors(context);
                     style.color = Value::Static(primary);

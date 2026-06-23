@@ -857,10 +857,7 @@ fn video_icon<VM: 'static>(
     let layout_style = resolve_video_style_for_layout(style.as_ref());
     with_visual_identity(
         Icon::internal(icon)
-            .size(
-                layout_style.control_icon_size,
-                layout_style.control_icon_size,
-            )
+            .size(layout_style.control_icon_size)
             .style_full_with_style_sheet(move |context, style_sheet, visual, state| {
                 let resolved = resolve_video_style_with_sheet(
                     style.as_ref(),

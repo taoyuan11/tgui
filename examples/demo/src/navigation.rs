@@ -5,6 +5,7 @@ use tgui::prelude::*;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum DemoPage {
     Basics,
+    Icons,
     Forms,
     Feedback,
     Overlays,
@@ -16,6 +17,7 @@ impl DemoPage {
     pub(crate) fn content_key(self) -> &'static str {
         match self {
             Self::Basics => "page-content-basics",
+            Self::Icons => "page-content-icons",
             Self::Forms => "page-content-forms",
             Self::Feedback => "page-content-feedback",
             Self::Overlays => "page-content-overlays",
@@ -33,13 +35,20 @@ pub(crate) struct NavigationItem {
     pub accent: u32,
 }
 
-pub(crate) const NAV_ITEMS: [NavigationItem; 6] = [
+pub(crate) const NAV_ITEMS: [NavigationItem; 7] = [
     NavigationItem {
         page: DemoPage::Basics,
         title: "Basics",
         description: "Text, Button, Divider",
         badge: "B",
         accent: 0x2563EBFF,
+    },
+    NavigationItem {
+        page: DemoPage::Icons,
+        title: "Icons",
+        description: "Common built-in icons",
+        badge: "I",
+        accent: 0x0EA5E9FF,
     },
     NavigationItem {
         page: DemoPage::Forms,
@@ -96,8 +105,8 @@ pub(crate) fn sidebar(app: &App) -> Element<App> {
     Flex::vertical()
         .width(dp(260.0))
         .height(pct(100.0))
-        .gap(dp(14.0))
-        .padding(Insets::all(dp(18.0)))
+        .gap(dp(12.0))
+        .padding(Insets::all(dp(16.0)))
         .style_full(styles::sidebar_style)
         .child(items)
         .into()

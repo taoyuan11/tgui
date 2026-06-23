@@ -204,7 +204,7 @@ fn surface_component(app: &App) -> Element<App> {
                         Badge::count(128u32)
                             .max(99)
                             .tone(BadgeTone::Error)
-                            .attach(Icon::builtin(BuiltinIcon::Info).size(dp(28.0), dp(28.0))),
+                            .attach(Icon::builtin(BuiltinIcon::Info).size(dp(28.0))),
                         Badge::text("NEW").tone(BadgeTone::Success),
                         AvatarGroup::new(vec![
                             Avatar::name("Ada Lovelace"),
@@ -212,7 +212,7 @@ fn surface_component(app: &App) -> Element<App> {
                             Avatar::initials("NP"),
                         ])
                         .max_visible(2),
-                        Icon::builtin(BuiltinIcon::Search).size(dp(28.0), dp(28.0)),
+                        Icon::builtin(BuiltinIcon::Search).size(dp(28.0)),
                     ]),
                 CODE_SURFACE_IDENTITY,
             ),

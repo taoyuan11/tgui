@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use crate::media::{MediaBytes, MediaSource};
 use crate::theme::{StyleContext, WidgetState};
-use crate::ui::layout::{LayoutStyle, Length, Value};
+use crate::ui::layout::{Align, Insets, LayoutStyle, Length, PositionType, Value};
 use crate::ui::theme::Theme;
 use crate::ui::unit::sp;
 
@@ -10,10 +10,9 @@ mod svg;
 
 use super::common::VisualStyle;
 use super::common::WidgetKind;
+use super::container::{set_layout_inset, set_layout_length, IntoLengthValue};
 use super::core::Element;
-use super::p3_support::{
-    impl_p3_layout_api, merge_layout, resolve_component_style_with_sheet, with_visual_identity,
-};
+use super::p3_support::{merge_layout, resolve_component_style_with_sheet, with_visual_identity};
 use super::style::{IconStyle, ImageStyle, StyleResolver, StyleSheet, TextWidgetStyle};
 use super::{Image, Text, WidgetId, WidgetKey};
 
@@ -49,6 +48,36 @@ pub enum BuiltinIcon {
     Error,
     Calendar,
     Clock,
+    Home,
+    Settings,
+    Bell,
+    Mail,
+    Lock,
+    Unlock,
+    Eye,
+    EyeOff,
+    Edit,
+    Copy,
+    Download,
+    Upload,
+    File,
+    Folder,
+    Trash,
+    RefreshCw,
+    ExternalLink,
+    Menu,
+    Filter,
+    SortAsc,
+    SortDesc,
+    Play,
+    Pause,
+    VolumeUp,
+    VolumeDown,
+    VolumeOff,
+    Palette,
+    MapPin,
+    Link,
+    Heart,
 }
 
 impl BuiltinIcon {
@@ -74,6 +103,36 @@ impl BuiltinIcon {
             Self::Error => "error",
             Self::Calendar => "calendar",
             Self::Clock => "clock",
+            Self::Home => "home",
+            Self::Settings => "settings",
+            Self::Bell => "bell",
+            Self::Mail => "mail",
+            Self::Lock => "lock",
+            Self::Unlock => "unlock",
+            Self::Eye => "eye",
+            Self::EyeOff => "eye_off",
+            Self::Edit => "edit",
+            Self::Copy => "copy",
+            Self::Download => "download",
+            Self::Upload => "upload",
+            Self::File => "file",
+            Self::Folder => "folder",
+            Self::Trash => "trash",
+            Self::RefreshCw => "refresh_cw",
+            Self::ExternalLink => "external_link",
+            Self::Menu => "menu",
+            Self::Filter => "filter",
+            Self::SortAsc => "sort_asc",
+            Self::SortDesc => "sort_desc",
+            Self::Play => "play",
+            Self::Pause => "pause",
+            Self::VolumeUp => "volume_up",
+            Self::VolumeDown => "volume_down",
+            Self::VolumeOff => "volume_off",
+            Self::Palette => "palette",
+            Self::MapPin => "map_pin",
+            Self::Link => "link",
+            Self::Heart => "heart",
         }
     }
 }
@@ -175,7 +234,142 @@ impl<VM> Icon<VM> {
         self
     }
 
-    impl_p3_layout_api!(layout);
+    pub fn key(mut self, key: impl Into<WidgetKey>) -> Self {
+        self.key = Some(key.into());
+        self
+    }
+
+    pub fn class(mut self, class: impl Into<String>) -> Self {
+        self.visual.classes.push(class.into());
+        self
+    }
+
+    pub fn classes<I, S>(mut self, classes: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.visual
+            .classes
+            .extend(classes.into_iter().map(Into::into));
+        self
+    }
+
+    pub fn style_id(mut self, style_id: impl Into<String>) -> Self {
+        self.visual.style_id = Some(style_id.into());
+        self
+    }
+
+    pub fn size(mut self, size: impl IntoLengthValue) -> Self {
+        let size = size.into_length_value();
+        self.layout.width = Some(size.clone());
+        self.layout.height = Some(size);
+        self
+    }
+
+    pub fn width(mut self, width: impl IntoLengthValue) -> Self {
+        set_layout_length(&mut self.layout.width, width);
+        self
+    }
+
+    pub fn height(mut self, height: impl IntoLengthValue) -> Self {
+        set_layout_length(&mut self.layout.height, height);
+        self
+    }
+
+    pub fn min_width(mut self, width: impl IntoLengthValue) -> Self {
+        set_layout_length(&mut self.layout.min_width, width);
+        self
+    }
+
+    pub fn min_height(mut self, height: impl IntoLengthValue) -> Self {
+        set_layout_length(&mut self.layout.min_height, height);
+        self
+    }
+
+    pub fn max_width(mut self, width: impl IntoLengthValue) -> Self {
+        set_layout_length(&mut self.layout.max_width, width);
+        self
+    }
+
+    pub fn max_height(mut self, height: impl IntoLengthValue) -> Self {
+        set_layout_length(&mut self.layout.max_height, height);
+        self
+    }
+
+    pub fn aspect_ratio(mut self, aspect_ratio: impl Into<Value<f32>>) -> Self {
+        self.layout.aspect_ratio = Some(aspect_ratio.into());
+        self
+    }
+
+    pub fn margin(mut self, insets: impl Into<Value<Insets>>) -> Self {
+        self.layout.margin = insets.into();
+        self
+    }
+
+    pub fn padding(mut self, insets: impl Into<Value<Insets>>) -> Self {
+        self.layout.padding = Some(insets.into());
+        self
+    }
+
+    pub fn grow(mut self, grow: impl Into<Value<f32>>) -> Self {
+        self.layout.grow = grow.into();
+        self
+    }
+
+    pub fn shrink(mut self, shrink: impl Into<Value<f32>>) -> Self {
+        self.layout.shrink = shrink.into();
+        self
+    }
+
+    pub fn basis(mut self, basis: impl IntoLengthValue) -> Self {
+        self.layout.basis = Some(basis.into_length_value());
+        self
+    }
+
+    pub fn align_self(mut self, align: Align) -> Self {
+        self.layout.align_self = Some(align);
+        self
+    }
+
+    pub fn justify_self(mut self, align: Align) -> Self {
+        self.layout.justify_self = Some(align);
+        self
+    }
+
+    pub fn position_absolute(mut self) -> Self {
+        self.layout.position_type = PositionType::Absolute;
+        self
+    }
+
+    pub fn left(mut self, value: impl IntoLengthValue) -> Self {
+        set_layout_inset(&mut self.layout.left, value);
+        self
+    }
+
+    pub fn top(mut self, value: impl IntoLengthValue) -> Self {
+        set_layout_inset(&mut self.layout.top, value);
+        self
+    }
+
+    pub fn right(mut self, value: impl IntoLengthValue) -> Self {
+        set_layout_inset(&mut self.layout.right, value);
+        self
+    }
+
+    pub fn bottom(mut self, value: impl IntoLengthValue) -> Self {
+        set_layout_inset(&mut self.layout.bottom, value);
+        self
+    }
+
+    pub fn inset(mut self, value: impl IntoLengthValue) -> Self {
+        let value = value.into_length_value();
+        self.layout.left = Some(value.clone());
+        self.layout.top = Some(value.clone());
+        self.layout.right = Some(value.clone());
+        self.layout.bottom = Some(value);
+        self
+    }
 }
 
 impl<VM: 'static> From<Icon<VM>> for Element<VM> {

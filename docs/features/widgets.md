@@ -107,7 +107,7 @@ Card::new()
 Badge::count(self.unread.signal())
     .max(99)
     .tone(BadgeTone::Error)
-    .attach(Icon::builtin(BuiltinIcon::Info).size(dp(28.0), dp(28.0)))
+    .attach(Icon::builtin(BuiltinIcon::Info).size(dp(28.0)))
 ```
 
 ## 输入与选择

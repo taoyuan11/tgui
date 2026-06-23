@@ -772,14 +772,12 @@ fn build_toast_card<VM: 'static>(
                 container.surface.shadow = button_style.surface.shadow;
                 container
             })
-            .child(
-                Icon::internal(SvgIconId::Close)
-                    .size(dp(14.0), dp(14.0))
-                    .style(move |icon_style: &mut IconStyle, _context| {
-                        icon_style.color = Value::Static(close_fg);
-                        icon_style.size = dp(14.0);
-                    }),
-            )
+            .child(Icon::internal(SvgIconId::Close).size(dp(14.0)).style(
+                move |icon_style: &mut IconStyle, _context| {
+                    icon_style.color = Value::Static(close_fg);
+                    icon_style.size = dp(14.0);
+                },
+            ))
             .on_click(Command::new(move |_vm| {
                 dismiss_queue.dismiss(id);
             }))

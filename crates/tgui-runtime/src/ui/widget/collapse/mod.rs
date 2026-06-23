@@ -95,7 +95,7 @@ impl<VM: 'static> From<Collapse<VM>> for Element<VM> {
             SvgIconId::ChevronDown
         };
         let header_icon = Icon::internal(icon_source)
-            .size(COLLAPSE_ICON_SIZE, COLLAPSE_ICON_SIZE)
+            .size(COLLAPSE_ICON_SIZE)
             .style_full_with_style_sheet({
                 let header_style = header_style.clone();
                 move |context, style_sheet, visual, state| {
