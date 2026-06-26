@@ -399,6 +399,27 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         changed
     }
 
+    fn virtual_scroll_scene_roots(
+        &self,
+        layout: &crate::ui::widget::ResolvedSceneLayout<VM>,
+        virtual_roots: &[WidgetId],
+    ) -> SmallVec<[WidgetId; 16]> {
+        let mut affected = HashSet::new();
+        for root in virtual_roots.iter().copied() {
+            let scene_root = layout
+                .parent_of(root)
+                .filter(|parent| {
+                    layout
+                        .resolved_widget(*parent)
+                        .and_then(|resolved| resolved.data_grid_root.as_ref())
+                        .is_some_and(|data_grid| data_grid.grid_id == *parent)
+                })
+                .unwrap_or(root);
+            affected.insert(scene_root);
+        }
+        self.highest_layout_roots_smallvec(layout, &affected)
+    }
+
     fn consume_scroll_view_requests_from_cached_scene(&mut self) -> bool {
         let bindings = if let Some(cached) = self.cached_scene.as_ref() {
             if let Some(layout) = cached.layout.as_ref() {
@@ -513,7 +534,12 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         }
         let roots = roots.into_iter().collect::<Vec<_>>();
 
-        if self.try_virtual_scroll_scene_fast_path(&roots, now) {
+        let scene_roots = self.virtual_scroll_scene_roots(layout, &roots);
+        if scene_roots.is_empty() {
+            return false;
+        }
+
+        if self.try_virtual_scroll_scene_fast_path(&roots, &scene_roots, now) {
             return true;
         }
 
@@ -521,7 +547,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             if !self.patch_cached_layout_for_roots_with_runtime_state(&roots, now) {
                 return false;
             }
-            if !self.patch_cached_scene_for_roots(&roots, now, true) {
+            if !self.patch_cached_scene_for_roots(&scene_roots, now, true) {
                 return false;
             }
 
@@ -553,7 +579,12 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         false
     }
 
-    fn try_virtual_scroll_scene_fast_path(&mut self, roots: &[WidgetId], now: Instant) -> bool {
+    fn try_virtual_scroll_scene_fast_path(
+        &mut self,
+        roots: &[WidgetId],
+        scene_roots: &[WidgetId],
+        now: Instant,
+    ) -> bool {
         let scroll_states = self.scroll_states.clone();
         let virtual_states = self.virtual_states.clone();
         {
@@ -572,7 +603,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             }
         }
 
-        if !self.patch_cached_scene_for_roots(roots, now, true) {
+        if !self.patch_cached_scene_for_roots(scene_roots, now, true) {
             return false;
         }
 

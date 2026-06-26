@@ -400,8 +400,10 @@ fn data_grid_pinned_columns_counteract_horizontal_scroll() {
 
     let mut start_cell = None;
     let mut middle_cell = None;
+    let mut middle_cell_clip = None;
     let mut end_cell = None;
     let mut middle_header = None;
+    let mut middle_header_clip = None;
     let mut end_header = None;
     for region in &computed.hit_regions {
         match &region.interaction {
@@ -414,6 +416,7 @@ fn data_grid_pinned_columns_counteract_horizontal_scroll() {
                 if state.column_key == WidgetKey::from("name") =>
             {
                 middle_cell = Some(region.rect);
+                middle_cell_clip = region.clip_rect;
             }
             HitInteraction::DataGridCell { state, .. }
                 if state.column_key == WidgetKey::from("actions") =>
@@ -424,6 +427,7 @@ fn data_grid_pinned_columns_counteract_horizontal_scroll() {
                 if state.column_key == WidgetKey::from("name") =>
             {
                 middle_header = Some(region.rect);
+                middle_header_clip = region.clip_rect;
             }
             HitInteraction::DataGridHeader { state, .. }
                 if state.column_key == WidgetKey::from("actions") =>
@@ -447,6 +451,12 @@ fn data_grid_pinned_columns_counteract_horizontal_scroll() {
         middle_header.expect("middle header should exist").x < dp(72.0),
         "header cells should synchronize with body horizontal scroll"
     );
+    let middle_cell_clip = middle_cell_clip.expect("middle cell should have a clip rect");
+    assert_eq!(middle_cell_clip.x, dp(72.0));
+    assert_eq!(middle_cell_clip.right(), dp(240.0 - 84.0));
+    let middle_header_clip = middle_header_clip.expect("middle header should have a clip rect");
+    assert_eq!(middle_header_clip.x, dp(72.0));
+    assert_eq!(middle_header_clip.right(), dp(240.0 - 84.0));
 }
 
 #[test]

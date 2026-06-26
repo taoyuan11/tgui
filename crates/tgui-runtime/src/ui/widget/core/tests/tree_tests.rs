@@ -189,6 +189,82 @@ fn tree_chrome_uses_svg_textures_for_disclosure_and_checks() {
 }
 
 #[test]
+fn tree_full_width_row_content_does_not_overlap_checkbox_chrome() {
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let theme = Theme::default();
+    let mut animations = AnimationEngine::default();
+    let tree: WidgetTree<()> = WidgetTree::new(
+        Tree::<&'static str, ()>::new(sample_nodes(), |ctx| {
+            Text::new(ctx.item).width(pct(100.0)).into()
+        })
+        .expanded_keys(vec![WidgetKey::from("root")])
+        .checkable(true)
+        .size(dp(240.0), dp(180.0)),
+    );
+
+    let rendered = tree.render_output(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        None,
+        None,
+        &HashMap::new(),
+        Rect::new(0.0, 0.0, 240.0, 180.0),
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+    let label = rendered
+        .primitives
+        .texts
+        .iter()
+        .find(|text| text.content.as_ref() == "Root")
+        .expect("root label should render");
+    let chrome_right = rendered
+        .primitives
+        .textures
+        .iter()
+        .filter(|texture| {
+            texture.frame.y < label.frame.bottom() && texture.frame.bottom() > label.frame.y
+        })
+        .map(|texture| texture.frame.right().get())
+        .fold(0.0_f32, f32::max);
+    let checkbox = rendered
+        .primitives
+        .textures
+        .iter()
+        .filter(|texture| {
+            texture.frame.y < label.frame.bottom() && texture.frame.bottom() > label.frame.y
+        })
+        .max_by(|left, right| {
+            left.frame
+                .x
+                .get()
+                .partial_cmp(&right.frame.x.get())
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
+        .expect("root checkbox chrome should render");
+    let label_center_y = label.frame.y.get() + label.frame.height.get() * 0.5;
+    let checkbox_center_y = checkbox.frame.y.get() + checkbox.frame.height.get() * 0.5;
+
+    assert!(
+        label.frame.x.get() >= chrome_right - 0.5,
+        "Tree row label should start after checkbox/disclosure chrome; label={:?}, chrome_right={chrome_right}",
+        label.frame
+    );
+    assert!(
+        (label_center_y - checkbox_center_y).abs() <= 0.5,
+        "Tree row label and checkbox should be vertically centered together; label={:?}, checkbox={:?}",
+        label.frame,
+        checkbox.frame
+    );
+}
+
+#[test]
 fn tree_expanded_disclosure_icon_is_rotated() {
     let font_manager = FontManager::new(&FontCatalog::default());
     let media = test_media();

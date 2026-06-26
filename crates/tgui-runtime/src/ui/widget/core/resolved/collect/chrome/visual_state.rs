@@ -3,6 +3,16 @@ use super::*;
 mod paint;
 mod styles;
 
+#[derive(Clone, Copy)]
+struct DataGridStickyInfo {
+    scroll_container_id: WidgetId,
+    pin: crate::ui::widget::DataGridColumnPin,
+    pin_offset: Dp,
+    start_pin_extent: Dp,
+    end_pin_extent: Dp,
+    is_header: bool,
+}
+
 impl<VM> ResolvedElement<VM> {
     pub(in super::super) fn resolve_collect_visual_state(
         &self,
@@ -38,7 +48,10 @@ impl<VM> ResolvedElement<VM> {
             layout_frame.width,
             layout_frame.height,
         );
-        let frame = self.apply_data_grid_sticky_frame(frame, visual_context, context);
+        let data_grid_sticky = self.data_grid_sticky_info();
+        let frame = data_grid_sticky
+            .map(|sticky| self.apply_data_grid_sticky_frame(frame, visual_context, context, sticky))
+            .unwrap_or(frame);
         let scale = track_property_scope(PropertySlot::Scale, || {
             if context.reduced_motion {
                 runtime_visual.scale.resolve().clamp(0.01, 16.0)
@@ -135,7 +148,13 @@ impl<VM> ResolvedElement<VM> {
             runtime_visual,
             offset,
             reactive_offset,
-            primitive_clip: Some(visual_context.clip_rect),
+            primitive_clip: Some(
+                data_grid_sticky
+                    .map(|sticky| {
+                        self.apply_data_grid_sticky_clip(visual_context.clip_rect, sticky)
+                    })
+                    .unwrap_or(visual_context.clip_rect),
+            ),
             overflow_clip: visual_context.overflow_clip_rect,
             primitive_clip_mask: visual_context.clip_mask,
             disabled,
@@ -199,49 +218,58 @@ impl<VM> ResolvedElement<VM> {
         }
     }
 
+    fn data_grid_sticky_info(&self) -> Option<DataGridStickyInfo> {
+        self.data_grid_cell
+            .as_ref()
+            .map(|cell| DataGridStickyInfo {
+                scroll_container_id: cell.scroll_container_id,
+                pin: cell.pin,
+                pin_offset: cell.pin_offset,
+                start_pin_extent: cell.start_pin_extent,
+                end_pin_extent: cell.end_pin_extent,
+                is_header: false,
+            })
+            .or_else(|| {
+                self.data_grid_header
+                    .as_ref()
+                    .map(|header| DataGridStickyInfo {
+                        scroll_container_id: header.scroll_container_id,
+                        pin: header.pin,
+                        pin_offset: header.pin_offset,
+                        start_pin_extent: header.start_pin_extent,
+                        end_pin_extent: header.end_pin_extent,
+                        is_header: true,
+                    })
+            })
+    }
+
     fn apply_data_grid_sticky_frame(
         &self,
         frame: Rect,
         visual_context: VisualContext,
         context: &CollectContext<'_, '_>,
+        sticky: DataGridStickyInfo,
     ) -> Rect {
-        let Some((scroll_container_id, pin, pin_offset, is_header)) = self
-            .data_grid_cell
-            .as_ref()
-            .map(|cell| (cell.scroll_container_id, cell.pin, cell.pin_offset, false))
-            .or_else(|| {
-                self.data_grid_header.as_ref().map(|header| {
-                    (
-                        header.scroll_container_id,
-                        header.pin,
-                        header.pin_offset,
-                        true,
-                    )
-                })
-            })
-        else {
-            return frame;
-        };
         let scroll_x = context
             .scroll_offsets
-            .get(&scroll_container_id)
+            .get(&sticky.scroll_container_id)
             .copied()
             .unwrap_or(Point::ZERO)
             .x;
-        match pin {
-            crate::ui::widget::DataGridColumnPin::None if is_header => {
+        match sticky.pin {
+            crate::ui::widget::DataGridColumnPin::None if sticky.is_header => {
                 Rect::new(frame.x - scroll_x, frame.y, frame.width, frame.height)
             }
-            crate::ui::widget::DataGridColumnPin::Start if !is_header => {
+            crate::ui::widget::DataGridColumnPin::Start if !sticky.is_header => {
                 Rect::new(frame.x + scroll_x, frame.y, frame.width, frame.height)
             }
             crate::ui::widget::DataGridColumnPin::End => {
-                let natural_frame = if is_header {
+                let natural_frame = if sticky.is_header {
                     Rect::new(frame.x - scroll_x, frame.y, frame.width, frame.height)
                 } else {
                     frame
                 };
-                let sticky_x = visual_context.clip_rect.right() - pin_offset - frame.width;
+                let sticky_x = visual_context.clip_rect.right() - sticky.pin_offset - frame.width;
                 if natural_frame.x > sticky_x {
                     Rect::new(sticky_x, frame.y, frame.width, frame.height)
                 } else {
@@ -250,6 +278,17 @@ impl<VM> ResolvedElement<VM> {
             }
             _ => frame,
         }
+    }
+
+    fn apply_data_grid_sticky_clip(&self, clip_rect: Rect, sticky: DataGridStickyInfo) -> Rect {
+        if sticky.pin != crate::ui::widget::DataGridColumnPin::None {
+            return clip_rect;
+        }
+
+        let left = clip_rect.x + sticky.start_pin_extent;
+        let right = (clip_rect.right() - sticky.end_pin_extent).max(left);
+        let unpinned_clip = Rect::new(left, clip_rect.y, right - left, clip_rect.height);
+        clip_rect.intersect(unpinned_clip).unwrap_or(unpinned_clip)
     }
 
     fn collect_visual_disabled_state(&self) -> bool {

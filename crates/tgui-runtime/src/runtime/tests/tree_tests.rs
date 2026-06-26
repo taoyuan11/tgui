@@ -112,6 +112,18 @@ fn top_tree_hit_at(
     WidgetTree::hit_path_from_computed(handler.computed_scene(), point).pop()
 }
 
+fn visible_tree_keys(handler: &mut BoundRuntimeHandler<TestVm>) -> Vec<WidgetKey> {
+    handler
+        .computed_scene()
+        .hit_regions
+        .iter()
+        .filter_map(|region| match &region.interaction {
+            HitInteraction::TreeNode { state, .. } => Some(state.key.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
 #[test]
 fn tree_disclosure_click_dispatches_expand_change() {
     let invalidation = InvalidationSignal::new();
@@ -146,6 +158,58 @@ fn tree_disclosure_click_dispatches_expand_change() {
     assert_eq!(change.key, WidgetKey::from("root"));
     assert!(change.expanded);
     assert_eq!(*expanded.lock().unwrap(), vec![WidgetKey::from("root")]);
+}
+
+#[test]
+fn tree_disclosure_click_updates_visible_rows_for_controlled_expanded_keys() {
+    let invalidation = InvalidationSignal::new();
+    let expanded = Arc::new(Mutex::new(Vec::<WidgetKey>::new()));
+    let expanded_signal_source = Arc::clone(&expanded);
+    let expanded_signal = Signal::new(
+        move || expanded_signal_source.lock().unwrap().clone(),
+        invalidation.clone(),
+    );
+    let expanded_for_cmd = Arc::clone(&expanded);
+    let tree = WidgetTree::new(
+        Tree::<&'static str, TestVm>::new(sample_nodes(), |ctx| Text::new(ctx.item).into())
+            .expanded_keys(expanded_signal)
+            .on_expand_change(ValueCommand::new(
+                move |_vm: &mut TestVm, change: TreeExpandChange| {
+                    *expanded_for_cmd.lock().unwrap() = change.expanded_keys.clone();
+                },
+            ))
+            .size(dp(260.0), dp(220.0)),
+    );
+    let mut handler = test_handler(Some(tree), invalidation);
+    let viewport = handler.viewport_rect();
+
+    assert_eq!(
+        visible_tree_keys(&mut handler),
+        vec![WidgetKey::from("root"), WidgetKey::from("sibling")]
+    );
+
+    let point = visible_disclosure_center(&mut handler, "root");
+    handler.cursor_position = Some(point);
+    handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Left);
+    handler.invalidate_computed_scene();
+    assert_eq!(
+        visible_tree_keys(&mut handler),
+        vec![
+            WidgetKey::from("root"),
+            WidgetKey::from("child-a"),
+            WidgetKey::from("child-b"),
+            WidgetKey::from("sibling")
+        ]
+    );
+
+    let point = visible_disclosure_center(&mut handler, "root");
+    handler.cursor_position = Some(point);
+    handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Left);
+    handler.invalidate_computed_scene();
+    assert_eq!(
+        visible_tree_keys(&mut handler),
+        vec![WidgetKey::from("root"), WidgetKey::from("sibling")]
+    );
 }
 
 #[test]

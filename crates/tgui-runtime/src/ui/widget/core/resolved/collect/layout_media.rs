@@ -72,8 +72,9 @@ impl<VM: 'static> ResolvedElement<VM> {
                         Dp::ZERO
                     },
                 };
+                let base_clip_rect = visual.primitive_clip.unwrap_or(visual_context.clip_rect);
                 let child_clip_rect = apply_overflow_clip(
-                    visual_context.clip_rect,
+                    base_clip_rect,
                     visual.background_frame,
                     layout.overflow_x,
                     layout.overflow_y,
@@ -258,8 +259,9 @@ impl<VM: 'static> ResolvedElement<VM> {
                         Dp::ZERO
                     },
                 };
+                let base_clip_rect = visual.primitive_clip.unwrap_or(visual_context.clip_rect);
                 let child_clip_rect = apply_overflow_clip(
-                    visual_context.clip_rect,
+                    base_clip_rect,
                     visual.background_frame,
                     *overflow_x,
                     *overflow_y,

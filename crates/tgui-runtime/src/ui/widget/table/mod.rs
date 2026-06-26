@@ -1016,7 +1016,7 @@ where
     let mut header = Flex::horizontal()
         .height(style.header_height)
         .width(total_width);
-    let pin_offsets = column_pin_offsets(columns.as_ref());
+    let pin_metrics = column_pin_metrics(columns.as_ref());
     for (column_index, column) in columns.iter().enumerate() {
         let width = resolved_column_width(column);
         let sort_state = sort.resolve();
@@ -1069,7 +1069,9 @@ where
             column_key: column.key.clone(),
             label,
             pin: column.pin,
-            pin_offset: pin_offsets[column_index],
+            pin_offset: pin_metrics.offsets[column_index],
+            start_pin_extent: pin_metrics.start_extent,
+            end_pin_extent: pin_metrics.end_extent,
             sortable: column.sortable,
             resizable: column.resizable,
             reorderable: column.reorderable,
@@ -1157,7 +1159,7 @@ where
     let selected = selected_keys.resolve().contains(&row_key);
     let disabled_now = disabled.resolve();
     let mut row_element = Flex::horizontal().width(total_width).height(row_height);
-    let pin_offsets = column_pin_offsets(columns.as_ref());
+    let pin_metrics = column_pin_metrics(columns.as_ref());
     for (column_index, column) in columns.iter().enumerate() {
         let column_width = resolved_column_width(column);
         let edit_value = column
@@ -1212,7 +1214,9 @@ where
             row_key: row_key.clone(),
             column_key: column.key.clone(),
             pin: column.pin,
-            pin_offset: pin_offsets[column_index],
+            pin_offset: pin_metrics.offsets[column_index],
+            start_pin_extent: pin_metrics.start_extent,
+            end_pin_extent: pin_metrics.end_extent,
             selected_keys: selected_keys.clone(),
             selection_mode,
             disabled: disabled.clone(),
@@ -1478,7 +1482,13 @@ fn apply_outer_layout(target: &mut LayoutStyle, source: LayoutStyle) {
     target.row_span = source.row_span;
 }
 
-fn column_pin_offsets<T, VM>(columns: &[DataGridColumn<T, VM>]) -> Vec<Dp> {
+struct DataGridColumnPinMetrics {
+    offsets: Vec<Dp>,
+    start_extent: Dp,
+    end_extent: Dp,
+}
+
+fn column_pin_metrics<T, VM>(columns: &[DataGridColumn<T, VM>]) -> DataGridColumnPinMetrics {
     let mut offsets = vec![Dp::ZERO; columns.len()];
     let mut start_offset = Dp::ZERO;
     for (index, column) in columns.iter().enumerate() {
@@ -1494,7 +1504,11 @@ fn column_pin_offsets<T, VM>(columns: &[DataGridColumn<T, VM>]) -> Vec<Dp> {
             end_offset += resolved_column_width(column);
         }
     }
-    offsets
+    DataGridColumnPinMetrics {
+        offsets,
+        start_extent: start_offset,
+        end_extent: end_offset,
+    }
 }
 
 fn resolved_column_width<T, VM>(column: &DataGridColumn<T, VM>) -> Dp {

@@ -30,10 +30,10 @@ use crate::ui::unit::{dp, sp, Dp, UnitContext};
 use crate::ui::widget::{
     Button, Canvas, CanvasMouseButton, CanvasParagraphStyle, CanvasPointerEvent, CanvasRecorder,
     CanvasShadow, CanvasStroke, CanvasTextStyle, CanvasTextVerticalAlign, CanvasTextWrap, Carousel,
-    Checkbox, ContainerStyle, CursorStyle, DataGrid, DataGridColumn, DataGridRow, Flex,
-    FocusScopeOptions, HitInteraction, Input, Point, ProgressBar, Rect, ScrollView, Select,
-    SelectOption, Slider, Spinner, Switch, Text, TextEditState, Textarea, Tooltip,
-    VirtualCacheState, WidgetKey, WidgetTree,
+    Checkbox, ContainerStyle, CursorStyle, DataGrid, DataGridColumn, DataGridColumnPin,
+    DataGridRow, Flex, FocusScopeOptions, HitInteraction, Input, Point, ProgressBar, Rect,
+    ScrollView, Select, SelectOption, Slider, Spinner, Switch, Text, TextEditState, Textarea,
+    Tooltip, VirtualCacheState, WidgetKey, WidgetTree,
 };
 use crate::ui::widget::{Element, Stack, WidgetId};
 #[cfg(feature = "audio")]

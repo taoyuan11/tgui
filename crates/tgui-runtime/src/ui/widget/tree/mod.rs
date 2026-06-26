@@ -282,14 +282,45 @@ impl<T: Clone> Clone for TreeRow<T> {
 }
 
 struct TreeRowSource<T> {
-    rows: Arc<[TreeRow<T>]>,
+    nodes: Arc<[TreeNode<T>]>,
+    expanded_keys: Value<Vec<WidgetKey>>,
 }
 
-impl<T> Clone for TreeRowSource<T> {
+impl<T: Clone> Clone for TreeRowSource<T> {
     fn clone(&self) -> Self {
         Self {
-            rows: self.rows.clone(),
+            nodes: self.nodes.clone(),
+            expanded_keys: self.expanded_keys.clone(),
         }
+    }
+}
+
+impl<T: Clone> TreeRowSource<T> {
+    fn new(nodes: Arc<[TreeNode<T>]>, expanded_keys: Value<Vec<WidgetKey>>) -> Self {
+        Self {
+            nodes,
+            expanded_keys,
+        }
+    }
+
+    fn rows(&self) -> Vec<TreeRow<T>> {
+        let expanded_now: HashSet<_> = self.expanded_keys.resolve().into_iter().collect();
+        flatten_tree_rows(&self.nodes, &expanded_now)
+    }
+
+    fn visible_keys_and_disabled(&self) -> (Arc<[WidgetKey]>, Arc<[bool]>) {
+        let rows = self.rows();
+        let visible_keys: Arc<[WidgetKey]> = rows
+            .iter()
+            .map(|row| row.key.clone())
+            .collect::<Vec<_>>()
+            .into();
+        let visible_disabled: Arc<[bool]> = rows
+            .iter()
+            .map(|row| row.disabled.resolve())
+            .collect::<Vec<_>>()
+            .into();
+        (visible_keys, visible_disabled)
     }
 }
 
@@ -298,15 +329,15 @@ where
     T: Clone + Send + Sync + 'static,
 {
     fn len(&self) -> usize {
-        self.rows.len()
+        self.rows().len()
     }
 
     fn item(&self, index: usize) -> Option<TreeRow<T>> {
-        self.rows.get(index).cloned()
+        self.rows().get(index).cloned()
     }
 
     fn key(&self, index: usize) -> Option<WidgetKey> {
-        self.rows.get(index).map(|row| row.key.clone())
+        self.rows().get(index).map(|row| row.key.clone())
     }
 }
 
@@ -716,26 +747,14 @@ where
         let row_visual = self.visual.clone();
         let root_style_resolver = self.style.clone();
         let root_visual = self.visual.clone();
-        let expanded_now: HashSet<_> = self.expanded_keys.resolve().into_iter().collect();
-        let rows = flatten_tree_rows(&self.nodes, &expanded_now);
-        if rows.is_empty() {
+        let source = TreeRowSource::new(self.nodes.into(), self.expanded_keys.clone());
+        let row_count = source.len();
+        if row_count == 0 {
             return self
                 .empty_view
                 .unwrap_or_else(|| Stack::new().child(Text::new("No items")).into());
         }
-
-        let visible_keys: Arc<[WidgetKey]> = rows
-            .iter()
-            .map(|row| row.key.clone())
-            .collect::<Vec<_>>()
-            .into();
-        let visible_disabled: Arc<[bool]> = rows
-            .iter()
-            .map(|row| row.disabled.resolve())
-            .collect::<Vec<_>>()
-            .into();
-        let row_count = rows.len();
-        let source = TreeRowSource { rows: rows.into() };
+        let source_for_render = source.clone();
         let render = self.render.clone();
         let selected_keys = self.selected_keys.clone();
         let root_selected_keys = selected_keys.clone();
@@ -779,6 +798,8 @@ where
                     check_state,
                 };
                 let child = render(context);
+                let (visible_keys, visible_disabled) =
+                    source_for_render.visible_keys_and_disabled();
                 build_tree_row(
                     tree_id,
                     visible_index,
@@ -873,12 +894,27 @@ where
     let check_state = tree_check_state(&row.check_target_keys, &checked_keys.resolve());
     let mut content = Flex::horizontal()
         .align(Align::Center)
-        .child(Stack::<VM>::new().width(style.indent_width * row.depth as f32))
-        .child(Stack::<VM>::new().width(style.disclosure_width));
+        .child(
+            Stack::<VM>::new()
+                .width(style.indent_width * row.depth as f32)
+                .shrink(0.0),
+        )
+        .child(Stack::<VM>::new().width(style.disclosure_width).shrink(0.0));
     if checkable.resolve() {
-        content = content.child(Stack::<VM>::new().width(style.checkbox_width));
+        content = content.child(Stack::<VM>::new().width(style.checkbox_width).shrink(0.0));
     }
-    let content = content.child(child).width(pct(100.0));
+    let content_slot = Flex::horizontal()
+        .align(Align::Center)
+        .basis(dp(0.0))
+        .height(pct(100.0))
+        .min_width(dp(0.0))
+        .grow(1.0)
+        .shrink(1.0)
+        .child(child);
+    let content = content
+        .child(content_slot)
+        .width(pct(100.0))
+        .height(pct(100.0));
     let row_container = Flex::vertical()
         .align(Align::Stretch)
         .child(content)

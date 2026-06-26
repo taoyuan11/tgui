@@ -25,6 +25,27 @@ fn table_columns() -> Vec<DataGridColumn<&'static str, TestVm>> {
     ]
 }
 
+fn pinned_table_columns() -> Vec<DataGridColumn<&'static str, TestVm>> {
+    vec![
+        DataGridColumn::new("id", "ID".to_string(), |ctx| {
+            Text::new(format!("#{}", ctx.row_index)).into()
+        })
+        .width(dp(72.0))
+        .pin(DataGridColumnPin::Start),
+        DataGridColumn::new("name", "Name".to_string(), |ctx| Text::new(ctx.row).into())
+            .width(dp(180.0)),
+        DataGridColumn::new("role", "Role".to_string(), |ctx| {
+            Text::new(format!("role {}", ctx.row_index)).into()
+        })
+        .width(dp(180.0)),
+        DataGridColumn::new("status", "Status".to_string(), |_ctx| {
+            Text::new("Ready").into()
+        })
+        .width(dp(84.0))
+        .pin(DataGridColumnPin::End),
+    ]
+}
+
 fn cell_center(
     handler: &mut BoundRuntimeHandler<TestVm>,
     row_key: impl Into<WidgetKey>,
@@ -70,6 +91,24 @@ fn header_center(
                     region.rect.x + region.rect.width * 0.5,
                     region.rect.y + region.rect.height * 0.5,
                 ))
+            }
+            _ => None,
+        })
+        .expect("requested data grid header should be visible")
+}
+
+fn header_hit(
+    handler: &mut BoundRuntimeHandler<TestVm>,
+    column_key: impl Into<WidgetKey>,
+) -> (Rect, Option<Rect>) {
+    let column_key = column_key.into();
+    handler
+        .computed_scene()
+        .hit_regions
+        .iter()
+        .find_map(|region| match &region.interaction {
+            HitInteraction::DataGridHeader { state, .. } if state.column_key == column_key => {
+                Some((region.rect, region.clip_rect))
             }
             _ => None,
         })
@@ -124,6 +163,61 @@ fn pointer_release(handler: &mut BoundRuntimeHandler<TestVm>, point: Point) {
             primary: true,
         },
     );
+}
+
+#[test]
+fn table_horizontal_virtual_scroll_patch_updates_header_and_pinned_clips() {
+    let invalidation = InvalidationSignal::new();
+    let rows = (0..48)
+        .map(|index| DataGridRow::keyed(format!("row-{index}"), "Alpha"))
+        .collect::<Vec<_>>();
+    let tree = WidgetTree::new(
+        DataGrid::new(rows, pinned_table_columns())
+            .size(dp(240.0), dp(160.0))
+            .row_height(dp(32.0))
+            .overscan(3),
+    );
+    let mut handler = test_handler_with_config(
+        TestVm,
+        Some(tree),
+        invalidation,
+        test_config_with_size(240.0, 160.0),
+    );
+    for _ in 0..3 {
+        let _ = handler.computed_scene();
+    }
+
+    let (initial_name_header, _) = header_hit(&mut handler, "name");
+    let scroll_id = handler
+        .computed_scene()
+        .scroll_regions
+        .iter()
+        .find(|region| region.can_scroll_x())
+        .map(|region| region.id)
+        .expect("DataGrid body should expose horizontal scroll");
+
+    crate::runtime::scene_runtime::scroll_fast_path_probe::reset();
+    handler.set_scroll_offset(scroll_id, Point::new(dp(96.0), Dp::ZERO));
+    let (scrolled_name_header, scrolled_name_clip) = header_hit(&mut handler, "name");
+
+    assert_eq!(
+        crate::runtime::scene_runtime::scroll_fast_path_probe::virtual_scene_hits(),
+        1,
+        "horizontal DataGrid body scroll should use the virtual scene patch path"
+    );
+    assert!(
+        scrolled_name_header.x < initial_name_header.x,
+        "header cells should move with horizontal body scroll during virtual scene patches"
+    );
+    assert_eq!(scrolled_name_header.x, dp(72.0 - 96.0));
+    let scrolled_name_clip = scrolled_name_clip.expect("header should keep a clip rect");
+    assert_eq!(scrolled_name_clip.x, dp(72.0));
+    assert_eq!(scrolled_name_clip.right(), dp(240.0 - 84.0));
+
+    handler.invalidate_computed_scene();
+    let (full_name_header, full_name_clip) = header_hit(&mut handler, "name");
+    assert_eq!(scrolled_name_header, full_name_header);
+    assert_eq!(Some(scrolled_name_clip), full_name_clip);
 }
 
 #[test]
