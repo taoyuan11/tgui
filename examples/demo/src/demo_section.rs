@@ -107,6 +107,7 @@ fn component_doc_with_layout(
     children.push(
         Text::new(title)
             .style_full(styles::section_title_style)
+            .user_select(true)
             .into(),
     );
     children.push(Text::new(intro).style_full(styles::status_style).into());

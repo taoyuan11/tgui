@@ -232,6 +232,18 @@ fn resolve_subtree_from_source_path_with_runtime_state_inner<'a, VM: 'static>(
     }
 
     let WidgetKind::Container { children, .. } = &source.kind else {
+        if matches!(source.kind, WidgetKind::Virtual { .. }) {
+            let resolved = source.resolve_with_runtime_state_and_style_sheet(
+                theme,
+                previous,
+                scroll_offsets,
+                virtual_states,
+                fallback_viewport_hint,
+                context,
+                style_sheet,
+            );
+            return cloned_resolved_subtree_at_path(&resolved, path);
+        }
         return None;
     };
     let previous_children = previous
@@ -290,6 +302,22 @@ fn child_source_position(spans: &[usize], child_index: usize) -> Option<(usize, 
         offset += span;
     }
     None
+}
+
+fn cloned_resolved_subtree_at_path<VM>(
+    root: &ResolvedElement<VM>,
+    path: &[usize],
+) -> Option<ResolvedElement<VM>> {
+    let mut current = root;
+    for child_index in path {
+        let children = match &current.kind {
+            ResolvedWidgetKind::Container { children, .. }
+            | ResolvedWidgetKind::Virtual { children, .. } => children,
+            _ => return None,
+        };
+        current = children.get(*child_index)?;
+    }
+    Some(current.clone())
 }
 
 fn child_source_position_from_source<VM>(

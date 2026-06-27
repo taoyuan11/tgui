@@ -1,7 +1,8 @@
 use super::*;
+use crate::foundation::binding::{ToastPlacement, ToastQueue};
 use crate::platform::event::MouseButton;
 use crate::ui::layout::{pct, Align};
-use crate::ui::widget::{ItemLayout, ScrollRegion, VirtualList};
+use crate::ui::widget::{ItemLayout, ScrollRegion, ToastHost, VirtualList};
 
 fn overlay_select_option_indices<VM>(
     computed: &crate::ui::widget::ComputedScene<VM>,
@@ -41,6 +42,20 @@ fn largest_inner_scroll_region<VM>(
         .max_by(|a, b| a.max_offset().y.get().total_cmp(&b.max_offset().y.get()))
         .copied()
         .expect("inner scroll region should exist")
+}
+
+fn demo_page_scroll_region<VM>(computed: &crate::ui::widget::ComputedScene<VM>) -> ScrollRegion {
+    computed
+        .scroll_regions
+        .iter()
+        .filter(|region| {
+            region.visible_frame.height > dp(500.0)
+                && region.max_offset().y > dp(100.0)
+                && region.max_offset().y < dp(10_000.0)
+        })
+        .copied()
+        .max_by(|a, b| a.max_offset().y.get().total_cmp(&b.max_offset().y.get()))
+        .expect("sectioned demo page scroll region should exist")
 }
 
 fn virtual_scroll_test_tree() -> (WidgetId, WidgetTree<TestVm>) {
@@ -228,6 +243,8 @@ fn dynamic_full_demo_shell_virtual_scroll_test_tree(
     let root = Stack::new().size(dp(900.0), dp(640.0)).child(
         Flex::horizontal()
             .size(pct(100.0), pct(100.0))
+            .position_absolute()
+            .inset(dp(0.0))
             .child(Stack::new().width(dp(240.0)).height(pct(100.0)))
             .child(
                 Flex::vertical()
@@ -238,6 +255,183 @@ fn dynamic_full_demo_shell_virtual_scroll_test_tree(
     );
 
     (outer_id, WidgetTree::new_legacy(root))
+}
+
+fn actual_demo_shell_virtual_page_test_tree() -> (WidgetId, WidgetTree<TestVm>) {
+    let page: Element<TestVm> = VirtualList::new(
+        vec![full_demo_shell_virtual_page()],
+        |_index, item: &Element<TestVm>| item.clone(),
+    )
+    .key("page-content-data")
+    .width(pct(100.0))
+    .height(pct(100.0))
+    .item_layout(ItemLayout::Measured {
+        estimate: dp(620.0),
+        spacing: dp(18.0),
+        overscan: 1,
+    })
+    .into();
+    let outer_id = page.id;
+    let root = Stack::new().size(dp(900.0), dp(640.0)).child(
+        Flex::horizontal()
+            .size(pct(100.0), pct(100.0))
+            .position_absolute()
+            .inset(dp(0.0))
+            .child(Stack::new().width(dp(240.0)).height(pct(100.0)))
+            .child(Flex::vertical().grow(1.0).height(pct(100.0)).child(page)),
+    );
+
+    (outer_id, WidgetTree::new_legacy(root))
+}
+
+fn sectioned_demo_virtual_component() -> Element<TestVm> {
+    let rows = (0..10_000).collect::<Vec<_>>();
+    let list = VirtualList::new(rows, |_index, item| {
+        Stack::new()
+            .height(dp(32.0))
+            .padding(Insets::symmetric(dp(12.0), dp(6.0)))
+            .child(Text::new(format!("Virtual row {item}")))
+            .into()
+    })
+    .item_layout(ItemLayout::Fixed {
+        item_extent: dp(32.0),
+        spacing: dp(2.0),
+        overscan: 4,
+    })
+    .key("demo-virtual-fixed")
+    .width(pct(100.0))
+    .height(dp(300.0));
+
+    let fixed_card = Flex::vertical()
+        .width(pct(100.0))
+        .gap(dp(10.0))
+        .padding(Insets::all(dp(12.0)))
+        .child(
+            Flex::vertical()
+                .gap(dp(4.0))
+                .child(Text::new("固定行高"))
+                .child(Text::new("10,000 行数据使用固定 item_extent 和 overscan。")),
+        )
+        .child(
+            Flex::vertical()
+                .width(pct(100.0))
+                .align(Align::Stretch)
+                .padding(Insets::all(dp(14.0)))
+                .child(list),
+        )
+        .child(Button::new("Show code"))
+        .child(Flex::<TestVm>::vertical().height(dp(0.0)));
+
+    let measured_card = Flex::vertical()
+        .width(pct(100.0))
+        .gap(dp(10.0))
+        .padding(Insets::all(dp(12.0)))
+        .child(Text::new("测量行高"))
+        .child(
+            Stack::new()
+                .height(dp(260.0))
+                .child(Text::new("Measured list")),
+        );
+
+    Flex::vertical()
+        .width(pct(100.0))
+        .gap(dp(14.0))
+        .padding(Insets::all(dp(16.0)))
+        .child(Text::new("VirtualList"))
+        .child(Text::new(
+            "VirtualList 只构建可见行，适合大数据量滚动列表。",
+        ))
+        .child(fixed_card)
+        .child(measured_card)
+        .into()
+}
+
+fn sectioned_demo_placeholder(label: &'static str, height: Dp) -> Element<TestVm> {
+    Flex::vertical()
+        .width(pct(100.0))
+        .height(height)
+        .gap(dp(12.0))
+        .padding(Insets::all(dp(16.0)))
+        .child(Text::new(label))
+        .child(Text::new("Placeholder section"))
+        .into()
+}
+
+fn actual_sectioned_demo_shell_root() -> Element<TestVm> {
+    let mut items: Vec<Element<TestVm>> = Vec::new();
+    items.push(
+        Flex::vertical()
+            .width(pct(100.0))
+            .gap(dp(18.0))
+            .padding(Insets::all(dp(24.0)))
+            .child(Text::new("Data"))
+            .child(Text::new(
+                "数据页面展示导航、tabs、列表、虚拟滚动、树和表格型数据控件。",
+            ))
+            .into(),
+    );
+    for section in [
+        sectioned_demo_placeholder("Breadcrumb / Pagination", dp(360.0)),
+        sectioned_demo_placeholder("Tabs", dp(520.0)),
+        sectioned_demo_placeholder("List", dp(420.0)),
+        sectioned_demo_virtual_component(),
+        sectioned_demo_placeholder("Tree", dp(420.0)),
+        sectioned_demo_placeholder("DataGrid", dp(520.0)),
+    ] {
+        items.push(
+            Flex::vertical()
+                .width(pct(100.0))
+                .padding(Insets::symmetric(dp(24.0), Dp::ZERO))
+                .child(section)
+                .into(),
+        );
+    }
+    items.push(Flex::vertical().height(dp(24.0)).into());
+
+    let page: Element<TestVm> =
+        VirtualList::new(items, |_index, item: &Element<TestVm>| item.clone())
+            .key("page-content-data")
+            .width(pct(100.0))
+            .height(pct(100.0))
+            .item_layout(ItemLayout::Measured {
+                estimate: dp(620.0),
+                spacing: dp(18.0),
+                overscan: 1,
+            })
+            .into();
+
+    Stack::new()
+        .size(dp(900.0), dp(640.0))
+        .child(
+            Flex::horizontal()
+                .size(pct(100.0), pct(100.0))
+                .position_absolute()
+                .inset(dp(0.0))
+                .child(Stack::new().width(dp(260.0)).height(pct(100.0)))
+                .child(Flex::vertical().grow(1.0).height(pct(100.0)).child(page)),
+        )
+        .into()
+}
+
+fn actual_sectioned_demo_shell_root_with_toasts(
+    adaptive: ToastQueue<TestVm>,
+    top_start: ToastQueue<TestVm>,
+    top_center: ToastQueue<TestVm>,
+    top_end: ToastQueue<TestVm>,
+    bottom_start: ToastQueue<TestVm>,
+    bottom_center: ToastQueue<TestVm>,
+) -> Element<TestVm> {
+    let content = actual_sectioned_demo_shell_root();
+    Stack::new()
+        .size(dp(900.0), dp(640.0))
+        .child(content)
+        .child(ToastHost::new(adaptive))
+        .child(ToastHost::new(top_start).placement(ToastPlacement::TopStart))
+        .child(ToastHost::new(top_center).placement(ToastPlacement::TopCenter))
+        .child(ToastHost::new(top_end).placement(ToastPlacement::TopEnd))
+        .child(ToastHost::new(bottom_start).placement(ToastPlacement::BottomStart))
+        .child(ToastHost::new(bottom_center).placement(ToastPlacement::BottomCenter))
+        .into()
 }
 
 fn dynamic_virtual_scroll_test_tree(visible: Signal<bool>) -> (WidgetId, WidgetTree<TestVm>) {
@@ -357,6 +551,32 @@ fn mouse_wheel_updates_virtual_list_window_immediately() {
 }
 
 #[test]
+fn scroll_offset_change_requests_redraw() {
+    let invalidation = InvalidationSignal::new();
+    let scroller: Element<TestVm> = Stack::new()
+        .size(dp(100.0), dp(100.0))
+        .overflow_y(Overflow::Scroll)
+        .child(Stack::new().size(dp(100.0), dp(300.0)))
+        .into();
+    let scroller_id = scroller.id;
+    let mut handler = test_handler(Some(WidgetTree::new(scroller)), invalidation);
+    let _ = handler.computed_scene();
+    assert!(!handler.invalidation.take_redraw_request());
+
+    handler.set_scroll_offset(scroller_id, Point::new(Dp::ZERO, dp(48.0)));
+    assert!(
+        handler.invalidation.take_redraw_request(),
+        "changing scroll offset should request a redraw even if the caller misses the event-level redraw path"
+    );
+
+    handler.set_scroll_offset(scroller_id, Point::new(Dp::ZERO, dp(48.0)));
+    assert!(
+        !handler.invalidation.take_redraw_request(),
+        "setting the same scroll offset should not request another redraw"
+    );
+}
+
+#[test]
 fn nested_mouse_wheel_scrolls_inner_virtual_list_before_parent_scroll_view() {
     let invalidation = InvalidationSignal::new();
     let (list_id, tree) = nested_virtual_scroll_test_tree();
@@ -456,6 +676,66 @@ fn demo_like_nested_virtual_list_scrolls_after_parent_scroll() {
     assert!(
         scrolled_min > baseline_min,
         "demo-like VirtualList should consume wheel input even inside a scrolled page"
+    );
+}
+
+#[test]
+fn actual_demo_shell_virtual_list_scrolls_inside_page_virtual_list() {
+    let invalidation = InvalidationSignal::new();
+    let (outer_id, tree) = actual_demo_shell_virtual_page_test_tree();
+    let mut handler = test_handler_with_config(
+        TestVm,
+        Some(tree),
+        invalidation,
+        test_config_with_size(900.0, 640.0),
+    );
+
+    handler.set_scroll_offset(outer_id, Point::new(Dp::ZERO, dp(360.0)));
+
+    let (region_id, target, baseline_min) = {
+        let computed = handler.computed_scene();
+        let region = largest_inner_scroll_region(computed, outer_id);
+        assert!(
+            region.visible_frame.height > dp(180.0),
+            "actual demo shell VirtualList should be visible after page scroll, got {:?}",
+            region.visible_frame
+        );
+        assert!(
+            region.max_offset().y > dp(10_000.0),
+            "actual demo shell VirtualList should have vertical overflow, got {:?}",
+            region
+        );
+        let baseline_min = visible_virtual_row_indices(computed)
+            .into_iter()
+            .min()
+            .expect("initial actual demo shell VirtualList rows should render");
+        (
+            region.id,
+            Point {
+                x: region.visible_frame.x + dp(24.0),
+                y: region.visible_frame.y + dp(24.0),
+            },
+            baseline_min,
+        )
+    };
+    assert_eq!(baseline_min, 0);
+
+    handler.cursor_position = Some(target);
+    assert!(handler.handle_mouse_wheel(MouseScrollDelta::LineDelta(0.0, -8.0)));
+
+    let computed = handler.computed_scene();
+    let scrolled_region = largest_inner_scroll_region(computed, outer_id);
+    assert_eq!(
+        scrolled_region.id, region_id,
+        "nested actual demo VirtualList should keep the same WidgetId after scroll"
+    );
+    let scrolled_min = visible_virtual_row_indices(computed)
+        .into_iter()
+        .min()
+        .expect("scrolled actual demo shell VirtualList rows should render");
+    assert!(
+        scrolled_min > baseline_min,
+        "nested actual demo VirtualList should consume wheel input before the page VirtualList"
     );
 }
 
@@ -788,6 +1068,178 @@ fn full_demo_shell_virtual_list_scrollbar_drag_updates_rows() {
         released_min > baseline_min,
         "full demo shell VirtualList should keep its scroll offset after releasing the thumb: baseline_min={baseline_min} released_min={released_min} released_indices={released_indices:?} region={released_region:?} offset={released_offset:?} active_drag={:?}",
         handler.active_scrollbar_drag.map(|drag| drag.handle)
+    );
+}
+
+#[test]
+fn rebuilt_sectioned_demo_virtual_list_scrollbar_drag_updates_rows() {
+    stacker::grow(16 * 1024 * 1024, || {
+        rebuilt_sectioned_demo_virtual_list_scrollbar_drag_updates_rows_impl();
+    });
+}
+
+fn rebuilt_sectioned_demo_virtual_list_scrollbar_drag_updates_rows_impl() {
+    let invalidation = InvalidationSignal::new();
+    let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+    let adaptive = ToastQueue::new(&context);
+    let top_start = ToastQueue::new(&context);
+    let top_center = ToastQueue::new(&context);
+    let top_end = ToastQueue::new(&context);
+    let bottom_start = ToastQueue::new(&context);
+    let bottom_center = ToastQueue::new(&context);
+    let mut handler = test_handler_with_config(
+        TestVm,
+        Some(WidgetTree::new(Text::new("initial"))),
+        invalidation,
+        test_config_with_size(900.0, 640.0),
+    );
+    handler.root_view = Some(Arc::new(move |_vm: &TestVm| {
+        actual_sectioned_demo_shell_root_with_toasts(
+            adaptive.clone(),
+            top_start.clone(),
+            top_center.clone(),
+            top_end.clone(),
+            bottom_start.clone(),
+            bottom_center.clone(),
+        )
+    }));
+    let command = Command::new_with_context(|_vm: &mut TestVm, context| {
+        context.request_rebuild();
+    });
+    handler.execute_command_without_invalidation(&command);
+    let event_loop = TestEventLoop;
+
+    let outer_id = {
+        let computed = handler.computed_scene();
+        demo_page_scroll_region(computed).id
+    };
+    handler.set_scroll_offset(outer_id, Point::new(Dp::ZERO, dp(1_520.0)));
+
+    let (region_id, start, target, baseline_min) = {
+        let computed = handler.computed_scene();
+        let region = largest_inner_scroll_region(computed, outer_id);
+        assert!(
+            region.visible_frame.height > dp(180.0),
+            "sectioned demo VirtualList should be visible after page scroll, got {:?}",
+            region.visible_frame
+        );
+        let baseline_min = visible_virtual_row_indices(computed)
+            .into_iter()
+            .min()
+            .expect("initial sectioned demo VirtualList rows should render");
+        let thumb = region
+            .vertical_thumb
+            .expect("sectioned demo VirtualList should render a vertical scrollbar thumb");
+        let track = region
+            .vertical_track
+            .expect("sectioned demo VirtualList should render a vertical scrollbar track");
+        let start = Point {
+            x: thumb.x + dp(thumb.width.get() * 0.5),
+            y: thumb.y + dp(thumb.height.get() * 0.5),
+        };
+        let travel = (track.height - thumb.height).max(0.0);
+        let target = Point {
+            x: start.x,
+            y: start.y + travel * 0.35,
+        };
+        (region.id, start, target, baseline_min)
+    };
+    assert_eq!(baseline_min, 0);
+
+    handler.handle_bound_window_event(
+        &event_loop,
+        WindowEvent::PointerMoved {
+            device_id: None,
+            position: PhysicalPosition::new(f64::from(start.x.get()), f64::from(start.y.get())),
+            primary: true,
+            source: PointerSource::Mouse,
+        },
+    );
+    handler.handle_bound_window_event(
+        &event_loop,
+        WindowEvent::PointerButton {
+            device_id: None,
+            position: PhysicalPosition::new(f64::from(start.x.get()), f64::from(start.y.get())),
+            state: ElementState::Pressed,
+            button: ButtonSource::Mouse(MouseButton::Left),
+            primary: true,
+        },
+    );
+    assert_eq!(
+        handler.active_scrollbar_drag.map(|drag| drag.handle.id),
+        Some(region_id),
+        "pressing the rebuilt sectioned demo VirtualList thumb should target the inner scrollbar"
+    );
+
+    handler.handle_bound_window_event(
+        &event_loop,
+        WindowEvent::PointerMoved {
+            device_id: None,
+            position: PhysicalPosition::new(f64::from(target.x.get()), f64::from(target.y.get())),
+            primary: true,
+            source: PointerSource::Mouse,
+        },
+    );
+
+    let dragged_computed = handler.computed_scene();
+    let dragged_min = visible_virtual_row_indices(dragged_computed)
+        .into_iter()
+        .min()
+        .expect("dragged rebuilt sectioned demo VirtualList rows should render");
+    assert!(
+        dragged_min > baseline_min,
+        "rebuilt sectioned demo VirtualList should update visible rows while its thumb is dragged"
+    );
+}
+
+#[test]
+fn sectioned_demo_virtual_list_wheel_scrolls_inner_list() {
+    stacker::grow(16 * 1024 * 1024, || {
+        sectioned_demo_virtual_list_wheel_scrolls_inner_list_impl();
+    });
+}
+
+fn sectioned_demo_virtual_list_wheel_scrolls_inner_list_impl() {
+    let invalidation = InvalidationSignal::new();
+    let mut handler = test_handler_with_config(
+        TestVm,
+        Some(WidgetTree::new(actual_sectioned_demo_shell_root())),
+        invalidation,
+        test_config_with_size(900.0, 640.0),
+    );
+
+    let outer_id = {
+        let computed = handler.computed_scene();
+        demo_page_scroll_region(computed).id
+    };
+    handler.set_scroll_offset(outer_id, Point::new(Dp::ZERO, dp(1_520.0)));
+
+    let (target, baseline_min) = {
+        let computed = handler.computed_scene();
+        let region = largest_inner_scroll_region(computed, outer_id);
+        let baseline_min = visible_virtual_row_indices(computed)
+            .into_iter()
+            .min()
+            .expect("initial sectioned demo VirtualList rows should render");
+        (
+            Point {
+                x: region.visible_frame.x + dp(40.0),
+                y: region.visible_frame.y + dp(80.0),
+            },
+            baseline_min,
+        )
+    };
+    handler.cursor_position = Some(target);
+    assert!(handler.handle_mouse_wheel(MouseScrollDelta::LineDelta(0.0, -8.0)));
+    while handler.advance_smooth_scroll() {}
+    let scrolled_indices = visible_virtual_row_indices(handler.computed_scene());
+    let scrolled_min = scrolled_indices
+        .into_iter()
+        .min()
+        .expect("scrolled sectioned demo VirtualList rows should render");
+    assert!(
+        scrolled_min > baseline_min,
+        "sectioned demo VirtualList should scroll by wheel"
     );
 }
 

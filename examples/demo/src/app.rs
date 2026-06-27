@@ -405,6 +405,8 @@ impl ViewModel for App {
             .child(
                 Flex::horizontal()
                     .size(pct(100.0), pct(100.0))
+                    .position_absolute()
+                    .inset(dp(0.0))
                     .child(navigation::sidebar(self))
                     .child(Flex::vertical().grow(1.0).height(pct(100.0)).child(content)),
             )
