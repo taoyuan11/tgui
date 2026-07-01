@@ -129,6 +129,73 @@ fn list_virtualizes_rows_and_keeps_selection_wrapper_inside_window() {
 }
 
 #[test]
+fn list_scroll_reuses_each_previous_row_id_at_most_once() {
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let theme = Theme::default();
+    let mut animations = AnimationEngine::default();
+    let viewport = Rect::new(0.0, 0.0, 240.0, 120.0);
+    let list: Element<()> = List::<String, ()>::new(
+        (0..6)
+            .map(|index| ListItem::keyed(index, format!("Row {index}")))
+            .collect::<Vec<_>>(),
+        |ctx| Text::new(ctx.item).into(),
+    )
+    .item_layout(ItemLayout::Fixed {
+        item_extent: dp(40.0),
+        spacing: Dp::ZERO,
+        overscan: 0,
+    })
+    .size(dp(240.0), dp(120.0))
+    .into();
+    let list_id = list.id;
+    let tree = WidgetTree::new(list);
+
+    let first_layout = tree.build_scene_layout(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        UnitContext::default(),
+        &HashMap::new(),
+        &HashMap::new(),
+        viewport,
+    );
+    let scroll_offsets = HashMap::from([(list_id, Point::new(Dp::ZERO, dp(40.0)))]);
+    let scrolled_layout = tree.build_scene_layout_at_with_previous(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        UnitContext::default(),
+        &scroll_offsets,
+        &HashMap::new(),
+        viewport,
+        Instant::now(),
+        Some(&first_layout),
+    );
+
+    let ResolvedWidgetKind::Virtual { children, .. } = &scrolled_layout.resolved_root.kind else {
+        panic!("List should resolve to a virtual widget");
+    };
+    let row_ids = children
+        .iter()
+        .filter(|child| child.list_item.is_some())
+        .map(|child| child.id)
+        .collect::<Vec<_>>();
+    let unique_row_ids = row_ids
+        .iter()
+        .copied()
+        .collect::<std::collections::HashSet<_>>();
+
+    assert_eq!(
+        row_ids.len(),
+        unique_row_ids.len(),
+        "visible List rows must not share WidgetId values after scroll: {row_ids:?}"
+    );
+}
+
+#[test]
 fn list_selected_row_emits_selected_background() {
     let font_manager = FontManager::new(&FontCatalog::default());
     let media = test_media();

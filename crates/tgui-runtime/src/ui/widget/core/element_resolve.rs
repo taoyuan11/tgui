@@ -263,6 +263,7 @@ impl<VM: 'static> Element<VM> {
                     .unwrap_or_default();
                 let mut child_meta = Vec::with_capacity(window_plan.placements.len());
                 let mut children = Vec::with_capacity(window_plan.placements.len());
+                let mut reused_child_ids = HashSet::new();
                 for placement in &window_plan.placements {
                     let Some(mut child) = source.build(placement.item_index, *context, style_sheet)
                     else {
@@ -297,21 +298,28 @@ impl<VM: 'static> Element<VM> {
                         }
                     }
                     let previous_id = runtime_state.widget_ids_by_key.get(&item_key).copied();
-                    let previous_child = previous_by_index
+                    let mut previous_child = previous_by_index
                         .get(&placement.item_index)
                         .copied()
-                        .or_else(|| {
-                            previous_id.and_then(|id| {
-                                previous_children.iter().find(|child| child.id == id)
-                            })
-                        })
-                        .or_else(|| previous_children.get(children.len()));
+                        .filter(|child| reused_child_ids.insert(child.id));
+                    if previous_child.is_none() {
+                        previous_child = previous_id
+                            .and_then(|id| previous_children.iter().find(|child| child.id == id))
+                            .filter(|child| reused_child_ids.insert(child.id));
+                    }
+                    if previous_child.is_none() {
+                        previous_child = previous_children
+                            .get(children.len())
+                            .filter(|child| reused_child_ids.insert(child.id));
+                    }
                     if child.key.is_none() {
                         child.key = Some(item_key.clone());
                     }
                     if let Some(previous_child) = previous_child {
                         child.id = previous_child.id;
-                    } else if let Some(previous_id) = previous_id {
+                    } else if let Some(previous_id) =
+                        previous_id.filter(|id| reused_child_ids.insert(*id))
+                    {
                         child.id = previous_id;
                     }
                     child_meta.push(VirtualResolvedItemMeta {
