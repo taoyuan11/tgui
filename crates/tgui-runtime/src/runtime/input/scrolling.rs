@@ -1,4 +1,4 @@
-use super::super::state::{SMOOTH_SCROLL_EPSILON, SMOOTH_SCROLL_LERP};
+use super::super::state::{SMOOTH_SCROLL_EPSILON, SMOOTH_SCROLL_FRAMES};
 use super::*;
 use smallvec::SmallVec;
 
@@ -404,8 +404,19 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         widget_id: WidgetId,
         target: Point,
     ) {
-        self.smooth_scroll_states
-            .insert(widget_id, SmoothScrollState { target });
+        let start = self
+            .scroll_states
+            .get(&widget_id)
+            .copied()
+            .unwrap_or(Point::ZERO);
+        self.smooth_scroll_states.insert(
+            widget_id,
+            SmoothScrollState {
+                start,
+                target,
+                frame: 0,
+            },
+        );
         self.touch_scroll_inertia_states.remove(&widget_id);
         let _ = self.advance_smooth_scroll();
     }
@@ -423,7 +434,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             .map(|(widget_id, state)| (*widget_id, *state))
             .collect::<SmallVec<[(WidgetId, SmoothScrollState); 8]>>();
 
-        for (widget_id, state) in updates {
+        for (widget_id, mut state) in updates {
             let current = self
                 .scroll_states
                 .get(&widget_id)
@@ -438,12 +449,21 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 continue;
             }
 
+            state.frame = state.frame.saturating_add(1).min(SMOOTH_SCROLL_FRAMES);
+            let progress = f32::from(state.frame) / f32::from(SMOOTH_SCROLL_FRAMES);
             let next = Point::new(
-                current.x + dx * SMOOTH_SCROLL_LERP,
-                current.y + dy * SMOOTH_SCROLL_LERP,
+                state.start.x + (state.target.x - state.start.x) * progress,
+                state.start.y + (state.target.y - state.start.y) * progress,
             );
             self.set_scroll_offset(widget_id, next);
             changed = true;
+
+            if state.frame >= SMOOTH_SCROLL_FRAMES {
+                self.set_scroll_offset(widget_id, state.target);
+                finished.push(widget_id);
+            } else {
+                self.smooth_scroll_states.insert(widget_id, state);
+            }
         }
 
         for widget_id in finished {

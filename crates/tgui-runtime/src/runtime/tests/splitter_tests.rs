@@ -1,10 +1,19 @@
 use super::*;
 
+use crate::animation::Transition;
 use crate::foundation::binding::State;
+use crate::platform::cursor::CursorIcon;
 use crate::platform::event::MouseButton;
 use crate::ui::widget::{Pane, ResizablePanels, SplitterResize};
 
 fn splitter_tree(sizes: State<Vec<f32>>) -> WidgetTree<TestVm> {
+    splitter_tree_with_sizes(sizes.clone(), sizes.signal())
+}
+
+fn splitter_tree_with_sizes(
+    sizes: State<Vec<f32>>,
+    sizes_value: impl Into<crate::ui::layout::Value<Vec<f32>>>,
+) -> WidgetTree<TestVm> {
     let sizes_for_resize = sizes.clone();
     WidgetTree::new(
         ResizablePanels::new(
@@ -12,7 +21,7 @@ fn splitter_tree(sizes: State<Vec<f32>>) -> WidgetTree<TestVm> {
                 Pane::new(Stack::<TestVm>::new()),
                 Pane::new(Stack::<TestVm>::new()),
             ],
-            sizes.signal(),
+            sizes_value,
         )
         .size(dp(200.0), dp(100.0))
         .on_resize(ValueCommand::new(
@@ -177,5 +186,78 @@ fn splitter_drag_updates_handle_layout_from_sizes_signal() {
     assert!(
         moved.x > start.x + dp(10.0),
         "splitter handle should move after dragging; start={start:?}, moved={moved:?}"
+    );
+}
+
+#[test]
+fn splitter_drag_keeps_resize_cursor_without_hover_rebuild() {
+    let invalidation = InvalidationSignal::new();
+    let sizes = State::new(vec![0.42, 0.58], invalidation.clone());
+    let mut handler = test_handler(Some(splitter_tree(sizes)), invalidation);
+    let start = splitter_handle_center(&mut handler);
+    let end = Point::new(start.x + dp(30.0), start.y);
+
+    pointer_press(&mut handler, start);
+    handler.hovered_widgets.clear();
+    handler.cursor_icon = None;
+    pointer_move(&mut handler, end);
+
+    assert_eq!(handler.cursor_icon, Some(CursorIcon::EwResize));
+}
+
+#[test]
+fn splitter_drag_defers_scene_rebuild_until_redraw() {
+    let invalidation = InvalidationSignal::new();
+    let sizes = State::new(vec![0.42, 0.58], invalidation.clone());
+    let mut handler = test_handler(Some(splitter_tree(sizes)), invalidation);
+    let start = splitter_handle_center(&mut handler);
+    let end = Point::new(start.x + dp(30.0), start.y);
+
+    pointer_press(&mut handler, start);
+    let _ = handler.computed_scene();
+    assert!(
+        handler
+            .cached_scene
+            .as_ref()
+            .is_some_and(|cached| cached.layout_valid && cached.computed_valid),
+        "cache should be valid before the drag move"
+    );
+
+    pointer_move(&mut handler, end);
+    let cached = handler.cached_scene.as_ref().expect("cache shell");
+    assert!(
+        !cached.layout_valid && !cached.computed_valid,
+        "splitter move should not force a scene rebuild during pointer event handling"
+    );
+
+    let moved = splitter_handle_center(&mut handler);
+    assert!(
+        moved.x > start.x + dp(10.0),
+        "splitter handle should still move on the next scene read; start={start:?}, moved={moved:?}"
+    );
+}
+
+#[test]
+fn splitter_drag_uses_immediate_layout_when_sizes_signal_is_animated() {
+    let invalidation = InvalidationSignal::new();
+    let sizes = State::new(vec![0.42, 0.58], invalidation.clone());
+    let transition = Transition::ease_in_out(Duration::from_millis(180));
+    let mut handler = test_handler(
+        Some(splitter_tree_with_sizes(
+            sizes.clone(),
+            sizes.signal().animated(transition),
+        )),
+        invalidation,
+    );
+    let start = splitter_handle_center(&mut handler);
+    let end = Point::new(start.x + dp(30.0), start.y);
+
+    pointer_press(&mut handler, start);
+    pointer_move(&mut handler, end);
+
+    let moved = splitter_handle_center(&mut handler);
+    assert!(
+        moved.x > start.x + dp(10.0),
+        "animated size signals should not make splitter drags lag; start={start:?}, moved={moved:?}"
     );
 }

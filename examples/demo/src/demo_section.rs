@@ -33,42 +33,28 @@ pub(crate) fn page(
     description: &'static str,
     sections: Vec<Element<App>>,
 ) -> Element<App> {
-    virtual_page(title, description, sections, dp(520.0))
-}
-
-pub(crate) fn virtual_page(
-    title: &'static str,
-    description: &'static str,
-    sections: Vec<Element<App>>,
-    estimate: Dp,
-) -> Element<App> {
-    let mut items = Vec::with_capacity(sections.len() + 2);
-    items.push(
+    let mut children = Vec::with_capacity(sections.len() + 1);
+    children.push(
         Flex::vertical()
             .width(pct(100.0))
             .gap(dp(18.0))
-            .padding(Insets::all(dp(24.0)))
             .child(Text::new(title).style_full(styles::title_style))
             .child(Text::new(description).style_full(|ctx| styles::muted_text_style(ctx, sp(15.0))))
             .into(),
     );
-    items.extend(sections.into_iter().map(|section| {
-        Flex::vertical()
-            .width(pct(100.0))
-            .padding(Insets::symmetric(dp(24.0), Dp::ZERO))
-            .child(section)
-            .into()
-    }));
-    items.push(Flex::vertical().height(dp(24.0)).into());
+    children.extend(sections);
 
-    VirtualList::new(items, |_index, item: &Element<App>| item.clone())
+    ScrollView::new()
         .width(pct(100.0))
         .height(pct(100.0))
-        .item_layout(ItemLayout::Measured {
-            estimate,
-            spacing: dp(18.0),
-            overscan: 1,
-        })
+        .overflow_x(Overflow::Hidden)
+        .child(
+            Flex::vertical()
+                .width(pct(100.0))
+                .gap(dp(18.0))
+                .padding(Insets::all(dp(24.0)))
+                .child(children),
+        )
         .into()
 }
 

@@ -158,11 +158,10 @@ pub(crate) fn page(app: &App) -> Element<App> {
         form_component(app),
     ];
 
-    demo_section::virtual_page(
+    demo_section::page(
         "Forms",
         "表单页面展示输入控件、选择控件、校验状态和受控值绑定。",
         sections,
-        dp(560.0),
     )
 }
 

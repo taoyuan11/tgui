@@ -75,7 +75,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             return false;
         }
         if let Some(command) = on_resize.as_ref() {
-            self.execute_value_command(
+            self.execute_value_command_without_invalidation(
                 command,
                 SplitterResize {
                     index,

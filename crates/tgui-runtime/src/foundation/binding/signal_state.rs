@@ -291,6 +291,11 @@ impl<T> Signal<T> {
         self
     }
 
+    pub(crate) fn without_transition(mut self) -> Self {
+        self.transition = None;
+        self
+    }
+
     pub(crate) fn from_state(
         state: State<T>,
         invalidation: InvalidationSignal,

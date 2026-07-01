@@ -462,6 +462,11 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             CursorIcon::Pointer
         } else if self.active_text_selection.is_some() {
             CursorIcon::Text
+        } else if let Some(active) = self.active_splitter_resize.as_ref() {
+            match active.axis {
+                crate::ui::layout::Axis::Horizontal => CursorIcon::EwResize,
+                crate::ui::layout::Axis::Vertical => CursorIcon::NsResize,
+            }
         } else if let Some(cursor_style) = self
             .hovered_widgets
             .iter()

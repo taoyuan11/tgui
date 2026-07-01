@@ -33,7 +33,7 @@ use super::layout_slots::LayoutSlotBinding;
 use super::reactive_slots::ReactiveSlotBinding;
 
 pub(super) const SMOOTH_SCROLL_EPSILON: f32 = 0.1;
-pub(super) const SMOOTH_SCROLL_LERP: f32 = 0.28;
+pub(super) const SMOOTH_SCROLL_FRAMES: u16 = 4;
 
 pub(super) struct CachedScene<VM> {
     pub(super) viewport: Rect,
@@ -807,7 +807,9 @@ pub(super) struct TouchScrollInertiaState {
 
 #[derive(Clone, Copy)]
 pub(super) struct SmoothScrollState {
+    pub(super) start: Point,
     pub(super) target: Point,
+    pub(super) frame: u16,
 }
 
 #[derive(Clone)]

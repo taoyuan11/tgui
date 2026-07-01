@@ -279,9 +279,11 @@ fn normalize_sizes(mut sizes: Vec<f32>, count: usize) -> Vec<f32> {
 fn splitter_sizes_value(sizes: Value<Vec<f32>>, count: usize) -> Value<Vec<f32>> {
     match sizes {
         Value::Static(sizes) => Value::Static(normalize_sizes(sizes, count)),
-        Value::Signal(signal) => {
-            Value::Signal(signal.project(move |sizes| normalize_sizes(sizes.clone(), count)))
-        }
+        Value::Signal(signal) => Value::Signal(
+            signal
+                .project(move |sizes| normalize_sizes(sizes.clone(), count))
+                .without_transition(),
+        ),
     }
 }
 

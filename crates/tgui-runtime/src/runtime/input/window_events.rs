@@ -64,7 +64,6 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                         needs_redraw |= self.update_cursor_icon();
                     } else if self.active_splitter_resize.is_some() {
                         needs_redraw |= self.handle_splitter_resize();
-                        needs_redraw |= self.handle_hover(viewport);
                         needs_redraw |= self.update_cursor_icon();
                     } else if self.active_canvas_drag.is_some() {
                         needs_redraw |= self.handle_canvas_drag();

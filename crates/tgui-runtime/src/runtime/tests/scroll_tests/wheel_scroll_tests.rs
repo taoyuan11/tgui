@@ -1360,6 +1360,52 @@ fn mouse_wheel_starts_immediately_and_keeps_smooth_target() {
 }
 
 #[test]
+fn smooth_scroll_advances_linearly() {
+    let invalidation = InvalidationSignal::new();
+    let mut handler = test_handler(None, invalidation);
+    let widget_id = WidgetId::from_raw(90_001);
+    let frames = usize::from(super::super::super::state::SMOOTH_SCROLL_FRAMES);
+    let target_y = dp(frames as f32 * 10.0);
+
+    handler.set_smooth_scroll_target(widget_id, Point::new(Dp::ZERO, target_y));
+    let mut offsets = vec![handler
+        .scroll_states
+        .get(&widget_id)
+        .map(|offset| offset.y)
+        .unwrap_or(Dp::ZERO)];
+
+    while handler.advance_smooth_scroll() {
+        offsets.push(
+            handler
+                .scroll_states
+                .get(&widget_id)
+                .map(|offset| offset.y)
+                .unwrap_or(Dp::ZERO),
+        );
+    }
+
+    assert_eq!(offsets.len(), frames);
+    for (index, offset) in offsets.iter().enumerate() {
+        let expected = (index + 1) as f32 * 10.0;
+        assert!(
+            (offset.get() - expected).abs() <= 0.001,
+            "frame {} should be linear: expected {expected}, got {}",
+            index + 1,
+            offset.get()
+        );
+    }
+    for pair in offsets.windows(2) {
+        let delta = pair[1] - pair[0];
+        assert!(
+            (delta.get() - 10.0).abs() <= 0.001,
+            "smooth scroll frame delta should stay constant, got {}",
+            delta.get()
+        );
+    }
+    assert!(!handler.smooth_scroll_states.contains_key(&widget_id));
+}
+
+#[test]
 fn mouse_wheel_scrolls_stack_wrapped_grid_of_canvas_cards() {
     let invalidation = InvalidationSignal::new();
     let card = || {
