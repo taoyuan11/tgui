@@ -24,9 +24,9 @@ impl InputStyle {
         Self {
             surface: WidgetSurfaceStyle::default(),
             background: stateful_colors(
-                palette.surface_low,
                 palette.surface,
-                palette.surface_high,
+                palette.surface,
+                palette.surface,
                 palette.disabled_surface,
             ),
             text: stateful_single(
@@ -50,7 +50,7 @@ impl InputStyle {
             selection: Some(Value::Static(theme.colors.selection)),
             caret: Some(Value::Static(theme.colors.primary)),
             border_width: Value::Static(theme.border.thin),
-            radius: Value::Static(theme.radius.lg),
+            radius: Value::Static(theme.radius.md),
             padding_x: theme.spacing.md - theme.spacing.xs,
             padding_y: theme.spacing.sm,
             min_height: dp(40.0),

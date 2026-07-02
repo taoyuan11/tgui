@@ -60,7 +60,7 @@ impl Theme {
         let focus_ring = FocusRingStyle {
             enabled: true,
             color: colors.focus_ring,
-            width: border.normal,
+            width: border.thick,
             gap: spacing.xxs,
         };
         let elevation = ElevationScale::default();

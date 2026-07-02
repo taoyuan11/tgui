@@ -1,13 +1,9 @@
 use crate::app::App;
 use crate::demo_section::{self, UsageDemo};
-use crate::styles;
 use tgui::prelude::*;
 
 const CODE_ICON_GRID: &str = r#"Icon::builtin(BuiltinIcon::Search)
-    .size(dp(28.0))
-    .style(|style, _ctx| {
-        style.color = Color::hexa(0x2563EBFF).into();
-    })"#;
+    .size(dp(28.0))"#;
 
 const CODE_ICON_SIZES: &str = r#"Flex::horizontal().gap(dp(16.0)).align(Align::Center).child(el![
     Icon::builtin(BuiltinIcon::Bell).size(dp(18.0)),
@@ -169,50 +165,21 @@ fn icon_grid() -> Element<App> {
 }
 
 fn icon_tile(icon: BuiltinIcon, label: &'static str) -> Element<App> {
-    Flex::vertical()
+    Card::new()
         .width(dp(112.0))
         .height(dp(106.0))
-        .gap(dp(8.0))
-        .center()
-        .padding(Insets::all(dp(10.0)))
-        .style_full(icon_tile_style)
-        .child(Icon::builtin(icon).size(dp(28.0)).style(|style, _ctx| {
-            style.color = Color::hexa(0x2563EBFF).into();
-        }))
-        .child(
-            Text::new(label)
-                .max_width(dp(96.0))
-                .align_self(Align::Center)
-                .style_full(icon_label_style)
-                .user_select(true),
+        .body(
+            Flex::vertical()
+                .height(pct(100.0))
+                .gap(dp(8.0))
+                .center()
+                .child(Icon::builtin(icon).size(dp(28.0)))
+                .child(
+                    Text::new(label)
+                        .max_width(dp(96.0))
+                        .align_self(Align::Center)
+                        .user_select(true),
+                ),
         )
         .into()
-}
-
-fn icon_tile_style(ctx: &StyleContext<'_>) -> ContainerStyle {
-    let mode = ctx.mode;
-    let mut style = ContainerStyle::default_for_theme(ctx.theme);
-    style.surface.background = Some(
-        match mode {
-            ResolvedThemeMode::Light => Color::hexa(0xF8FAFCFF),
-            ResolvedThemeMode::Dark => Color::hexa(0x0F172AFF),
-        }
-        .into(),
-    );
-    style.surface.border_color = Some(
-        match mode {
-            ResolvedThemeMode::Light => Color::hexa(0xE2E8F0FF),
-            ResolvedThemeMode::Dark => Color::hexa(0x334155FF),
-        }
-        .into(),
-    );
-    style.surface.border_width = Some(dp(1.0).into());
-    style.surface.border_radius = Some(dp(8.0).into());
-    style
-}
-
-fn icon_label_style(ctx: &StyleContext<'_>) -> TextWidgetStyle {
-    let mut style = styles::muted_text_style(ctx, sp(12.0));
-    style.typography.weight = FontWeight::Medium;
-    style
 }

@@ -12,8 +12,8 @@ pub struct SkeletonStyle {
 impl SkeletonStyle {
     pub fn default_for_theme(theme: &Theme) -> Self {
         Self {
-            base: Value::Static(theme.colors.surface_high),
-            highlight: Value::Static(theme.colors.surface_overlay),
+            base: Value::Static(theme.colors.surface_low),
+            highlight: Value::Static(theme.colors.surface),
             radius: theme.radius.md,
             line_height: theme.spacing.md,
             gap: theme.spacing.xs,

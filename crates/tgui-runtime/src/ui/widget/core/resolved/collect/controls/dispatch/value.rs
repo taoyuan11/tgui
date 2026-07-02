@@ -56,7 +56,7 @@ fn build_virtual_select_menu_overlay<VM: 'static>(
     }
 
     let menu_width = trigger_frame.width;
-    let menu_corner_radius = context.units.resolve_dp(select_style.radius);
+    let menu_corner_radius = context.units.resolve_dp(select_style.menu_radius);
     if open_progress <= f32::EPSILON {
         return Some((
             OverlayContent::Batch {
@@ -142,7 +142,7 @@ fn build_virtual_select_menu_overlay<VM: 'static>(
         overscan: 2,
     })
     .size(menu_width, full_height)
-    .border_radius(select_style.radius)
+    .border_radius(select_style.menu_radius)
     .into();
     super::super::super::prepare_nested_scene_root(
         &mut root,

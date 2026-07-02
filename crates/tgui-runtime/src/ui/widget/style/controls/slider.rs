@@ -28,9 +28,9 @@ impl SliderStyle {
         Self {
             surface: WidgetSurfaceStyle::default(),
             track: stateful_single(
-                palette.outline_muted,
-                palette.outline_muted,
-                palette.outline,
+                palette.surface_high,
+                palette.surface_high,
+                palette.surface_high,
                 palette.disabled_surface,
             ),
             active_track: stateful_single(
@@ -59,10 +59,10 @@ impl SliderStyle {
                 palette.disabled_content,
             ),
             focus_ring: None,
-            track_height: theme.border.thick,
+            track_height: dp(4.0),
             thumb_size: theme.spacing.md + theme.spacing.xs,
             radius: Value::Static(theme.radius.full),
-            border_width: Value::Static(theme.border.thin),
+            border_width: Value::Static(theme.border.none),
             tick_size: theme.spacing.xs,
             label_gap: theme.spacing.sm,
             min_width: dp(160.0),

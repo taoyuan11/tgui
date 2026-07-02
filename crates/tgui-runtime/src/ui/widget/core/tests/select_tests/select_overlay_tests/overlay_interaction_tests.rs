@@ -307,7 +307,9 @@ fn select_dropdown_pressed_highlight_preserves_menu_corner_clip() {
     );
     let select_style = default_select_style(&theme, crate::ui::theme::WidgetState::default());
     let option_height = UnitContext::default().resolve_dp(select_style.option_height);
-    let menu_radius = select_style.radius.get();
+    assert_eq!(select_style.radius, theme.radius.md);
+    assert_eq!(select_style.menu_radius, theme.radius.lg);
+    let menu_radius = select_style.menu_radius.get();
     let highlight = rendered
         .primitives
         .overlay_shapes

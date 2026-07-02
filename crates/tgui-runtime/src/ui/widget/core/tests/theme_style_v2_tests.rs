@@ -45,7 +45,7 @@ fn theme_tokens_drive_default_component_styles() {
     assert_eq!(button.text_style.size, theme.typography.label.size);
 
     let input = InputStyle::default_for_theme(&theme);
-    assert_eq!(normal_color(&input.background), theme.colors.surface_low);
+    assert_eq!(normal_color(&input.background), theme.colors.surface);
     assert_eq!(
         input.caret.as_ref().unwrap().resolve(),
         theme.colors.primary
@@ -54,12 +54,12 @@ fn theme_tokens_drive_default_component_styles() {
         input.selection.as_ref().unwrap().resolve(),
         theme.colors.selection
     );
-    assert_eq!(input.radius.resolve(), theme.radius.lg);
+    assert_eq!(input.radius.resolve(), theme.radius.md);
     assert_eq!(input.padding_x, theme.spacing.md - theme.spacing.xs);
     assert_eq!(input.text_style.size, theme.typography.body.size);
 
     let select = SelectStyle::default_for_theme(&theme);
-    assert_eq!(normal_color(&select.background), theme.colors.surface_low);
+    assert_eq!(normal_color(&select.background), theme.colors.surface);
     assert_eq!(
         select.menu_background.resolve(),
         theme.colors.surface_overlay
@@ -68,7 +68,7 @@ fn theme_tokens_drive_default_component_styles() {
         select.selected_option_background.resolve(),
         theme.colors.primary_container
     );
-    assert_eq!(select.radius.resolve(), theme.radius.lg);
+    assert_eq!(select.radius.resolve(), theme.radius.md);
 
     let slider = SliderStyle::default_for_theme(&theme);
     assert_eq!(normal_color(&slider.active_track), theme.colors.primary);
@@ -77,10 +77,7 @@ fn theme_tokens_drive_default_component_styles() {
 
     let progress = ProgressBarStyle::default_for_theme(&theme);
     assert_eq!(progress.fill_color.resolve(), theme.colors.primary);
-    assert_eq!(
-        progress.track_color.resolve(),
-        theme.colors.outline_muted.with_alpha_factor(0.56)
-    );
+    assert_eq!(progress.track_color.resolve(), theme.colors.surface_high);
 
     let tabs = TabsStyle::default_for_theme(&theme);
     assert_eq!(tabs.indicator_color.resolve(), theme.colors.primary);
@@ -90,7 +87,7 @@ fn theme_tokens_drive_default_component_styles() {
     let list = ListStyle::default_for_theme(&theme);
     assert_eq!(
         list.item_selected_background.resolve(),
-        theme.colors.primary_container.with_alpha_factor(0.64)
+        theme.colors.primary_container
     );
     assert_eq!(list.item_radius, theme.radius.md);
 
@@ -112,12 +109,12 @@ fn theme_tokens_drive_default_component_styles() {
 
     let menu = MenuStyle::default_for_theme(&theme);
     assert_eq!(menu.checked_indicator_color.resolve(), theme.colors.primary);
-    assert_eq!(menu.background.resolve(), theme.colors.surface);
-    assert_eq!(menu.radius.resolve(), theme.radius.md);
+    assert_eq!(menu.background.resolve(), theme.colors.surface_overlay);
+    assert_eq!(menu.radius.resolve(), theme.radius.xl);
 
     let modal = ModalStyle::default_for_theme(&theme);
-    assert_eq!(modal.background.resolve(), theme.colors.surface);
-    assert_eq!(modal.radius.resolve(), theme.radius.lg);
+    assert_eq!(modal.background.resolve(), theme.colors.surface_overlay);
+    assert_eq!(modal.radius.resolve(), theme.radius.xl);
     assert_eq!(modal.title_text_style.weight, theme.typography.label.weight);
 }
 

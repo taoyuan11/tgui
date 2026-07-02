@@ -136,8 +136,8 @@ impl ButtonStyle {
             ButtonVariantKind::Ghost => (
                 stateful_colors(
                     Color::TRANSPARENT,
-                    palette.surface_high.lighten(surface_hover_lighten()),
-                    palette.surface_high.darken(surface_hover_lighten()),
+                    palette.surface_low,
+                    palette.surface_high,
                     Color::TRANSPARENT,
                 ),
                 stateful_single(
@@ -254,7 +254,7 @@ impl CheckboxStyle {
                 palette.disabled_content,
             ),
             border_width: Value::Static(theme.border.thin),
-            radius: Value::Static(theme.radius.md),
+            radius: Value::Static(theme.radius.sm),
             size: theme.spacing.md,
             label_gap: theme.spacing.sm,
             text_style: theme.typography.label.clone(),
@@ -394,7 +394,7 @@ impl SwitchStyle {
             border_width: Value::Static(theme.border.none),
             radius: Value::Static(theme.radius.full),
             padding: Insets::all(theme.spacing.xs),
-            width: dp(42.0),
+            width: dp(40.0),
             height: dp(24.0),
         }
     }
@@ -429,9 +429,9 @@ impl SelectStyle {
         Self {
             surface: WidgetSurfaceStyle::default(),
             background: stateful_colors(
-                palette.surface_low,
                 palette.surface,
-                palette.surface_high,
+                palette.surface,
+                palette.surface,
                 palette.disabled_surface,
             ),
             text: stateful_single(
@@ -468,7 +468,7 @@ impl SelectStyle {
             ),
             selected_option_background: Value::Static(theme.colors.primary_container),
             border_width: Value::Static(theme.border.thin),
-            radius: Value::Static(theme.radius.lg),
+            radius: Value::Static(theme.radius.md),
             padding_x: theme.spacing.md,
             padding_y: Dp::ZERO,
             min_height: dp(40.0),
@@ -514,7 +514,7 @@ impl TooltipStyle {
             offset: theme.spacing.sm,
             pointer_size: theme.spacing.sm,
             pointer_inset: theme.spacing.md,
-            shadow: theme.elevation.sm.clone(),
+            shadow: theme.elevation.md.clone(),
             text_style: theme.typography.label.clone(),
         }
     }
@@ -546,7 +546,7 @@ impl PopoverStyle {
             border: menu.border,
             border_width: menu.border_width,
             radius: menu.radius,
-            shadow: menu.shadow,
+            shadow: theme.elevation.lg.clone(),
             padding: Insets::all(theme.spacing.md),
             min_width: dp(220.0),
             max_width: dp(420.0),
@@ -598,10 +598,10 @@ impl MenuStyle {
         let palette = palette_from_theme(theme);
         Self {
             surface: WidgetSurfaceStyle::default(),
-            background: Value::Static(theme.colors.surface),
+            background: Value::Static(theme.colors.surface_overlay),
             border: Value::Static(theme.colors.outline_muted),
             border_width: Value::Static(theme.border.thin),
-            radius: Value::Static(theme.radius.md),
+            radius: Value::Static(theme.radius.xl),
             shadow: theme.elevation.md.clone(),
             min_width: dp(160.0),
             max_width: dp(360.0),
@@ -802,11 +802,11 @@ impl ModalStyle {
         Self {
             backdrop_color: Value::Static(theme.colors.scrim),
             surface: WidgetSurfaceStyle::default(),
-            background: Value::Static(theme.colors.surface),
+            background: Value::Static(theme.colors.surface_overlay),
             border: Value::Static(theme.colors.outline_muted),
             border_width: Value::Static(theme.border.thin),
-            radius: Value::Static(theme.radius.lg),
-            shadow: theme.elevation.lg.clone(),
+            radius: Value::Static(theme.radius.xl),
+            shadow: theme.elevation.xl.clone(),
             min_width: dp(280.0),
             max_width: dp(560.0),
             max_height: dp(640.0),
@@ -868,6 +868,12 @@ impl ToastStyle {
         action_button.padding_x = theme.spacing.xs;
         action_button.padding_y = theme.spacing.xxs;
         action_button.radius = Value::Static(theme.radius.sm);
+        action_button.foreground = stateful_single(
+            theme.colors.surface,
+            theme.colors.surface,
+            theme.colors.surface,
+            theme.colors.surface.with_alpha_factor(0.52),
+        );
 
         let mut close_button = ButtonStyle::default_for_theme(
             theme,
@@ -877,15 +883,21 @@ impl ToastStyle {
         close_button.padding_x = theme.spacing.xxs;
         close_button.padding_y = theme.spacing.xxs;
         close_button.radius = Value::Static(theme.radius.full);
+        close_button.foreground = stateful_single(
+            theme.colors.surface,
+            theme.colors.surface,
+            theme.colors.surface,
+            theme.colors.surface.with_alpha_factor(0.52),
+        );
 
         Self {
             surface: WidgetSurfaceStyle::default(),
-            background: Value::Static(theme.colors.surface_high),
-            foreground: Value::Static(theme.colors.on_surface),
-            border: Value::Static(theme.colors.outline_muted),
-            border_width: Value::Static(theme.border.thin),
-            radius: Value::Static(theme.radius.md),
-            shadow: theme.elevation.sm.clone(),
+            background: Value::Static(theme.colors.on_surface),
+            foreground: Value::Static(theme.colors.surface),
+            border: Value::Static(Color::TRANSPARENT),
+            border_width: Value::Static(theme.border.none),
+            radius: Value::Static(theme.radius.lg),
+            shadow: theme.elevation.md.clone(),
             padding: Insets::symmetric(theme.spacing.md, theme.spacing.sm),
             gap: theme.spacing.sm,
             title_text_style: {
@@ -901,12 +913,12 @@ impl ToastStyle {
             stack_gap: theme.spacing.sm,
             action_button,
             close_button,
-            success_icon_background: Value::Static(Color::hexa(0x10B981FF)),
-            success_icon_foreground: Value::Static(Color::WHITE),
+            success_icon_background: Value::Static(theme.colors.success),
+            success_icon_foreground: Value::Static(theme.colors.on_success),
             error_icon_background: Value::Static(theme.colors.error),
             error_icon_foreground: Value::Static(theme.colors.on_error),
-            warning_icon_background: Value::Static(Color::hexa(0xF59E0BFF)),
-            warning_icon_foreground: Value::Static(Color::WHITE),
+            warning_icon_background: Value::Static(theme.colors.warning),
+            warning_icon_foreground: Value::Static(theme.colors.on_warning),
             info_icon_background: Value::Static(palette.primary),
             info_icon_foreground: Value::Static(palette.on_primary),
         }
@@ -938,11 +950,11 @@ impl DrawerStyle {
         Self {
             backdrop_color: Value::Static(theme.colors.scrim),
             surface: WidgetSurfaceStyle::default(),
-            background: Value::Static(theme.colors.surface),
+            background: Value::Static(theme.colors.surface_overlay),
             border: Value::Static(theme.colors.outline_muted),
             border_width: Value::Static(theme.border.thin),
-            radius: Value::Static(theme.radius.none),
-            shadow: theme.elevation.md.clone(),
+            radius: Value::Static(theme.radius.xl),
+            shadow: theme.elevation.xl.clone(),
             width: dp(280.0),
             height: dp(240.0),
             padding: Insets::all(theme.spacing.lg),
@@ -974,13 +986,13 @@ mod tests {
     #[test]
     fn input_and_select_defaults_use_theme_tokens() {
         let mut theme = Theme::dark();
-        theme.colors.surface_low = Color::hexa(0x102030FF);
+        theme.colors.surface = Color::hexa(0x102030FF);
         theme.colors.primary = Color::hexa(0x44DD99FF);
         theme.colors.selection = Color::hexa(0x44DD9966);
-        theme.radius.lg = dp(10.0);
+        theme.radius.md = dp(10.0);
 
         let input = InputStyle::default_for_theme(&theme);
-        assert_eq!(input.background.normal.resolve(), theme.colors.surface_low);
+        assert_eq!(input.background.normal.resolve(), theme.colors.surface);
         assert_eq!(
             input.caret.as_ref().map(Value::resolve),
             Some(theme.colors.primary)
@@ -989,14 +1001,14 @@ mod tests {
             input.selection.as_ref().map(Value::resolve),
             Some(theme.colors.selection)
         );
-        assert_eq!(input.radius.resolve(), theme.radius.lg);
+        assert_eq!(input.radius.resolve(), theme.radius.md);
 
         let select = SelectStyle::default_for_theme(&theme);
-        assert_eq!(select.background.normal.resolve(), theme.colors.surface_low);
+        assert_eq!(select.background.normal.resolve(), theme.colors.surface);
         assert_eq!(
             select.selected_option_background.resolve(),
             theme.colors.primary_container
         );
-        assert_eq!(select.radius.resolve(), theme.radius.lg);
+        assert_eq!(select.radius.resolve(), theme.radius.md);
     }
 }

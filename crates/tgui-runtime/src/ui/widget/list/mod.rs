@@ -194,12 +194,8 @@ impl ListStyle {
             item_padding: Insets::symmetric(theme.spacing.md, theme.spacing.xs + theme.spacing.xxs),
             item_radius: theme.radius.md,
             item_background: Value::Static(Color::TRANSPARENT),
-            item_hover_background: Value::Static(
-                theme.colors.primary_container.with_alpha_factor(0.36),
-            ),
-            item_selected_background: Value::Static(
-                theme.colors.primary_container.with_alpha_factor(0.64),
-            ),
+            item_hover_background: Value::Static(theme.colors.surface_low),
+            item_selected_background: Value::Static(theme.colors.primary_container),
             item_disabled_background: Value::Static(Color::TRANSPARENT),
             group_header_background: Value::Static(Color::TRANSPARENT),
             group_header_text: Value::Static(palette.on_surface_muted),

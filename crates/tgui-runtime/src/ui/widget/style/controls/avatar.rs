@@ -21,8 +21,8 @@ pub struct AvatarStyle {
 impl AvatarStyle {
     pub fn default_for_theme(theme: &Theme, shape: AvatarShape) -> Self {
         Self {
-            background: Value::Static(theme.colors.primary_container),
-            foreground: Value::Static(theme.colors.on_primary_container),
+            background: Value::Static(theme.colors.surface_low),
+            foreground: Value::Static(theme.colors.on_surface_muted),
             size: dp(40.0),
             radius: match shape {
                 AvatarShape::Circle => theme.radius.full,

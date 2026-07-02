@@ -16,11 +16,11 @@ impl CardStyle {
     pub fn default_for_theme(theme: &Theme) -> Self {
         Self {
             surface: WidgetSurfaceStyle::default(),
-            background: Value::Static(theme.colors.surface),
+            background: Value::Static(theme.colors.surface_overlay),
             border: Value::Static(theme.colors.outline_muted),
             border_width: theme.border.thin,
-            radius: theme.radius.lg,
-            shadow: theme.elevation.none.clone(),
+            radius: theme.radius.xl,
+            shadow: theme.elevation.lg.clone(),
             padding: Insets::all(theme.spacing.md),
             gap: theme.spacing.sm,
         }

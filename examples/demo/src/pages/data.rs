@@ -2,7 +2,6 @@ use std::cmp::Ordering;
 
 use crate::app::{App, DemoContact, Employee};
 use crate::demo_section::{self, UsageDemo};
-use crate::styles;
 use tgui::prelude::*;
 
 const CODE_TABS_BASIC: &str = r#"Tabs::new(items, app.tabs_selected.signal())
@@ -126,7 +125,7 @@ fn navigation_component(app: &App) -> Element<App> {
                             ));
                         }
                     )),
-                Text::new(app.component_status.signal()).style_full(styles::status_style),
+                Text::new(app.component_status.signal()),
             ]),
             CODE_DATA_NAVIGATION,
         )],
@@ -186,10 +185,7 @@ fn tabs_component(app: &App) -> Element<App> {
                         .into();
                         tabs
                     })
-                    .child(
-                        Text::new(app.tabs_reorder_status.signal())
-                            .style_full(styles::status_style),
-                    ),
+                    .child(Text::new(app.tabs_reorder_status.signal())),
                 CODE_TABS_BASIC,
             ),
             UsageDemo::new(
@@ -198,21 +194,9 @@ fn tabs_component(app: &App) -> Element<App> {
                 "TabView 别名可使用同样 API 设置侧向 placement。",
                 TabView::new(
                     vec![
-                        TabItem::new(
-                            "overview",
-                            "概览",
-                            Text::new("概览内容").style_full(styles::status_style),
-                        ),
-                        TabItem::new(
-                            "logs",
-                            "日志",
-                            Text::new("日志内容").style_full(styles::status_style),
-                        ),
-                        TabItem::new(
-                            "settings",
-                            "设置",
-                            Text::new("设置内容").style_full(styles::status_style),
-                        ),
+                        TabItem::new("overview", "概览", Text::new("概览内容")),
+                        TabItem::new("logs", "日志", Text::new("日志内容")),
+                        TabItem::new("settings", "设置", Text::new("设置内容")),
                     ],
                     selected_for_left,
                 )
@@ -241,8 +225,7 @@ fn demo_tab_items(
                 "overview",
                 "概览",
                 Flex::vertical().gap(dp(8.0)).child(el![
-                    Text::new("Tabs 会根据选中 key 只渲染当前 panel。")
-                        .style_full(styles::status_style),
+                    Text::new("Tabs 会根据选中 key 只渲染当前 panel。"),
                     ProgressBar::new(slider_value.clone().map(|value| value / 100.0))
                         .width(dp(240.0))
                         .show_label(true)
@@ -270,19 +253,14 @@ fn demo_tab_items(
             "logs" => TabItem::new(
                 "logs",
                 "日志",
-                Text::new(selected.clone().map(|key| format!("active tab: {key}")))
-                    .style_full(styles::status_style),
+                Text::new(selected.clone().map(|key| format!("active tab: {key}"))),
             ),
             "metrics" => TabItem::new(
                 "metrics",
                 "指标",
-                Text::new("More 模式下会被收进更多菜单。").style_full(styles::status_style),
+                Text::new("More 模式下会被收进更多菜单。"),
             ),
-            _ => TabItem::new(
-                "advanced",
-                "高级",
-                Text::new("支持拖拽重排的 tab。").style_full(styles::status_style),
-            ),
+            _ => TabItem::new("advanced", "高级", Text::new("支持拖拽重排的 tab。")),
         })
         .collect()
 }
@@ -298,7 +276,7 @@ fn list_component(app: &App) -> Element<App> {
                 "分组和多选",
                 "点击行、Shift-click 范围和键盘 Enter 都会派发事件。",
                 Flex::vertical().gap(dp(8.0)).child(el![
-                    Text::new(list_selection_summary(app)).style_full(styles::status_style),
+                    Text::new(list_selection_summary(app)),
                     List::sections(contact_sections(), contact_row)
                         .key("demo-list-selection")
                         .width(pct(100.0))
@@ -318,7 +296,7 @@ fn list_component(app: &App) -> Element<App> {
                         ])
                         .on_selection_change(ValueCommand::new(App::set_list_selection))
                         .on_item_action(ValueCommand::new(App::open_list_item)),
-                    Text::new(app.list_status.signal()).style_full(styles::status_style),
+                    Text::new(app.list_status.signal()),
                 ]),
                 CODE_LIST_SELECTION,
             ),
@@ -448,11 +426,7 @@ fn section_header(text: &'static str) -> Element<App> {
         .width(pct(100.0))
         .height(dp(30.0))
         .padding(Insets::symmetric(dp(12.0), dp(6.0)))
-        .child(
-            Text::new(text)
-                .width(pct(100.0))
-                .style_full(styles::status_style),
-        )
+        .child(Text::new(text).width(pct(100.0)))
         .into()
 }
 
@@ -466,16 +440,8 @@ fn contact_row(ctx: ListItemContext<DemoContact>) -> Element<App> {
         .width(pct(100.0))
         .align(Align::Stretch)
         .gap(dp(2.0))
-        .child(
-            Text::new(title)
-                .width(pct(100.0))
-                .style_full(styles::usage_title_style),
-        )
-        .child(
-            Text::new(format!("{} - {}", ctx.item.role, ctx.item.status))
-                .width(pct(100.0))
-                .style_full(styles::status_style),
-        )
+        .child(Text::new(title).width(pct(100.0)))
+        .child(Text::new(format!("{} - {}", ctx.item.role, ctx.item.status)).width(pct(100.0)))
         .into()
 }
 
@@ -483,7 +449,7 @@ fn state_view(text: &'static str) -> Element<App> {
     Stack::new()
         .height(dp(150.0))
         .center()
-        .child(Text::new(text).style_full(styles::status_style))
+        .child(Text::new(text))
         .into()
 }
 
@@ -531,11 +497,7 @@ fn virtual_row(ctx: ListItemContext<String>) -> Element<App> {
     Stack::new()
         .width(pct(100.0))
         .padding(Insets::symmetric(dp(12.0), dp(6.0)))
-        .child(
-            Text::new(ctx.item)
-                .width(pct(100.0))
-                .style_full(styles::status_style),
-        )
+        .child(Text::new(ctx.item).width(pct(100.0)))
         .into()
 }
 
@@ -549,7 +511,7 @@ fn tree_component(app: &App) -> Element<App> {
             "层级节点",
             "受控 keys 保持展开、选择和复选状态，拖拽只派发 drop 事件。",
             Flex::vertical().gap(dp(8.0)).child(el![
-                Text::new(tree_summary(app)).style_full(styles::status_style),
+                Text::new(tree_summary(app)),
                 Flex::horizontal().gap(dp(8.0)).wrap(Wrap::Wrap).child(el![
                     Button::new("Toggle loading").on_click(Command::new(App::toggle_tree_loading)),
                     Button::new("Toggle empty").on_click(Command::new(App::toggle_tree_empty)),
@@ -586,7 +548,7 @@ fn tree_component(app: &App) -> Element<App> {
                 .on_check_change(ValueCommand::new(App::set_tree_checked))
                 .on_node_action(ValueCommand::new(App::open_tree_node))
                 .on_drop(ValueCommand::new(App::drop_tree_node)),
-                Text::new(app.tree_status.signal()).style_full(styles::status_style),
+                Text::new(app.tree_status.signal()),
             ]),
             CODE_TREE_BASIC,
         )],
@@ -630,10 +592,7 @@ fn tree_row(ctx: TreeNodeContext<&'static str>) -> Element<App> {
     } else {
         ctx.item.to_string()
     };
-    Text::new(label)
-        .width(pct(100.0))
-        .style_full(styles::status_style)
-        .into()
+    Text::new(label).width(pct(100.0)).into()
 }
 
 fn data_grid_component(app: &App) -> Element<App> {
@@ -647,7 +606,7 @@ fn data_grid_component(app: &App) -> Element<App> {
                 "选择、排序和编辑",
                 "表头排序、行选择、单元格编辑和右键菜单都在同一表格中展示。",
                 Flex::vertical().gap(dp(8.0)).child(el![
-                    Text::new(data_summary(app)).style_full(styles::status_style),
+                    Text::new(data_summary(app)),
                     DataGrid::new(sorted_rows(app), columns(app))
                         .width(pct(100.0))
                         .height(dp(360.0))
@@ -658,8 +617,10 @@ fn data_grid_component(app: &App) -> Element<App> {
                         .row_height(dp(42.0))
                         .overscan(4)
                         .context_menu(vec![
-                            MenuItem::new("Mark reviewed").on_select(Command::new(App::mark_data_reviewed)),
-                            MenuItem::new("Clear selection").on_select(Command::new(App::clear_data_selection)),
+                            MenuItem::new("Mark reviewed")
+                                .on_select(Command::new(App::mark_data_reviewed)),
+                            MenuItem::new("Clear selection")
+                                .on_select(Command::new(App::clear_data_selection)),
                         ])
                         .on_selection_change(ValueCommand::new(App::select_data_rows))
                         .on_sort_change(ValueCommand::new(App::sort_data_rows))
@@ -667,7 +628,7 @@ fn data_grid_component(app: &App) -> Element<App> {
                         .on_column_reorder(ValueCommand::new(App::reorder_data_column))
                         .on_cell_action(ValueCommand::new(App::open_data_cell))
                         .on_cell_edit_commit(ValueCommand::new(App::commit_data_cell_edit)),
-                    Text::new(app.data_status.signal()).style_full(styles::status_style),
+                    Text::new(app.data_status.signal()),
                 ]),
                 CODE_DATAGRID_BASIC,
             ),
@@ -675,8 +636,9 @@ fn data_grid_component(app: &App) -> Element<App> {
                 "datagrid/columns",
                 "列能力",
                 "列可排序、调整宽度、重排、固定在开始或结束位置。",
-                Text::new("上方表格的 ID 列固定在开始位置，Status 列固定在结束位置，Name/Role/Status 支持编辑。")
-                    .style_full(styles::status_style),
+                Text::new(
+                    "上方表格的 ID 列固定在开始位置，Status 列固定在结束位置，Name/Role/Status 支持编辑。",
+                ),
                 CODE_DATAGRID_COLUMNS,
             ),
             UsageDemo::new(

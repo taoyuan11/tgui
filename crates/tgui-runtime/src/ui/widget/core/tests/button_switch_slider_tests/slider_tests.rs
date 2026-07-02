@@ -119,8 +119,13 @@ fn slider_thumb_shadow_renders_before_thumb_fill_without_changing_hit_geometry()
 }
 
 #[test]
-fn slider_default_thumb_renders_outline_for_light_theme_visibility() {
-    let theme = Theme::default();
+fn slider_default_uses_token_track_without_thumb_outline() {
+    let theme = Theme::light();
+    let style = SliderStyle::default_for_theme(&theme);
+    assert_eq!(style.track.normal.resolve(), theme.colors.surface_high);
+    assert_eq!(style.active_track.normal.resolve(), theme.colors.primary);
+    assert_eq!(style.border_width.resolve(), theme.border.none);
+
     let font_manager = FontManager::new(&FontCatalog::default());
     let media = test_media();
     let mut animations = AnimationEngine::default();
@@ -142,11 +147,21 @@ fn slider_default_thumb_renders_outline_for_light_theme_visibility() {
         false,
     );
 
-    assert!(rendered
+    assert!(!rendered
         .primitives
         .shapes
         .iter()
         .any(|shape| shape.stroke_width > 0.0));
+    assert!(rendered
+        .primitives
+        .shapes
+        .iter()
+        .any(|shape| shape.color == theme.colors.surface_high));
+    assert!(rendered
+        .primitives
+        .shapes
+        .iter()
+        .any(|shape| shape.color == theme.colors.primary));
 }
 
 #[test]

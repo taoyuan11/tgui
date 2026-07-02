@@ -2,12 +2,10 @@ use std::{path::PathBuf, time::Duration};
 
 use crate::app::{App, audio_status_text};
 use crate::demo_section::{self, UsageDemo};
-use crate::styles;
 use tgui::prelude::*;
 
 const CODE_IMAGE_PATH: &str = r#"Image::from_path(demo_image_path())
-    .size(dp(260.0), dp(150.0))
-    .style_full(image_style)"#;
+    .size(dp(260.0), dp(150.0))"#;
 
 const CODE_IMAGE_EVENTS: &str = r#"Image::from_path(demo_image_path())
     .on_success(Command::new(|app: &mut App| {
@@ -97,7 +95,7 @@ fn carousel_component(app: &App) -> Element<App> {
                     app.carousel_index.set(index);
                     app.component_status.set(format!("Carousel index: {index}"));
                 })),
-                Text::new(app.component_status.signal()).style_full(styles::status_style),
+                Text::new(app.component_status.signal()),
             ]),
             CODE_CAROUSEL,
         )],
@@ -113,10 +111,8 @@ fn image_component(app: &App) -> Element<App> {
             UsageDemo::new(
                 "image/path",
                 "本地图片",
-                "从示例资源目录加载图片，并应用圆角样式。",
-                Image::from_path(demo_image_path())
-                    .size(dp(260.0), dp(150.0))
-                    .style_full(styles::image_style),
+                "从示例资源目录加载图片，使用 Image 的默认 fit 和 surface 样式。",
+                Image::from_path(demo_image_path()).size(dp(260.0), dp(150.0)),
                 CODE_IMAGE_PATH,
             ),
             UsageDemo::new(
@@ -126,11 +122,10 @@ fn image_component(app: &App) -> Element<App> {
                 Flex::vertical().gap(dp(8.0)).child(el![
                     Image::from_path(demo_image_path())
                         .size(dp(180.0), dp(100.0))
-                        .style_full(styles::image_style)
                         .on_success(Command::new(|app: &mut App| {
                             app.toast_status.set("图片加载完成".to_string());
                         })),
-                    Text::new(app.toast_status.signal()).style_full(styles::status_style),
+                    Text::new(app.toast_status.signal()),
                 ]),
                 CODE_IMAGE_EVENTS,
             ),
@@ -178,7 +173,7 @@ fn audio_component(app: &App) -> Element<App> {
                         .width(dp(420.0))
                         .placeholder("输入音频文件路径或 URL"),
                     Button::new("加载").on_click(Command::new(App::load_audio_from_input)),
-                    Text::new(app.audio_status.signal()).style_full(styles::status_style),
+                    Text::new(app.audio_status.signal()),
                 ]),
                 CODE_AUDIO_SAFE_LOAD,
             ),
@@ -195,8 +190,7 @@ fn audio_component(app: &App) -> Element<App> {
                             app.audio_controller.pause();
                         })),
                     ]),
-                    Text::new(app.audio_controller.playback_state().map(audio_status_text))
-                        .style_full(styles::status_style),
+                    Text::new(app.audio_controller.playback_state().map(audio_status_text)),
                 ]),
                 CODE_AUDIO_PLAYBACK,
             ),
@@ -221,7 +215,7 @@ fn video_component(app: &App) -> Element<App> {
                     Button::new("加载").on_click(Command::new(|app: &mut App| {
                         app.video_player.load_from_input();
                     })),
-                    Text::new(app.video_player.status.signal()).style_full(styles::status_style),
+                    Text::new(app.video_player.status.signal()),
                 ]),
                 CODE_VIDEO_SAFE_LOAD,
             ),
@@ -239,21 +233,15 @@ fn video_component(app: &App) -> Element<App> {
 }
 
 fn carousel_slide(title: &'static str, subtitle: &'static str) -> Element<App> {
-    Stack::new()
+    Card::new()
         .height(dp(110.0))
-        .center()
-        .style_full(|ctx| {
-            let mut style = ContainerStyle::default_for_theme(ctx.theme);
-            style.surface.background = Some(ctx.theme.colors.surface_high.into());
-            style.surface.border_radius = Some(ctx.theme.radius.lg.into());
-            style
-        })
-        .child(
+        .body(
             Flex::vertical()
+                .height(pct(100.0))
                 .gap(dp(4.0))
-                .align(Align::Center)
-                .child(Text::new(title).style_full(styles::usage_title_style))
-                .child(Text::new(subtitle).style_full(styles::status_style)),
+                .center()
+                .child(Text::new(title))
+                .child(Text::new(subtitle)),
         )
         .into()
 }
@@ -284,7 +272,6 @@ fn demo_canvas_gradient() -> Element<App> {
             .fill_and_stroke();
     }))
     .size(dp(232.0), dp(160.0))
-    .style_full(styles::canvas_style)
     .into()
 }
 
@@ -302,6 +289,5 @@ fn demo_canvas_path() -> Element<App> {
             .fill_and_stroke();
     }))
     .size(dp(232.0), dp(150.0))
-    .style_full(styles::canvas_style)
     .into()
 }

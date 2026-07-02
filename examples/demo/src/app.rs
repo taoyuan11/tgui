@@ -410,31 +410,19 @@ impl ViewModel for App {
                     .child(navigation::sidebar(self))
                     .child(Flex::vertical().grow(1.0).height(pct(100.0)).child(content)),
             )
-            .child(ToastHost::new(self.toast_queue.clone()).style_full(styles::modern_toast_style))
+            .child(ToastHost::new(self.toast_queue.clone()))
+            .child(ToastHost::new(self.toast_top_start.clone()).placement(ToastPlacement::TopStart))
             .child(
-                ToastHost::new(self.toast_top_start.clone())
-                    .placement(ToastPlacement::TopStart)
-                    .style_full(styles::modern_toast_style),
+                ToastHost::new(self.toast_top_center.clone()).placement(ToastPlacement::TopCenter),
             )
-            .child(
-                ToastHost::new(self.toast_top_center.clone())
-                    .placement(ToastPlacement::TopCenter)
-                    .style_full(styles::modern_toast_style),
-            )
-            .child(
-                ToastHost::new(self.toast_top_end.clone())
-                    .placement(ToastPlacement::TopEnd)
-                    .style_full(styles::modern_toast_style),
-            )
+            .child(ToastHost::new(self.toast_top_end.clone()).placement(ToastPlacement::TopEnd))
             .child(
                 ToastHost::new(self.toast_bottom_start.clone())
-                    .placement(ToastPlacement::BottomStart)
-                    .style_full(styles::modern_toast_style),
+                    .placement(ToastPlacement::BottomStart),
             )
             .child(
                 ToastHost::new(self.toast_bottom_center.clone())
-                    .placement(ToastPlacement::BottomCenter)
-                    .style_full(styles::modern_toast_style),
+                    .placement(ToastPlacement::BottomCenter),
             )
             .into()
     }

@@ -360,12 +360,8 @@ impl DataGridStyle {
             header_text: Value::Static(palette.on_surface),
             row_background: Value::Static(Color::TRANSPARENT),
             zebra_background: Value::Static(theme.colors.surface_low.with_alpha_factor(0.48)),
-            row_hover_background: Value::Static(
-                theme.colors.primary_container.with_alpha_factor(0.34),
-            ),
-            row_selected_background: Value::Static(
-                theme.colors.primary_container.with_alpha_factor(0.62),
-            ),
+            row_hover_background: Value::Static(theme.colors.surface_low),
+            row_selected_background: Value::Static(theme.colors.primary_container),
             cell_focused_border: Value::Static(theme.colors.focus_ring),
             cell_editing_background: Value::Static(theme.colors.surface),
             grid_line: Value::Static(theme.colors.outline_muted),

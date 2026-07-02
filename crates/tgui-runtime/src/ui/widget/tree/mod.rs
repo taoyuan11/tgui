@@ -212,20 +212,14 @@ impl TreeStyle {
             checkbox_icon_size: sp(20.0),
             indent_line_color: Value::Static(theme.colors.outline_muted.with_alpha_factor(0.6)),
             disclosure_icon_color: Value::Static(palette.on_surface_muted),
-            disclosure_hover_background: Value::Static(
-                theme.colors.primary_container.with_alpha_factor(0.36),
-            ),
+            disclosure_hover_background: Value::Static(theme.colors.surface_low),
             checkbox_unchecked_color: Value::Static(theme.colors.outline),
             checkbox_checked_color: Value::Static(theme.colors.primary),
             checkbox_indeterminate_color: Value::Static(theme.colors.primary.lighten(0.08)),
             checkbox_disabled_color: Value::Static(theme.colors.on_disabled),
             item_background: Value::Static(Color::TRANSPARENT),
-            item_hover_background: Value::Static(
-                theme.colors.primary_container.with_alpha_factor(0.36),
-            ),
-            item_selected_background: Value::Static(
-                theme.colors.primary_container.with_alpha_factor(0.64),
-            ),
+            item_hover_background: Value::Static(theme.colors.surface_low),
+            item_selected_background: Value::Static(theme.colors.primary_container),
             item_disabled_background: Value::Static(Color::TRANSPARENT),
         }
     }

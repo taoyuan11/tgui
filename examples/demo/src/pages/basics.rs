@@ -3,17 +3,10 @@ use crate::demo_section::{self, UsageDemo};
 use crate::styles;
 use tgui::prelude::*;
 
-const CODE_TEXT_BASIC: &str = r#"Text::new("这是一段基础文本")
-    .style(|style, _ctx| {
-        style.typography.size = sp(16.0);
-    })"#;
+const CODE_TEXT_BASIC: &str = r#"Text::new("这是一段基础文本")"#;
 
 const CODE_TEXT_SELECTABLE: &str = r#"Text::new("这段文本允许用户选择和复制")
-    .user_select(true)
-    .style(|style, _ctx| {
-        style.typography.size = sp(14.0);
-        style.color = Color::hexa(0x64748BFF).into();
-    })"#;
+    .user_select(true)"#;
 
 const CODE_RICH_TEXT: &str = r###"RichText::markdown("## Markdown\n- links\n- code")
     .on_link_click(ValueCommand::new(|app: &mut App, link| {
@@ -118,9 +111,8 @@ fn text_component(app: &App) -> Element<App> {
             UsageDemo::new(
                 "text/basic",
                 "基础文本",
-                "使用主题默认文字样式并调整字号。",
-                Text::new("这是一段可直接渲染的文本组件。")
-                    .style_full(|ctx| styles::text_style(ctx, sp(16.0))),
+                "使用主题默认文字样式。",
+                Text::new("这是一段可直接渲染的文本组件。"),
                 CODE_TEXT_BASIC,
             ),
             UsageDemo::new(
@@ -128,8 +120,7 @@ fn text_component(app: &App) -> Element<App> {
                 "可选择文本",
                 "开启 user_select 后，用户可以复制文本内容。",
                 Text::new("这段文本允许选择和复制，适合路径、日志、诊断信息。")
-                    .user_select(true)
-                    .style_full(styles::status_style),
+                    .user_select(true),
                 CODE_TEXT_SELECTABLE,
             ),
             UsageDemo::new(
@@ -143,7 +134,7 @@ fn text_component(app: &App) -> Element<App> {
                     .on_link_click(ValueCommand::new(|app: &mut App, link: RichTextLinkClick| {
                         app.component_status.set(format!("RichText link: {}", link.href));
                     })),
-                    Text::new(app.component_status.signal()).style_full(styles::status_style),
+                    Text::new(app.component_status.signal()),
                 ]),
                 CODE_RICH_TEXT,
             ),
@@ -178,7 +169,7 @@ fn button_component(app: &App) -> Element<App> {
                     Button::new("触发命令").on_click(Command::new(|app: &mut App| {
                         app.toast_status.set("按钮命令已触发".to_string());
                     })),
-                    Text::new(app.toast_status.signal()).style_full(styles::status_style),
+                    Text::new(app.toast_status.signal()),
                 ]),
                 CODE_BUTTON_COMMAND,
             ),
@@ -222,7 +213,7 @@ fn surface_component(app: &App) -> Element<App> {
                 "Card 可以承载 header / body / footer，内部可组合任意内容。",
                 Card::new()
                     .width(dp(360.0))
-                    .header(Text::new("Release candidate").style_full(styles::usage_title_style))
+                    .header(Text::new("Release candidate"))
                     .body(RichText::markdown(
                         "**Card** 已接入公开 API，支持徽标、富文本和组合布局。",
                     ))
@@ -244,9 +235,9 @@ fn divider_component(app: &App) -> Element<App> {
                 "基础分隔",
                 "水平分隔线保持内容层次清晰。",
                 Flex::vertical().gap(dp(8.0)).child(el![
-                    Text::new("上方内容").style_full(styles::status_style),
+                    Text::new("上方内容"),
                     Divider::new().width(dp(280.0)),
-                    Text::new("下方内容").style_full(styles::status_style),
+                    Text::new("下方内容"),
                 ]),
                 CODE_DIVIDER_BASIC,
             ),
@@ -262,9 +253,9 @@ fn divider_component(app: &App) -> Element<App> {
                         .thickness(dp(2.0))
                         .color(Color::hexa(0x2563EBFF)),
                     Flex::horizontal().gap(dp(12.0)).child(el![
-                        Text::new("左侧").style_full(styles::status_style),
+                        Text::new("左侧"),
                         Divider::new().vertical().height(dp(24.0)),
-                        Text::new("右侧").style_full(styles::status_style),
+                        Text::new("右侧"),
                     ]),
                 ]),
                 CODE_DIVIDER_VARIANTS,
@@ -288,8 +279,7 @@ fn disclosure_layout_component(app: &App) -> Element<App> {
                 Flex::vertical().gap(dp(10.0)).child(el![
                     Collapse::new(
                         "Runtime notes",
-                        Text::new("Collapse 内容由调用方提供，可以放文本、表单或列表。")
-                            .style_full(styles::status_style),
+                        Text::new("Collapse 内容由调用方提供，可以放文本、表单或列表。"),
                     )
                     .expanded(app.collapse_open.signal().animated(disclosure_transition))
                     .on_change(ValueCommand::new(|app: &mut App, open| {
@@ -322,8 +312,8 @@ fn disclosure_layout_component(app: &App) -> Element<App> {
                 "点击分隔条按步长调整尺寸，双击恢复均分。",
                 ResizablePanels::new(
                     vec![
-                        Pane::new(panel("Navigation pane", 0xE0F2FEFF)),
-                        Pane::new(panel("Detail pane", 0xDCFCE7FF)),
+                        Pane::new(panel("Navigation pane")),
+                        Pane::new(panel("Detail pane")),
                     ],
                     app.splitter_sizes.signal(),
                 )
@@ -339,17 +329,15 @@ fn disclosure_layout_component(app: &App) -> Element<App> {
     )
 }
 
-fn panel(title: &'static str, color: u32) -> Element<App> {
-    Stack::new()
+fn panel(title: &'static str) -> Element<App> {
+    Card::new()
         .height(pct(100.0))
-        .center()
-        .style_full(move |ctx| {
-            let mut style = ContainerStyle::default_for_theme(ctx.theme);
-            style.surface.background = Some(Color::hexa(color).into());
-            style.surface.border_radius = Some(dp(6.0).into());
-            style
-        })
-        .child(Text::new(title).style_full(styles::status_style))
+        .body(
+            Stack::new()
+                .height(pct(100.0))
+                .center()
+                .child(Text::new(title)),
+        )
         .into()
 }
 

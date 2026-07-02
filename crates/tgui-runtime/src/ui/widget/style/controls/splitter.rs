@@ -13,7 +13,7 @@ impl SplitterStyle {
         Self {
             handle_color: stateful_colors(
                 theme.colors.outline_muted,
-                theme.colors.primary.with_alpha_factor(0.72),
+                theme.colors.primary,
                 theme.colors.primary,
                 theme.colors.disabled,
             ),

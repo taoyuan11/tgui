@@ -47,7 +47,7 @@ pub(crate) fn palette_from_theme(theme: &Theme) -> Palette {
         disabled_surface: colors.disabled,
         disabled_content: colors.on_disabled,
         text_primary: colors.on_surface,
-        scrollbar_track: colors.surface_low.with_alpha_factor(0.72),
+        scrollbar_track: colors.surface_low.with_alpha_factor(0.8),
         scrollbar_thumb: stateful_colors(
             colors.outline.with_alpha_factor(0.64),
             colors.outline.lighten(SCROLLBAR_HOVER_LIGHTEN),
@@ -55,7 +55,7 @@ pub(crate) fn palette_from_theme(theme: &Theme) -> Palette {
             colors.disabled,
         )
         .map(|value| value.resolve()),
-        switch_track: colors.outline.with_alpha_factor(0.86),
+        switch_track: colors.surface_high,
     }
 }
 

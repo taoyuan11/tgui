@@ -2,7 +2,6 @@ use std::time::Duration;
 
 use crate::app::App;
 use crate::demo_section::{self, UsageDemo};
-use crate::styles;
 use tgui::prelude::*;
 
 const CODE_PROGRESS_VALUE: &str = r#"ProgressBar::new(app.slider_value.signal().map(|value| value / 100.0))
@@ -47,8 +46,7 @@ const CODE_TOAST_ACTION: &str = r#"Toast::new("文件已移入回收站")
     })))"#;
 
 const CODE_TOAST_PLACEMENT: &str = r#"ToastHost::new(queue)
-    .placement(ToastPlacement::TopCenter)
-    .style_full(modern_toast_style)"#;
+    .placement(ToastPlacement::TopCenter)"#;
 
 const CODE_NOTIFICATION_PERMISSION: &str = r#"ctx.notifications().request_permission(
     ValueCommand::new(|app: &mut App, result| {
@@ -123,17 +121,9 @@ fn spinner_component(app: &App) -> Element<App> {
                 "spinner/basic",
                 "尺寸变体",
                 "默认尺寸和较大尺寸可以并排展示。",
-                Flex::horizontal().gap(dp(12.0)).child(el![
-                    Spinner::new(),
-                    Spinner::new().size(dp(32.0), dp(32.0)).style_full(|ctx| {
-                        let mut style = SpinnerStyle::default_for_theme(ctx.theme);
-                        style.indicator_color = Color::hexa(0x2563EBFF).into();
-                        style.track_color = Color::hexa(0x93C5FD88).into();
-                        style.size = dp(32.0);
-                        style.thickness = dp(4.0);
-                        style
-                    }),
-                ]),
+                Flex::horizontal()
+                    .gap(dp(12.0))
+                    .child(el![Spinner::new(), Spinner::new().size(dp(32.0), dp(32.0)),]),
                 CODE_SPINNER_BASIC,
             ),
             UsageDemo::new(
@@ -150,8 +140,7 @@ fn spinner_component(app: &App) -> Element<App> {
                         } else {
                             "reduced-motion: 已关闭".to_string()
                         }
-                    }))
-                    .style_full(styles::status_style),
+                    })),
                 ]),
                 CODE_SPINNER_REDUCED,
             ),
@@ -271,7 +260,7 @@ fn toast_component(app: &App) -> Element<App> {
                             app.toast_status
                                 .set("最近操作: 弹出 2 秒 toast".to_string());
                         })),
-                    Text::new(app.toast_status.signal()).style_full(styles::status_style),
+                    Text::new(app.toast_status.signal()),
                 ]),
                 CODE_TOAST_ACTION,
             ),
@@ -356,7 +345,7 @@ fn notification_component(app: &App) -> Element<App> {
                             |app: &mut App, ctx| app.send_plain_notification(ctx),
                         )),
                     ]),
-                    Text::new(app.notification_status.signal()).style_full(styles::status_style),
+                    Text::new(app.notification_status.signal()),
                 ]),
                 CODE_NOTIFICATION_PERMISSION,
             ),
@@ -368,7 +357,7 @@ fn notification_component(app: &App) -> Element<App> {
                     Button::new("发送动作通知").on_click(Command::new_with_context(
                         |app: &mut App, ctx| app.send_action_notification(ctx),
                     )),
-                    Text::new(app.notification_status.signal()).style_full(styles::status_style),
+                    Text::new(app.notification_status.signal()),
                 ]),
                 CODE_NOTIFICATION_ACTION,
             ),

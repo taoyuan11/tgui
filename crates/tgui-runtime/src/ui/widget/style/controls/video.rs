@@ -40,8 +40,8 @@ impl VideoStyle {
         Self {
             surface: WidgetSurfaceStyle::default(),
             background: Value::Static(Color::hexa(0x000000FF)),
-            border: Value::Static(theme.colors.outline_muted),
-            border_width: theme.border.thin,
+            border: Value::Static(Color::TRANSPARENT),
+            border_width: theme.border.none,
             radius: theme.radius.lg,
             padding: Insets::ZERO,
             gap: theme.spacing.sm,

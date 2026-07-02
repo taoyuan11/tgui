@@ -17,7 +17,7 @@ impl SpinnerStyle {
         let palette = palette_from_theme(theme);
         Self {
             surface: WidgetSurfaceStyle::default(),
-            track_color: Value::Static(palette.outline_muted),
+            track_color: Value::Static(palette.surface_low),
             indicator_color: Value::Static(palette.primary),
             size: theme.spacing.lg,
             thickness: theme.border.thick,

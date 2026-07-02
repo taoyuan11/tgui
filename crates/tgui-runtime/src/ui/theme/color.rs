@@ -88,61 +88,91 @@ impl Default for ColorScheme {
 impl ColorScheme {
     pub fn light() -> Self {
         Self {
-            background: Color::hexa(0xF7F9FCFF),
-            on_background: Color::hexa(0x1B1F24FF),
+            background: Color::hexa(0xFAFAFAFF),
+            on_background: Color::hexa(0x09090BFF),
             surface: Color::hexa(0xFFFFFFFF),
-            surface_low: Color::hexa(0xF3F6FAFF),
-            surface_high: Color::hexa(0xEEF3F8FF),
-            surface_overlay: Color::hexa(0xFFFFFFF5),
-            on_surface: Color::hexa(0x202427FF),
-            on_surface_muted: Color::hexa(0x5F6B7AFF),
-            primary: Color::hexa(0x0F6CBDFF),
-            on_primary: Color::hexa(0xFFFFFFFF),
-            primary_container: Color::hexa(0xE4F2FFFF),
-            on_primary_container: Color::hexa(0x043862FF),
-            success: Color::hexa(0x0F9F6EFF),
-            on_success: Color::hexa(0xFFFFFFFF),
-            warning: Color::hexa(0xD98600FF),
-            on_warning: Color::hexa(0x2F1D00FF),
-            error: Color::hexa(0xD92D20FF),
-            on_error: Color::hexa(0xFFFFFFFF),
-            outline: Color::hexa(0xD2DAE3FF),
-            outline_muted: Color::hexa(0xE2E8F0B8),
-            focus_ring: Color::hexa(0x3A96DDFF),
-            selection: Color::hexa(0x0F6CBD4D),
-            disabled: Color::hexa(0xEDF1F5FF),
-            on_disabled: Color::hexa(0x9AA6B2FF),
-            scrim: Color::hexa(0x10182066),
+            surface_low: Color::hexa(0xF4F4F5FF),
+            surface_high: Color::hexa(0xE4E4E7FF),
+            surface_overlay: Color::hexa(0xFFFFFFFA),
+            on_surface: Color::hexa(0x18181BFF),
+            on_surface_muted: Color::hexa(0x71717AFF),
+            primary: Color::hexa(0x18181BFF),
+            on_primary: Color::hexa(0xFAFAFAFF),
+            primary_container: Color::hexa(0xF4F4F5FF),
+            on_primary_container: Color::hexa(0x09090BFF),
+            success: Color::hexa(0x10B981FF),
+            on_success: Color::hexa(0x09090BFF),
+            warning: Color::hexa(0xF59E0BFF),
+            on_warning: Color::hexa(0x09090BFF),
+            error: Color::hexa(0xEF4444FF),
+            on_error: Color::hexa(0xFAFAFAFF),
+            outline: Color::hexa(0xD4D4D8FF),
+            outline_muted: Color::hexa(0xE4E4E780),
+            focus_ring: Color::hexa(0x09090B33),
+            selection: Color::hexa(0x18181B1A),
+            disabled: Color::hexa(0xF4F4F5FF),
+            on_disabled: Color::hexa(0xA1A1AAFF),
+            scrim: Color::hexa(0x09090B66),
         }
     }
 
     pub fn dark() -> Self {
         Self {
-            background: Color::hexa(0x101418FF),
-            on_background: Color::hexa(0xF4F7FBFF),
-            surface: Color::hexa(0x171C22FF),
-            surface_low: Color::hexa(0x12171DFF),
-            surface_high: Color::hexa(0x202832FF),
-            surface_overlay: Color::hexa(0x202832F5),
-            on_surface: Color::hexa(0xF3F6FAFF),
-            on_surface_muted: Color::hexa(0xA8B4C2E6),
-            primary: Color::hexa(0x4EA5F6FF),
-            on_primary: Color::hexa(0xFFFFFFFF),
-            primary_container: Color::hexa(0x123B5EFF),
-            on_primary_container: Color::hexa(0xD8ECFFFF),
-            success: Color::hexa(0x4CC38AFF),
-            on_success: Color::hexa(0x061E14FF),
-            warning: Color::hexa(0xE9A441FF),
-            on_warning: Color::hexa(0x2B1B00FF),
-            error: Color::hexa(0xFF6B66FF),
-            on_error: Color::hexa(0xFFFFFFFF),
-            outline: Color::hexa(0x3A4654FF),
-            outline_muted: Color::hexa(0x2D3744B8),
-            focus_ring: Color::hexa(0x78BDF8FF),
-            selection: Color::hexa(0x4EA5F666),
-            disabled: Color::hexa(0x252D36FF),
-            on_disabled: Color::hexa(0x758292FF),
-            scrim: Color::hexa(0x03070BCC),
+            background: Color::hexa(0x09090BFF),
+            on_background: Color::hexa(0xFAFAFAFF),
+            surface: Color::hexa(0x18181BFF),
+            surface_low: Color::hexa(0x27272AFF),
+            surface_high: Color::hexa(0x3F3F46FF),
+            surface_overlay: Color::hexa(0x18181BFA),
+            on_surface: Color::hexa(0xF4F4F5FF),
+            on_surface_muted: Color::hexa(0xA1A1AAFF),
+            primary: Color::hexa(0xFAFAFAFF),
+            on_primary: Color::hexa(0x09090BFF),
+            primary_container: Color::hexa(0x27272AFF),
+            on_primary_container: Color::hexa(0xFAFAFAFF),
+            success: Color::hexa(0x34D399FF),
+            on_success: Color::hexa(0x09090BFF),
+            warning: Color::hexa(0xFBBF24FF),
+            on_warning: Color::hexa(0x09090BFF),
+            error: Color::hexa(0xF87171FF),
+            on_error: Color::hexa(0x09090BFF),
+            outline: Color::hexa(0x52525BFF),
+            outline_muted: Color::hexa(0x3F3F4680),
+            focus_ring: Color::hexa(0xFAFAFA4D),
+            selection: Color::hexa(0xFAFAFA26),
+            disabled: Color::hexa(0x27272AFF),
+            on_disabled: Color::hexa(0x71717AFF),
+            scrim: Color::hexa(0x000000CC),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_schemes_match_neutral_token_table() {
+        let light = ColorScheme::light();
+        assert_eq!(light.background, Color::hexa(0xFAFAFAFF));
+        assert_eq!(light.on_background, Color::hexa(0x09090BFF));
+        assert_eq!(light.surface, Color::hexa(0xFFFFFFFF));
+        assert_eq!(light.surface_low, Color::hexa(0xF4F4F5FF));
+        assert_eq!(light.surface_high, Color::hexa(0xE4E4E7FF));
+        assert_eq!(light.surface_overlay, Color::hexa(0xFFFFFFFA));
+        assert_eq!(light.primary, Color::hexa(0x18181BFF));
+        assert_eq!(light.focus_ring, Color::hexa(0x09090B33));
+        assert_eq!(light.selection, Color::hexa(0x18181B1A));
+
+        let dark = ColorScheme::dark();
+        assert_eq!(dark.background, Color::hexa(0x09090BFF));
+        assert_eq!(dark.on_background, Color::hexa(0xFAFAFAFF));
+        assert_eq!(dark.surface, Color::hexa(0x18181BFF));
+        assert_eq!(dark.surface_low, Color::hexa(0x27272AFF));
+        assert_eq!(dark.surface_high, Color::hexa(0x3F3F46FF));
+        assert_eq!(dark.surface_overlay, Color::hexa(0x18181BFA));
+        assert_eq!(dark.primary, Color::hexa(0xFAFAFAFF));
+        assert_eq!(dark.focus_ring, Color::hexa(0xFAFAFA4D));
+        assert_eq!(dark.selection, Color::hexa(0xFAFAFA26));
     }
 }
