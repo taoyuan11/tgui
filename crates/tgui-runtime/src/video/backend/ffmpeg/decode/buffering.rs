@@ -137,8 +137,13 @@ impl DecodeSession {
 
             while decode_budget > 0
                 && (!respect_buffer_memory_limit || !self.buffering_constrained_by_memory_limit())
-                && self.video_decoder.receive_frame(&mut decoded).is_ok()
             {
+                match self.video_decoder.receive_frame(&mut decoded) {
+                    Ok(()) => {}
+                    Err(error) if is_video_receive_drained(error) => break,
+                    Err(error) => return Err(self.video_frame_receive_error(error)),
+                }
+
                 let position = pts_to_duration(decoded.timestamp(), self.video_time_base)
                     .unwrap_or_else(|| {
                         self.queued_video_tail_position()
@@ -184,9 +189,14 @@ impl DecodeSession {
             let mut decoded = VideoFrame::empty();
             let mut flushed_frames = Vec::new();
             while decode_budget > 0
-                && self.video_decoder.receive_frame(&mut decoded).is_ok()
                 && (!respect_buffer_memory_limit || !self.buffering_constrained_by_memory_limit())
             {
+                match self.video_decoder.receive_frame(&mut decoded) {
+                    Ok(()) => {}
+                    Err(error) if is_video_receive_drained(error) => break,
+                    Err(error) => return Err(self.video_frame_receive_error(error)),
+                }
+
                 let position = pts_to_duration(decoded.timestamp(), self.video_time_base)
                     .unwrap_or_else(|| {
                         self.queued_video_tail_position()
@@ -247,6 +257,27 @@ impl DecodeSession {
 
         TguiError::Media(format!("failed to send video packet: {error}"))
     }
+
+    pub(super) fn video_frame_receive_error(&self, error: ffmpeg::Error) -> TguiError {
+        if self.video_codec_id == codec::Id::AV1 {
+            return TguiError::Media(format!(
+                "当前 FFmpeg 无法解码这个 AV1 视频。解码器 `{}` 报错: {error}。请安装或构建带 `dav1d` / `aom` 软件 AV1 解码支持的 FFmpeg，或将该视频转码为 H.264/H.265 后再预览。",
+                self.video_decoder_name
+            ));
+        }
+
+        TguiError::Media(format!("failed to receive video frame: {error}"))
+    }
+}
+
+fn is_video_receive_drained(error: ffmpeg::Error) -> bool {
+    matches!(
+        error,
+        ffmpeg::Error::Eof
+            | ffmpeg::Error::Other {
+                errno: ffmpeg::error::EAGAIN
+            }
+    )
 }
 
 fn average_non_zero_bytes(bytes: &[u64]) -> Option<u64> {

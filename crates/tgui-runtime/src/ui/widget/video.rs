@@ -508,6 +508,8 @@ impl<VM: 'static> From<Video<VM>> for Element<VM> {
 
         let mut surface: Element<VM> = VideoSurface::new(controller.clone())
             .size(pct(100.0), pct(100.0))
+            .position_absolute()
+            .inset(dp(0.0))
             .style(move |style, _| {
                 style.fit = fit;
                 style.surface.background = Some(Color::hexa(0x000000FF).into());
@@ -564,6 +566,9 @@ impl<VM: 'static> From<Video<VM>> for Element<VM> {
         root.key = video.key;
         root = with_visual_identity(root, &video.visual);
         root.layout = merge_layout(root.layout, video.layout);
+        if root.layout.height != LayoutStyle::default().height {
+            root.layout.aspect_ratio = None;
+        }
         root
     }
 }

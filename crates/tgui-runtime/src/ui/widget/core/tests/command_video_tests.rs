@@ -264,6 +264,22 @@ fn collect_clickable_elements<VM>(element: &Element<VM>, out: &mut Vec<Element<V
 }
 
 #[cfg(feature = "video")]
+#[test]
+fn video_explicit_height_removes_default_aspect_ratio() {
+    let (controller, _) = recorded_video_controller(
+        VideoPlaybackState::Ready,
+        Some(std::time::Duration::from_secs(30)),
+        false,
+    );
+    let element: Element<()> = Video::new(controller)
+        .width(pct(100.0))
+        .height(dp(240.0))
+        .into();
+
+    assert!(element.layout.aspect_ratio.is_none());
+}
+
+#[cfg(feature = "video")]
 fn collect_icon_sources<VM>(element: &Element<VM>, out: &mut Vec<SvgIconId>) {
     if let WidgetKind::Icon { icon } = &element.kind {
         out.push(icon.source);
@@ -272,6 +288,22 @@ fn collect_icon_sources<VM>(element: &Element<VM>, out: &mut Vec<SvgIconId>) {
         for child in children {
             for resolved in child.resolve(None) {
                 collect_icon_sources(&resolved, out);
+            }
+        }
+    }
+}
+
+#[cfg(feature = "video")]
+fn collect_visible_icon_sources<VM>(element: &Element<VM>, out: &mut Vec<SvgIconId>) {
+    if let WidgetKind::Icon { icon } = &element.kind {
+        if element.visual.opacity.resolve() > 0.5 {
+            out.push(icon.source);
+        }
+    }
+    if let WidgetKind::Container { children, .. } = &element.kind {
+        for child in children {
+            for resolved in child.resolve(None) {
+                collect_visible_icon_sources(&resolved, out);
             }
         }
     }
@@ -407,7 +439,7 @@ fn video_player_play_button_forwards_by_state() {
         assert_eq!(clickables[0].visual.opacity.resolve() < 1.0, disabled);
 
         let mut icons = Vec::new();
-        collect_icon_sources(&tree.root, &mut icons);
+        collect_visible_icon_sources(&tree.root, &mut icons);
         assert_eq!(icons[0], expected_icon);
 
         command.execute(&mut ());
@@ -641,6 +673,59 @@ fn video_surface_renders_texture_when_frame_exists() {
     assert_eq!(rendered.primitives.video_textures.len(), 1);
     assert_eq!(rendered.primitives.video_textures[0].frame.width, 160.0);
     assert_eq!(rendered.primitives.video_textures[0].frame.height, 90.0);
+}
+
+#[cfg(feature = "video")]
+#[test]
+fn video_player_contains_portrait_frame_in_fixed_box() {
+    let theme = Theme::default();
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let mut animations = AnimationEngine::default();
+    let texture = std::sync::Arc::new(crate::media::TextureFrame::new(
+        9,
+        16,
+        vec![255; 9 * 16 * 4],
+    ));
+    let controller = test_video_controller(crate::video::VideoSurfaceSnapshot {
+        intrinsic_size: crate::media::IntrinsicSize::from_pixels(9, 16),
+        texture: Some(texture),
+        loading: false,
+        error: None,
+    });
+    let tree: WidgetTree<()> = WidgetTree::new(
+        Video::new(controller)
+            .width(dp(160.0))
+            .height(dp(90.0))
+            .show_controls(false)
+            .show_status(false),
+    );
+
+    let rendered = tree.render_output(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        None,
+        None,
+        &HashMap::new(),
+        Rect::new(0.0, 0.0, 160.0, 90.0),
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+
+    assert_eq!(rendered.primitives.video_textures.len(), 1);
+    let frame = rendered.primitives.video_textures[0].frame;
+    assert!(
+        (frame.width.get() - 50.625).abs() < 0.01,
+        "unexpected portrait video frame: {frame:?}"
+    );
+    assert_eq!(frame.height, 90.0);
+    assert!((frame.x.get() - 54.6875).abs() < 0.01);
+    assert_eq!(frame.y, 0.0);
 }
 
 #[test]
