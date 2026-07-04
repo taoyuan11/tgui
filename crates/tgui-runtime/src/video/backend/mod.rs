@@ -52,6 +52,14 @@ impl BackendSharedState {
         });
     }
 
+    pub fn reset_for_stop(&self) {
+        self.playback_state.set(VideoPlaybackState::Idle);
+        self.metrics.set(VideoMetrics::default());
+        self.video_size.set(VideoSize::default());
+        self.error.set(None);
+        self.surface.set(VideoSurfaceSnapshot::default());
+    }
+
     pub fn set_error(&self, message: String) {
         self.playback_state
             .set(VideoPlaybackState::Error(message.clone()));

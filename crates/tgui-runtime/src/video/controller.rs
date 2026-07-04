@@ -69,6 +69,11 @@ impl VideoController {
         self.inner.backend.pause();
     }
 
+    pub fn stop(&self) {
+        self.inner.backend.shutdown();
+        self.inner.shared.reset_for_stop();
+    }
+
     pub fn seek(&self, position: Duration) {
         let mut metrics = self.inner.shared.metrics.get();
         metrics.position = position;

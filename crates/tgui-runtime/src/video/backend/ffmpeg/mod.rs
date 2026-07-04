@@ -270,12 +270,16 @@ impl VideoBackend for FfmpegVideoBackend {
 
     fn shutdown(&self) {
         let Some(workers) = self.runtime.lock().workers.take() else {
+            clear_latest_frame(&self.latest_frame);
+            self.shared.reset_for_stop();
             return;
         };
 
         let _ = workers.command_tx.send(BackendCommand::Shutdown);
         let _ = workers.present_worker.join();
         let _ = workers.decode_worker.join();
+        clear_latest_frame(&self.latest_frame);
+        self.shared.reset_for_stop();
     }
 }
 
