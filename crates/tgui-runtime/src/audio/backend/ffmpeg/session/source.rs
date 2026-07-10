@@ -36,13 +36,20 @@ pub(super) fn open_audio_input(
         crate::audio::backend::shared::open_ffmpeg_input("audio", &source_url, headers)?;
 
     if !start_position.is_zero() {
-        let timestamp = start_position.as_micros().min(i64::MAX as u128) as i64;
-        input
-            .seek(timestamp, ..timestamp)
-            .map_err(|error| TguiError::Media(format!("failed to seek audio source: {error}")))?;
+        seek_audio_input(&mut input, start_position)?;
     }
 
     Ok(input)
+}
+
+pub(super) fn seek_audio_input(
+    input: &mut format::context::Input,
+    position: Duration,
+) -> Result<(), TguiError> {
+    let timestamp = position.as_micros().min(i64::MAX as u128) as i64;
+    input
+        .seek(timestamp, ..timestamp)
+        .map_err(|error| TguiError::Media(format!("failed to seek audio source: {error}")))
 }
 
 pub(super) fn queue_hard_water(source: &AudioSource) -> Duration {

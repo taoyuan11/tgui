@@ -42,7 +42,7 @@ impl PresentWorker {
             .current_audio_clock
             .as_ref()
             .map(|clock| current_position.saturating_add(clock.buffered_duration()));
-        let video_buffer_end = self.shared_queue.tail_end_position(self.current_generation);
+        let video_buffer_end = self.video_buffered_position();
 
         match (audio_buffer_end, video_buffer_end) {
             (Some(a), Some(v)) => Some(a.min(v)),
@@ -178,10 +178,22 @@ impl PresentWorker {
 
     pub(super) fn video_buffered_duration(&self) -> Duration {
         let baseline = self.last_presented_position.max(self.playback_position());
-        self.shared_queue
-            .tail_end_position(self.current_generation)
+        self.video_buffered_position()
             .map(|end| end.saturating_sub(baseline))
             .unwrap_or(Duration::ZERO)
+    }
+
+    fn video_buffered_position(&self) -> Option<Duration> {
+        let ready = self.shared_queue.tail_end_position(self.current_generation);
+        let demuxed = (self.buffer_snapshot.generation == self.current_generation)
+            .then_some(self.buffer_snapshot.video_buffered_position)
+            .flatten();
+        match (ready, demuxed) {
+            (Some(ready), Some(demuxed)) => Some(ready.max(demuxed)),
+            (Some(ready), None) => Some(ready),
+            (None, Some(demuxed)) => Some(demuxed),
+            (None, None) => None,
+        }
     }
 
     pub(super) fn can_start_playback(&self) -> bool {
@@ -191,8 +203,7 @@ impl PresentWorker {
             self.video_buffered_duration(),
             self.current_buffering_profile.video_start_buffer_target,
             self.remaining_duration(),
-            self.shared_queue.ready_frame_count(self.current_generation)
-                >= self.current_buffering_profile.video_max_packet_count,
+            self.buffer_snapshot.video_packet_cap_reached,
         );
         (audio_ok && video_ok)
             || startup_playback_blocked_by_memory_limit(
@@ -210,8 +221,7 @@ impl PresentWorker {
             self.video_buffered_duration(),
             self.current_buffering_profile.video_resume_buffer_target,
             self.remaining_duration(),
-            self.shared_queue.ready_frame_count(self.current_generation)
-                >= self.current_buffering_profile.video_max_packet_count,
+            self.buffer_snapshot.video_packet_cap_reached,
         );
         (audio_ok && video_ok)
             || startup_playback_blocked_by_memory_limit(

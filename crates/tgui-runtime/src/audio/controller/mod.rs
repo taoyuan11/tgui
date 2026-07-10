@@ -66,7 +66,11 @@ impl AudioController {
     /// 成功时返回 `Ok(())`；如果后端无法接受该音频源则返回错误。
     pub fn load(&self, source: AudioSource) -> Result<(), TguiError> {
         self.inner.shared.reset_for_load();
-        self.inner.backend.load(source)
+        if let Err(error) = self.inner.backend.load(source) {
+            self.inner.shared.set_error(error.to_string());
+            return Err(error);
+        }
+        Ok(())
     }
 
     /// 开始或继续播放当前音频。

@@ -2,6 +2,29 @@ use ffmpeg_next as ffmpeg;
 
 use crate::foundation::error::TguiError;
 
+pub(crate) enum PacketRead {
+    Packet(ffmpeg::Packet),
+    Retry,
+    Eof,
+}
+
+pub(crate) fn read_ffmpeg_packet(
+    kind: &str,
+    input: &mut ffmpeg::format::context::Input,
+) -> Result<PacketRead, TguiError> {
+    let mut packet = ffmpeg::Packet::empty();
+    match packet.read(input) {
+        Ok(()) => Ok(PacketRead::Packet(packet)),
+        Err(ffmpeg::Error::Eof) => Ok(PacketRead::Eof),
+        Err(ffmpeg::Error::Other {
+            errno: ffmpeg::error::EAGAIN,
+        }) => Ok(PacketRead::Retry),
+        Err(error) => Err(TguiError::Media(format!(
+            "failed to read {kind} packet: {error}"
+        ))),
+    }
+}
+
 pub(crate) fn validate_ffmpeg_headers(
     kind: &str,
     headers: &[(String, String)],

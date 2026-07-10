@@ -17,7 +17,6 @@ mod worker;
 use session::validate_audio_source;
 use worker::worker_main;
 
-const COMMAND_POLL_INTERVAL: Duration = Duration::from_millis(10);
 const STEP_IDLE_SLEEP: Duration = Duration::from_millis(4);
 const LOCAL_AUDIO_QUEUE_HARD_WATER: Duration = Duration::from_millis(3000);
 const NETWORK_AUDIO_QUEUE_HARD_WATER: Duration = Duration::from_millis(8000);

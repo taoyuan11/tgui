@@ -14,10 +14,10 @@ fn muted_audio_still_advances_clock() {
         queue: Mutex::new(VecDeque::from([AudioSampleChunk {
             samples: vec![0.25, -0.25, 0.5, -0.5],
             offset: 0,
-            compressed_bytes: 0,
+            allocation_bytes: 4 * std::mem::size_of::<f32>() as u64,
         }])),
         queued_samples: AtomicU64::new(4),
-        queued_compressed_bytes: AtomicU64::new(0),
+        queued_sample_bytes: AtomicU64::new(4 * std::mem::size_of::<f32>() as u64),
         playing: AtomicBool::new(true),
         muted: AtomicBool::new(true),
         volume_bits: AtomicU32::new(1.0f32.to_bits()),

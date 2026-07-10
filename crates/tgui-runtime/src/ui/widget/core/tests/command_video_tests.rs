@@ -169,6 +169,8 @@ impl VideoBackend for RecordedVideoBackend {
         self.commands.lock().expect("commands lock").pauses += 1;
     }
 
+    fn stop(&self) {}
+
     fn seek(&self, position: std::time::Duration) {
         self.commands
             .lock()

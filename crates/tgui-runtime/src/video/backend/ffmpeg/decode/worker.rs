@@ -45,24 +45,27 @@ impl DecodeWorker {
 
     fn run(&mut self) {
         loop {
-            let command_result = if self.session.is_some() {
+            let can_step = self
+                .session
+                .as_ref()
+                .is_some_and(|session| !session.eof_notified);
+            let command = if can_step {
                 match self.command_rx.try_recv() {
-                    Ok(command) => Ok(command),
-                    Err(TryRecvError::Empty) => Err(RecvTimeoutError::Timeout),
-                    Err(TryRecvError::Disconnected) => Err(RecvTimeoutError::Disconnected),
+                    Ok(command) => Some(command),
+                    Err(TryRecvError::Empty) => None,
+                    Err(TryRecvError::Disconnected) => break,
                 }
             } else {
-                self.command_rx.recv_timeout(COMMAND_POLL_INTERVAL)
+                match self.command_rx.recv() {
+                    Ok(command) => Some(command),
+                    Err(_) => break,
+                }
             };
 
-            match command_result {
-                Ok(command) => {
-                    if !self.handle_command(command) {
-                        break;
-                    }
+            if let Some(command) = command {
+                if !self.handle_command_batch(command) {
+                    break;
                 }
-                Err(RecvTimeoutError::Timeout) => {}
-                Err(RecvTimeoutError::Disconnected) => break,
             }
 
             let Some(session) = self.session.as_mut() else {
@@ -91,7 +94,6 @@ impl DecodeWorker {
                         .event_tx
                         .send(DecodeEvent::BufferSnapshot(session.snapshot()));
                     let _ = self.event_tx.send(DecodeEvent::EofDrained { generation });
-                    thread::sleep(STEP_IDLE_SLEEP);
                 }
                 Err(error) => {
                     let generation = session.generation;
@@ -105,6 +107,39 @@ impl DecodeWorker {
         }
     }
 
+    fn handle_command_batch(&mut self, first: DecodeCommand) -> bool {
+        let mut pending_open = None;
+        let mut next = Some(first);
+
+        loop {
+            if let Some(command) = next.take() {
+                match command {
+                    command @ (DecodeCommand::Load { .. }
+                    | DecodeCommand::Seek { .. }
+                    | DecodeCommand::Stop { .. }) => {
+                        pending_open = Some(command);
+                    }
+                    DecodeCommand::Shutdown => return false,
+                    command => {
+                        if !self.handle_command(command) {
+                            return false;
+                        }
+                    }
+                }
+            }
+
+            next = match self.command_rx.try_recv() {
+                Ok(command) => Some(command),
+                Err(TryRecvError::Empty) => break,
+                Err(TryRecvError::Disconnected) => return false,
+            };
+        }
+
+        pending_open
+            .map(|command| self.handle_command(command))
+            .unwrap_or(true)
+    }
+
     fn handle_command(&mut self, command: DecodeCommand) -> bool {
         match command {
             DecodeCommand::Load { generation, source } => {
@@ -115,7 +150,7 @@ impl DecodeWorker {
                 source,
                 position,
             } => {
-                self.open_session(OpenReason::Seek, generation, source, position);
+                self.seek_or_open_session(generation, source, position);
             }
             DecodeCommand::SetPlaying {
                 generation,
@@ -151,10 +186,46 @@ impl DecodeWorker {
                     session.set_target_raster(raster);
                 }
             }
+            DecodeCommand::Stop { generation } => {
+                if self.shared_queue.accepted_generation() == generation {
+                    self.session = None;
+                    self.playback_clock.set_position(Duration::ZERO);
+                }
+            }
             DecodeCommand::Shutdown => return false,
         }
 
         true
+    }
+
+    fn seek_or_open_session(
+        &mut self,
+        generation: u64,
+        source: VideoSource,
+        position: Duration,
+    ) {
+        if self.shared_queue.accepted_generation() != generation {
+            return;
+        }
+
+        let reuse_result = self
+            .session
+            .as_mut()
+            .filter(|session| session.source() == &source)
+            .map(|session| session.seek_in_place(generation, position));
+
+        if let Some(Ok((stream_opened, first_frame_position))) = reuse_result {
+            self.publish_opened_session(stream_opened, first_frame_position);
+            if let Some(session) = self.session.as_ref() {
+                let _ = self
+                    .event_tx
+                    .send(DecodeEvent::BufferSnapshot(session.snapshot()));
+            }
+            return;
+        }
+
+        self.session = None;
+        self.open_session(OpenReason::Seek, generation, source, position);
     }
 
     fn open_session(
@@ -164,7 +235,11 @@ impl DecodeWorker {
         source: VideoSource,
         position: Duration,
     ) {
-        self.shared_queue.replace_generation(generation);
+        if self.shared_queue.accepted_generation() != generation {
+            return;
+        }
+
+        self.session = None;
 
         match DecodeSession::open(
             reason,
@@ -179,13 +254,7 @@ impl DecodeWorker {
             self.playback_clock.clone(),
         ) {
             Ok((session, stream_opened, first_frame_position)) => {
-                let _ = self
-                    .event_tx
-                    .send(DecodeEvent::StreamOpened(stream_opened.clone()));
-                let _ = self.event_tx.send(DecodeEvent::FirstFrameReady {
-                    generation,
-                    _position: first_frame_position,
-                });
+                self.publish_opened_session(stream_opened, first_frame_position);
                 let _ = self
                     .event_tx
                     .send(DecodeEvent::BufferSnapshot(session.snapshot()));
@@ -199,5 +268,20 @@ impl DecodeWorker {
                 self.session = None;
             }
         }
+    }
+
+    fn publish_opened_session(
+        &self,
+        stream_opened: StreamOpenedEvent,
+        first_frame_position: Duration,
+    ) {
+        let generation = stream_opened.generation;
+        let _ = self
+            .event_tx
+            .send(DecodeEvent::StreamOpened(stream_opened));
+        let _ = self.event_tx.send(DecodeEvent::FirstFrameReady {
+            generation,
+            _position: first_frame_position,
+        });
     }
 }

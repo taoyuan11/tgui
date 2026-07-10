@@ -10,7 +10,6 @@ pub(super) struct OpenedAudioPipeline {
     pub(super) decoder: ffmpeg::decoder::Audio,
     pub(super) resampler: Resampler,
     pub(super) output: AudioOutput,
-    pub(super) clock: SharedAudioClock,
 }
 
 pub(super) fn resolve_source_url(source: &VideoSource) -> Result<String, TguiError> {
@@ -31,7 +30,14 @@ pub(super) fn seek_input_to_start_position(
         return Ok(());
     }
 
-    let timestamp = start_position.as_micros().min(i64::MAX as u128) as i64;
+    seek_input_to_position(input, start_position)
+}
+
+pub(super) fn seek_input_to_position(
+    input: &mut format::context::Input,
+    position: Duration,
+) -> Result<(), TguiError> {
+    let timestamp = position.as_micros().min(i64::MAX as u128) as i64;
     input
         .seek(timestamp, ..timestamp)
         .map_err(|error| TguiError::Media(format!("failed to seek video source: {error}")))
@@ -58,8 +64,21 @@ pub(super) fn open_audio_pipeline(
 
     let output = AudioOutput::new(volume, muted, "tgui-video")
         .map_err(|error| TguiError::Media(format!("failed to create audio output: {error}")))?;
-    let clock = output.clock_handle();
-    let resampler = Resampler::get(
+    let resampler = create_audio_resampler(&decoder, &output)?;
+
+    Ok(OpenedAudioPipeline {
+        stream_index,
+        decoder,
+        resampler,
+        output,
+    })
+}
+
+pub(super) fn create_audio_resampler(
+    decoder: &ffmpeg::decoder::Audio,
+    output: &AudioOutput,
+) -> Result<Resampler, TguiError> {
+    Resampler::get(
         decoder.format(),
         decoder.channel_layout(),
         decoder.rate(),
@@ -67,13 +86,5 @@ pub(super) fn open_audio_pipeline(
         ffmpeg::ChannelLayout::default(output.channels().into()),
         output.sample_rate(),
     )
-    .map_err(|error| TguiError::Media(format!("failed to create audio resampler: {error}")))?;
-
-    Ok(OpenedAudioPipeline {
-        stream_index,
-        decoder,
-        resampler,
-        output,
-        clock,
-    })
+    .map_err(|error| TguiError::Media(format!("failed to create audio resampler: {error}")))
 }

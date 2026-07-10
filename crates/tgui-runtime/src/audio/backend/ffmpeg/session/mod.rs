@@ -8,14 +8,16 @@ use ffmpeg_next as ffmpeg;
 use crate::audio::AudioSource;
 use crate::foundation::error::TguiError;
 
-use super::super::shared::{AudioOutput, SharedAudioClock};
+use super::super::shared::{
+    read_ffmpeg_packet, AudioOutput, PacketRead, SharedAudioClock,
+};
 
 mod decode;
 mod source;
 
 use decode::{flush_audio_resampler, receive_audio_frames};
 pub(crate) use source::validate_audio_source;
-use source::{open_audio_input, queue_hard_water, stream_duration};
+use source::{open_audio_input, queue_hard_water, seek_audio_input, stream_duration};
 
 pub(super) enum SessionStep {
     Continue,
@@ -72,15 +74,7 @@ impl AudioSession {
         let audio_output = AudioOutput::new(volume, muted, "tgui-audio")
             .map_err(|error| TguiError::Media(format!("failed to create audio output: {error}")))?;
         let audio_clock = audio_output.clock_handle();
-        let resampler = Resampler::get(
-            audio_decoder.format(),
-            audio_decoder.channel_layout(),
-            audio_decoder.rate(),
-            ffmpeg::format::Sample::F32(ffmpeg::format::sample::Type::Packed),
-            ffmpeg::ChannelLayout::default(audio_output.channels().into()),
-            audio_output.sample_rate(),
-        )
-        .map_err(|error| TguiError::Media(format!("failed to create audio resampler: {error}")))?;
+        let resampler = create_audio_resampler(&audio_decoder, &audio_output)?;
 
         let mut session = Self {
             input,
@@ -95,8 +89,9 @@ impl AudioSession {
             eof_drained: false,
             queue_hard_water: queue_hard_water(&source),
         };
-        session.audio_output.set_playing(playing);
+        session.audio_output.set_playing(false);
         session.prime_initial_audio()?;
+        session.audio_output.set_playing(playing);
         Ok(session)
     }
 
@@ -126,6 +121,26 @@ impl AudioSession {
         self.audio_output.set_muted(muted);
     }
 
+    pub(super) fn seek(
+        &mut self,
+        position: Duration,
+        playing: bool,
+    ) -> Result<(), TguiError> {
+        self.audio_output.set_playing(false);
+        seek_audio_input(&mut self.input, position)?;
+        self.audio_decoder.flush();
+        let replacement_resampler = create_audio_resampler(&self.audio_decoder, &self.audio_output)?;
+        self.audio_output.reset();
+
+        self.start_position = position;
+        self.resampler = replacement_resampler;
+        self.eof_sent = false;
+        self.eof_drained = false;
+        self.prime_initial_audio()?;
+        self.audio_output.set_playing(playing);
+        Ok(())
+    }
+
     fn prime_initial_audio(&mut self) -> Result<(), TguiError> {
         // 首次打开后先预灌一小段音频，避免一按播放就因为缓冲为零而立刻饿死。
         while !self.eof_sent && self.audio_clock.buffered_duration() < Duration::from_millis(200) {
@@ -149,21 +164,17 @@ impl AudioSession {
             return Ok(SessionStep::EofDrained);
         }
 
-        if self.audio_clock.buffered_duration() >= self.queue_hard_water
-            || self.audio_clock.buffered_memory_bytes() >= buffer_memory_limit_bytes
+        let buffered_duration = self.audio_clock.buffered_duration();
+        if buffered_duration >= self.queue_hard_water
+            || (!buffered_duration.is_zero()
+                && self.audio_clock.buffered_memory_bytes() >= buffer_memory_limit_bytes)
         {
             return Ok(SessionStep::Idle);
         }
 
-        let next_packet = {
-            let mut packets = self.input.packets();
-            packets
-                .next()
-                .map(|(stream, packet)| (stream.index(), packet))
-        };
-
-        match next_packet {
-            Some((stream_index, packet)) => {
+        match read_ffmpeg_packet("audio", &mut self.input)? {
+            PacketRead::Packet(packet) => {
+                let stream_index = packet.stream();
                 if stream_index == self.audio_stream_index {
                     self.audio_decoder.send_packet(&packet).map_err(|error| {
                         TguiError::Media(format!("failed to send audio packet: {error}"))
@@ -177,7 +188,8 @@ impl AudioSession {
                 }
                 Ok(SessionStep::Continue)
             }
-            None => {
+            PacketRead::Retry => Ok(SessionStep::Idle),
+            PacketRead::Eof => {
                 if !self.eof_sent {
                     self.eof_sent = true;
                     let _ = self.audio_decoder.send_eof();
@@ -197,4 +209,19 @@ impl AudioSession {
             }
         }
     }
+}
+
+fn create_audio_resampler(
+    decoder: &ffmpeg::decoder::Audio,
+    output: &AudioOutput,
+) -> Result<Resampler, TguiError> {
+    Resampler::get(
+        decoder.format(),
+        decoder.channel_layout(),
+        decoder.rate(),
+        ffmpeg::format::Sample::F32(ffmpeg::format::sample::Type::Packed),
+        ffmpeg::ChannelLayout::default(output.channels().into()),
+        output.sample_rate(),
+    )
+    .map_err(|error| TguiError::Media(format!("failed to create audio resampler: {error}")))
 }

@@ -38,7 +38,7 @@ impl BenchVideoQueue {
         &self,
         generation: u64,
         positions_ms: &[u64],
-        compressed_bytes_per_frame: u64,
+        decoded_bytes_per_frame: u64,
     ) {
         let texture = Arc::new(TextureFrame::new(1, 1, vec![0u8; 4]));
         let frames: Vec<QueuedVideoFrame> = positions_ms
@@ -48,7 +48,8 @@ impl BenchVideoQueue {
                 position: Duration::from_millis(ms),
                 end_position: Duration::from_millis(ms + 33),
                 texture: texture.clone(),
-                compressed_bytes: compressed_bytes_per_frame,
+                decoded_bytes: decoded_bytes_per_frame,
+                compressed_bytes: 0,
             })
             .collect();
         self.inner.push_frames(frames);
@@ -192,6 +193,7 @@ pub fn bench_distribute_video_compressed_bytes(frame_count: usize, compressed_by
             position: Duration::from_millis(index as u64 * 33),
             end_position: Duration::from_millis(index as u64 * 33 + 33),
             texture: texture.clone(),
+            decoded_bytes: 4,
             compressed_bytes: 0,
         })
         .collect();

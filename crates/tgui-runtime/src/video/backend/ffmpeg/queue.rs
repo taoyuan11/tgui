@@ -6,14 +6,15 @@ pub(super) struct QueuedVideoFrame {
     pub(super) position: Duration,
     pub(super) end_position: Duration,
     pub(super) texture: Arc<TextureFrame>,
+    pub(super) decoded_bytes: u64,
     pub(super) compressed_bytes: u64,
 }
 
 #[derive(Default)]
 pub(super) struct VideoQueueState {
     pub(super) frames: VecDeque<QueuedVideoFrame>,
-    /// `frames` 中的总 compressed_bytes 之和，避免每次询问时再做线性扫描。
-    pub(super) total_compressed_bytes: u64,
+    /// `frames` 中 RGBA 像素缓冲的总字节数，避免每次询问时再做线性扫描。
+    pub(super) total_decoded_bytes: u64,
     /// `frames` 队尾帧的 end_position 缓存。frames 为空时为 `None`。
     pub(super) tail_end_position: Option<Duration>,
 }
@@ -32,8 +33,12 @@ impl SharedVideoQueue {
     }
 
     pub(super) fn replace_generation(&self, generation: u64) {
-        self.accepted_generation
-            .store(generation, Ordering::Release);
+        let previous = self
+            .accepted_generation
+            .fetch_max(generation, Ordering::AcqRel);
+        if generation < previous {
+            return;
+        }
         self.clear_all();
     }
 
@@ -44,7 +49,7 @@ impl SharedVideoQueue {
     pub(super) fn clear_all(&self) {
         let mut state = self.state.lock();
         state.frames.clear();
-        state.total_compressed_bytes = 0;
+        state.total_decoded_bytes = 0;
         state.tail_end_position = None;
     }
 
@@ -65,9 +70,9 @@ impl SharedVideoQueue {
             if frame.generation != accepted_generation {
                 continue;
             }
-            state.total_compressed_bytes = state
-                .total_compressed_bytes
-                .saturating_add(frame.compressed_bytes);
+            state.total_decoded_bytes = state
+                .total_decoded_bytes
+                .saturating_add(frame.decoded_bytes);
             state.tail_end_position = Some(frame.end_position);
             state.frames.push_back(frame);
         }
@@ -79,9 +84,9 @@ impl SharedVideoQueue {
             Some(frame) if frame.generation == generation => {
                 let popped = state.frames.pop_front();
                 if let Some(frame) = popped.as_ref() {
-                    state.total_compressed_bytes = state
-                        .total_compressed_bytes
-                        .saturating_sub(frame.compressed_bytes);
+                    state.total_decoded_bytes = state
+                        .total_decoded_bytes
+                        .saturating_sub(frame.decoded_bytes);
                     if state.frames.is_empty() {
                         state.tail_end_position = None;
                     }
@@ -124,7 +129,7 @@ impl SharedVideoQueue {
             return 0;
         }
         let state = self.state.lock();
-        state.total_compressed_bytes
+        state.total_decoded_bytes
     }
 
     pub(super) fn tail_end_position(&self, generation: u64) -> Option<Duration> {
@@ -144,7 +149,7 @@ impl SharedVideoQueue {
         if frame.generation != generation {
             return None;
         }
-        let bytes = frame.compressed_bytes;
+        let bytes = frame.decoded_bytes;
         (bytes > 0).then_some(bytes)
     }
 }

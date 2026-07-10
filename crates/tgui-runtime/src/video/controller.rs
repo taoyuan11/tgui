@@ -49,7 +49,11 @@ impl VideoController {
 
     pub fn load(&self, source: VideoSource) -> Result<(), TguiError> {
         self.inner.shared.reset_for_load();
-        self.inner.backend.load(source)
+        if let Err(error) = self.inner.backend.load(source) {
+            self.inner.shared.set_error(error.to_string());
+            return Err(error);
+        }
+        Ok(())
     }
 
     pub fn play(&self) {
@@ -70,7 +74,7 @@ impl VideoController {
     }
 
     pub fn stop(&self) {
-        self.inner.backend.shutdown();
+        self.inner.backend.stop();
         self.inner.shared.reset_for_stop();
     }
 
@@ -213,6 +217,14 @@ mod tests {
             let mut commands = self.commands.lock().expect("commands lock poisoned");
             commands.commands.push("pause");
             commands.pause_count += 1;
+        }
+
+        fn stop(&self) {
+            self.commands
+                .lock()
+                .expect("commands lock poisoned")
+                .commands
+                .push("stop");
         }
 
         fn seek(&self, position: Duration) {

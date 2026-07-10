@@ -4,7 +4,7 @@ use std::sync::{Arc, Once, OnceLock};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
-use crossbeam_channel::{unbounded, Sender};
+use crossbeam_channel::{bounded, unbounded, Sender};
 use ffmpeg::codec;
 use ffmpeg::format;
 use ffmpeg::media;
@@ -156,7 +156,7 @@ impl FfmpegVideoBackend {
 
         let (backend_tx, backend_rx) = unbounded();
         let (decode_tx, decode_rx) = unbounded();
-        let (event_tx, event_rx) = unbounded();
+        let (event_tx, event_rx) = bounded(32);
         let shared_queue = Arc::new(SharedVideoQueue::new());
         let playback_clock = SharedPlaybackClock::default();
 
@@ -238,6 +238,15 @@ impl VideoBackend for FfmpegVideoBackend {
         self.send_if_active(BackendCommand::Pause);
     }
 
+    fn stop(&self) {
+        if self.active_command_tx().is_some() {
+            self.send_if_active(BackendCommand::Stop);
+        } else {
+            clear_latest_frame(&self.latest_frame);
+            self.shared.reset_for_stop();
+        }
+    }
+
     fn seek(&self, position: Duration) {
         self.send_if_active(BackendCommand::Seek(position));
     }
@@ -256,6 +265,9 @@ impl VideoBackend for FfmpegVideoBackend {
 
     fn set_target_raster(&self, raster: Option<RasterRequest>) {
         let mut runtime = self.runtime.lock();
+        if runtime.target_raster == raster {
+            return;
+        }
         runtime.target_raster = raster;
         if let Some(workers) = runtime.workers.as_ref() {
             let _ = workers
@@ -288,6 +300,7 @@ enum BackendCommand {
     Load(VideoSource),
     Play,
     Pause,
+    Stop,
     Seek(Duration),
     SetVolume(f32),
     SetMuted(bool),
@@ -315,6 +328,7 @@ enum DecodeCommand {
     SetMuted(bool),
     SetBufferMemoryLimitBytes(u64),
     SetTargetRaster(Option<RasterRequest>),
+    Stop { generation: u64 },
     Shutdown,
 }
 
@@ -350,6 +364,8 @@ struct StreamOpenedEvent {
 struct BufferSnapshot {
     generation: u64,
     eof_sent: bool,
+    video_buffered_position: Option<Duration>,
+    video_packet_cap_reached: bool,
     total_buffered_memory_bytes: u64,
     buffering_constrained_by_memory_limit: bool,
 }
@@ -580,6 +596,7 @@ mod tests {
                 position: Duration::ZERO,
                 end_position: Duration::from_millis(33),
                 texture: Arc::new(TextureFrame::new(1, 1, vec![255; 4])),
+                decoded_bytes: 4,
                 compressed_bytes: 4,
             },
             QueuedVideoFrame {
@@ -587,6 +604,7 @@ mod tests {
                 position: Duration::from_millis(33),
                 end_position: Duration::from_millis(66),
                 texture: Arc::new(TextureFrame::new(1, 1, vec![255; 4])),
+                decoded_bytes: 4,
                 compressed_bytes: 4,
             },
         ]);

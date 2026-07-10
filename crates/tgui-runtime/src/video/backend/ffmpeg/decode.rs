@@ -1,9 +1,9 @@
 use std::thread;
 use std::time::Duration;
 
-use crossbeam_channel::{Receiver, RecvTimeoutError, Sender, TryRecvError};
+use crossbeam_channel::{Receiver, Sender, TryRecvError};
 
-use crate::audio::backend::shared::AudioOutput;
+use crate::audio::backend::shared::{read_ffmpeg_packet, AudioOutput, PacketRead};
 use crate::foundation::error::TguiError;
 
 use super::*;
@@ -12,7 +12,10 @@ mod buffering;
 mod open;
 mod worker;
 
-use self::open::{open_audio_pipeline, resolve_source_url, seek_input_to_start_position};
+use self::open::{
+    create_audio_resampler, open_audio_pipeline, resolve_source_url, seek_input_to_position,
+    seek_input_to_start_position,
+};
 pub(super) use self::worker::decode_main;
 
 enum DecodeStepOutcome {
@@ -24,7 +27,9 @@ enum DecodeStepOutcome {
 struct DecodeSession {
     generation: u64,
     _reason: OpenReason,
+    source: VideoSource,
     start_position: Duration,
+    duration: Option<Duration>,
     video_frame_duration: Duration,
     input: format::context::Input,
     video_stream_index: usize,
@@ -34,6 +39,7 @@ struct DecodeSession {
     video_decoder_name: String,
     audio_decoder: Option<ffmpeg::decoder::Audio>,
     scaler: Scaler,
+    converted_video_frame: VideoFrame,
     resampler: Option<Resampler>,
     video_time_base: ffmpeg::Rational,
     audio_output: Option<AudioOutput>,
@@ -43,6 +49,7 @@ struct DecodeSession {
     next_video_texture_revision: u64,
     target_raster: Option<RasterRequest>,
     pending_video_packets: VecDeque<QueuedVideoPacket>,
+    pending_video_packet_bytes: u64,
     buffering_profile: BufferingProfile,
     buffer_memory_limit_bytes: u64,
     pending_video_compressed_bytes: u64,
@@ -82,14 +89,12 @@ impl DecodeSession {
         let video_decoder = opened_video_decoder.decoder;
         let scaler = create_video_scaler(&video_decoder, target_raster)?;
 
-        let intrinsic_size =
-            IntrinsicSize::from_pixels(video_decoder.width(), video_decoder.height());
         let duration = stream_duration(video_stream.duration(), video_time_base);
         let video_frame_duration =
             stream_frame_duration(&video_stream).unwrap_or(Duration::from_millis(33));
 
         let audio_stream = input.streams().best(media::Type::Audio);
-        let (audio_stream_index, audio_decoder, resampler, audio_output, audio_clock) =
+        let (audio_stream_index, audio_decoder, resampler, audio_output) =
             if let Some(audio_stream) = audio_stream {
                 let opened_audio = open_audio_pipeline(&audio_stream, volume, muted)?;
                 (
@@ -97,16 +102,17 @@ impl DecodeSession {
                     Some(opened_audio.decoder),
                     Some(opened_audio.resampler),
                     Some(opened_audio.output),
-                    Some(opened_audio.clock),
                 )
             } else {
-                (None, None, None, None, None)
+                (None, None, None, None)
             };
 
         let mut session = Self {
             generation,
             _reason: reason,
+            source,
             start_position,
+            duration,
             video_frame_duration,
             input,
             video_stream_index,
@@ -116,6 +122,7 @@ impl DecodeSession {
             video_decoder_name: opened_video_decoder.decoder_name,
             audio_decoder,
             scaler,
+            converted_video_frame: VideoFrame::empty(),
             resampler,
             video_time_base,
             audio_output,
@@ -125,6 +132,7 @@ impl DecodeSession {
             next_video_texture_revision: 1,
             target_raster,
             pending_video_packets: VecDeque::new(),
+            pending_video_packet_bytes: 0,
             buffering_profile,
             buffer_memory_limit_bytes,
             pending_video_compressed_bytes: 0,
@@ -138,24 +146,88 @@ impl DecodeSession {
         session.playback_clock.set_position(start_position);
         let first_frame_position = session.prime_first_frame()?;
 
-        let opened = StreamOpenedEvent {
-            generation,
-            start_position,
-            duration,
-            intrinsic_size,
-            video_size: VideoSize {
-                width: session.video_decoder.width(),
-                height: session.video_decoder.height(),
-            },
-            buffering_profile,
-            audio_clock,
-        };
+        let opened = session.stream_opened_event();
 
         Ok((session, opened, first_frame_position))
     }
 
+    fn source(&self) -> &VideoSource {
+        &self.source
+    }
+
+    fn seek_in_place(
+        &mut self,
+        generation: u64,
+        position: Duration,
+    ) -> Result<(StreamOpenedEvent, Duration), TguiError> {
+        self.ensure_current_generation(generation)?;
+        seek_input_to_position(&mut self.input, position)?;
+
+        self.video_decoder.flush();
+        let replacement_resampler = match (self.audio_decoder.as_mut(), self.audio_output.as_ref())
+        {
+            (Some(decoder), Some(output)) => {
+                decoder.flush();
+                Some(create_audio_resampler(decoder, output)?)
+            }
+            _ => None,
+        };
+        if let Some(output) = self.audio_output.as_ref() {
+            output.reset();
+        }
+
+        self.generation = generation;
+        self._reason = OpenReason::Seek;
+        self.start_position = position;
+        self.resampler = replacement_resampler;
+        self.pending_video_packets.clear();
+        self.pending_video_packet_bytes = 0;
+        self.pending_video_compressed_bytes = 0;
+        self.pending_audio_compressed_bytes = 0;
+        self.last_video_position = position;
+        self.eof_sent = false;
+        self.eof_notified = false;
+        self.last_snapshot = None;
+        self.playback_clock.set_position(position);
+
+        let first_frame_position = self.prime_first_frame()?;
+        Ok((self.stream_opened_event(), first_frame_position))
+    }
+
+    fn stream_opened_event(&self) -> StreamOpenedEvent {
+        StreamOpenedEvent {
+            generation: self.generation,
+            start_position: self.start_position,
+            duration: self.duration,
+            intrinsic_size: IntrinsicSize::from_pixels(
+                self.video_decoder.width(),
+                self.video_decoder.height(),
+            ),
+            video_size: VideoSize {
+                width: self.video_decoder.width(),
+                height: self.video_decoder.height(),
+            },
+            buffering_profile: self.buffering_profile,
+            audio_clock: self
+                .audio_output
+                .as_ref()
+                .map(|output| output.clock_handle()),
+        }
+    }
+
+    fn ensure_current_generation(&self, generation: u64) -> Result<(), TguiError> {
+        if self.shared_queue.accepted_generation() == generation {
+            Ok(())
+        } else {
+            Err(TguiError::Media(
+                "video decode request was superseded".to_string(),
+            ))
+        }
+    }
+
     fn prime_first_frame(&mut self) -> Result<Duration, TguiError> {
         loop {
+            self.ensure_current_generation(self.generation)?;
             if self.shared_queue.has_frames(self.generation) {
                 return Ok(self
                     .shared_queue
@@ -164,22 +236,23 @@ impl DecodeSession {
                     .unwrap_or(self.start_position));
             }
 
-            let next_packet = {
-                let mut packets = self.input.packets();
-                packets
-                    .next()
-                    .map(|(stream, packet)| (stream.index(), packet))
-            };
-            let Some((stream_index, packet)) = next_packet else {
-                self.eof_sent = true;
-                self.video_decoder.send_eof().map_err(|error| {
-                    TguiError::Media(format!("failed to flush preview decoder: {error}"))
-                })?;
-                self.fill_ready_video_frames(false)?;
-                if let Some(frame) = self.shared_queue.front(self.generation) {
-                    return Ok(frame.position);
+            let (stream_index, packet) = match read_ffmpeg_packet("video", &mut self.input)? {
+                PacketRead::Packet(packet) => (packet.stream(), packet),
+                PacketRead::Retry => {
+                    thread::sleep(STEP_IDLE_SLEEP);
+                    continue;
                 }
-                break;
+                PacketRead::Eof => {
+                    self.eof_sent = true;
+                    self.video_decoder.send_eof().map_err(|error| {
+                        TguiError::Media(format!("failed to flush preview decoder: {error}"))
+                    })?;
+                    self.fill_ready_video_frames(false)?;
+                    if let Some(frame) = self.shared_queue.front(self.generation) {
+                        return Ok(frame.position);
+                    }
+                    break;
+                }
             };
 
             if stream_index != self.video_stream_index {
@@ -207,15 +280,9 @@ impl DecodeSession {
             return Ok(DecodeStepOutcome::Idle { snapshot_changed });
         }
 
-        let next_packet = {
-            let mut packets = self.input.packets();
-            packets
-                .next()
-                .map(|(stream, packet)| (stream.index(), packet))
-        };
-
-        match next_packet {
-            Some((stream_index, packet)) => {
+        match read_ffmpeg_packet("video", &mut self.input)? {
+            PacketRead::Packet(packet) => {
+                let stream_index = packet.stream();
                 if stream_index == self.video_stream_index {
                     self.queue_video_packet(packet);
                     snapshot_changed = true;
@@ -244,7 +311,11 @@ impl DecodeSession {
                     }
                 }
             }
-            None => {
+            PacketRead::Retry => {
+                snapshot_changed |= self.update_snapshot_cache();
+                return Ok(DecodeStepOutcome::Idle { snapshot_changed });
+            }
+            PacketRead::Eof => {
                 if !self.eof_sent {
                     self.eof_sent = true;
                     self.video_decoder.send_eof().map_err(|error| {
@@ -301,6 +372,9 @@ impl DecodeSession {
         BufferSnapshot {
             generation: self.generation,
             eof_sent: self.eof_sent,
+            video_buffered_position: self.queued_video_tail_position(),
+            video_packet_cap_reached: self.pending_video_packets.len()
+                >= self.buffering_profile.video_max_packet_count,
             total_buffered_memory_bytes: self.total_buffered_memory_bytes(),
             buffering_constrained_by_memory_limit: self.buffering_constrained_by_memory_limit(),
         }
@@ -313,6 +387,8 @@ impl DecodeSession {
             .as_ref()
             .map(|previous| {
                 previous.eof_sent != snapshot.eof_sent
+                    || previous.video_buffered_position != snapshot.video_buffered_position
+                    || previous.video_packet_cap_reached != snapshot.video_packet_cap_reached
                     || previous.total_buffered_memory_bytes != snapshot.total_buffered_memory_bytes
                     || previous.buffering_constrained_by_memory_limit
                         != snapshot.buffering_constrained_by_memory_limit
@@ -353,6 +429,7 @@ impl DecodeSession {
         self.target_raster = raster;
         if let Ok(scaler) = create_video_scaler(&self.video_decoder, self.target_raster) {
             self.scaler = scaler;
+            self.converted_video_frame = VideoFrame::empty();
         }
     }
 

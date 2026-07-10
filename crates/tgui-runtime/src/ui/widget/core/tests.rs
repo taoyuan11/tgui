@@ -297,6 +297,7 @@ fn test_video_controller(snapshot: crate::video::VideoSurfaceSnapshot) -> VideoC
 
         fn play(&self) {}
         fn pause(&self) {}
+        fn stop(&self) {}
         fn seek(&self, _position: std::time::Duration) {}
         fn set_volume(&self, _volume: f32) {}
         fn set_muted(&self, _muted: bool) {}

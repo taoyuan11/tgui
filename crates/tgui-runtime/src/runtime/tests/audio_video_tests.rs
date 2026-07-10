@@ -337,6 +337,8 @@ impl VideoBackend for MockVideoBackend {
 
     fn pause(&self) {}
 
+    fn stop(&self) {}
+
     fn seek(&self, _position: Duration) {}
 
     fn set_volume(&self, _volume: f32) {}

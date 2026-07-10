@@ -5,7 +5,9 @@ mod tests;
 
 #[cfg(all(feature = "video", test))]
 pub(crate) use network::ffmpeg_http_input_options;
-pub(crate) use network::{open_ffmpeg_input, validate_ffmpeg_headers};
+pub(crate) use network::{
+    open_ffmpeg_input, read_ffmpeg_packet, validate_ffmpeg_headers, PacketRead,
+};
 pub(crate) use output::{AudioOutput, SharedAudioClock};
 
 #[cfg(feature = "bench-support")]

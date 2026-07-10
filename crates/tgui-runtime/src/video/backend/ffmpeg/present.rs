@@ -143,6 +143,10 @@ impl PresentWorker {
                 self.software_paused_position = Duration::ZERO;
                 self.software_play_started_at = None;
                 self.playback_ended = false;
+                self.buffer_snapshot = BufferSnapshot {
+                    generation: self.current_generation,
+                    ..BufferSnapshot::default()
+                };
                 self.playback_clock.set_position(Duration::ZERO);
                 self.shared_queue
                     .replace_generation(self.current_generation);
@@ -175,6 +179,37 @@ impl PresentWorker {
                     self.shared.playback_state.set(VideoPlaybackState::Paused);
                 }
             }
+            BackendCommand::Stop => {
+                self.set_decode_playing(false);
+                self.current_generation = self.current_generation.saturating_add(1);
+                self.current_source = None;
+                self.current_duration = None;
+                self.current_intrinsic_size = IntrinsicSize::ZERO;
+                self.current_video_size = VideoSize::default();
+                self.current_start_position = Duration::ZERO;
+                self.current_audio_clock = None;
+                self.last_presented_position = Duration::ZERO;
+                self.software_paused_position = Duration::ZERO;
+                self.software_play_started_at = None;
+                self.should_play = false;
+                self.decode_playing = false;
+                self.playback_ended = false;
+                self.pending_open_reason = None;
+                self.stream_opened = false;
+                self.startup_pending = false;
+                self.buffer_snapshot = BufferSnapshot {
+                    generation: self.current_generation,
+                    ..BufferSnapshot::default()
+                };
+                self.playback_clock.set_position(Duration::ZERO);
+                self.shared_queue
+                    .replace_generation(self.current_generation);
+                clear_latest_frame(&self.latest_frame);
+                self.shared.reset_for_stop();
+                let _ = self.decode_tx.send(DecodeCommand::Stop {
+                    generation: self.current_generation,
+                });
+            }
             BackendCommand::Seek(position) => {
                 let Some(source) = self.current_source.clone() else {
                     return true;
@@ -190,9 +225,14 @@ impl PresentWorker {
                 self.software_paused_position = position;
                 self.software_play_started_at = None;
                 self.playback_ended = false;
+                self.buffer_snapshot = BufferSnapshot {
+                    generation: self.current_generation,
+                    ..BufferSnapshot::default()
+                };
                 self.playback_clock.set_position(position);
                 self.shared_queue
                     .replace_generation(self.current_generation);
+                clear_latest_frame(&self.latest_frame);
                 self.shared.playback_state.set(VideoPlaybackState::Loading);
                 self.shared.error.set(None);
                 self.shared.surface.set(VideoSurfaceSnapshot {

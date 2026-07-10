@@ -12,17 +12,25 @@ pub(super) fn receive_audio_frames(
     compressed_bytes: u64,
 ) -> Result<(), TguiError> {
     let mut decoded = AudioFrame::empty();
-    let mut chunks = Vec::new();
-    while decoder.receive_frame(&mut decoded).is_ok() {
+    let mut samples = Vec::new();
+    loop {
+        match decoder.receive_frame(&mut decoded) {
+            Ok(()) => {}
+            Err(error) if is_audio_receive_drained(error) => break,
+            Err(error) => {
+                return Err(TguiError::Media(format!(
+                    "failed to receive decoded audio frame: {error}"
+                )))
+            }
+        }
+
         let mut resampled = allocate_resampled_audio_frame(resampler, &decoded);
         resampler.run(&decoded, &mut resampled).map_err(|error| {
             TguiError::Media(format!("failed to resample audio frame: {error}"))
         })?;
-        if let Some(samples) = audio_frame_to_f32_if_any(&resampled) {
-            chunks.push(samples);
-        }
+        append_audio_frame_samples(&resampled, &mut samples);
     }
-    queue_audio_chunks(audio_output, chunks, compressed_bytes);
+    audio_output.push_samples(samples, compressed_bytes);
     Ok(())
 }
 
@@ -30,7 +38,7 @@ pub(super) fn flush_audio_resampler(
     resampler: &mut Resampler,
     audio_output: &AudioOutput,
 ) -> Result<(), TguiError> {
-    let mut chunks = Vec::new();
+    let mut samples = Vec::new();
     loop {
         let mut resampled = allocate_flush_audio_frame(resampler);
         match resampler
@@ -38,14 +46,12 @@ pub(super) fn flush_audio_resampler(
             .map_err(|error| TguiError::Media(format!("failed to flush resampler: {error}")))?
         {
             Some(_) => {
-                if let Some(samples) = audio_frame_to_f32_if_any(&resampled) {
-                    chunks.push(samples);
-                }
+                append_audio_frame_samples(&resampled, &mut samples);
             }
             None => break,
         }
     }
-    queue_audio_chunks(audio_output, chunks, 0);
+    audio_output.push_samples(samples, 0);
     Ok(())
 }
 
@@ -97,35 +103,9 @@ fn allocate_flush_audio_frame(resampler: &Resampler) -> AudioFrame {
     frame
 }
 
-fn queue_audio_chunks(audio_output: &AudioOutput, chunks: Vec<Vec<f32>>, compressed_bytes: u64) {
-    if chunks.is_empty() {
-        return;
-    }
-
-    let total_samples = chunks
-        .iter()
-        .map(|samples| samples.len() as u64)
-        .sum::<u64>()
-        .max(1);
-    let mut remaining_bytes = compressed_bytes;
-    let mut remaining_samples = total_samples;
-
-    for samples in chunks {
-        let sample_count = samples.len() as u64;
-        let chunk_bytes = if remaining_samples == sample_count {
-            remaining_bytes
-        } else {
-            compressed_bytes.saturating_mul(sample_count) / total_samples
-        };
-        remaining_bytes = remaining_bytes.saturating_sub(chunk_bytes);
-        remaining_samples = remaining_samples.saturating_sub(sample_count);
-        audio_output.push_samples(samples, chunk_bytes);
-    }
-}
-
-fn audio_frame_to_f32_if_any(frame: &AudioFrame) -> Option<Vec<f32>> {
+fn append_audio_frame_samples(frame: &AudioFrame, samples: &mut Vec<f32>) {
     if frame.samples() == 0 || !frame.is_packed() {
-        return None;
+        return;
     }
 
     // SAFETY: 进入这里之前已确认 frame 是 packed（即所有声道交错存放在
@@ -135,6 +115,16 @@ fn audio_frame_to_f32_if_any(frame: &AudioFrame) -> Option<Vec<f32>> {
     unsafe {
         let len = frame.samples() * frame.channels() as usize;
         let slice = std::slice::from_raw_parts((*frame.as_ptr()).data[0] as *const f32, len);
-        Some(slice.to_vec())
+        samples.extend_from_slice(slice);
     }
+}
+
+fn is_audio_receive_drained(error: ffmpeg::Error) -> bool {
+    matches!(
+        error,
+        ffmpeg::Error::Eof
+            | ffmpeg::Error::Other {
+                errno: ffmpeg::error::EAGAIN
+            }
+    )
 }

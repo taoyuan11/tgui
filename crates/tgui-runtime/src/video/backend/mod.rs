@@ -78,6 +78,7 @@ pub(crate) trait VideoBackend: Send + Sync {
     fn load(&self, source: VideoSource) -> Result<(), TguiError>;
     fn play(&self);
     fn pause(&self);
+    fn stop(&self);
     fn seek(&self, position: std::time::Duration);
     fn set_volume(&self, volume: f32);
     fn set_muted(&self, muted: bool);
