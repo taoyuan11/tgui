@@ -3,8 +3,83 @@ pub(super) use super::*;
 use std::time::{Duration, Instant};
 
 use crate::foundation::binding::{Toast, ToastKind, ToastPlacement, ToastQueue};
+use crate::ui::theme::Density;
 use crate::ui::widget::style::ToastStyle;
 use crate::ui::widget::{ComputedScene, Stack, ToastHost};
+
+#[test]
+fn toast_density_geometry_reaches_real_overlay_primitives() {
+    run_with_large_stack(toast_density_geometry_reaches_real_overlay_primitives_impl);
+}
+
+fn toast_density_geometry_reaches_real_overlay_primitives_impl() {
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let viewport = Rect::new(0.0, 0.0, 640.0, 480.0);
+
+    for (density, expected_width, expected_icon) in [
+        (Density::Compact, dp(280.0), dp(16.0)),
+        (Density::Spacious, dp(360.0), dp(20.0)),
+    ] {
+        let mut theme = Theme::light();
+        theme.density = density;
+        let context = test_context();
+        let queue = ToastQueue::<()>::new(&context);
+        let now = Instant::now();
+        queue.push_at(
+            Toast::new("Density-aware toast")
+                .title("Saved")
+                .kind(ToastKind::Success)
+                .duration(Duration::from_secs(10)),
+            now - Duration::from_secs(1),
+        );
+        let tree = WidgetTree::new(Stack::new().child(ToastHost::new(queue)));
+        let mut animations = AnimationEngine::default();
+        let computed = compute_scene_at(
+            &tree,
+            &font_manager,
+            &theme,
+            &media,
+            &mut animations,
+            viewport,
+            now,
+        );
+
+        let card = computed
+            .scene
+            .overlay_shapes
+            .iter()
+            .find(|shape| {
+                shape.color == theme.colors.outline_muted
+                    && (shape.rect.width - expected_width).abs() <= dp(0.1)
+            })
+            .unwrap_or_else(|| {
+                panic!(
+                    "toast card should render with density width {expected_width:?}; target={:?}, shapes={:?}",
+                    theme.colors.outline_muted,
+                    computed
+                        .scene
+                        .overlay_shapes
+                        .iter()
+                        .map(|shape| (shape.rect, shape.color, shape.corner_radius))
+                        .collect::<Vec<_>>()
+                )
+            });
+        assert_eq!(card.corner_radius, theme.radius.lg.get());
+
+        let icon = computed
+            .scene
+            .overlay_shapes
+            .iter()
+            .find(|shape| {
+                shape.color == theme.colors.success
+                    && (shape.rect.width - expected_icon).abs() <= dp(0.1)
+                    && (shape.rect.height - expected_icon).abs() <= dp(0.1)
+            })
+            .expect("toast kind icon should render with its density size");
+        assert_eq!(icon.corner_radius, expected_icon.get() * 0.5);
+    }
+}
 
 #[test]
 fn toast_host_emits_overlay_content_in_stack_order_and_tracks_wakeup() {

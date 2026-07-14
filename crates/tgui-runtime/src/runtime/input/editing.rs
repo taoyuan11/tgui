@@ -21,22 +21,34 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             .text_edit_state(widget_id)
             .cloned()
             .unwrap_or_else(|| self.default_text_edit_state(widget_id, current_text));
-        let (text_len_before, changed, next_rope, next_value, next_state, text_change) = {
+        let (
+            text_len_before,
+            changed,
+            next_rope,
+            next_value,
+            next_is_ascii,
+            next_state,
+            text_change,
+        ) = {
             let session = self
                 .text_input_buffers
                 .get_mut(&widget_id)
                 .expect("text input session should be initialized");
             let current_text = std::mem::take(&mut session.current_text);
             let state = state.clamped_to(&current_text);
-            let mut buffer =
-                RopeBuffer::from_parts(std::mem::take(&mut session.rope), current_text);
+            let mut buffer = RopeBuffer::from_parts(
+                std::mem::take(&mut session.rope),
+                current_text,
+                session.current_text_is_ascii,
+            );
             let Some((next_state, text_change)) = edit(&mut buffer, &state) else {
-                let (next_rope, next_value) = buffer.into_parts();
+                let (next_rope, next_value, next_is_ascii) = buffer.into_parts();
                 session.rope = next_rope;
                 session.current_text = next_value;
+                session.current_text_is_ascii = next_is_ascii;
                 return false;
             };
-            let (next_rope, next_value) = buffer.into_parts();
+            let (next_rope, next_value, next_is_ascii) = buffer.into_parts();
             let text_len_before = session.external_value.len();
             let changed = session.external_value != next_value;
             (
@@ -44,6 +56,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 changed,
                 next_rope,
                 next_value,
+                next_is_ascii,
                 next_state,
                 text_change,
             )
@@ -57,6 +70,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 .get_mut(&widget_id)
                 .expect("text input session should exist after edit");
             session.rope = next_rope;
+            session.current_text_is_ascii = next_is_ascii;
             let edit_replacement = Some((
                 text_change.range_bytes.0,
                 text_change.range_bytes.1,

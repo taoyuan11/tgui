@@ -473,6 +473,82 @@ fn input_arrow_right_moves_by_grapheme_cluster() {
 }
 
 #[test]
+fn long_textarea_shift_arrow_preserves_utf8_selection_after_ime_preedit() {
+    let invalidation = InvalidationSignal::new();
+    let prefix = "中a\u{0301}".repeat(512);
+    let cluster = "👩🏽‍💻";
+    let initial = format!("{prefix}{cluster}tail");
+    let tree = WidgetTree::new(
+        Textarea::<TestVm>::new(initial.as_str())
+            .size(dp(140.0), dp(72.0))
+            .auto_wrap(false),
+    );
+    let mut handler = test_handler(Some(tree), invalidation);
+    let viewport = handler.viewport_rect();
+    let frame = text_input_frame(&mut handler, true);
+
+    handler.cursor_position = Some(Point {
+        x: frame.x + dp(8.0),
+        y: frame.y + dp(8.0),
+    });
+    handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Left);
+
+    let text_id = handler
+        .focused_widget_id()
+        .expect("textarea should be focused after click");
+    let cluster_start = prefix.len();
+    let cluster_end = cluster_start + cluster.len();
+    handler.text_edit_states.insert(
+        text_id,
+        TextEditState {
+            cursor: cluster_start,
+            anchor: cluster_start,
+            composition: None,
+            scroll_x: Dp::ZERO,
+            scroll_y: Dp::ZERO,
+            preferred_column_x: None,
+        },
+    );
+
+    assert!(handler.handle_ime_event(&Ime::Preedit("候補".to_string(), Some((0, "候補".len())),)));
+    assert!(
+        !handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::ArrowRight,))),
+        "the platform IME must retain navigation while preedit is active",
+    );
+    assert!(handler.handle_ime_event(&Ime::Disabled));
+    handler.modifiers = ModifiersState::SHIFT;
+    assert!(
+        handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::ArrowRight,)))
+    );
+    handler.modifiers = ModifiersState::empty();
+
+    let state = handler
+        .text_edit_states
+        .get(&text_id)
+        .expect("textarea edit state should exist");
+    assert_eq!(state.cursor, cluster_end);
+    assert_eq!(state.anchor, cluster_start);
+    assert_eq!(state.selection_range(), Some((cluster_start, cluster_end)));
+    assert!(state.composition.is_none());
+    assert_eq!(
+        handler
+            .text_input_buffers
+            .get(&text_id)
+            .expect("textarea session should remain live")
+            .current_text,
+        initial,
+    );
+    assert!(
+        handler
+            .scroll_states
+            .get(&text_id)
+            .map(|offset| offset.x > Dp::ZERO)
+            .unwrap_or(false),
+        "moving the long-line caret should keep it horizontally visible",
+    );
+}
+
+#[test]
 fn textarea_replaces_mixed_rtl_complex_selection() {
     let invalidation = InvalidationSignal::new();
     let initial = "Report שלום नमस्ते 👩‍💻 done";

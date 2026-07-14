@@ -16,7 +16,12 @@ pub(in crate::media) struct RasterDocument {
     bytes: MediaBytes,
     raster_cache: Vec<RasterTextureEntry>,
     pending_rasters: Vec<PendingRasterEntry>,
+    last_exact_request: Option<(RasterRequest, usize)>,
     next_access_tick: u64,
+    #[cfg(test)]
+    exact_lookup_visits: usize,
+    #[cfg(test)]
+    exact_hot_hits: usize,
 }
 
 impl RasterDocument {
@@ -26,7 +31,12 @@ impl RasterDocument {
             bytes,
             raster_cache: Vec::new(),
             pending_rasters: Vec::new(),
+            last_exact_request: None,
             next_access_tick: 1,
+            #[cfg(test)]
+            exact_lookup_visits: 0,
+            #[cfg(test)]
+            exact_hot_hits: 0,
         }
     }
 
@@ -39,22 +49,12 @@ impl RasterDocument {
         completions: &Arc<Mutex<Vec<MediaCompletion>>>,
     ) -> Result<Option<Arc<TextureFrame>>, TguiError> {
         self.collect_finished_rasters(budget)?;
-
-        if let Some(animation) = self
-            .raster_cache
-            .iter_mut()
-            .find(|entry| entry.request == raster_request)
-            .and_then(|entry| entry.animation.as_mut())
-        {
-            animation.ensure_started(clock.now);
-        }
-
         let tick = self.bump_access_tick();
-        if let Some(entry) = self
-            .raster_cache
-            .iter_mut()
-            .find(|entry| entry.request == raster_request)
-        {
+        if let Some(index) = self.exact_raster_index(raster_request) {
+            let entry = &mut self.raster_cache[index];
+            if let Some(animation) = entry.animation.as_mut() {
+                animation.ensure_started(clock.now);
+            }
             entry.last_used = tick;
             return Ok(Some(entry.texture.clone()));
         }
@@ -136,6 +136,9 @@ impl RasterDocument {
     }
 
     fn collect_finished_rasters(&mut self, budget: &ResourceBudget) -> Result<(), TguiError> {
+        if self.pending_rasters.is_empty() {
+            return Ok(());
+        }
         let mut completed = Vec::new();
         for (index, entry) in self.pending_rasters.iter().enumerate() {
             let Some(result) = entry
@@ -182,6 +185,37 @@ impl RasterDocument {
         tick
     }
 
+    fn exact_raster_index(&mut self, request: RasterRequest) -> Option<usize> {
+        if let Some((cached_request, index)) = self.last_exact_request {
+            if cached_request == request
+                && self
+                    .raster_cache
+                    .get(index)
+                    .is_some_and(|entry| entry.request == request)
+            {
+                #[cfg(test)]
+                {
+                    self.exact_hot_hits += 1;
+                }
+                return Some(index);
+            }
+        }
+
+        let mut found = None;
+        for (index, entry) in self.raster_cache.iter().enumerate() {
+            #[cfg(test)]
+            {
+                self.exact_lookup_visits += 1;
+            }
+            if entry.request == request {
+                found = Some(index);
+                break;
+            }
+        }
+        self.last_exact_request = found.map(|index| (request, index));
+        found
+    }
+
     fn evict_if_needed(&mut self, max_entries: usize) {
         while self.raster_cache.len() > max_entries {
             if let Some((oldest_index, _)) = self
@@ -191,6 +225,7 @@ impl RasterDocument {
                 .min_by_key(|(_, entry)| entry.last_used)
             {
                 self.raster_cache.remove(oldest_index);
+                self.last_exact_request = None;
             } else {
                 break;
             }
@@ -220,6 +255,17 @@ impl RasterDocument {
         let entry = &mut self.raster_cache[best_index];
         entry.last_used = tick;
         Some(entry.texture.clone())
+    }
+
+    #[cfg(test)]
+    pub(in crate::media) fn reset_exact_lookup_stats(&mut self) {
+        self.exact_lookup_visits = 0;
+        self.exact_hot_hits = 0;
+    }
+
+    #[cfg(test)]
+    pub(in crate::media) fn exact_lookup_stats(&self) -> (usize, usize) {
+        (self.exact_lookup_visits, self.exact_hot_hits)
     }
 }
 

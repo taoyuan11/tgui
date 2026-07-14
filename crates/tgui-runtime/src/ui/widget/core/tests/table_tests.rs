@@ -1,8 +1,11 @@
 use super::*;
 
+use crate::ui::layout::Value;
+use crate::ui::theme::Density;
 use crate::ui::widget::{
     DataGrid, DataGridColumn, DataGridColumnPin, DataGridDensity, DataGridRow, DataGridSection,
-    DataGridSelectionMode, HitInteraction, ResolvedElement, WidgetId, WidgetKey,
+    DataGridSelectionMode, DataGridStyle, HitInteraction, ItemLayout, ResolvedElement, WidgetId,
+    WidgetKey,
 };
 
 fn resolved_children<'a, VM>(kind: &'a ResolvedWidgetKind<VM>) -> &'a [ResolvedElement<VM>] {
@@ -18,6 +21,17 @@ fn subtree_has_data_grid_header<VM>(element: &ResolvedElement<VM>) -> bool {
         || resolved_children(&element.kind)
             .iter()
             .any(subtree_has_data_grid_header)
+}
+
+fn subtree_container_padding<VM>(element: &ResolvedElement<VM>) -> Option<Value<Insets>> {
+    if let ResolvedWidgetKind::Container { layout, .. } = &element.kind {
+        if let Some(padding) = layout.padding.clone() {
+            return Some(padding);
+        }
+    }
+    resolved_children(&element.kind)
+        .iter()
+        .find_map(subtree_container_padding)
 }
 
 fn columns<VM: 'static>() -> Vec<DataGridColumn<String, VM>> {
@@ -190,15 +204,80 @@ fn data_grid_defaults_render_readably_in_dark_theme() {
             .any(|shape| shape.color == theme.colors.surface_low),
         "DataGrid header should follow dark theme defaults"
     );
-    for label in ["Name", "Alpha"] {
-        let text = rendered
-            .primitives
-            .texts
-            .iter()
-            .find(|text| text.content.as_ref() == label)
-            .unwrap_or_else(|| panic!("expected DataGrid text {label:?} to render"));
-        assert_eq!(text.color, theme.colors.on_surface);
-    }
+    let header = rendered
+        .primitives
+        .texts
+        .iter()
+        .find(|text| text.content.as_ref() == "Name")
+        .expect("expected DataGrid header text to render");
+    assert_eq!(header.color, theme.colors.on_surface_muted);
+    assert_eq!(header.font_size, theme.typography.label.size.get());
+    assert_eq!(header.font_weight, theme.typography.label.weight);
+
+    let cell = rendered
+        .primitives
+        .texts
+        .iter()
+        .find(|text| text.content.as_ref() == "Alpha")
+        .expect("expected DataGrid cell text to render");
+    assert_eq!(cell.color, theme.colors.on_surface);
+    assert_eq!(cell.font_size, theme.typography.body_small.size.get());
+    assert_eq!(cell.font_weight, theme.typography.body_small.weight);
+}
+
+#[test]
+fn data_grid_default_surface_applies_modern_shape_tokens() {
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let theme = Theme::light();
+    let style = DataGridStyle::default_for_theme(&theme);
+    let radius = style
+        .surface
+        .border_radius
+        .as_ref()
+        .expect("default DataGrid radius")
+        .resolve()
+        .get();
+    assert_eq!(
+        style
+            .surface
+            .border_width
+            .as_ref()
+            .expect("default DataGrid border width")
+            .resolve(),
+        theme.border.none
+    );
+    let mut animations = AnimationEngine::default();
+    let tree: WidgetTree<()> = WidgetTree::new(
+        DataGrid::new(
+            vec![DataGridRow::keyed("a", "Alpha".to_string())],
+            columns(),
+        )
+        .size(dp(240.0), dp(120.0)),
+    );
+
+    let rendered = tree.render_output(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        None,
+        None,
+        &HashMap::new(),
+        Rect::new(0.0, 0.0, 240.0, 120.0),
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+
+    assert!(rendered.primitives.shapes.iter().any(|shape| {
+        shape.rect == Rect::new(0.0, 0.0, 240.0, 120.0)
+            && shape.stroke_width == 0.0
+            && shape.color == theme.colors.surface
+            && shape.corner_radius == radius
+    }));
 }
 
 #[test]
@@ -333,6 +412,236 @@ fn data_grid_supports_sections_empty_loading_and_density() {
     assert!(
         loading_layout.resolved_root.data_grid_root.is_none(),
         "loading slot should replace the grid body"
+    );
+}
+
+#[test]
+fn data_grid_density_scales_header_and_row_together() {
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let theme = Theme::default();
+
+    for (density, expected_height) in [
+        (DataGridDensity::Compact, dp(32.0)),
+        (DataGridDensity::Regular, dp(40.0)),
+        (DataGridDensity::Spacious, dp(48.0)),
+    ] {
+        let mut animations = AnimationEngine::default();
+        let tree: WidgetTree<()> = WidgetTree::new(
+            DataGrid::new(
+                vec![DataGridRow::keyed("a", "Alpha".to_string())],
+                columns(),
+            )
+            .density(density)
+            .size(dp(240.0), dp(144.0)),
+        );
+        let layout = tree.build_scene_layout(
+            &font_manager,
+            &theme,
+            &media,
+            &mut animations,
+            UnitContext::default(),
+            &HashMap::new(),
+            &HashMap::new(),
+            Rect::new(0.0, 0.0, 240.0, 144.0),
+        );
+        let ResolvedWidgetKind::Container { children, .. } = &layout.resolved_root.kind else {
+            panic!("DataGrid root should resolve to a container");
+        };
+        assert_eq!(
+            children[0]
+                .layout
+                .height
+                .as_ref()
+                .map(|value| value.resolve()),
+            Some(crate::ui::layout::Length::Px(expected_height)),
+            "header height should follow {density:?} density"
+        );
+        let ResolvedWidgetKind::Virtual { children: rows, .. } = &children[1].kind else {
+            panic!("DataGrid body should use VirtualList");
+        };
+        let row = rows
+            .iter()
+            .find(|row| {
+                resolved_children(&row.kind)
+                    .iter()
+                    .any(|cell| cell.data_grid_cell.is_some())
+            })
+            .expect("density test row should resolve");
+        assert_eq!(
+            row.layout.height.as_ref().map(|value| value.resolve()),
+            Some(crate::ui::layout::Length::Px(expected_height)),
+            "row height should follow {density:?} density"
+        );
+    }
+}
+
+#[test]
+fn data_grid_runtime_metrics_follow_theme_on_the_same_tree_and_keep_overrides() {
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let viewport = Rect::new(0.0, 0.0, 360.0, 220.0);
+    let tree: WidgetTree<()> = WidgetTree::new(
+        DataGrid::new(
+            (0..40)
+                .map(|index| DataGridRow::keyed(index, format!("Row {index}")))
+                .collect::<Vec<_>>(),
+            columns(),
+        )
+        .style(|style, context| match context.density {
+            Density::Compact => {
+                style.header_height = dp(34.0);
+                style.regular_row_height = dp(30.0);
+                style.cell_padding = Insets::all(dp(2.0));
+            }
+            Density::Comfortable => {}
+            Density::Spacious => {
+                style.header_height = dp(58.0);
+                style.regular_row_height = dp(54.0);
+                style.cell_padding = Insets::all(dp(14.0));
+            }
+        })
+        .size(dp(340.0), dp(200.0)),
+    );
+
+    for (density, header_height, row_height, padding) in [
+        (Density::Compact, dp(34.0), dp(30.0), dp(2.0)),
+        (Density::Spacious, dp(58.0), dp(54.0), dp(14.0)),
+    ] {
+        let mut theme = Theme::light();
+        theme.density = density;
+        let mut animations = AnimationEngine::default();
+        let layout = tree.build_scene_layout(
+            &font_manager,
+            &theme,
+            &media,
+            &mut animations,
+            UnitContext::default(),
+            &HashMap::new(),
+            &HashMap::new(),
+            viewport,
+        );
+        let ResolvedWidgetKind::Container { children, .. } = &layout.resolved_root.kind else {
+            panic!("DataGrid root should resolve to a container");
+        };
+        assert_eq!(
+            children[0]
+                .layout
+                .height
+                .as_ref()
+                .map(|value| value.resolve()),
+            Some(crate::ui::layout::Length::Px(header_height))
+        );
+        let header_cell = resolved_children(&children[0].kind)
+            .first()
+            .expect("header cell should resolve");
+        assert_eq!(
+            subtree_container_padding(header_cell),
+            Some(Value::Static(Insets::all(padding)))
+        );
+
+        let ResolvedWidgetKind::Virtual {
+            item_layout,
+            children: rows,
+            ..
+        } = &children[1].kind
+        else {
+            panic!("DataGrid body should use VirtualList");
+        };
+        assert!(matches!(
+            item_layout,
+            ItemLayout::Fixed { item_extent, .. } if (*item_extent - row_height).abs() <= dp(0.1)
+        ));
+        let row = rows
+            .iter()
+            .find(|row| {
+                resolved_children(&row.kind)
+                    .iter()
+                    .any(|cell| cell.data_grid_cell.is_some())
+            })
+            .expect("visible data row should resolve");
+        assert_eq!(
+            row.layout.height.as_ref().map(|value| value.resolve()),
+            Some(crate::ui::layout::Length::Px(row_height))
+        );
+        let cell = resolved_children(&row.kind)
+            .first()
+            .expect("data cell should resolve");
+        let ResolvedWidgetKind::Container {
+            layout: cell_layout,
+            ..
+        } = &cell.kind
+        else {
+            panic!("data cell should remain a container");
+        };
+        assert_eq!(
+            cell_layout.padding,
+            Some(Value::Static(Insets::all(padding)))
+        );
+    }
+
+    let override_tree: WidgetTree<()> = WidgetTree::new(
+        DataGrid::new(
+            vec![DataGridRow::keyed("a", "Alpha".to_string())],
+            columns(),
+        )
+        .style(|style, context| {
+            style.regular_row_height = match context.density {
+                Density::Compact => dp(24.0),
+                Density::Comfortable => dp(40.0),
+                Density::Spacious => dp(72.0),
+            };
+        })
+        .row_height(dp(44.0))
+        .item_layout(ItemLayout::Fixed {
+            item_extent: dp(60.0),
+            spacing: dp(3.0),
+            overscan: 5,
+        })
+        .size(dp(340.0), dp(180.0)),
+    );
+    let mut theme = Theme::light();
+    theme.density = Density::Spacious;
+    let mut animations = AnimationEngine::default();
+    let layout = override_tree.build_scene_layout(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        UnitContext::default(),
+        &HashMap::new(),
+        &HashMap::new(),
+        viewport,
+    );
+    let ResolvedWidgetKind::Container { children, .. } = &layout.resolved_root.kind else {
+        panic!("DataGrid root should resolve to a container");
+    };
+    let ResolvedWidgetKind::Virtual {
+        item_layout,
+        children: rows,
+        ..
+    } = &children[1].kind
+    else {
+        panic!("DataGrid body should use VirtualList");
+    };
+    assert!(matches!(
+        item_layout,
+        ItemLayout::Fixed { item_extent, spacing, overscan }
+            if (*item_extent - dp(60.0)).abs() <= dp(0.1)
+                && (*spacing - dp(3.0)).abs() <= dp(0.1)
+                && *overscan == 5
+    ));
+    let row = rows
+        .iter()
+        .find(|row| {
+            resolved_children(&row.kind)
+                .iter()
+                .any(|cell| cell.data_grid_cell.is_some())
+        })
+        .expect("visible data row should resolve");
+    assert_eq!(
+        row.layout.height.as_ref().map(|value| value.resolve()),
+        Some(crate::ui::layout::Length::Px(dp(44.0)))
     );
 }
 

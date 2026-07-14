@@ -37,6 +37,7 @@ pub(crate) fn tessellate_canvas_scene_items(
     opacity: f32,
     clip_rect: Option<Rect>,
     clip_mask: Option<ClipMask>,
+    collect_hit_metadata: bool,
     font_manager: &FontManager,
     media: &MediaManager,
     units: UnitContext,
@@ -50,17 +51,30 @@ pub(crate) fn tessellate_canvas_scene_items(
         .iter()
         .map(|item| {
             let output = item.tessellate(origin, opacity, clip, media, units);
-            let text_hits = item_text_hits(item, font_manager, origin, units);
+            let text_hits = if collect_hit_metadata {
+                item_text_hits(item, font_manager, origin, units)
+            } else {
+                Arc::from([])
+            };
             CanvasSceneItemRender {
                 item_id: item.id(),
-                cursor: item.style().cursor,
-                hit_bounds: item.hit_bounds(),
-                hit_geometry: item_hit_geometry(item, &output, origin, text_hits.as_ref()),
-                local_origin: item_local_origin(item),
-                inverse_transform: item
-                    .style()
-                    .transform
-                    .inverse()
+                cursor: collect_hit_metadata
+                    .then_some(item.style().cursor)
+                    .flatten(),
+                hit_bounds: collect_hit_metadata.then(|| item.hit_bounds()).flatten(),
+                hit_geometry: collect_hit_metadata
+                    .then(|| item_hit_geometry(item, &output, origin, text_hits.as_ref()))
+                    .flatten(),
+                local_origin: collect_hit_metadata
+                    .then(|| item_local_origin(item))
+                    .unwrap_or(Point::ZERO),
+                inverse_transform: collect_hit_metadata
+                    .then(|| {
+                        item.style()
+                            .transform
+                            .inverse()
+                            .unwrap_or(CanvasTransform2D::IDENTITY)
+                    })
                     .unwrap_or(CanvasTransform2D::IDENTITY),
                 text_hits,
                 output,

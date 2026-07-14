@@ -2,7 +2,7 @@ pub(super) use super::*;
 
 use crate::foundation::view_model::ValueCommand;
 use crate::ui::widget::Flex;
-use crate::ui::widget::{Button, Popover, PopoverStyle, PopoverTriggerMode};
+use crate::ui::widget::{Button, Popover, PopoverStyle, PopoverTriggerMode, RenderPrimitive};
 
 #[test]
 fn popover_builder_attaches_descriptor() {
@@ -137,6 +137,58 @@ fn popover_style_defaults_match_expected_baseline() {
     assert_eq!(light.min_width, dp(220.0));
     assert_eq!(light.offset, theme.spacing.sm);
     assert!(light.pointer_size.is_none());
+}
+
+#[test]
+fn popover_scene_tracks_theme_density_without_custom_style() {
+    fn render_surface(density: crate::ui::theme::Density) -> (PopoverStyle, RenderPrimitive) {
+        let mut theme = Theme::light();
+        theme.density = density;
+        let font_manager = FontManager::new(&FontCatalog::default());
+        let media = test_media();
+        let mut animations = AnimationEngine::default();
+        let tree: WidgetTree<()> = WidgetTree::new(
+            Popover::new(Button::new("More").size(dp(90.0), dp(36.0)))
+                .content(Text::new("popover body"))
+                .open(true),
+        );
+        let rendered = tree.render_output(
+            &font_manager,
+            &theme,
+            &media,
+            &mut animations,
+            None,
+            None,
+            &HashMap::new(),
+            Rect::new(0.0, 0.0, 640.0, 480.0),
+            None,
+            None,
+            None,
+            None,
+            false,
+        );
+        let style = PopoverStyle::default_for_theme(&theme);
+        let surface = rendered
+            .primitives
+            .overlay_shapes
+            .iter()
+            .find(|shape| shape.color == style.background.resolve() && shape.stroke_width == 0.0)
+            .cloned()
+            .expect("open popover should emit its themed surface");
+        (style, surface)
+    }
+
+    let (compact_style, compact_surface) = render_surface(crate::ui::theme::Density::Compact);
+    let (spacious_style, spacious_surface) = render_surface(crate::ui::theme::Density::Spacious);
+    assert!(compact_surface.rect.width >= compact_style.min_width);
+    assert!(spacious_surface.rect.width >= spacious_style.min_width);
+    assert!(spacious_surface.rect.width > compact_surface.rect.width);
+    assert!(spacious_surface.rect.height > compact_surface.rect.height);
+    assert!(compact_surface.corner_radius > 0.0);
+    assert_eq!(
+        compact_surface.corner_radius,
+        spacious_surface.corner_radius
+    );
 }
 
 #[test]

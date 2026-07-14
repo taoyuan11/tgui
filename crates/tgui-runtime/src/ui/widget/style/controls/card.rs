@@ -14,6 +14,11 @@ pub struct CardStyle {
 
 impl CardStyle {
     pub fn default_for_theme(theme: &Theme) -> Self {
+        let (padding, gap) = match theme.density {
+            Density::Compact => (Insets::all(theme.spacing.sm), theme.spacing.xs),
+            Density::Comfortable => (Insets::all(theme.spacing.md), theme.spacing.sm),
+            Density::Spacious => (Insets::all(theme.spacing.lg), theme.spacing.md),
+        };
         Self {
             surface: WidgetSurfaceStyle::default(),
             background: Value::Static(theme.colors.surface_overlay),
@@ -21,8 +26,8 @@ impl CardStyle {
             border_width: theme.border.thin,
             radius: theme.radius.xl,
             shadow: theme.elevation.lg.clone(),
-            padding: Insets::all(theme.spacing.md),
-            gap: theme.spacing.sm,
+            padding,
+            gap,
         }
     }
 }

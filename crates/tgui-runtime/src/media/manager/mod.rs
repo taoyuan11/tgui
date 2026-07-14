@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
@@ -30,20 +31,39 @@ pub(crate) struct MediaManager {
 }
 
 struct ImageCache {
-    entries: HashMap<MediaSource, ImageCacheEntry>,
+    entries: HashMap<Arc<MediaSource>, Arc<ImageCacheEntry>>,
+    hot_entry: Option<HotImageCacheEntry>,
     next_access_tick: u64,
+    #[cfg(test)]
+    source_hash_lookups: usize,
+    #[cfg(test)]
+    hot_hits: usize,
+    #[cfg(test)]
+    entry_requests: usize,
 }
 
 struct ImageCacheEntry {
     image: Arc<Mutex<ImageEntry>>,
-    last_used: u64,
+    last_used: AtomicU64,
+}
+
+struct HotImageCacheEntry {
+    source: Arc<MediaSource>,
+    entry: Arc<ImageCacheEntry>,
 }
 
 impl ImageCache {
     fn new() -> Self {
         Self {
             entries: HashMap::new(),
+            hot_entry: None,
             next_access_tick: 1,
+            #[cfg(test)]
+            source_hash_lookups: 0,
+            #[cfg(test)]
+            hot_hits: 0,
+            #[cfg(test)]
+            entry_requests: 0,
         }
     }
 
@@ -90,6 +110,37 @@ impl MediaManager {
         snapshot
     }
 
+    /// Resolves intrinsic sizing and the requested raster in one cache/entry lookup.
+    ///
+    /// Image rendering used to request metadata and then immediately request the raster, which
+    /// repeated the source hash and both media mutex acquisitions. Holding the entry across the
+    /// sizing decision also avoids cloning the intermediate error state.
+    pub(crate) fn image_snapshot_for_layout(
+        &self,
+        source: &MediaSource,
+        layout: super::types::MediaTextureLayout,
+    ) -> (
+        ImageSnapshot,
+        crate::ui::widget::Rect,
+        Option<RasterRequest>,
+    ) {
+        let entry = self.image_entry(source);
+        let clock = AnimationClock {
+            now: Instant::now(),
+        };
+        let mut entry = entry.lock().expect("image entry lock poisoned");
+        let target_frame = layout.target_frame(entry.intrinsic_size());
+        let raster_request = RasterRequest::from_frame(target_frame, layout.scale_factor);
+        let snapshot = entry.snapshot(
+            raster_request,
+            clock,
+            &self.invalidation,
+            &self.budget,
+            &self.completions,
+        );
+        (snapshot, target_frame, raster_request)
+    }
+
     pub(crate) fn drain_completions(&self) -> Vec<MediaCompletion> {
         self.completions
             .lock()
@@ -133,9 +184,38 @@ impl MediaManager {
     fn image_entry(&self, source: &MediaSource) -> Arc<Mutex<ImageEntry>> {
         {
             let mut cache = self.images.lock().expect("image cache lock poisoned");
+            #[cfg(test)]
+            {
+                cache.entry_requests += 1;
+            }
             let tick = cache.bump_access_tick();
-            if let Some(entry) = cache.entries.get_mut(source) {
-                entry.last_used = tick;
+            if let Some(entry) = cache
+                .hot_entry
+                .as_ref()
+                .filter(|entry| entry.source.as_ref() == source)
+                .map(|entry| Arc::clone(&entry.entry))
+            {
+                entry.last_used.store(tick, Ordering::Relaxed);
+                #[cfg(test)]
+                {
+                    cache.hot_hits += 1;
+                }
+                return entry.image.clone();
+            }
+            #[cfg(test)]
+            {
+                cache.source_hash_lookups += 1;
+            }
+            if let Some((source_key, entry)) = cache
+                .entries
+                .get_key_value(source)
+                .map(|(source, entry)| (Arc::clone(source), Arc::clone(entry)))
+            {
+                entry.last_used.store(tick, Ordering::Relaxed);
+                cache.hot_entry = Some(HotImageCacheEntry {
+                    source: source_key,
+                    entry: Arc::clone(&entry),
+                });
                 return entry.image.clone();
             }
         }
@@ -156,15 +236,27 @@ impl MediaManager {
 
         let mut images = self.images.lock().expect("image cache lock poisoned");
         let tick = images.bump_access_tick();
+        #[cfg(test)]
+        {
+            images.source_hash_lookups += 1;
+        }
+        let source_key = Arc::new(source.clone());
         let entry = images
             .entries
-            .entry(source.clone())
-            .or_insert_with(|| ImageCacheEntry {
-                image: new_entry.clone(),
-                last_used: tick,
-            });
-        entry.last_used = tick;
+            .entry(Arc::clone(&source_key))
+            .or_insert_with(|| {
+                Arc::new(ImageCacheEntry {
+                    image: new_entry.clone(),
+                    last_used: AtomicU64::new(tick),
+                })
+            })
+            .clone();
+        entry.last_used.store(tick, Ordering::Relaxed);
         let image = entry.image.clone();
+        images.hot_entry = Some(HotImageCacheEntry {
+            source: source_key,
+            entry,
+        });
         self.evict_image_sources_if_needed(&mut images, source);
         image
     }
@@ -204,7 +296,14 @@ impl MediaManager {
             else {
                 break;
             };
-            cache.entries.remove(&victim);
+            cache.entries.remove(victim.as_ref());
+            if cache
+                .hot_entry
+                .as_ref()
+                .is_some_and(|entry| entry.source == victim)
+            {
+                cache.hot_entry = None;
+            }
         }
     }
 
@@ -223,6 +322,33 @@ impl MediaManager {
             .expect("image cache lock poisoned")
             .entries
             .len()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn reset_image_lookup_stats(&self) {
+        let mut cache = self.images.lock().expect("image cache lock poisoned");
+        cache.source_hash_lookups = 0;
+        cache.hot_hits = 0;
+        cache.entry_requests = 0;
+    }
+
+    #[cfg(test)]
+    pub(crate) fn image_lookup_stats(&self) -> (usize, usize, usize) {
+        let cache = self.images.lock().expect("image cache lock poisoned");
+        (
+            cache.source_hash_lookups,
+            cache.hot_hits,
+            cache.entry_requests,
+        )
+    }
+
+    #[cfg(test)]
+    pub(crate) fn is_image_cached(&self, source: &MediaSource) -> bool {
+        self.images
+            .lock()
+            .expect("image cache lock poisoned")
+            .entries
+            .contains_key(source)
     }
 
     pub(crate) fn canvas_shadow_texture<F>(
@@ -270,15 +396,16 @@ fn oldest_evictable_image_source(
     cache: &ImageCache,
     protected: &MediaSource,
     include_pending: bool,
-) -> Option<MediaSource> {
+) -> Option<Arc<MediaSource>> {
     cache
         .entries
         .iter()
         .filter(|(source, entry)| {
-            *source != protected && (include_pending || !image_entry_has_pending_work(&entry.image))
+            source.as_ref() != protected
+                && (include_pending || !image_entry_has_pending_work(&entry.image))
         })
-        .min_by_key(|(_, entry)| entry.last_used)
-        .map(|(source, _)| source.clone())
+        .min_by_key(|(_, entry)| entry.last_used.load(Ordering::Relaxed))
+        .map(|(source, _)| Arc::clone(source))
 }
 
 fn image_entry_has_pending_work(entry: &Arc<Mutex<ImageEntry>>) -> bool {

@@ -78,6 +78,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         let text_scale_bits = units.font_scale().to_bits();
         let animation_epoch = self.animation_epoch;
         let layout_animation_epoch = self.layout_animation_epoch;
+        let accessibility_animation_epoch = self.accessibility_animation_epoch;
         let scroll_epoch = self.scroll_epoch;
         let hover_epoch = self.hover_epoch;
         let text_input_epoch = self.text_input_epoch;
@@ -143,6 +144,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         cached.text_scale_bits = text_scale_bits;
         cached.animation_epoch = animation_epoch;
         cached.layout_animation_epoch = layout_animation_epoch;
+        cached.accessibility_animation_epoch = accessibility_animation_epoch;
         cached.scroll_epoch = scroll_epoch;
         cached.hover_epoch = hover_epoch;
         cached.text_input_epoch = text_input_epoch;

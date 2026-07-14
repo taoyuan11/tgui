@@ -2016,6 +2016,146 @@ fn scroll_view_controller_scroll_to_updates_runtime_offset() {
 }
 
 #[test]
+fn scroll_view_controller_cached_hit_visits_only_bound_controllers() {
+    let invalidation = InvalidationSignal::new();
+    let ctx = ViewModelContext::for_benchmarks();
+    let controller = ScrollViewController::new(&ctx);
+    let mut content = Flex::<TestVm>::vertical();
+    for index in 0..64 {
+        content = content.child(
+            Stack::new()
+                .size(dp(120.0), dp(8.0))
+                .child(Text::new(format!("row {index}"))),
+        );
+    }
+    let tree = WidgetTree::new(
+        ScrollView::new()
+            .size(dp(160.0), dp(540.0))
+            .controller(controller)
+            .child(content),
+    );
+    let mut handler = test_handler(Some(tree), invalidation);
+
+    let scroll_region_count = handler.computed_scene().scroll_regions.len();
+    assert!(
+        scroll_region_count >= 16,
+        "test scene should contain many unbound container scroll regions, got {scroll_region_count}"
+    );
+    crate::runtime::scene_runtime::scroll_view_binding_probe::reset();
+
+    let _ = handler.computed_scene();
+
+    assert_eq!(
+        crate::runtime::scene_runtime::scroll_view_binding_probe::rebuild_region_visits(),
+        0,
+        "a valid cached scene must not rescan all scroll regions"
+    );
+    assert_eq!(
+        crate::runtime::scene_runtime::scroll_view_binding_probe::consume_binding_visits(),
+        1,
+        "cache hits should visit only the single bound controller"
+    );
+    assert_eq!(
+        crate::runtime::scene_runtime::scroll_view_binding_probe::stale_rebuilds(),
+        0
+    );
+}
+
+#[test]
+fn large_scene_scroll_interactions_visit_only_real_scroll_candidates() {
+    let invalidation = InvalidationSignal::new();
+    let mut content = Flex::<TestVm>::vertical();
+    for index in 0..256 {
+        content = content.child(
+            Stack::new()
+                .size(dp(140.0), dp(8.0))
+                .child(Text::new(format!("row {index}"))),
+        );
+    }
+    let scroller: Element<TestVm> = ScrollView::new()
+        .size(dp(180.0), dp(120.0))
+        .child(content)
+        .into();
+    let scroller_id = scroller.id;
+    let mut handler = test_handler_with_config(
+        TestVm,
+        Some(WidgetTree::new(scroller)),
+        invalidation,
+        test_config_with_size(180.0, 120.0),
+    );
+
+    let (region_count, cursor, thumb_cursor, drag_cursor) = {
+        let computed = handler.computed_scene();
+        let region = computed
+            .scroll_regions
+            .iter()
+            .find(|region| region.id == scroller_id)
+            .copied()
+            .expect("scroll view should register a region");
+        let thumb = region
+            .vertical_thumb
+            .expect("overflowing scroll view should render a thumb");
+        let track = region
+            .vertical_track
+            .expect("overflowing scroll view should render a track");
+        (
+            computed.scroll_regions.len(),
+            Point::new(
+                region.visible_frame.x + dp(20.0),
+                region.visible_frame.y + dp(20.0),
+            ),
+            Point::new(thumb.x + thumb.width * 0.5, thumb.y + thumb.height * 0.5),
+            Point::new(
+                thumb.x + thumb.width * 0.5,
+                thumb.y + thumb.height * 0.5 + (track.height - thumb.height) * 0.25,
+            ),
+        )
+    };
+    assert!(
+        region_count >= 16,
+        "test scene should cross the lazy lookup threshold, got {region_count} regions"
+    );
+
+    handler.cursor_position = Some(cursor);
+    crate::runtime::input::scroll_region_lookup_probe::reset();
+    assert!(handler.handle_mouse_wheel(MouseScrollDelta::LineDelta(0.0, -2.0)));
+    assert_eq!(
+        crate::runtime::input::scroll_region_lookup_probe::wheel_candidate_visits(),
+        1,
+        "wheel targeting should skip non-scrollable Container regions"
+    );
+
+    handler.cursor_position = Some(cursor);
+    crate::runtime::input::scroll_region_lookup_probe::reset();
+    assert!(handler.begin_touch_scroll_drag(handler.viewport_rect()));
+    assert_eq!(
+        crate::runtime::input::scroll_region_lookup_probe::touch_candidate_visits(),
+        1,
+        "touch targeting should visit only the actual scroll view"
+    );
+    handler.active_touch_scroll = None;
+
+    handler.cursor_position = Some(thumb_cursor);
+    crate::runtime::input::scroll_region_lookup_probe::reset();
+    assert!(handler.sync_scrollbar_hover());
+    assert_eq!(
+        crate::runtime::input::scroll_region_lookup_probe::scrollbar_candidate_visits(),
+        1,
+        "scrollbar hover should skip regions without thumbs"
+    );
+    assert!(handler.begin_scrollbar_drag());
+
+    handler.cursor_position = Some(drag_cursor);
+    crate::runtime::input::scroll_region_lookup_probe::reset();
+    assert!(handler.handle_scrollbar_drag());
+    assert_eq!(
+        crate::runtime::input::scroll_region_lookup_probe::drag_id_fallback_visits(),
+        0,
+        "stable scrollbar drags should validate the retained region index in O(1)"
+    );
+}
+
+#[test]
 fn touch_scroll_inertia_advances_and_stops_within_bounds() {
     let invalidation = InvalidationSignal::new();
     let scroller: Element<TestVm> = ScrollView::new()

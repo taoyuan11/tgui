@@ -1,5 +1,5 @@
 use crate::foundation::binding::{
-    DependencyGraph, DependencyOwner, PropertySlot, TextChange, TextChangeSet,
+    DependencyGraph, DependencyOwner, PropertySlot, ScrollViewController, TextChange, TextChangeSet,
 };
 use crate::foundation::view_model::{Command, ValueCommand};
 use crate::media::MediaTextureKey;
@@ -50,6 +50,7 @@ pub(super) struct CachedScene<VM> {
     pub(super) text_scale_bits: u32,
     pub(super) animation_epoch: u64,
     pub(super) layout_animation_epoch: u64,
+    pub(super) accessibility_animation_epoch: u64,
     pub(super) scroll_epoch: u64,
     pub(super) hover_epoch: u64,
     pub(super) text_input_epoch: u64,
@@ -72,8 +73,15 @@ pub(super) struct CachedScene<VM> {
         HashMap<MediaTextureBindingSlot, MediaTextureBindingIndex>,
     pub(super) caret_decoration: Option<CaretDecorationBinding>,
     pub(super) text_input_slot_bindings: HashMap<WidgetId, TextInputSlotBinding>,
+    pub(super) scroll_view_controller_bindings: Vec<ScrollViewControllerBinding>,
     pub(super) dependencies: DependencyGraph,
     pub(super) strict_capability_report: Option<StrictCapabilityReport>,
+}
+
+pub(super) struct ScrollViewControllerBinding {
+    pub(super) widget_id: WidgetId,
+    pub(super) scroll_region_index: usize,
+    pub(super) controller: ScrollViewController,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -240,6 +248,7 @@ pub(super) struct TextInputBufferState {
     pub(super) external_value: String,
     pub(super) external_revision: u64,
     pub(super) current_text: String,
+    pub(super) current_text_is_ascii: bool,
     pub(super) display_text: String,
     pub(super) rope: Rope,
     pub(super) editor: Editor<'static>,
@@ -255,6 +264,7 @@ impl TextInputBufferState {
             external_value: resolved_value.clone(),
             external_revision: revision,
             current_text: resolved_value.clone(),
+            current_text_is_ascii: resolved_value.is_ascii(),
             display_text: resolved_value.clone(),
             rope: Rope::from_str(&resolved_value),
             editor,
@@ -774,6 +784,10 @@ impl TooltipState {
 #[derive(Clone, Copy)]
 pub(super) struct ScrollbarDrag {
     pub(super) handle: ScrollbarHandle,
+    /// Index of `handle.id` in the scene that started (or last rebound) this drag.
+    /// Stable retained frames can validate the handle in O(1); structural scene changes
+    /// fall back to the exact id/geometry scans before updating this hint.
+    pub(super) scroll_region_index: usize,
     pub(super) start_cursor: Point,
     pub(super) start_scroll_offset: Point,
     pub(super) track: Rect,

@@ -203,11 +203,16 @@ fn default_select_style(
     )
 }
 
+mod avatar_tests;
+mod badge_breadcrumb_tests;
 mod binding_children;
 mod binding_scope_tests;
 mod button_switch_slider_tests;
 mod canvas_tests;
+mod card_tests;
+mod carousel_tests;
 mod collapse_tests;
+mod combobox_tests;
 mod command_video_tests;
 mod controls_tests;
 mod dependency_tests;
@@ -220,7 +225,11 @@ mod menu_tests;
 mod modal_tests;
 mod popover_tests;
 mod portal_tests;
+mod rating_tests;
+mod rich_text_splitter_tests;
+mod scene_layout_patch_tests;
 mod select_tests;
+mod skeleton_tests;
 mod table_tests;
 mod tabs_tests;
 mod text_and_background;

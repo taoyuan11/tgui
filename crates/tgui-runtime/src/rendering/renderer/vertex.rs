@@ -6,8 +6,8 @@ use crate::ui::widget::{
 
 mod clip;
 
-pub(super) use self::clip::physical_mesh_clip_mask_data;
 use self::clip::{logical_clip_mask_data, physical_clip_mask_at_position, physical_clip_mask_data};
+pub(super) use self::clip::{physical_mesh_clip_mask_data, MeshClipMaskUniformData};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) struct VertexViewport {
@@ -74,6 +74,7 @@ pub(super) struct TextQuadSpec {
     pub(super) corner_radius: f32,
     pub(super) clip_mask: Option<ClipMask>,
     pub(super) opacity: f32,
+    pub(super) tint: [u8; 4],
 }
 
 #[derive(Clone, Copy)]
@@ -84,6 +85,7 @@ pub(super) struct TextTransformSpec {
     pub(super) corner_radius: f32,
     pub(super) clip_mask: Option<ClipMask>,
     pub(super) opacity: f32,
+    pub(super) tint: [u8; 4],
 }
 
 #[repr(C)]
@@ -446,11 +448,12 @@ pub(super) struct TextVertex {
     clip_corner_radius: f32,
     clip_enabled: f32,
     opacity: f32,
+    tint: [u8; 4],
 }
 
 impl TextVertex {
     pub(super) fn layout<'a>() -> wgpu::VertexBufferLayout<'a> {
-        const ATTRIBUTES: [wgpu::VertexAttribute; 10] = wgpu::vertex_attr_array![
+        const ATTRIBUTES: [wgpu::VertexAttribute; 11] = wgpu::vertex_attr_array![
             0 => Float32x2,
             1 => Float32x2,
             2 => Float32x2,
@@ -460,7 +463,8 @@ impl TextVertex {
             6 => Float32x2,
             7 => Float32,
             8 => Float32,
-            9 => Float32
+            9 => Float32,
+            10 => Unorm8x4
         ];
         wgpu::VertexBufferLayout {
             array_stride: std::mem::size_of::<Self>() as u64,
@@ -485,6 +489,7 @@ impl TextVertex {
                 corner_radius: spec.corner_radius,
                 clip_mask: spec.clip_mask,
                 opacity: spec.opacity,
+                tint: spec.tint,
             },
             viewport,
         )
@@ -498,6 +503,7 @@ impl TextVertex {
             corner_radius,
             clip_mask,
             opacity,
+            tint,
         } = spec;
         let scale_factor = viewport.scale_factor;
         let rect_width = rect.width.get();
@@ -533,6 +539,7 @@ impl TextVertex {
                 clip_corner_radius: clip_mask.clip_corner_radius,
                 clip_enabled: clip_mask.clip_enabled,
                 opacity,
+                tint,
             }
         };
 
@@ -599,6 +606,7 @@ mod tests {
                 corner_radius: 0.0,
                 clip_mask: None,
                 opacity: 1.0,
+                tint: [255; 4],
             },
             viewport(physical_width, physical_height, scale_factor),
         );
@@ -627,11 +635,30 @@ mod tests {
                 corner_radius: 0.0,
                 clip_mask: None,
                 opacity: 0.25,
+                tint: [255; 4],
             },
             VertexViewport::new(100.0, 50.0, 100.0, 50.0, 1.0),
         );
 
         assert!(quad.iter().all(|vertex| vertex.opacity == 0.25));
+    }
+
+    #[test]
+    fn quad_preserves_compact_unorm_tint() {
+        let tint = [17, 91, 203, 244];
+        let quad = TextVertex::quad(
+            TextQuadSpec {
+                rect: Rect::new(0.0, 0.0, 100.0, 50.0),
+                uv_rect: None,
+                corner_radius: 0.0,
+                clip_mask: None,
+                opacity: 1.0,
+                tint,
+            },
+            VertexViewport::new(100.0, 50.0, 100.0, 50.0, 1.0),
+        );
+        assert!(quad.iter().all(|vertex| vertex.tint == tint));
+        assert_eq!(std::mem::size_of::<TextVertex>(), 68);
     }
 
     #[test]
@@ -649,6 +676,7 @@ mod tests {
                 corner_radius: 0.0,
                 clip_mask: None,
                 opacity: 0.8,
+                tint: [255; 4],
             },
             VertexViewport::new(100.0, 100.0, 200.0, 200.0, 2.0),
         );

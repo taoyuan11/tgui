@@ -321,6 +321,59 @@ fn removing_opaque_dependency_subtree_clears_global_fallback() {
 }
 
 #[test]
+fn scene_patch_focus_mismatch_restores_moved_computed_scene() {
+    let invalidation = InvalidationSignal::new();
+    let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+    let visible = context.state(true);
+    let input: Element<TestVm> = Input::new("focused").into();
+    let input_id = input.id;
+    let tree = WidgetTree::new_legacy(Stack::<TestVm>::new().dynamic_child(
+        visible.signal().map_unchecked(move |visible| {
+            if visible {
+                input.clone()
+            } else {
+                Text::new("fallback").into()
+            }
+        }),
+    ));
+    let mut handler = test_handler(Some(tree), invalidation);
+    handler.focused_widget = Some(FocusedWidget {
+        widget_id: input_id,
+        scope_path: Vec::new(),
+        on_blur: None,
+    });
+
+    let _ = handler.computed_scene();
+    let root_id = handler
+        .cached_scene
+        .as_ref()
+        .and_then(|cache| cache.layout.as_ref())
+        .expect("cached layout should exist")
+        .root_id();
+
+    visible.set(false);
+    assert!(handler.patch_cached_layout_for_roots(&[root_id], Instant::now()));
+    assert!(
+        !handler.patch_cached_scene_for_roots(&[root_id], Instant::now(), true),
+        "removing the focused input should force the caller to reconcile focus"
+    );
+
+    let cached = handler
+        .cached_scene
+        .as_ref()
+        .expect("failed patch should preserve the cache shell");
+    assert!(
+        cached
+            .computed
+            .scene
+            .texts
+            .iter()
+            .any(|text| text.content.as_ref() == "fallback"),
+        "the moved computed scene must be restored before the failure is returned"
+    );
+}
+
+#[test]
 fn removing_dynamic_child_clears_reactive_owner_subscriptions() {
     let invalidation = InvalidationSignal::new();
     let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
@@ -5458,6 +5511,93 @@ fn animated_gif_runtime_advances_retained_texture_slot() {
 // 的渲染命令流都逐项等价。快路径只是把「整树重收集」收窄成「只重收集滚动子树」，
 // 用同一个 collect 函数，因此结果必须 byte-identical。探针确认确实走了快路径。
 // ---------------------------------------------------------------------------
+
+#[test]
+fn scroll_view_controller_binding_cache_tracks_dynamic_patch_add_and_remove() {
+    let invalidation = InvalidationSignal::new();
+    let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+    let visible = context.state(false);
+    let controller = ScrollViewController::new(&context);
+    let dynamic_controller = controller.clone();
+    let tree = WidgetTree::new_legacy(
+        Stack::<TestVm>::new().dynamic_child(visible.signal().map_unchecked(
+            move |visible| -> Element<TestVm> {
+                if visible {
+                    ScrollView::new()
+                        .size(dp(120.0), dp(80.0))
+                        .controller(dynamic_controller.clone())
+                        .child(Stack::new().size(dp(120.0), dp(260.0)))
+                        .into()
+                } else {
+                    Text::new("no controller").key("no-controller").into()
+                }
+            },
+        )),
+    );
+    let mut handler = test_handler(Some(tree), invalidation);
+    let _ = handler.computed_scene();
+    let root_id = handler
+        .cached_scene
+        .as_ref()
+        .and_then(|cached| cached.layout.as_ref())
+        .expect("cached layout")
+        .root_id();
+    assert!(handler
+        .cached_scene
+        .as_ref()
+        .expect("cached scene")
+        .scroll_view_controller_bindings
+        .is_empty());
+
+    visible.set(true);
+    assert!(handler.patch_cached_layout_for_roots(&[root_id], Instant::now()));
+    assert!(handler.patch_cached_scene_for_roots(&[root_id], Instant::now(), true));
+    assert_eq!(
+        handler
+            .cached_scene
+            .as_ref()
+            .expect("patched cached scene")
+            .scroll_view_controller_bindings
+            .len(),
+        1,
+        "adding a controlled scroll view must refresh the retained binding cache"
+    );
+
+    let _ = handler.computed_scene();
+    let scroll_id = controller
+        .widget_id()
+        .expect("controller should bind after patch");
+    controller.jump_to(Point::new(Dp::ZERO, dp(48.0)));
+    let _ = handler.computed_scene();
+    assert_eq!(
+        handler
+            .scroll_states
+            .get(&scroll_id)
+            .copied()
+            .unwrap_or(Point::ZERO)
+            .y,
+        dp(48.0),
+        "immediate requests must retain their existing semantics through the cache"
+    );
+
+    visible.set(false);
+    assert!(handler.patch_cached_layout_for_roots(&[root_id], Instant::now()));
+    assert!(handler.patch_cached_scene_for_roots(&[root_id], Instant::now(), true));
+    assert!(handler
+        .cached_scene
+        .as_ref()
+        .expect("patched cached scene")
+        .scroll_view_controller_bindings
+        .is_empty());
+    crate::runtime::scene_runtime::scroll_view_binding_probe::reset();
+    controller.scroll_to(Point::new(Dp::ZERO, dp(72.0)));
+    let _ = handler.computed_scene();
+    assert_eq!(
+        crate::runtime::scene_runtime::scroll_view_binding_probe::consume_binding_visits(),
+        0,
+        "removed controllers must not remain in the retained binding cache"
+    );
+}
 
 /// 构造一个内容溢出、可纵向滚动的容器，内部放三个不同色块以便指纹比对。
 fn scrollable_color_tree() -> WidgetTree<TestVm> {

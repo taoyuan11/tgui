@@ -3,8 +3,7 @@ use std::sync::Arc;
 use crate::foundation::binding::{TextChangeSet, TextController};
 use crate::foundation::view_model::{Command, ValueCommand};
 use crate::theme::{StyleContext, WidgetState};
-use crate::ui::layout::{Insets, LayoutStyle, Value};
-use crate::ui::theme::Theme;
+use crate::ui::layout::{pct, Insets, LayoutStyle, Length, Value};
 use crate::ui::unit::{dp, Dp};
 
 use super::common::VisualStyle;
@@ -150,9 +149,9 @@ impl<VM> Combobox<VM> {
 
 impl<VM: 'static> From<Combobox<VM>> for Element<VM> {
     fn from(combo: Combobox<VM>) -> Self {
-        let layout_style = resolve_combobox_style_for_layout(combo.style.as_ref());
         let query = combo.controller.text();
         let options = filtered_options(combo.options.resolve(), &query, combo.filter.as_ref());
+        let menu_width_override = combo.layout.width.clone();
         let on_text_change = combo.on_change.clone().map({
             let controller = combo.controller.clone();
             move |command| {
@@ -169,9 +168,21 @@ impl<VM: 'static> From<Combobox<VM>> for Element<VM> {
             }
         });
         let input_style = combo.style.clone();
+        let input_layout_style = combo.style.clone();
         let mut input = Input::new(combo.controller.clone())
             .placeholder(combo.placeholder.clone())
-            .width(layout_style.width)
+            .runtime_layout(move |layout, context, style_sheet, visual| {
+                let resolved = resolve_combobox_style_with_sheet(
+                    input_layout_style.as_ref(),
+                    context,
+                    style_sheet,
+                    visual,
+                    WidgetState::default(),
+                );
+                if layout.width.is_none() {
+                    layout.width = Some(Value::Static(Length::Px(resolved.width)));
+                }
+            })
             .style_full_with_style_sheet(move |context, style_sheet, visual, state| {
                 let resolved = resolve_combobox_style_with_sheet(
                     input_style.as_ref(),
@@ -194,17 +205,45 @@ impl<VM: 'static> From<Combobox<VM>> for Element<VM> {
         }
         let trigger: Element<VM> = with_visual_identity(input.into(), &combo.visual);
         let content: Element<VM> = if options.is_empty() {
-            let style = combo.style.clone();
+            let text_style = combo.style.clone();
+            let surface_style = combo.style.clone();
+            let layout_style = combo.style.clone();
+            let menu_width_override = menu_width_override.clone();
             with_visual_identity(
                 Stack::new()
-                    .width(layout_style.menu_width)
-                    .padding(Insets::all(dp(10.0)))
+                    .runtime_layout(move |layout, container, context, style_sheet, visual| {
+                        let resolved = resolve_combobox_style_with_sheet(
+                            layout_style.as_ref(),
+                            context,
+                            style_sheet,
+                            visual,
+                            WidgetState::default(),
+                        );
+                        if layout.width.is_none() {
+                            layout.width = menu_width_override
+                                .clone()
+                                .or_else(|| Some(Value::Static(Length::Px(resolved.menu_width))));
+                        }
+                        container.padding = Some(Value::Static(Insets::all(dp(resolved
+                            .option_height
+                            .get()
+                            * 0.25))));
+                    })
+                    .style_full_with_style_sheet(move |context, style_sheet, visual, state| {
+                        combobox_menu_surface_style(
+                            surface_style.as_ref(),
+                            context,
+                            style_sheet,
+                            visual,
+                            state,
+                        )
+                    })
                     .child(with_visual_identity(
                         Text::new("No results")
                             .style_full_with_style_sheet(
                                 move |context, style_sheet, visual, state| {
                                     let resolved = resolve_combobox_style_with_sheet(
-                                        style.as_ref(),
+                                        text_style.as_ref(),
                                         context,
                                         style_sheet,
                                         visual,
@@ -224,28 +263,35 @@ impl<VM: 'static> From<Combobox<VM>> for Element<VM> {
                 &combo.visual,
             )
         } else {
-            let height = dp(layout_style.option_height.get()
-                * layout_style.max_visible_options.min(options.len()).max(1) as f32);
+            let option_count = options.len();
             let controller = combo.controller.clone();
             let on_change = combo.on_change.clone();
             let on_open_change = combo.on_open_change.clone();
-            let option_height = layout_style.option_height;
-            let menu_width = layout_style.menu_width;
             let combo_visual = combo.visual.clone();
             let combo_style = combo.style.clone();
-            let menu: Element<VM> =
-                VirtualList::new(options, move |_index, option: &ComboboxOption| {
+            let menu_layout_style = combo.style.clone();
+            let menu_width_override = menu_width_override.clone();
+            let menu: Element<VM> = VirtualList::new_with_style_context(
+                options,
+                move |_index, option: &ComboboxOption, context, style_sheet| {
                     let controller = controller.clone();
                     let on_change = on_change.clone();
                     let on_open_change = on_open_change.clone();
                     let key = option.key.clone();
                     let label = option.label.clone();
                     let button_style = combo_style.clone();
+                    let resolved = resolve_combobox_style_with_sheet(
+                        button_style.as_ref(),
+                        &context,
+                        style_sheet,
+                        &combo_visual,
+                        WidgetState::default(),
+                    );
                     let button = Button::new(label.clone())
                         .ghost()
                         .disable(option.disabled)
-                        .width(menu_width)
-                        .height(option_height);
+                        .width(pct(100.0))
+                        .height(resolved.option_height);
                     let variant = button.variant();
                     with_visual_identity(
                         button
@@ -285,43 +331,56 @@ impl<VM: 'static> From<Combobox<VM>> for Element<VM> {
                             .into(),
                         &combo_visual,
                     )
-                })
-                .item_layout(ItemLayout::Fixed {
-                    item_extent: layout_style.option_height,
-                    spacing: Dp::ZERO,
-                    overscan: 3,
-                })
-                .width(layout_style.menu_width)
-                .height(height)
-                .style_full_with_style_sheet({
-                    let style = combo.style.clone();
-                    move |context, style_sheet, visual, state| {
-                        let resolved = resolve_combobox_style_with_sheet(
-                            style.as_ref(),
-                            context,
-                            style_sheet,
-                            visual,
-                            state,
-                        );
-                        let mut container = ContainerStyle::default_for_theme(context.theme);
-                        container.surface.background =
-                            Some(Value::Static(context.theme.colors.surface_overlay));
-                        container.surface.border_radius =
-                            Some(Value::Static(context.theme.radius.md));
-                        container.surface.border_color =
-                            Some(Value::Static(context.theme.colors.outline_muted));
-                        container.surface.border_width =
-                            Some(Value::Static(context.theme.border.thin));
-                        let _ = resolved.highlight;
-                        container
-                    }
-                })
-                .into();
+                },
+            )
+            .item_layout(ItemLayout::Fixed {
+                item_extent: dp(40.0),
+                spacing: Dp::ZERO,
+                overscan: 3,
+            })
+            .runtime_layout(move |layout, item_layout, context, style_sheet, visual| {
+                let resolved = resolve_combobox_style_with_sheet(
+                    menu_layout_style.as_ref(),
+                    context,
+                    style_sheet,
+                    visual,
+                    WidgetState::default(),
+                );
+                if layout.width.is_none() {
+                    layout.width = menu_width_override
+                        .clone()
+                        .or_else(|| Some(Value::Static(Length::Px(resolved.menu_width))));
+                }
+                if layout.height.is_none() {
+                    let visible = resolved.max_visible_options.min(option_count).max(1);
+                    layout.height = Some(Value::Static(Length::Px(dp(resolved
+                        .option_height
+                        .get()
+                        * visible as f32))));
+                }
+                *item_layout = item_layout.with_estimate(resolved.option_height);
+            })
+            .style_full_with_style_sheet({
+                let style = combo.style.clone();
+                move |context, style_sheet, visual, state| {
+                    combobox_menu_surface_style(style.as_ref(), context, style_sheet, visual, state)
+                }
+            })
+            .into();
             with_visual_identity(menu, &combo.visual)
         };
         let popover = Popover::new(trigger)
             .content(content)
             .open(combo.open)
+            .style(|style, _| {
+                style.background = Value::Static(crate::foundation::color::Color::TRANSPARENT);
+                style.border = Value::Static(crate::foundation::color::Color::TRANSPARENT);
+                style.border_width = Value::Static(Dp::ZERO);
+                style.radius = Value::Static(Dp::ZERO);
+                style.shadow = Default::default();
+                style.padding = Insets::all(Dp::ZERO);
+                style.min_width = Dp::ZERO;
+            })
             .match_anchor_width(true);
         let mut root: Element<VM> = if let Some(command) = combo.on_open_change {
             popover.on_open_change(command).into()
@@ -353,20 +412,6 @@ fn filtered_options(
         .collect()
 }
 
-fn resolve_combobox_style(
-    style: Option<&StyleResolver<ComboboxStyle>>,
-    context: &StyleContext<'_>,
-) -> ComboboxStyle {
-    let style_sheet = StyleSheet::default();
-    resolve_combobox_style_with_sheet(
-        style,
-        context,
-        &style_sheet,
-        &VisualStyle::default(),
-        WidgetState::default(),
-    )
-}
-
 fn resolve_combobox_style_with_sheet(
     style: Option<&StyleResolver<ComboboxStyle>>,
     context: &StyleContext<'_>,
@@ -389,10 +434,19 @@ fn resolve_combobox_style_with_sheet(
     )
 }
 
-fn resolve_combobox_style_for_layout(
+fn combobox_menu_surface_style(
     style: Option<&StyleResolver<ComboboxStyle>>,
-) -> ComboboxStyle {
-    let theme = Theme::default();
-    let context = StyleContext::from_theme(&theme);
-    resolve_combobox_style(style, &context)
+    context: &StyleContext<'_>,
+    style_sheet: &StyleSheet,
+    visual: &VisualStyle,
+    state: WidgetState,
+) -> ContainerStyle {
+    let _ = resolve_combobox_style_with_sheet(style, context, style_sheet, visual, state);
+    let mut container = ContainerStyle::default_for_theme(context.theme);
+    container.surface.background = Some(Value::Static(context.theme.colors.surface_overlay));
+    container.surface.border_radius = Some(Value::Static(context.theme.radius.lg));
+    container.surface.border_color = Some(Value::Static(context.theme.colors.outline_muted));
+    container.surface.border_width = Some(Value::Static(context.theme.border.thin));
+    container.surface.shadow = Some(Value::Static(context.theme.elevation.lg.clone()));
+    container
 }

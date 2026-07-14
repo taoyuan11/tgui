@@ -1,6 +1,8 @@
 use crate::ui::layout::Insets;
 use crate::ui::unit::Dp;
 
+pub(crate) const CLIP_CULL_MARGIN: f32 = 1.0;
+
 /// 表示组件坐标系中的二维点。
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Point {
@@ -101,11 +103,10 @@ impl Rect {
     /// for which this holds is scissored to zero pixels by the renderer, so dropping
     /// it from the scene is rendering-identical.
     pub(crate) fn fully_outside(self, clip: Rect) -> bool {
-        const MARGIN: f32 = 1.0;
-        self.right() < clip.x - MARGIN
-            || self.x > clip.right() + MARGIN
-            || self.bottom() < clip.y - MARGIN
-            || self.y > clip.bottom() + MARGIN
+        self.right() < clip.x - CLIP_CULL_MARGIN
+            || self.x > clip.right() + CLIP_CULL_MARGIN
+            || self.bottom() < clip.y - CLIP_CULL_MARGIN
+            || self.y > clip.bottom() + CLIP_CULL_MARGIN
     }
 }
 

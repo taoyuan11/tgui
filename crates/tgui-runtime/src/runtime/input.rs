@@ -7,6 +7,8 @@ mod focus;
 mod gesture;
 mod hovering;
 mod interaction;
+#[cfg(test)]
+pub(crate) use interaction::scroll_region_lookup_probe;
 mod key_repeat;
 mod list;
 mod navigation;
@@ -42,7 +44,9 @@ use crate::platform::event::{
 };
 use crate::platform::keyboard::{Key, KeyCode, NamedKey, PhysicalKey};
 use crate::platform::window::ImeRequestData;
-use crate::text::rope_buffer::RopeBuffer;
+use crate::text::rope_buffer::{
+    next_grapheme_boundary_byte, prev_grapheme_boundary_byte, RopeBuffer,
+};
 use crate::ui::unit::{Dp, UnitContext};
 use crate::ui::widget::{
     CanvasItemInteractionHandlers, CanvasMouseButton, HitInteraction, InteractionHandlers, Point,
@@ -346,15 +350,15 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 } else {
                     let extend = self.modifiers.shift_key();
                     self.move_focused_input_cursor(
-                        |buffer: &RopeBuffer, state: &TextEditState| {
+                        |text: &str, is_ascii: bool, state: &TextEditState| {
                             if let Some((start, _)) = state.selection_range() {
                                 if extend {
-                                    buffer.prev_grapheme_boundary_byte(state.cursor)
+                                    prev_grapheme_boundary_byte(text, state.cursor, is_ascii)
                                 } else {
                                     start
                                 }
                             } else {
-                                buffer.prev_grapheme_boundary_byte(state.cursor)
+                                prev_grapheme_boundary_byte(text, state.cursor, is_ascii)
                             }
                         },
                         extend,
@@ -375,15 +379,15 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 } else {
                     let extend = self.modifiers.shift_key();
                     self.move_focused_input_cursor(
-                        |buffer: &RopeBuffer, state: &TextEditState| {
+                        |text: &str, is_ascii: bool, state: &TextEditState| {
                             if let Some((_, end)) = state.selection_range() {
                                 if extend {
-                                    buffer.next_grapheme_boundary_byte(state.cursor)
+                                    next_grapheme_boundary_byte(text, state.cursor, is_ascii)
                                 } else {
                                     end
                                 }
                             } else {
-                                buffer.next_grapheme_boundary_byte(state.cursor)
+                                next_grapheme_boundary_byte(text, state.cursor, is_ascii)
                             }
                         },
                         extend,
@@ -423,7 +427,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     || self.move_focused_list_item_to_edge(false, self.modifiers.shift_key())
                     || self.enter_focused_list_root(false, self.modifiers.shift_key())
                     || self.adjust_focused_slider(0, Some(false))
-                    || self.move_focused_input_cursor(|_, _| 0, self.modifiers.shift_key())
+                    || self.move_focused_input_cursor(|_, _, _| 0, self.modifiers.shift_key())
                     || self.scroll_focused_region_to_edge(false)
             }
             PhysicalKey::Code(KeyCode::End) => {
@@ -435,7 +439,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     || self.enter_focused_list_root(true, self.modifiers.shift_key())
                     || self.adjust_focused_slider(0, Some(true))
                     || self.move_focused_input_cursor(
-                        |buffer: &RopeBuffer, _state: &TextEditState| buffer.len_bytes(),
+                        |text: &str, _is_ascii: bool, _state: &TextEditState| text.len(),
                         self.modifiers.shift_key(),
                     )
                     || self.scroll_focused_region_to_edge(true)

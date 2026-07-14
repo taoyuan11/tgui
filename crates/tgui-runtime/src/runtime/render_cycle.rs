@@ -167,6 +167,10 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             return;
         };
 
+        // The system appearance may have changed while the event loop was suspended and no
+        // `ThemeChanged` event could be delivered. Resume is the one event-driven re-query.
+        let window_theme = resolve_window_theme(Some(window.as_ref()));
+        self.initialize_platform_window_binding_state(window_theme);
         self.sync_theme_binding();
         self.invalidate_scene_with_reason("resume_existing_window");
         let clear_color =

@@ -1,10 +1,10 @@
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use crate::animation::Transition;
 use crate::foundation::view_model::{Command, ValueCommand};
 use crate::theme::{StyleContext, WidgetState};
 use crate::ui::layout::{Insets, LayoutStyle, Length, Overflow, Value};
-use crate::ui::theme::Theme;
 use crate::ui::unit::{dp, Dp};
 
 use super::common::VisualStyle;
@@ -18,7 +18,6 @@ use super::style::{
 };
 use super::{CursorStyle, Flex, Icon, Stack, Text, WidgetKey};
 
-const COLLAPSE_HEADER_MIN_HEIGHT: Dp = dp(40.0);
 const COLLAPSE_ICON_SIZE: Dp = dp(20.0);
 const COLLAPSE_PANEL_MAX_HEIGHT: Dp = dp(320.0);
 const COLLAPSE_TRANSITION_MS: u64 = 180;
@@ -82,7 +81,6 @@ impl<VM> Collapse<VM> {
 
 impl<VM: 'static> From<Collapse<VM>> for Element<VM> {
     fn from(collapse: Collapse<VM>) -> Self {
-        let layout_style = resolve_collapse_style_for_layout(collapse.style.as_ref());
         let expanded = collapse.expanded.resolve();
         let expanded_for_click = collapse.expanded.clone();
         let progress = collapse_progress_value(collapse.expanded.clone());
@@ -114,10 +112,31 @@ impl<VM: 'static> From<Collapse<VM>> for Element<VM> {
             });
         let header = Flex::horizontal()
             .width(Length::Percent(1.0))
-            .min_height(COLLAPSE_HEADER_MIN_HEIGHT)
-            .padding(layout_style.padding)
-            .gap(dp(8.0))
             .align(crate::ui::layout::Align::Center)
+            .runtime_layout({
+                let header_style = collapse.style.clone();
+                move |layout, container, context, style_sheet, visual| {
+                    let resolved = resolve_collapse_style_with_sheet(
+                        header_style.as_ref(),
+                        context,
+                        style_sheet,
+                        visual,
+                        WidgetState::default(),
+                    );
+                    layout.min_height.get_or_insert_with(|| {
+                        Value::Static(Length::Px(resolved.header_min_height))
+                    });
+                    container
+                        .padding
+                        .get_or_insert_with(|| Value::Static(resolved.padding));
+                    if matches!(
+                        container.gap,
+                        Value::Static(Length::Px(value)) if value == Dp::ZERO
+                    ) {
+                        container.gap = Value::Static(Length::Px(resolved.header_gap));
+                    }
+                }
+            })
             .style_full_with_style_sheet(move |context, style_sheet, visual, state| {
                 let resolved = resolve_collapse_style_with_sheet(
                     header_style.as_ref(),
@@ -166,11 +185,45 @@ impl<VM: 'static> From<Collapse<VM>> for Element<VM> {
             vec![with_visual_identity(header.into(), &header_identity)];
         let style = collapse.style.clone();
         let panel_identity = collapse.visual.clone();
-        let panel_padding = collapse_progress_padding(progress.clone(), layout_style.padding);
+        let panel_padding_cache = Arc::new(Mutex::new(None::<(Insets, Value<Insets>)>));
         children.push(with_visual_identity(
             Stack::new()
                 .overflow(Overflow::Hidden)
-                .padding(panel_padding)
+                .runtime_layout({
+                    let style = collapse.style.clone();
+                    let progress = progress.clone();
+                    let padding_cache = panel_padding_cache.clone();
+                    move |_layout, container, context, style_sheet, visual| {
+                        let resolved = resolve_collapse_style_with_sheet(
+                            style.as_ref(),
+                            context,
+                            style_sheet,
+                            visual,
+                            WidgetState::default(),
+                        );
+                        if container.padding.is_none() {
+                            let mut cache = padding_cache
+                                .lock()
+                                .unwrap_or_else(|poisoned| poisoned.into_inner());
+                            let padding = match cache.as_ref() {
+                                Some((cached_padding, value))
+                                    if *cached_padding == resolved.padding =>
+                                {
+                                    value.clone()
+                                }
+                                _ => {
+                                    let value = collapse_progress_padding(
+                                        progress.clone(),
+                                        resolved.padding,
+                                    );
+                                    *cache = Some((resolved.padding, value.clone()));
+                                    value
+                                }
+                            };
+                            container.padding = Some(padding);
+                        }
+                    }
+                })
                 .max_height(collapse_progress_max_height(progress.clone()))
                 .opacity(progress)
                 .style_full_with_style_sheet(move |context, style_sheet, visual, state| {
@@ -290,7 +343,6 @@ impl<VM> Accordion<VM> {
 
 impl<VM: 'static> From<Accordion<VM>> for Element<VM> {
     fn from(accordion: Accordion<VM>) -> Self {
-        let layout_style = resolve_collapse_style_for_layout(accordion.style.as_ref());
         let items = accordion
             .items
             .into_iter()
@@ -319,26 +371,32 @@ impl<VM: 'static> From<Accordion<VM>> for Element<VM> {
                 .into()
             })
             .collect::<Vec<Element<VM>>>();
-        let mut root: Element<VM> = Flex::vertical().gap(layout_style.gap).child(items).into();
+        let mut root: Element<VM> = Flex::vertical()
+            .runtime_layout({
+                let style = accordion.style.clone();
+                move |_layout, container, context, style_sheet, visual| {
+                    let resolved = resolve_collapse_style_with_sheet(
+                        style.as_ref(),
+                        context,
+                        style_sheet,
+                        visual,
+                        WidgetState::default(),
+                    );
+                    if matches!(
+                        container.gap,
+                        Value::Static(Length::Px(value)) if value == Dp::ZERO
+                    ) {
+                        container.gap = Value::Static(Length::Px(resolved.gap));
+                    }
+                }
+            })
+            .child(items)
+            .into();
         root.key = accordion.key;
         root = with_visual_identity(root, &accordion.visual);
         root.layout = merge_layout(root.layout, accordion.layout);
         root
     }
-}
-
-fn resolve_collapse_style(
-    style: Option<&StyleResolver<CollapseStyle>>,
-    context: &StyleContext<'_>,
-) -> CollapseStyle {
-    let style_sheet = StyleSheet::default();
-    resolve_collapse_style_with_sheet(
-        style,
-        context,
-        &style_sheet,
-        &VisualStyle::default(),
-        WidgetState::default(),
-    )
 }
 
 fn resolve_collapse_style_with_sheet(
@@ -361,14 +419,6 @@ fn resolve_collapse_style_with_sheet(
             sheet.apply_collapse_state(base, context, visual, state)
         },
     )
-}
-
-fn resolve_collapse_style_for_layout(
-    style: Option<&StyleResolver<CollapseStyle>>,
-) -> CollapseStyle {
-    let theme = Theme::default();
-    let context = StyleContext::from_theme(&theme);
-    resolve_collapse_style(style, &context)
 }
 
 fn collapse_progress_value(expanded: Value<bool>) -> Value<f32> {

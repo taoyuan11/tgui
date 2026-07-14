@@ -1,7 +1,6 @@
 use crate::foundation::view_model::Command;
 use crate::theme::{StyleContext, WidgetState};
-use crate::ui::layout::{LayoutStyle, Value};
-use crate::ui::theme::Theme;
+use crate::ui::layout::{LayoutStyle, Length, Value};
 
 use super::common::VisualStyle;
 use super::core::Element;
@@ -93,7 +92,6 @@ impl<VM> Default for Card<VM> {
 
 impl<VM: 'static> From<Card<VM>> for Element<VM> {
     fn from(card: Card<VM>) -> Self {
-        let layout_style = resolve_card_style_for_layout(card.style.as_ref());
         let mut children = Vec::new();
         if let Some(header) = card.header {
             children.push(header);
@@ -106,9 +104,19 @@ impl<VM: 'static> From<Card<VM>> for Element<VM> {
             children.push(footer);
         }
         let style = card.style.clone();
+        let layout_style = card.style.clone();
         let mut root: Element<VM> = Flex::vertical()
-            .gap(layout_style.gap)
-            .padding(layout_style.padding)
+            .runtime_layout(move |_layout, container, context, style_sheet, visual| {
+                let resolved = resolve_card_style_with_sheet(
+                    layout_style.as_ref(),
+                    context,
+                    style_sheet,
+                    visual,
+                    WidgetState::default(),
+                );
+                container.gap = Value::Static(Length::Px(resolved.gap));
+                container.padding = Some(Value::Static(resolved.padding));
+            })
             .style_full_with_style_sheet(move |context, style_sheet, visual, state| {
                 let resolved = resolve_card_style_with_sheet(
                     style.as_ref(),
@@ -139,20 +147,6 @@ impl<VM: 'static> From<Card<VM>> for Element<VM> {
     }
 }
 
-fn resolve_card_style(
-    style: Option<&StyleResolver<CardStyle>>,
-    context: &StyleContext<'_>,
-) -> CardStyle {
-    let style_sheet = StyleSheet::default();
-    resolve_card_style_with_sheet(
-        style,
-        context,
-        &style_sheet,
-        &VisualStyle::default(),
-        WidgetState::default(),
-    )
-}
-
 fn resolve_card_style_with_sheet(
     style: Option<&StyleResolver<CardStyle>>,
     context: &StyleContext<'_>,
@@ -171,10 +165,4 @@ fn resolve_card_style_with_sheet(
         |sheet, base, context, visual| sheet.apply_card(base, context, visual),
         |sheet, base, context, visual, state| sheet.apply_card_state(base, context, visual, state),
     )
-}
-
-fn resolve_card_style_for_layout(style: Option<&StyleResolver<CardStyle>>) -> CardStyle {
-    let theme = Theme::default();
-    let context = StyleContext::from_theme(&theme);
-    resolve_card_style(style, &context)
 }

@@ -206,6 +206,8 @@ impl<VM> ResolvedElement<VM> {
         Ok(LayoutNode {
             node,
             children: child_layouts,
+            cached_child_content_bounds: std::sync::OnceLock::new(),
+            cached_child_cull_index: std::sync::OnceLock::new(),
         })
     }
 

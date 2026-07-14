@@ -1,6 +1,8 @@
 use super::super::*;
 use super::shadow::{rasterize_rounded_rect_shadow, rounded_rect_shadow_cache_key, shadow_padding};
 use crate::media::TextureFrame;
+#[cfg(feature = "video")]
+use crate::media::{resolve_media_rect, RasterRequest};
 use std::sync::{Arc, OnceLock};
 
 fn transparent_media_texture() -> Arc<TextureFrame> {
@@ -23,21 +25,14 @@ pub(crate) fn push_media_texture_or_placeholder<VM>(
     computed: &mut ComputedScene<VM>,
     kind: &str,
 ) {
-    let metadata = context.media.image_snapshot(source, None);
-    let target_frame = resolve_media_rect(content_frame, metadata.intrinsic_size, fit);
-    let raster_request = RasterRequest::from_frame(target_frame, context.units.scale_factor());
+    let media_layout =
+        crate::media::MediaTextureLayout::new(content_frame, fit, context.units.scale_factor());
+    let (snapshot, target_frame, raster_request) = context
+        .media
+        .image_snapshot_for_layout(source, media_layout);
     let media_key =
         raster_request.map(|request| crate::media::MediaTextureKey::new(source.clone(), request));
-    let media_layout = Some(crate::media::MediaTextureLayout::new(
-        content_frame,
-        fit,
-        context.units.scale_factor(),
-    ));
-    let snapshot = if let Some(raster_request) = raster_request {
-        context.media.image_snapshot(source, Some(raster_request))
-    } else {
-        metadata
-    };
+    let media_layout = Some(media_layout);
 
     if let Some(texture) = snapshot.texture.as_ref() {
         if media_key.is_some() {
@@ -133,19 +128,12 @@ pub(crate) fn push_background_media_texture<VM>(
     context: &mut CollectContext<'_, '_>,
     computed: &mut ComputedScene<VM>,
 ) {
-    let metadata = context.media.image_snapshot(source, None);
-    let target_frame = resolve_media_rect(content_frame, metadata.intrinsic_size, fit);
-    let raster_request = RasterRequest::from_frame(target_frame, context.units.scale_factor());
-    let media_layout = Some(crate::media::MediaTextureLayout::new(
-        content_frame,
-        fit,
-        context.units.scale_factor(),
-    ));
-    let snapshot = if let Some(raster_request) = raster_request {
-        context.media.image_snapshot(source, Some(raster_request))
-    } else {
-        metadata
-    };
+    let media_layout =
+        crate::media::MediaTextureLayout::new(content_frame, fit, context.units.scale_factor());
+    let (snapshot, target_frame, raster_request) = context
+        .media
+        .image_snapshot_for_layout(source, media_layout);
+    let media_layout = Some(media_layout);
 
     if let Some(texture) = snapshot.texture.as_ref() {
         computed.scene.push_texture(TexturePrimitive {

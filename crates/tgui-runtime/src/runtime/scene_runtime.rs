@@ -41,6 +41,49 @@ pub(in crate::runtime) mod scroll_fast_path_probe {
     }
 }
 
+/// 测试探针：量化 controller 绑定索引的重建扫描量与缓存命中时的访问量。
+/// 仅测试构建编译，生产热路径零成本。
+#[cfg(test)]
+pub(in crate::runtime) mod scroll_view_binding_probe {
+    use std::cell::Cell;
+
+    thread_local! {
+        static REBUILD_REGION_VISITS: Cell<u64> = const { Cell::new(0) };
+        static CONSUME_BINDING_VISITS: Cell<u64> = const { Cell::new(0) };
+        static STALE_REBUILDS: Cell<u64> = const { Cell::new(0) };
+    }
+
+    pub(in crate::runtime) fn record_rebuild_region_visits(count: usize) {
+        REBUILD_REGION_VISITS.with(|value| value.set(value.get() + count as u64));
+    }
+
+    pub(in crate::runtime) fn record_consume_binding_visit() {
+        CONSUME_BINDING_VISITS.with(|value| value.set(value.get() + 1));
+    }
+
+    pub(in crate::runtime) fn record_stale_rebuild() {
+        STALE_REBUILDS.with(|value| value.set(value.get() + 1));
+    }
+
+    pub(in crate::runtime) fn reset() {
+        REBUILD_REGION_VISITS.with(|value| value.set(0));
+        CONSUME_BINDING_VISITS.with(|value| value.set(0));
+        STALE_REBUILDS.with(|value| value.set(0));
+    }
+
+    pub(in crate::runtime) fn rebuild_region_visits() -> u64 {
+        REBUILD_REGION_VISITS.with(Cell::get)
+    }
+
+    pub(in crate::runtime) fn consume_binding_visits() -> u64 {
+        CONSUME_BINDING_VISITS.with(Cell::get)
+    }
+
+    pub(in crate::runtime) fn stale_rebuilds() -> u64 {
+        STALE_REBUILDS.with(Cell::get)
+    }
+}
+
 fn gpu_scroll_clip_supported(clip_rect: Option<Rect>, region: ScrollRegion) -> bool {
     let Some(clip_rect) = clip_rect else {
         return false;
@@ -335,6 +378,9 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             &mut cached.computed.scroll_regions,
             hit_delta,
         );
+        // The retained GPU-scroll path updates hit rectangles in place. Drop the lazy spatial
+        // candidate cache before translating so the next pointer query rebuilds from new bounds.
+        cached.computed.invalidate_hit_test_index();
         translate_gpu_scroll_hits(&mut cached.computed.hit_regions, widget_id, hit_delta);
         for chunk in cached.scene_chunks.values_mut() {
             if let Some(region) = chunk
@@ -362,21 +408,11 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         true
     }
 
-    fn apply_scroll_view_controller_state(
+    fn apply_scroll_view_controller_requests(
         &mut self,
-        bindings: Vec<(WidgetId, ScrollRegion, ScrollViewController)>,
+        requests: SmallVec<[(WidgetId, ScrollRegion, ScrollViewController, ScrollRequest); 2]>,
     ) -> bool {
-        let mut changed = false;
-        let mut requests: Vec<(WidgetId, ScrollRegion, ScrollViewController, ScrollRequest)> =
-            Vec::new();
-        for (widget_id, region, controller) in bindings {
-            controller.bind_widget(widget_id);
-            controller.sync_offset(region.scroll_offset);
-            if let Some(request) = controller.take_request() {
-                requests.push((widget_id, region, controller, request));
-            }
-        }
-
+        let changed = !requests.is_empty();
         for (widget_id, region, controller, request) in requests {
             let max = region.max_offset();
             let target = Point::new(
@@ -393,10 +429,35 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 }
             }
             controller.clear_request(request);
-            changed = true;
         }
 
         changed
+    }
+
+    pub(super) fn rebuild_scroll_view_controller_bindings(&mut self) {
+        let Some(cached) = self.cached_scene.as_mut() else {
+            return;
+        };
+        cached.scroll_view_controller_bindings.clear();
+        let Some(layout) = cached.layout.as_ref() else {
+            return;
+        };
+        #[cfg(test)]
+        scroll_view_binding_probe::record_rebuild_region_visits(
+            cached.computed.scroll_regions.len(),
+        );
+        for (scroll_region_index, region) in cached.computed.scroll_regions.iter().enumerate() {
+            let Some(controller) = layout.scroll_view_controller(region.id).cloned() else {
+                continue;
+            };
+            cached.scroll_view_controller_bindings.push(
+                crate::runtime::state::ScrollViewControllerBinding {
+                    widget_id: region.id,
+                    scroll_region_index,
+                    controller,
+                },
+            );
+        }
     }
 
     fn virtual_scroll_scene_roots(
@@ -421,30 +482,51 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
     }
 
     fn consume_scroll_view_requests_from_cached_scene(&mut self) -> bool {
-        let bindings = if let Some(cached) = self.cached_scene.as_ref() {
-            if let Some(layout) = cached.layout.as_ref() {
-                cached
-                    .computed
-                    .scroll_regions
-                    .iter()
-                    .filter_map(|region| {
-                        let resolved = layout.resolved_widget(region.id)?;
-                        let crate::ui::widget::ResolvedWidgetKind::Container { layout, .. } =
-                            &resolved.kind
-                        else {
-                            return None;
-                        };
-                        let controller = layout.scroll_view.as_ref()?.controller.clone()?;
-                        Some((region.id, *region, controller))
-                    })
-                    .collect()
-            } else {
-                Vec::new()
-            }
-        } else {
-            Vec::new()
+        let cache_is_valid = self.cached_scene.as_ref().is_some_and(|cached| {
+            cached
+                .scroll_view_controller_bindings
+                .iter()
+                .all(|binding| {
+                    cached
+                        .computed
+                        .scroll_regions
+                        .get(binding.scroll_region_index)
+                        .is_some_and(|region| region.id == binding.widget_id)
+                })
+        });
+        if !cache_is_valid {
+            #[cfg(test)]
+            scroll_view_binding_probe::record_stale_rebuild();
+            self.rebuild_scroll_view_controller_bindings();
+        }
+
+        let mut requests = SmallVec::new();
+        let Some(cached) = self.cached_scene.as_ref() else {
+            return false;
         };
-        self.apply_scroll_view_controller_state(bindings)
+        for binding in &cached.scroll_view_controller_bindings {
+            let Some(region) = cached
+                .computed
+                .scroll_regions
+                .get(binding.scroll_region_index)
+                .copied()
+            else {
+                continue;
+            };
+            #[cfg(test)]
+            scroll_view_binding_probe::record_consume_binding_visit();
+            binding.controller.bind_widget(binding.widget_id);
+            binding.controller.sync_offset(region.scroll_offset);
+            if let Some(request) = binding.controller.take_request() {
+                requests.push((
+                    binding.widget_id,
+                    region,
+                    binding.controller.clone(),
+                    request,
+                ));
+            }
+        }
+        self.apply_scroll_view_controller_requests(requests)
     }
 
     fn sync_virtual_state_update_list(
@@ -466,20 +548,12 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 .unwrap_or(true);
             layout_invalidated = layout_invalidated || viewport_changed;
             state.viewport_hint = Some(update.viewport_hint.clone());
-            for (index, extent) in &update.measured_extents {
-                let measured_changed = state
-                    .measured_extents
-                    .get(index)
-                    .copied()
-                    .map(|previous| {
-                        (previous - *extent).abs()
-                            > crate::ui::widget::MEASURED_EXTENT_INVALIDATION_EPSILON
-                    })
-                    .unwrap_or(true);
-                if measured_changed {
-                    layout_invalidated = layout_invalidated || update.invalidate_layout;
-                    state.measured_extents.insert(*index, *extent);
-                }
+            if let Some(signature) = update.measurement_signature {
+                let prefix_changed = state
+                    .measurements
+                    .update_measurements(signature, &update.measured_extents);
+                layout_invalidated =
+                    layout_invalidated || (prefix_changed && update.invalidate_layout);
             }
             state.widget_ids_by_key = update.widget_ids_by_key.iter().cloned().collect();
         }
@@ -1242,7 +1316,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             // 的全场景深拷贝。`collected` 的其余字段在下方按字段分别 move 进 CachedScene,
             // 与这里的部分 move 互不冲突。
             let mut computed = collected.computed;
-            self.append_external_portals_to_computed(&mut computed, now);
+            self.append_external_portals_to_computed(&mut computed, &widget_states, now);
             computed.assign_new_prepare_cache_serial();
             let virtual_layout_invalidated = self.sync_virtual_state_updates(&computed);
             if virtual_layout_invalidated {
@@ -1269,6 +1343,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 text_scale_bits: units.font_scale().to_bits(),
                 animation_epoch: self.animation_epoch,
                 layout_animation_epoch: self.layout_animation_epoch,
+                accessibility_animation_epoch: self.accessibility_animation_epoch,
                 scroll_epoch: self.scroll_epoch,
                 hover_epoch: self.hover_epoch,
                 text_input_epoch: self.text_input_epoch,
@@ -1298,6 +1373,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 media_texture_binding_index: HashMap::new(),
                 caret_decoration: None,
                 text_input_slot_bindings: HashMap::new(),
+                scroll_view_controller_bindings: Vec::new(),
                 strict_capability_report: None,
             }));
             if virtual_layout_invalidated {
@@ -1322,31 +1398,11 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 let _ = self.try_update_caret_visibility_slot(caret_visible);
             }
             self.rebuild_text_input_slot_bindings();
+            self.rebuild_scroll_view_controller_bindings();
             // 整帧重收集已用最新 scroll_states 重算全树并把 cached.scroll_epoch 同步到当前,
             // 任何积压的滚动脏标记都已被该重收集覆盖,清空避免下帧误判。
             self.scroll_dirty_widgets.clear();
-            if let Some(cached) = self.cached_scene.as_ref() {
-                let bindings = if let Some(layout) = cached.layout.as_ref() {
-                    cached
-                        .computed
-                        .scroll_regions
-                        .iter()
-                        .filter_map(|region| {
-                            let resolved = layout.resolved_widget(region.id)?;
-                            let crate::ui::widget::ResolvedWidgetKind::Container { layout, .. } =
-                                &resolved.kind
-                            else {
-                                return None;
-                            };
-                            let controller = layout.scroll_view.as_ref()?.controller.clone()?;
-                            Some((region.id, *region, controller))
-                        })
-                        .collect()
-                } else {
-                    Vec::new()
-                };
-                let _ = self.apply_scroll_view_controller_state(bindings);
-            }
+            let _ = self.consume_scroll_view_requests_from_cached_scene();
 
             if self.reconcile_auto_focus_after_scene_update() {
                 self.invalidate_computed_scene();

@@ -128,9 +128,12 @@ impl AnimationControllerBuilder {
             on_complete: self.on_complete,
             on_stop: self.on_stop,
             invalidation: self.invalidation,
+            queued_in_coordinator: false,
         }));
-        self.coordinator.register(&state);
-        AnimationControllerHandle { state }
+        AnimationControllerHandle {
+            state,
+            coordinator: self.coordinator,
+        }
     }
 }
 
@@ -138,16 +141,23 @@ impl AnimationControllerBuilder {
 #[derive(Clone)]
 pub struct AnimationControllerHandle {
     state: Arc<Mutex<AnimationControllerState>>,
+    coordinator: AnimationCoordinator,
 }
 
 impl AnimationControllerHandle {
     /// 开始播放动画。
     pub fn play(&self) {
-        let mut state = self
-            .state
-            .lock()
-            .expect("animation controller lock poisoned");
-        state.play(Instant::now());
+        let enqueue = {
+            let mut state = self
+                .state
+                .lock()
+                .expect("animation controller lock poisoned");
+            state.play(Instant::now());
+            state.mark_queued_if_running()
+        };
+        if enqueue {
+            self.coordinator.enqueue(&self.state);
+        }
     }
 
     /// 暂停动画。
@@ -161,11 +171,17 @@ impl AnimationControllerHandle {
 
     /// 恢复已暂停的动画。
     pub fn resume(&self) {
-        let mut state = self
-            .state
-            .lock()
-            .expect("animation controller lock poisoned");
-        state.resume(Instant::now());
+        let enqueue = {
+            let mut state = self
+                .state
+                .lock()
+                .expect("animation controller lock poisoned");
+            state.resume(Instant::now());
+            state.mark_queued_if_running()
+        };
+        if enqueue {
+            self.coordinator.enqueue(&self.state);
+        }
     }
 
     /// 停止动画并重置到初始位置。
@@ -179,11 +195,17 @@ impl AnimationControllerHandle {
 
     /// 从头重新开始播放。
     pub fn restart(&self) {
-        let mut state = self
-            .state
-            .lock()
-            .expect("animation controller lock poisoned");
-        state.restart(Instant::now());
+        let enqueue = {
+            let mut state = self
+                .state
+                .lock()
+                .expect("animation controller lock poisoned");
+            state.restart(Instant::now());
+            state.mark_queued_if_running()
+        };
+        if enqueue {
+            self.coordinator.enqueue(&self.state);
+        }
     }
 
     /// 按时间偏移跳转到指定位置。
@@ -301,6 +323,10 @@ struct AnimationControllerState {
     on_complete: Option<AnimationCallback>,
     on_stop: Option<AnimationCallback>,
     invalidation: InvalidationSignal,
+    /// True while this controller has an entry in the coordinator's dense running list. Paused and
+    /// stopped controllers keep the flag until the coordinator prunes their existing entry, so a
+    /// resume before that traversal cannot enqueue a duplicate.
+    queued_in_coordinator: bool,
 }
 
 impl AnimationControllerState {
@@ -486,5 +512,14 @@ impl AnimationControllerState {
 
     fn is_running(&self) -> bool {
         matches!(self.status, AnimationStatus::Running)
+    }
+
+    fn mark_queued_if_running(&mut self) -> bool {
+        if self.is_running() && !self.queued_in_coordinator {
+            self.queued_in_coordinator = true;
+            true
+        } else {
+            false
+        }
     }
 }

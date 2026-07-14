@@ -233,9 +233,24 @@ impl<VM> Slider<VM> {
                     disabled: Value::Static(false),
                     validation: Value::Static(ValidationVisualState::default()),
                     style: None,
+                    runtime_layout: None,
                 },
             },
         }
+    }
+
+    #[allow(dead_code)] // Video controls use this hook only when the `video` feature is enabled.
+    pub(crate) fn runtime_layout(
+        mut self,
+        resolver: impl Fn(&mut LayoutStyle, &StyleContext<'_>, &super::StyleSheet, &VisualStyle)
+            + Send
+            + Sync
+            + 'static,
+    ) -> Self {
+        if let WidgetKind::Slider { runtime_layout, .. } = &mut self.element.kind {
+            *runtime_layout = Some(std::sync::Arc::new(resolver));
+        }
+        self
     }
 
     impl_widget_layout_api!();

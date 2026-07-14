@@ -202,7 +202,18 @@ fn build_popover_scene<VM: 'static>(
                 }
 
                 super::prepare_nested_scene_root(&mut root, context, context.viewport);
-                let resolved = root.resolve(context.theme);
+                let resolved = root.resolve_with_runtime_state_and_style_sheet(
+                    context.theme,
+                    None,
+                    context.scroll_offsets,
+                    context.virtual_states,
+                    crate::ui::widget::r#virtual::VirtualViewportHint {
+                        width: context.viewport.width,
+                        height: context.viewport.height,
+                    },
+                    &context.style_context,
+                    context.style_sheet,
+                );
                 let mut taffy = TaffyTree::new();
                 let layout_root = resolved
                     .build_layout_tree(

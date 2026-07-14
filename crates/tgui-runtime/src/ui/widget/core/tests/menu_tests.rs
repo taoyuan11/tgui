@@ -1,7 +1,9 @@
 pub(super) use super::*;
 
+use crate::ui::layout::Value;
+use crate::ui::theme::Density;
 use crate::ui::widget::{
-    Button, ContextMenu, Menu, MenuBar, MenuIcon, MenuItem, MenuStyle, RenderCommand,
+    Button, ContextMenu, Menu, MenuBar, MenuBarStyle, MenuIcon, MenuItem, MenuStyle, RenderCommand,
 };
 
 const SIMPLE_MENU_SVG: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16"><rect width="16" height="16" rx="3" fill="#2f80ed"/></svg>"##;
@@ -160,6 +162,59 @@ fn menu_open_true_emits_filled_background_and_separate_border() {
 }
 
 #[test]
+fn menu_hover_scene_uses_density_geometry_and_rounded_state_layer() {
+    let mut theme = Theme::light();
+    theme.density = crate::ui::theme::Density::Compact;
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let mut animations = AnimationEngine::default();
+    let menu_element: Element<()> = Menu::new(Button::new("File").size(dp(80.0), dp(28.0)))
+        .items(vec![MenuItem::new("New")])
+        .open(true)
+        .into();
+    let menu_id = menu_element.id;
+    let tree = WidgetTree::new(menu_element);
+    let mut states = WidgetStateMap::default();
+    let mut state = states.get_select_option(menu_id, 0);
+    state.hovered = true;
+    states.set_select_option(menu_id, 0, state);
+
+    let rendered = tree.render_output_with_widget_state(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        false,
+        None,
+        None,
+        &states,
+        &HashMap::new(),
+        &HashMap::new(),
+        Rect::new(0.0, 0.0, 400.0, 400.0),
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+
+    let style = MenuStyle::default_for_theme(&theme);
+    let hover = style.item_background.hovered.resolve();
+    let state_layer = rendered
+        .primitives
+        .overlay_shapes
+        .iter()
+        .find(|shape| shape.color == hover)
+        .expect("hovered menu item should emit a state-layer shape");
+    assert_eq!(state_layer.rect.height, style.item_min_height);
+    assert_eq!(
+        state_layer.corner_radius,
+        (style.radius.resolve() - style.padding.left).get()
+    );
+    assert!(state_layer.rect.x > dp(0.0));
+}
+
+#[test]
 fn menu_checkable_item_renders_checkmark() {
     let theme = Theme::default();
     let font_manager = FontManager::new(&FontCatalog::default());
@@ -288,6 +343,113 @@ fn menubar_builder_produces_horizontal_flex_with_entries() {
         })
         .sum();
     assert_eq!(total_children, 2);
+}
+
+#[test]
+fn menubar_runtime_geometry_and_open_menu_follow_the_same_tree() {
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let viewport = Rect::new(0.0, 0.0, 520.0, 320.0);
+    let tree: WidgetTree<()> = WidgetTree::new(
+        MenuBar::new(Some(0usize))
+            .entry("File", vec![MenuItem::new("New")])
+            .entry("Edit", vec![MenuItem::new("Undo")])
+            .style(|style, context| match context.density {
+                Density::Compact => {
+                    style.height = dp(30.0);
+                    style.padding = Insets::all(dp(3.0));
+                    style.entry_min_width = dp(64.0);
+                    style.entry_gap = dp(2.0);
+                }
+                Density::Comfortable => {}
+                Density::Spacious => {
+                    style.height = dp(50.0);
+                    style.padding = Insets::all(dp(11.0));
+                    style.entry_min_width = dp(104.0);
+                    style.entry_gap = dp(10.0);
+                }
+            }),
+    );
+
+    for (mut theme, height, padding, entry_min_width, entry_gap) in [
+        (Theme::light(), dp(30.0), dp(3.0), dp(64.0), dp(2.0)),
+        (Theme::dark(), dp(50.0), dp(11.0), dp(104.0), dp(10.0)),
+    ] {
+        theme.density = if matches!(theme.mode, crate::ui::theme::ResolvedThemeMode::Light) {
+            Density::Compact
+        } else {
+            Density::Spacious
+        };
+        let mut animations = AnimationEngine::default();
+        let layout = tree.build_scene_layout(
+            &font_manager,
+            &theme,
+            &media,
+            &mut animations,
+            UnitContext::default(),
+            &HashMap::new(),
+            &HashMap::new(),
+            viewport,
+        );
+        assert_eq!(
+            layout.resolved_root.layout.height,
+            Some(Value::Static(crate::ui::layout::Length::Px(height)))
+        );
+        let ResolvedWidgetKind::Container {
+            layout: root_layout,
+            children,
+            ..
+        } = &layout.resolved_root.kind
+        else {
+            panic!("MenuBar root should remain a container");
+        };
+        assert_eq!(
+            root_layout.padding,
+            Some(Value::Static(Insets::all(padding)))
+        );
+        assert_eq!(
+            root_layout.gap,
+            Value::Static(crate::ui::layout::Length::Px(entry_gap))
+        );
+        assert_eq!(children.len(), 2);
+        assert!(children.iter().all(|entry| {
+            entry.layout.height == Some(Value::Static(crate::ui::layout::Length::Px(height)))
+                && entry.layout.min_width
+                    == Some(Value::Static(crate::ui::layout::Length::Px(
+                        entry_min_width,
+                    )))
+        }));
+
+        let mut animations = AnimationEngine::default();
+        let computed = tree.compute_scene(
+            &font_manager,
+            &theme,
+            &media,
+            &mut animations,
+            None,
+            None,
+            &HashMap::new(),
+            viewport,
+            None,
+            None,
+            None,
+            None,
+            false,
+        );
+        assert!(computed
+            .rendered()
+            .primitives
+            .overlay_texts
+            .iter()
+            .any(|text| text.content.as_ref() == "New"));
+        let expected_background = MenuBarStyle::default_for_theme(&theme).background.resolve();
+        assert!(computed
+            .rendered()
+            .primitives
+            .shapes
+            .iter()
+            .any(|shape| shape.color == expected_background));
+    }
 }
 
 #[test]

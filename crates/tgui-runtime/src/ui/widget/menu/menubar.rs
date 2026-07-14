@@ -12,10 +12,14 @@
 //!     .entry("编辑", vec![MenuItem::new("撤销")...])
 //! ```
 
+use std::sync::Arc;
+
+use parking_lot::RwLock;
+
 use crate::foundation::view_model::{Command, CommandContext, ValueCommand};
-use crate::ui::layout::Axis;
-use crate::ui::layout::Value;
+use crate::ui::layout::{Axis, Length, Value};
 use crate::ui::theme::{StateValue, StyleContext, WidgetState};
+use crate::ui::unit::Dp;
 use crate::ui::widget::button::Button;
 use crate::ui::widget::container::Flex;
 use crate::ui::widget::core::Element;
@@ -29,6 +33,25 @@ use super::super::common::VisualStyle;
 use super::types::{MenuBarGroupId, MenuItem};
 use super::widget::Menu;
 use crate::ui::widget::StyleSheet;
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+struct MenuBarRuntimeMetrics {
+    height: Dp,
+    padding: crate::ui::layout::Insets,
+    entry_min_width: Dp,
+    entry_gap: Dp,
+}
+
+impl From<&MenuBarStyle> for MenuBarRuntimeMetrics {
+    fn from(style: &MenuBarStyle) -> Self {
+        Self {
+            height: style.height,
+            padding: style.padding,
+            entry_min_width: style.entry_min_width,
+            entry_gap: style.entry_gap,
+        }
+    }
+}
 
 /// MenuBar 单个顶级条目。
 #[derive(Clone)]
@@ -175,7 +198,7 @@ where
             menu_style,
         } = bar;
 
-        let layout_style = resolve_menu_bar_style_for_layout(style.as_ref());
+        let runtime_metrics = Arc::new(RwLock::new(MenuBarRuntimeMetrics::default()));
         let mut children: Vec<Element<VM>> = Vec::with_capacity(entries.len());
         for (index, entry) in entries.into_iter().enumerate() {
             let MenuBarEntry {
@@ -193,10 +216,14 @@ where
 
             // 点击事件：toggle 我这一项
             let entry_style = style.clone();
+            let entry_runtime_metrics = runtime_metrics.clone();
             let mut button = Button::new(label)
                 .disable(disabled.clone())
-                .height(layout_style.height)
-                .min_width(layout_style.entry_min_width)
+                .runtime_layout(move |layout, _, _, _| {
+                    let metrics = *entry_runtime_metrics.read();
+                    layout.height = Some(Value::Static(Length::Px(metrics.height)));
+                    layout.min_width = Some(Value::Static(Length::Px(metrics.entry_min_width)));
+                })
                 .style_full_with_style_sheet(move |context, style_sheet, visual, state| {
                     menu_bar_entry_button_style(
                         resolve_menu_bar_style_with_sheet(
@@ -254,14 +281,26 @@ where
         }
 
         let root_style = style.clone();
+        let root_runtime_metrics = runtime_metrics;
         Flex::new(Axis::Horizontal)
-            .height(layout_style.height)
-            .padding(layout_style.padding)
-            .gap(layout_style.entry_gap)
+            .runtime_layout(move |layout, container, context, style_sheet, visual| {
+                let resolved = resolve_menu_bar_style_with_sheet(
+                    root_style.as_ref(),
+                    context,
+                    style_sheet,
+                    visual,
+                    WidgetState::default(),
+                );
+                let metrics = MenuBarRuntimeMetrics::from(&resolved);
+                *root_runtime_metrics.write() = metrics;
+                layout.height = Some(Value::Static(Length::Px(metrics.height)));
+                container.padding = Some(Value::Static(metrics.padding));
+                container.gap = Value::Static(Length::Px(metrics.entry_gap));
+            })
             .style_full_with_style_sheet(move |context, style_sheet, visual, state| {
                 menu_bar_container_style(
                     resolve_menu_bar_style_with_sheet(
-                        root_style.as_ref(),
+                        style.as_ref(),
                         context,
                         style_sheet,
                         visual,
@@ -273,21 +312,6 @@ where
             .child(children)
             .into()
     }
-}
-
-fn resolve_menu_bar_style(
-    style: Option<&StyleResolver<MenuBarStyle>>,
-    context: &StyleContext<'_>,
-) -> MenuBarStyle {
-    let style_sheet = StyleSheet::default();
-    let visual = VisualStyle::default();
-    resolve_menu_bar_style_with_sheet(
-        style,
-        context,
-        &style_sheet,
-        &visual,
-        WidgetState::default(),
-    )
 }
 
 fn resolve_menu_bar_style_with_sheet(
@@ -304,12 +328,6 @@ fn resolve_menu_bar_style_with_sheet(
     style
         .map(|resolver| resolver.resolve_from(base.clone(), context))
         .unwrap_or(base)
-}
-
-fn resolve_menu_bar_style_for_layout(style: Option<&StyleResolver<MenuBarStyle>>) -> MenuBarStyle {
-    let theme = crate::ui::theme::Theme::default();
-    let context = StyleContext::from_theme(&theme);
-    resolve_menu_bar_style(style, &context)
 }
 
 fn resolve_menu_style(

@@ -15,6 +15,12 @@ use super::super::core::Element;
 use super::super::style::{ImageStyle, StyleResolver};
 use super::source::{IntoImagePathSource, IntoImageUrlSource};
 
+type RuntimeImageLayoutResolver = std::sync::Arc<
+    dyn Fn(&mut LayoutStyle, &StyleContext<'_>, &crate::ui::widget::StyleSheet, &VisualStyle)
+        + Send
+        + Sync,
+>;
+
 /// 图片组件。
 #[derive(Clone)]
 pub struct Image {
@@ -26,6 +32,7 @@ pub struct Image {
     pub(crate) fit: ContentFit,
     pub(crate) cursor_style: Option<Value<CursorStyle>>,
     pub(crate) style: Option<StyleResolver<ImageStyle>>,
+    pub(crate) runtime_layout: Option<RuntimeImageLayoutResolver>,
 }
 
 macro_rules! impl_image_layout_api {
@@ -203,6 +210,7 @@ impl Image {
             fit: ContentFit::Contain,
             cursor_style: None,
             style: None,
+            runtime_layout: None,
         }
     }
 
@@ -265,6 +273,17 @@ impl Image {
         self.style = Some(super::super::style::StyleResolver::full_with_style_sheet(
             resolver,
         ));
+        self
+    }
+
+    pub(crate) fn runtime_layout(
+        mut self,
+        resolver: impl Fn(&mut LayoutStyle, &StyleContext<'_>, &crate::ui::widget::StyleSheet, &VisualStyle)
+            + Send
+            + Sync
+            + 'static,
+    ) -> Self {
+        self.runtime_layout = Some(std::sync::Arc::new(resolver));
         self
     }
 

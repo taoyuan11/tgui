@@ -69,7 +69,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 }
             }
             event_loop.set_control_flow(ControlFlow::WaitUntil(deadline));
-        } else {
+        } else if !matches!(event_loop.control_flow(), ControlFlow::Wait) {
             event_loop.set_control_flow(ControlFlow::Wait);
         }
     }
@@ -99,7 +99,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 }
             }
             event_loop.set_control_flow(ControlFlow::WaitUntil(deadline));
-        } else {
+        } else if !matches!(event_loop.control_flow(), ControlFlow::Wait) {
             event_loop.set_control_flow(ControlFlow::Wait);
         }
     }
@@ -238,10 +238,11 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             }
         };
 
+        let window_theme = resolve_window_theme(Some(window.as_ref()));
         self.theme = resolve_theme(
             &self.active_theme_selection(),
             &self.active_theme_set(),
-            resolve_window_theme(Some(window.as_ref())),
+            window_theme,
         );
         let clear_color =
             if self.window_bindings.clear_color.is_some() || self.config.clear_color_overridden {
@@ -263,6 +264,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         self.renderer = Some(renderer);
         self.last_synced_clear_color = Some(clear_color);
         self.window = Some(window);
+        self.initialize_platform_window_binding_state(window_theme);
         self.initialize_accessibility_adapter();
 
         if !self.render_hidden_frame(event_loop) {

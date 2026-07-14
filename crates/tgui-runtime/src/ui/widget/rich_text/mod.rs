@@ -5,7 +5,6 @@ use crate::media::MediaSource;
 use crate::text::font::FontWeight;
 use crate::theme::{StyleContext, WidgetState};
 use crate::ui::layout::{Align, Insets, LayoutStyle, Value, Wrap};
-use crate::ui::theme::Theme;
 use crate::ui::unit::{dp, sp};
 
 use super::common::VisualStyle;
@@ -80,7 +79,6 @@ impl<VM> RichText<VM> {
 
 impl<VM: 'static> From<RichText<VM>> for Element<VM> {
     fn from(rich: RichText<VM>) -> Self {
-        let layout_style = resolve_rich_text_style_for_layout(rich.style.as_ref());
         let blocks = markdown_blocks(&rich.markdown.resolve());
         let children = blocks
             .into_iter()
@@ -93,8 +91,19 @@ impl<VM: 'static> From<RichText<VM>> for Element<VM> {
                 )
             })
             .collect::<Vec<_>>();
+        let runtime_style = rich.style.clone();
         let mut root: Element<VM> = Flex::vertical()
-            .gap(layout_style.gap)
+            .gap(dp(0.0))
+            .runtime_layout(move |_layout, container, context, style_sheet, visual| {
+                let resolved = resolve_rich_text_style_with_sheet(
+                    runtime_style.as_ref(),
+                    context,
+                    style_sheet,
+                    visual,
+                    WidgetState::default(),
+                );
+                container.gap = Value::Static(crate::ui::layout::Length::Px(resolved.gap));
+            })
             .child(children)
             .into();
         root.key = rich.key;
@@ -585,20 +594,6 @@ fn rich_text_style_mapped(
     }
 }
 
-fn resolve_rich_text_style(
-    style: Option<&StyleResolver<RichTextStyle>>,
-    context: &StyleContext<'_>,
-) -> RichTextStyle {
-    let style_sheet = StyleSheet::default();
-    resolve_rich_text_style_with_sheet(
-        style,
-        context,
-        &style_sheet,
-        &VisualStyle::default(),
-        WidgetState::default(),
-    )
-}
-
 fn resolve_rich_text_style_with_sheet(
     style: Option<&StyleResolver<RichTextStyle>>,
     context: &StyleContext<'_>,
@@ -619,12 +614,4 @@ fn resolve_rich_text_style_with_sheet(
             sheet.apply_rich_text_state(base, context, visual, state)
         },
     )
-}
-
-fn resolve_rich_text_style_for_layout(
-    style: Option<&StyleResolver<RichTextStyle>>,
-) -> RichTextStyle {
-    let theme = Theme::default();
-    let context = StyleContext::from_theme(&theme);
-    resolve_rich_text_style(style, &context)
 }

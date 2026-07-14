@@ -9,7 +9,7 @@
 use std::sync::Arc;
 
 use crate::foundation::color::Color;
-use crate::media::{resolve_media_rect, ContentFit, MediaSource, RasterRequest};
+use crate::media::{ContentFit, MediaSource};
 use crate::text::font::TextFontRequest;
 use crate::ui::layout::Insets;
 use crate::ui::unit::Dp;
@@ -434,11 +434,17 @@ pub(crate) fn emit_menu_layer<VM>(
                     && !menu.items[index].submenu.is_empty();
                 let item_bg = style.item_background.resolve(widget_state).resolve();
                 if item_bg.a > 0 {
+                    // Keep the state layer inside the floating surface and echo its shape.
+                    // This avoids the harsh rectangular highlight used by legacy menus while
+                    // preserving the public MenuStyle surface.
+                    let item_radius = (style.radius.resolve() - style.padding.left)
+                        .max(Dp::ZERO)
+                        .get();
                     primitives.push(crate::ui::widget::overlay::OverlayPrimitive::Shape(
                         RenderPrimitive {
                             rect: item_rect,
                             color: item_bg,
-                            corner_radius: 0.0,
+                            corner_radius: item_radius,
                             stroke_width: 0.0,
                             clip_rect: None,
                             clip_mask: None,
@@ -781,10 +787,14 @@ fn svg_menu_icon_primitive(
     context: &CollectContext<'_, '_>,
 ) -> Option<crate::ui::widget::overlay::OverlayPrimitive> {
     let source = MediaSource::bytes(bytes.clone());
-    let metadata = context.media.image_snapshot(&source, None);
-    let target_frame = resolve_media_rect(icon_frame, metadata.intrinsic_size, ContentFit::Contain);
-    let raster_request = RasterRequest::from_frame(target_frame, context.units.scale_factor())?;
-    let snapshot = context.media.image_snapshot(&source, Some(raster_request));
+    let layout = crate::media::MediaTextureLayout::new(
+        icon_frame,
+        ContentFit::Contain,
+        context.units.scale_factor(),
+    );
+    let (snapshot, target_frame, raster_request) =
+        context.media.image_snapshot_for_layout(&source, layout);
+    raster_request?;
     let texture = snapshot.texture.as_ref()?;
 
     Some(crate::ui::widget::overlay::OverlayPrimitive::Texture(

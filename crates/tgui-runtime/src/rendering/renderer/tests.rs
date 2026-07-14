@@ -75,6 +75,116 @@ fn draw_id_distinguishes_stream_and_command_index() {
 }
 
 #[test]
+fn scene_pass_collapses_redundant_pipeline_state_sets() {
+    use super::draw::{
+        pipeline_state_set_count, scene_vertex_buffer_bind_count, scissor_state_set_count,
+        sprite_bind_group_state_set_count, typed_vertex_draw_range, DrawPipeline,
+    };
+
+    let repeated_rects = vec![DrawPipeline::Rect; 1024];
+    assert_eq!(pipeline_state_set_count(&repeated_rects), 1);
+
+    let mixed = [
+        DrawPipeline::Rect,
+        DrawPipeline::Rect,
+        DrawPipeline::Sprite,
+        DrawPipeline::Sprite,
+        DrawPipeline::Mesh,
+        DrawPipeline::Rect,
+    ];
+    assert_eq!(pipeline_state_set_count(&mixed), 4);
+
+    let viewport = (0, 0, 1920, 1080);
+    let clipped = (40, 40, 320, 240);
+    let repeated_scissors = vec![viewport; 1024];
+    assert_eq!(scissor_state_set_count(&repeated_scissors), 1);
+    assert_eq!(
+        scissor_state_set_count(&[viewport, viewport, clipped, clipped, viewport]),
+        3
+    );
+
+    let repeated_draws = vec![true; 1024];
+    assert_eq!(scene_vertex_buffer_bind_count(&repeated_draws), 1);
+    // Backdrop blur / canvas composite 结束当前 scene pass；后续普通 draw
+    // 开始新 pass 并独立绑定一次池 buffer。
+    assert_eq!(
+        scene_vertex_buffer_bind_count(&[true, true, false, true, false, false, true, true]),
+        3
+    );
+
+    let repeated_sprite_binding = vec![Some(7); 1024];
+    assert_eq!(
+        sprite_bind_group_state_set_count(&repeated_sprite_binding),
+        1
+    );
+    assert_eq!(
+        sprite_bind_group_state_set_count(&[Some(7), Some(7), Some(8), Some(8), Some(7),]),
+        3
+    );
+    // A non-sprite draw uses a different pipeline layout, so the conservative state model
+    // rebinds the texture if the same sprite resource appears again afterwards.
+    assert_eq!(
+        sprite_bind_group_state_set_count(&[Some(7), None, Some(7)]),
+        2
+    );
+
+    let rect_stride = std::mem::size_of::<RectVertex>() as u64;
+    let brush_stride = std::mem::size_of::<BrushVertex>() as u64;
+    let rect_bytes = rect_stride * 6;
+    let brush_offset = rect_bytes.div_ceil(brush_stride) * brush_stride;
+    assert_eq!(typed_vertex_draw_range::<RectVertex>(0, 6), 0..6);
+    assert_eq!(
+        typed_vertex_draw_range::<BrushVertex>(brush_offset, 6),
+        (brush_offset / brush_stride) as u32..(brush_offset / brush_stride) as u32 + 6
+    );
+}
+
+#[test]
+fn initial_scene_clear_elides_the_dedicated_pass_for_regular_draws() {
+    let first_command = first_initial_scene_command(
+        Some(InitialSceneCommandKind::Regular),
+        Some(InitialSceneCommandKind::SamplesExistingTarget),
+    );
+    assert_eq!(
+        initial_scene_clear_strategy(first_command),
+        InitialSceneClear::FirstRegularPass
+    );
+    assert_eq!(
+        InitialSceneClear::FirstRegularPass.dedicated_pass_count(),
+        0
+    );
+}
+
+#[test]
+fn initial_scene_clear_preserves_effect_and_empty_scene_ordering() {
+    let overlay_regular = first_initial_scene_command(None, Some(InitialSceneCommandKind::Regular));
+    assert_eq!(
+        initial_scene_clear_strategy(overlay_regular),
+        InitialSceneClear::FirstRegularPass
+    );
+
+    assert_eq!(
+        initial_scene_clear_strategy(Some(InitialSceneCommandKind::SamplesExistingTarget)),
+        InitialSceneClear::ExplicitBeforeTargetSampling
+    );
+    assert_eq!(
+        initial_scene_clear_strategy(None),
+        InitialSceneClear::ExplicitBeforePresent
+    );
+
+    // Blur/composite must observe the explicit clear before sampling the target; an empty scene
+    // retains exactly one explicit clear before the present pass samples it.
+    assert_eq!(
+        InitialSceneClear::ExplicitBeforeTargetSampling.dedicated_pass_count(),
+        1
+    );
+    assert_eq!(
+        InitialSceneClear::ExplicitBeforePresent.dedicated_pass_count(),
+        1
+    );
+}
+
+#[test]
 fn scene_slot_write_marks_only_the_touched_draw_dirty() {
     let mut scene = ScenePrimitives::default();
     scene.push_shape(RenderPrimitive {
@@ -187,13 +297,48 @@ fn retained_prepare_stats_rebuild_only_dirty_scene_draws() {
 }
 
 #[test]
+fn retained_prepare_cache_lookup_keeps_vertex_storage_borrowed() {
+    let payload_bytes = 64 * 1024;
+    let (same_storage, observed_bytes) =
+        super::prepare::retained_cache_lookup_storage_probe(payload_bytes);
+
+    assert!(same_storage);
+    assert_eq!(observed_bytes, payload_bytes);
+}
+
+#[test]
+fn stable_prepare_frames_reuse_large_command_output_storage() {
+    let command_count = 10_000;
+    let stable_frames = 120;
+    let (storage_growths, retained_capacity, retained_bytes, same_storage) =
+        super::prepare::prepared_command_scratch_storage_probe(command_count, stable_frames);
+
+    assert_eq!(
+        storage_growths, 1,
+        "a stable retained scene should grow prepared command storage only on its first frame"
+    );
+    assert!(
+        same_storage,
+        "stable frames should keep the same allocation"
+    );
+    assert!(retained_capacity >= command_count);
+    assert_eq!(
+        retained_bytes,
+        retained_capacity * std::mem::size_of::<super::prepare::PreparedCommand>()
+    );
+}
+
+#[test]
 fn text_cache_key_tracks_overflow_mode() {
     let clip = TextCacheKey {
         content: Arc::from("hello"),
+        content_hash: super::text::text_content_hash("hello"),
+        rich_spans: None,
         font_family: None,
         width: 10,
         height: 10,
         color: [255, 255, 255, 255],
+        tintable_mask: false,
         force_color: false,
         font_size_bits: 1,
         line_height_bits: 2,
@@ -247,32 +392,133 @@ fn active_texture_keys_include_overlay_textures() {
         .overlay_textures
         .push(texture_primitive(overlay_texture.clone()));
 
-    let keys = active_texture_keys(&scene);
+    let mut keys = HashSet::new();
+    collect_active_texture_keys(&scene, &mut keys);
 
     assert!(keys.contains(&main_texture.id()));
     assert!(keys.contains(&overlay_texture.id()));
 }
 
 #[test]
-fn text_system_releases_swash_frame_cache() {
-    let mut text_system = TextSystem::new();
-    text_system.swash_cache.image_cache.insert(
-        CacheKey {
-            font_id: fontdb::ID::dummy(),
-            glyph_id: 1,
-            font_size_bits: 16.0_f32.to_bits(),
-            x_bin: SubpixelBin::Zero,
-            y_bin: SubpixelBin::Zero,
-            font_weight: fontdb::Weight::NORMAL,
-            flags: CacheKeyFlags::empty(),
-        },
-        None,
-    );
+fn active_texture_key_scratch_reuses_capacity_between_frames() {
+    let textures: Vec<_> = (0..32)
+        .map(|value| std::sync::Arc::new(TextureFrame::new(2, 2, vec![value; 2 * 2 * 4])))
+        .collect();
+    let mut scene = ScenePrimitives::default();
+    scene
+        .textures
+        .extend(textures.iter().cloned().map(texture_primitive));
+    let mut keys = HashSet::new();
 
-    text_system.release_frame_raster_cache();
+    collect_active_texture_keys(&scene, &mut keys);
+    let first_capacity = keys.capacity();
+    collect_active_texture_keys(&scene, &mut keys);
+
+    assert_eq!(keys.len(), textures.len());
+    assert_eq!(keys.capacity(), first_capacity);
+}
+
+#[test]
+fn stable_retained_frames_scan_cache_liveness_once() {
+    let scene_serial = 41;
+    let mut last_scene_serial = None;
+    let mut refreshes = 0;
+
+    for _ in 0..10_000 {
+        if cache_liveness_needs_refresh(last_scene_serial, scene_serial, false) {
+            refreshes += 1;
+            last_scene_serial = Some(scene_serial);
+        }
+    }
+
+    assert_eq!(
+        refreshes, 1,
+        "stable frames should not repeat command walks"
+    );
+}
+
+#[test]
+fn dirty_draws_refresh_liveness_even_when_scene_serial_is_stable() {
+    assert!(cache_liveness_needs_refresh(Some(17), 17, true));
+    assert!(cache_liveness_needs_refresh(Some(17), 18, false));
+    assert!(!cache_liveness_needs_refresh(Some(17), 17, false));
+}
+
+fn glyph_cache_key(index: usize) -> CacheKey {
+    CacheKey {
+        font_id: fontdb::ID::dummy(),
+        glyph_id: index as u16,
+        font_size_bits: (12.0 + (index / (u16::MAX as usize + 1)) as f32).to_bits(),
+        x_bin: SubpixelBin::Zero,
+        y_bin: SubpixelBin::Zero,
+        font_weight: fontdb::Weight::NORMAL,
+        flags: CacheKeyFlags::empty(),
+    }
+}
+
+#[test]
+fn text_system_retains_bounded_swash_cache_across_frames() {
+    let mut text_system = TextSystem::new();
+    assert!(!text_system.prepare_font_system(7));
+    text_system
+        .swash_cache
+        .image_cache
+        .insert(glyph_cache_key(1), None);
+    text_system.finish_raster_batch(0);
+    text_system.finish_frame();
+
+    assert_eq!(text_system.swash_cache.image_cache.len(), 1);
+    assert_eq!(text_system.stats().image_insertions, 1);
+    assert_eq!(text_system.stats().frame_resets, 0);
+    text_system.reset_stats();
+    assert_eq!(text_system.stats().image_insertions, 0);
+    assert_eq!(text_system.stats().frame_resets, 0);
+}
+
+#[test]
+fn text_system_legacy_control_releases_swash_cache_each_frame() {
+    let mut text_system = TextSystem::new();
+    text_system.set_retention(false);
+    text_system
+        .swash_cache
+        .image_cache
+        .insert(glyph_cache_key(1), None);
+    text_system.finish_raster_batch(0);
+    text_system.finish_frame();
 
     assert!(text_system.swash_cache.image_cache.is_empty());
     assert!(text_system.swash_cache.outline_command_cache.is_empty());
+    assert_eq!(text_system.stats().frame_resets, 1);
+}
+
+#[test]
+fn text_system_switching_font_databases_invalidates_rasters() {
+    let mut text_system = TextSystem::new();
+    assert!(!text_system.prepare_font_system(11));
+    text_system
+        .swash_cache
+        .image_cache
+        .insert(glyph_cache_key(1), None);
+    assert!(text_system.prepare_font_system(12));
+
+    assert!(text_system.swash_cache.image_cache.is_empty());
+    assert_eq!(text_system.stats().font_system_resets, 1);
+}
+
+#[test]
+fn text_system_evicts_retained_cache_over_entry_budget() {
+    let mut text_system = TextSystem::new();
+    for index in 0..=RETAINED_GLYPH_IMAGE_ENTRY_LIMIT {
+        text_system
+            .swash_cache
+            .image_cache
+            .insert(glyph_cache_key(index), None);
+    }
+    text_system.finish_raster_batch(0);
+    text_system.finish_frame();
+
+    assert!(text_system.swash_cache.image_cache.is_empty());
+    assert_eq!(text_system.stats().budget_evictions, 1);
 }
 
 fn texture_primitive(texture: std::sync::Arc<TextureFrame>) -> TexturePrimitive {

@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use crate::foundation::view_model::{Command, ValueCommand};
 use crate::theme::{StyleContext, WidgetState};
 use crate::ui::layout::{Align, Insets, LayoutStyle, Value};
@@ -217,6 +219,7 @@ impl<VM> Button<VM> {
                     disabled: Value::Static(false),
                     variant: ButtonVariantKind::Primary,
                     style: None,
+                    runtime_layout: None,
                 },
             },
         }
@@ -302,6 +305,19 @@ impl<VM> Button<VM> {
     ) -> Self {
         if let WidgetKind::Button { style, .. } = &mut self.element.kind {
             *style = Some(super::style::StyleResolver::full_with_style_sheet(resolver));
+        }
+        self
+    }
+
+    pub(crate) fn runtime_layout(
+        mut self,
+        resolver: impl Fn(&mut LayoutStyle, &StyleContext<'_>, &super::StyleSheet, &VisualStyle)
+            + Send
+            + Sync
+            + 'static,
+    ) -> Self {
+        if let WidgetKind::Button { runtime_layout, .. } = &mut self.element.kind {
+            *runtime_layout = Some(Arc::new(resolver));
         }
         self
     }

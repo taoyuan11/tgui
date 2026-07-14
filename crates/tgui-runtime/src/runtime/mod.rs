@@ -252,6 +252,24 @@ pub struct WindowBindings {
     pub(crate) reduced_motion: Option<Signal<bool>>,
 }
 
+#[derive(Default)]
+struct WindowBindingSyncState {
+    window_identity: Option<usize>,
+    title_token: Option<(usize, u64)>,
+    title: Option<String>,
+    theme_mode_token: Option<(usize, u64)>,
+    theme_set_token: Option<(usize, u64)>,
+    theme_checked_revision: Option<u64>,
+    theme_initialized: bool,
+    reduced_motion_token: Option<(usize, u64)>,
+    clear_color_token: Option<(usize, u64)>,
+    clear_color_target: Option<Color>,
+    clear_color_animation_initialized: bool,
+    window_properties_checked_revision: Option<u64>,
+    #[cfg(test)]
+    theme_resolves: usize,
+}
+
 pub struct WindowCommand<VM> {
     pub(crate) trigger: InputTrigger,
     pub(crate) command: Command<VM>,
@@ -275,6 +293,7 @@ pub struct BoundRuntimeHandler<VM> {
     font_manager: Arc<FontManager>,
     theme: Theme,
     theme_store: ThemeStore,
+    binding_sync: Box<WindowBindingSyncState>,
     reduced_motion: bool,
     view_model: Arc<Mutex<VM>>,
     window_bindings: WindowBindings,
@@ -289,6 +308,7 @@ pub struct BoundRuntimeHandler<VM> {
     animation_engine: AnimationEngine,
     animation_epoch: u64,
     layout_animation_epoch: u64,
+    accessibility_animation_epoch: u64,
     hover_epoch: u64,
     cursor_position: Option<Point>,
     modifiers: ModifiersState,
@@ -427,7 +447,11 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             ThemeSelection::Mode(mode) => config.theme_set.resolve(*mode, None).as_ref().clone(),
             ThemeSelection::System => config.theme_set.resolve_window_theme(None).as_ref().clone(),
         };
-        let theme_store = ThemeStore::new(config.theme_set.clone(), ThemeMode::System, None);
+        let initial_theme_mode = match &config.theme {
+            ThemeSelection::System => ThemeMode::System,
+            ThemeSelection::Mode(mode) => *mode,
+        };
+        let theme_store = ThemeStore::new(config.theme_set.clone(), initial_theme_mode, None);
         let resource_budget = config.resource_budget;
         let reduced_motion = config.reduced_motion;
         let (accessibility_action_sender, accessibility_action_receiver) =
@@ -441,6 +465,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             font_manager,
             theme,
             theme_store,
+            binding_sync: Box::default(),
             reduced_motion,
             view_model,
             window_bindings,
@@ -455,6 +480,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             animation_engine: AnimationEngine::default(),
             animation_epoch: 0,
             layout_animation_epoch: 0,
+            accessibility_animation_epoch: 0,
             hover_epoch: 0,
             cursor_position: None,
             modifiers: ModifiersState::default(),

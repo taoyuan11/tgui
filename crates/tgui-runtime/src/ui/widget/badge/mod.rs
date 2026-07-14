@@ -1,6 +1,5 @@
 use crate::theme::{StyleContext, WidgetState};
-use crate::ui::layout::{Insets, LayoutStyle, Value};
-use crate::ui::theme::Theme;
+use crate::ui::layout::{Insets, LayoutStyle, Length, Value};
 use crate::ui::unit::{dp, Dp};
 
 use super::common::VisualStyle;
@@ -123,7 +122,6 @@ impl<VM> Badge<VM> {
 
 impl<VM: 'static> From<Badge<VM>> for Element<VM> {
     fn from(badge: Badge<VM>) -> Self {
-        let layout_style = resolve_badge_style_for_layout(badge.style.as_ref(), badge.tone);
         let badge_element = badge_content_element(
             &badge.content,
             badge.style.clone(),
@@ -159,9 +157,6 @@ impl<VM: 'static> From<Badge<VM>> for Element<VM> {
         root.key = badge.key;
         root = with_visual_identity(root, &badge.visual);
         root.layout = merge_layout(root.layout, badge.layout);
-        if matches!(badge.content, BadgeContent::Dot) && root.layout.width.is_none() {
-            root.layout.width = Some(crate::ui::layout::Length::Px(layout_style.dot_size).into());
-        }
         root
     }
 }
@@ -172,13 +167,28 @@ fn badge_content_element<VM: 'static>(
     tone: BadgeTone,
     visual_identity: VisualStyle,
 ) -> Element<VM> {
-    let layout_style = resolve_badge_style_for_layout(style.as_ref(), tone);
     match content {
         BadgeContent::Dot => {
             let style = style.clone();
+            let layout_style = style.clone();
             with_visual_identity(
                 Stack::new()
-                    .size(layout_style.dot_size, layout_style.dot_size)
+                    .runtime_layout(move |layout, _container, context, style_sheet, visual| {
+                        let resolved = resolve_badge_style_with_sheet(
+                            layout_style.as_ref(),
+                            context,
+                            style_sheet,
+                            visual,
+                            WidgetState::default(),
+                            tone,
+                        );
+                        if layout.width.is_none() {
+                            layout.width = Some(Value::Static(Length::Px(resolved.dot_size)));
+                        }
+                        if layout.height.is_none() {
+                            layout.height = Some(Value::Static(Length::Px(resolved.dot_size)));
+                        }
+                    })
                     .style_full_with_style_sheet(move |context, style_sheet, visual, state| {
                         let resolved = resolve_badge_style_with_sheet(
                             style.as_ref(),
@@ -217,14 +227,29 @@ fn badge_pill<VM: 'static>(
     tone: BadgeTone,
     visual_identity: VisualStyle,
 ) -> Element<VM> {
-    let layout_style = resolve_badge_style_for_layout(style.as_ref(), tone);
     let container_style = style.clone();
+    let layout_style = style.clone();
     let text_style = style;
     let text_identity = visual_identity.clone();
     with_visual_identity(
         Stack::new()
-            .min_height(layout_style.min_height)
-            .padding(Insets::symmetric(layout_style.padding_x, dp(1.0)))
+            .runtime_layout(move |layout, container, context, style_sheet, visual| {
+                let resolved = resolve_badge_style_with_sheet(
+                    layout_style.as_ref(),
+                    context,
+                    style_sheet,
+                    visual,
+                    WidgetState::default(),
+                    tone,
+                );
+                if layout.min_height.is_none() {
+                    layout.min_height = Some(Value::Static(Length::Px(resolved.min_height)));
+                }
+                container.padding = Some(Value::Static(Insets::symmetric(
+                    resolved.padding_x,
+                    dp(1.0),
+                )));
+            })
             .center()
             .style_full_with_style_sheet(move |context, style_sheet, visual, state| {
                 let resolved = resolve_badge_style_with_sheet(
@@ -273,22 +298,6 @@ fn format_badge_count(value: u32, max: u32) -> String {
     }
 }
 
-fn resolve_badge_style(
-    style: Option<&StyleResolver<BadgeStyle>>,
-    context: &StyleContext<'_>,
-    tone: BadgeTone,
-) -> BadgeStyle {
-    let style_sheet = StyleSheet::default();
-    resolve_badge_style_with_sheet(
-        style,
-        context,
-        &style_sheet,
-        &VisualStyle::default(),
-        WidgetState::default(),
-        tone,
-    )
-}
-
 fn resolve_badge_style_with_sheet(
     style: Option<&StyleResolver<BadgeStyle>>,
     context: &StyleContext<'_>,
@@ -308,13 +317,4 @@ fn resolve_badge_style_with_sheet(
         |sheet, base, context, visual| sheet.apply_badge(base, context, visual),
         |sheet, base, context, visual, state| sheet.apply_badge_state(base, context, visual, state),
     )
-}
-
-fn resolve_badge_style_for_layout(
-    style: Option<&StyleResolver<BadgeStyle>>,
-    tone: BadgeTone,
-) -> BadgeStyle {
-    let theme = Theme::default();
-    let context = StyleContext::from_theme(&theme);
-    resolve_badge_style(style, &context, tone)
 }

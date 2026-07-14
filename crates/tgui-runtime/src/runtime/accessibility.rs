@@ -1,5 +1,7 @@
 use super::*;
-use crate::accessibility::{build_tree_update, widget_id_from_node};
+use crate::accessibility::{
+    build_tree_update, node_id_from_widget, widget_id_from_node, TreeUpdateKey,
+};
 use crate::foundation::binding::{TextChange, TextChangeSet};
 use crate::ui::widget::{splitter_adjusted_sizes, HitInteraction, SplitterResize};
 use accesskit::{Action, ActionData, ActionRequest};
@@ -19,19 +21,42 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
     }
 
     pub(in crate::runtime) fn sync_accessibility_tree(&mut self) {
+        let focused_widget = self.focused_widget_id();
+        let invalidation_revision = self.invalidation.revision();
         let Some(cached) = self.cached_scene.as_ref() else {
             return;
         };
-        let update = build_tree_update(
-            cached.layout.as_ref(),
-            &cached.computed,
-            self.focused_widget_id(),
-            cached.viewport,
-        );
+        let key = TreeUpdateKey {
+            invalidation_revision,
+            scene_serial: cached.computed.scene.prepare_cache_serial(),
+            viewport: cached.viewport,
+            theme_epoch: cached.theme_epoch,
+            style_sheet_version: cached.style_sheet_version,
+            density: cached.density,
+            reduced_motion: cached.reduced_motion,
+            text_scale_bits: cached.text_scale_bits,
+            accessibility_animation_epoch: cached.accessibility_animation_epoch,
+            scroll_epoch: cached
+                .computed
+                .has_accessible_scroll_state()
+                .then_some(cached.scroll_epoch),
+            text_input_epoch: cached.text_input_epoch,
+            external_portal_revision: cached.external_portal_revision,
+        };
+        let candidate_focus = focused_widget
+            .map(node_id_from_widget)
+            .unwrap_or(crate::accessibility::ROOT_NODE_ID);
         let Some(adapter) = self.accessibility_adapter.as_mut() else {
             return;
         };
-        adapter.update_if_active(update);
+        adapter.update_if_active(key, candidate_focus, || {
+            build_tree_update(
+                cached.layout.as_ref(),
+                &cached.computed,
+                focused_widget,
+                cached.viewport,
+            )
+        });
     }
 
     pub(in crate::runtime) fn update_accessibility_window_focus_state(&mut self, is_focused: bool) {

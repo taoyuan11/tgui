@@ -7,6 +7,15 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             return;
         };
 
+        // Resolving the root and recursively walking it is O(widget count),
+        // even when no widget can produce a media event. Static WidgetTrees
+        // cache that capability at construction; dynamic/virtual trees remain
+        // conservative and continue through the full revision-aware path.
+        if !tree.may_have_media_event_handlers() {
+            self.media_event_states.clear();
+            return;
+        }
+
         let states = tree.media_event_states(&self.media_manager, &self.theme);
         let current_ids: HashSet<_> = states.iter().map(|state| state.widget_id).collect();
         self.media_event_states

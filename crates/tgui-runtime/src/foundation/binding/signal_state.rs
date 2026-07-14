@@ -37,6 +37,10 @@ impl<T> State<T> {
     /// 返回值: 闭包返回的结果。
     pub fn read<R>(&self, reader: impl FnOnce(&T) -> R) -> R {
         self.track_read();
+        self.read_untracked(reader)
+    }
+
+    fn read_untracked<R>(&self, reader: impl FnOnce(&T) -> R) -> R {
         let value = self.value.lock();
         reader(&value)
     }
@@ -74,7 +78,7 @@ impl<T> State<T> {
     {
         let state = self.clone();
         Signal::new_memo_tracked(
-            move || state.read(|value| projector(value)),
+            move || state.read_untracked(|value| projector(value)),
             self.invalidation.clone(),
             Some(self.dependency),
             [self.signal_id],
@@ -118,6 +122,10 @@ impl<T: Clone> State<T> {
     /// 返回值: 当前状态值。
     pub fn get(&self) -> T {
         self.track_read();
+        self.get_untracked()
+    }
+
+    fn get_untracked(&self) -> T {
         self.value.lock().clone()
     }
 }
@@ -190,6 +198,27 @@ struct SignalCache<T> {
 }
 
 impl<T> Signal<T> {
+    pub(crate) fn sync_identity(&self) -> usize {
+        Arc::as_ptr(&self.cache) as usize
+    }
+
+    /// Returns a stable identity plus the narrowest revision that can change this signal.
+    ///
+    /// State-backed signals use their dependency revision, so unrelated state updates do not
+    /// force window bindings to be polled. Opaque signals conservatively use the global
+    /// invalidation revision because the runtime cannot know which state their reader observes.
+    pub(crate) fn sync_token(&self) -> (usize, u64) {
+        let identity = self.sync_identity();
+        let revision = match self.dependency {
+            Some(dependency) => self
+                .invalidation
+                .dependency_revision(dependency)
+                .unwrap_or(0),
+            None => self.invalidation.revision(),
+        };
+        (identity, revision)
+    }
+
     pub(crate) fn new(
         reader: impl Fn() -> T + Send + Sync + 'static,
         invalidation: InvalidationSignal,
@@ -307,7 +336,7 @@ impl<T> Signal<T> {
     {
         let graph = invalidation.reactive_graph();
         Self::new_with_parts(
-            Arc::new(move || state.get()),
+            Arc::new(move || state.get_untracked()),
             invalidation,
             graph,
             signal_id,

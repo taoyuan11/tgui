@@ -2,7 +2,6 @@ use crate::foundation::view_model::Command;
 use crate::media::{ContentFit, MediaSource};
 use crate::theme::{StyleContext, WidgetState};
 use crate::ui::layout::{Axis, LayoutStyle, Value};
-use crate::ui::theme::Theme;
 
 use super::badge::Badge;
 use super::common::VisualStyle;
@@ -100,7 +99,6 @@ impl<VM> Avatar<VM> {
 
 impl<VM: 'static> From<Avatar<VM>> for Element<VM> {
     fn from(avatar: Avatar<VM>) -> Self {
-        let layout_style = resolve_avatar_style_for_layout(avatar.style.as_ref(), avatar.shape);
         let visual_identity = avatar.visual.clone();
         let content: Element<VM> = match avatar.source {
             AvatarSource::Image(source) => {
@@ -108,7 +106,29 @@ impl<VM: 'static> From<Avatar<VM>> for Element<VM> {
                 let shape = avatar.shape;
                 with_visual_identity(
                     Image::new(source)
-                        .size(layout_style.size, layout_style.size)
+                        .runtime_layout({
+                            let style = avatar.style.clone();
+                            move |layout, context, style_sheet, visual| {
+                                let resolved = resolve_avatar_style_with_sheet(
+                                    style.as_ref(),
+                                    context,
+                                    style_sheet,
+                                    visual,
+                                    WidgetState::default(),
+                                    shape,
+                                );
+                                if layout.width.is_none() {
+                                    layout.width = Some(Value::Static(
+                                        crate::ui::layout::Length::Px(resolved.size),
+                                    ));
+                                }
+                                if layout.height.is_none() {
+                                    layout.height = Some(Value::Static(
+                                        crate::ui::layout::Length::Px(resolved.size),
+                                    ));
+                                }
+                            }
+                        })
                         .style_full_with_style_sheet(move |context, style_sheet, visual, state| {
                             let resolved = resolve_avatar_style_with_sheet(
                                 style.as_ref(),
@@ -168,13 +188,30 @@ fn avatar_initials<VM: 'static>(
     shape: AvatarShape,
     visual_identity: VisualStyle,
 ) -> Element<VM> {
-    let layout_style = resolve_avatar_style_for_layout(style.as_ref(), shape);
     let container_style = style.clone();
+    let layout_style = style.clone();
     let text_style = style;
     let text_identity = visual_identity.clone();
     with_visual_identity(
         Stack::new()
-            .size(layout_style.size, layout_style.size)
+            .runtime_layout(move |layout, _container, context, style_sheet, visual| {
+                let resolved = resolve_avatar_style_with_sheet(
+                    layout_style.as_ref(),
+                    context,
+                    style_sheet,
+                    visual,
+                    WidgetState::default(),
+                    shape,
+                );
+                if layout.width.is_none() {
+                    layout.width =
+                        Some(Value::Static(crate::ui::layout::Length::Px(resolved.size)));
+                }
+                if layout.height.is_none() {
+                    layout.height =
+                        Some(Value::Static(crate::ui::layout::Length::Px(resolved.size)));
+                }
+            })
             .center()
             .style_full_with_style_sheet(move |context, style_sheet, visual, state| {
                 let resolved = resolve_avatar_style_with_sheet(
@@ -283,8 +320,6 @@ impl<VM> AvatarGroup<VM> {
 
 impl<VM: 'static> From<AvatarGroup<VM>> for Element<VM> {
     fn from(group: AvatarGroup<VM>) -> Self {
-        let layout_style =
-            resolve_avatar_style_for_layout(group.style.as_ref(), AvatarShape::Circle);
         let total = group.avatars.len();
         let visible = group.max_visible.min(total);
         let mut children = group
@@ -307,8 +342,21 @@ impl<VM: 'static> From<AvatarGroup<VM>> for Element<VM> {
             }
             children.push(overflow.into());
         }
+        let runtime_style = group.style.clone();
         let mut root: Element<VM> = Flex::new(Axis::Horizontal)
-            .gap(-layout_style.group_overlap.get())
+            .gap(crate::ui::unit::dp(0.0))
+            .runtime_layout(move |_layout, container, context, style_sheet, visual| {
+                let resolved = resolve_avatar_style_with_sheet(
+                    runtime_style.as_ref(),
+                    context,
+                    style_sheet,
+                    visual,
+                    WidgetState::default(),
+                    AvatarShape::Circle,
+                );
+                container.gap =
+                    Value::Static(crate::ui::layout::Length::Px(-resolved.group_overlap));
+            })
             .child(children)
             .into();
         root.key = group.key;
@@ -355,13 +403,4 @@ fn resolve_avatar_style_with_sheet(
             sheet.apply_avatar_state(base, context, visual, state)
         },
     )
-}
-
-fn resolve_avatar_style_for_layout(
-    style: Option<&StyleResolver<AvatarStyle>>,
-    shape: AvatarShape,
-) -> AvatarStyle {
-    let theme = Theme::default();
-    let context = StyleContext::from_theme(&theme);
-    resolve_avatar_style(style, &context, shape)
 }

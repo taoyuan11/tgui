@@ -17,6 +17,54 @@ fn context() -> ViewModelContext {
 }
 
 #[test]
+fn invalidation_wake_permit_coalesces_bursts_until_acknowledged() {
+    let invalidation = InvalidationSignal::new();
+    let sends = AtomicUsize::new(0);
+
+    for _ in 0..1024 {
+        let _ = invalidation.debug_try_send_wake(|| {
+            sends.fetch_add(1, Ordering::Relaxed);
+            true
+        });
+    }
+
+    assert_eq!(sends.load(Ordering::Relaxed), 1);
+    assert!(invalidation.debug_wake_queued());
+
+    // user_event acknowledges before draining work; an update racing with the callback must be
+    // able to queue the next event rather than disappearing behind the consumed permit.
+    invalidation.acknowledge_wake();
+    assert!(invalidation.debug_try_send_wake(|| {
+        sends.fetch_add(1, Ordering::Relaxed);
+        true
+    }));
+    assert_eq!(sends.load(Ordering::Relaxed), 2);
+}
+
+#[test]
+fn invalidation_wake_permit_is_shared_by_clones_and_rolls_back_failed_send() {
+    let invalidation = InvalidationSignal::new();
+    let clone = invalidation.clone();
+    let attempts = AtomicUsize::new(0);
+
+    assert!(!invalidation.debug_try_send_wake(|| {
+        attempts.fetch_add(1, Ordering::Relaxed);
+        false
+    }));
+    assert!(!invalidation.debug_wake_queued());
+
+    assert!(clone.debug_try_send_wake(|| {
+        attempts.fetch_add(1, Ordering::Relaxed);
+        true
+    }));
+    assert!(!invalidation.debug_try_send_wake(|| {
+        attempts.fetch_add(1, Ordering::Relaxed);
+        true
+    }));
+    assert_eq!(attempts.load(Ordering::Relaxed), 2);
+}
+
+#[test]
 fn state_set_same_value_does_not_advance_revision() {
     let invalidation = InvalidationSignal::new();
     let state = State::new(1, invalidation.clone());
@@ -138,6 +186,89 @@ fn tracked_signal_read_subscribes_current_owner_as_reactive_target() {
 
     let targets = ctx.invalidation().drain_reactive_targets();
     assert!(targets.contains(&ReactiveTarget::Owner(owner)));
+}
+
+#[test]
+fn tracked_memo_signal_subscribes_owner_only_to_the_memo_node() {
+    let ctx = context();
+    let state = ctx.state(1);
+    let parity = state.signal().map(|value| value % 2);
+    let owner = DependencyOwner {
+        widget_id: 43,
+        phase: DependencyPhase::Scene,
+        property: Some(PropertySlot::Background),
+    };
+    let target = ReactiveTarget::Owner(owner);
+
+    let _ = with_dependency_collection(|| track_dependency_scope(owner, || parity.get()));
+
+    assert_eq!(
+        ctx.invalidation().reactive_target_source_count(target),
+        1,
+        "the memo target must not also subscribe directly to its source state"
+    );
+    state.set(3);
+    let drain = ctx.invalidation().drain_reactive_updates();
+    assert_eq!(
+        drain.processed_signals, 1,
+        "the unchanged memo should be recomputed while processing its source without entering the dirty queue"
+    );
+    assert!(
+        drain.targets.is_empty(),
+        "an unchanged memo projection must prune the tracked owner update"
+    );
+}
+
+#[test]
+fn tracked_state_projection_does_not_subscribe_owner_directly_to_source() {
+    let ctx = context();
+    let state = ctx.state(String::from("aa"));
+    let length = state.project(|value| value.len());
+    let owner = DependencyOwner {
+        widget_id: 44,
+        phase: DependencyPhase::Scene,
+        property: Some(PropertySlot::TextContent),
+    };
+    let target = ReactiveTarget::Owner(owner);
+
+    let _ = with_dependency_collection(|| track_dependency_scope(owner, || length.get()));
+
+    assert_eq!(ctx.invalidation().reactive_target_source_count(target), 1);
+    state.set(String::from("bb"));
+    let drain = ctx.invalidation().drain_reactive_updates();
+    assert_eq!(drain.processed_signals, 1);
+    assert!(
+        drain.targets.is_empty(),
+        "an unchanged State::project value must prune its tracked owner update"
+    );
+}
+
+#[test]
+fn reactive_drain_uses_one_graph_lock_per_direct_signal_plus_completion() {
+    let ctx = context();
+    let target = ReactiveTarget::Custom(8_001);
+    let mut states = Vec::with_capacity(1024);
+
+    for value in 0..1024 {
+        let state = ctx.state(value);
+        state.signal().subscribe_target(target);
+        states.push(state);
+    }
+    for (index, state) in states.iter().enumerate() {
+        state.set(index + 1);
+    }
+
+    let drain = ctx.invalidation().drain_reactive_updates();
+    assert_eq!(drain.processed_signals, 1024);
+    assert_eq!(drain.targets, vec![target]);
+    assert_eq!(
+        drain.graph_lock_acquisitions, 1025,
+        "direct target propagation should need one graph lock per signal and one final drain lock"
+    );
+    assert!(
+        !drain.scratch_spilled,
+        "single-subscriber propagation should stay inside the inline drain buffers"
+    );
 }
 
 #[test]

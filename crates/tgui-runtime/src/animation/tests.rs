@@ -238,10 +238,81 @@ fn controller_updates_animated_value_and_completes() {
         .build();
 
     handle.play();
-    assert!(coordinator.refresh(Instant::now() + Duration::from_millis(50)));
+    assert!(
+        coordinator
+            .refresh_and_next_frame_deadline(Instant::now() + Duration::from_millis(50), true)
+            .changed
+    );
     assert!(value.get() > 0.0);
-    coordinator.refresh(Instant::now() + Duration::from_millis(150));
+    coordinator.refresh_and_next_frame_deadline(Instant::now() + Duration::from_millis(150), true);
     assert_eq!(handle.status(), AnimationStatus::Completed);
+}
+
+#[test]
+fn controller_frame_visits_only_queued_running_controllers() {
+    let invalidation = InvalidationSignal::new();
+    let coordinator = AnimationCoordinator::default();
+    let handles = (0..1024)
+        .map(|_| AnimationControllerBuilder::new(coordinator.clone(), invalidation.clone()).build())
+        .collect::<Vec<_>>();
+
+    let idle_frame = coordinator.refresh_and_next_frame_deadline(Instant::now(), false);
+    assert_eq!(idle_frame.visited_controllers, 0);
+    assert_eq!(idle_frame.next_deadline, None);
+
+    handles[517].play();
+    let running_frame = coordinator.refresh_and_next_frame_deadline(Instant::now(), false);
+
+    assert_eq!(running_frame.visited_controllers, 1);
+    assert!(!running_frame.changed);
+    assert!(running_frame.next_deadline.is_some());
+}
+
+#[test]
+fn paused_then_resumed_controller_keeps_one_coordinator_entry() {
+    let invalidation = InvalidationSignal::new();
+    let coordinator = AnimationCoordinator::default();
+    let handle = AnimationControllerBuilder::new(coordinator.clone(), invalidation).build();
+
+    handle.play();
+    handle.pause();
+    handle.resume();
+    let frame = coordinator.refresh_and_next_frame_deadline(Instant::now(), false);
+
+    assert_eq!(frame.visited_controllers, 1);
+    assert!(frame.next_deadline.is_some());
+}
+
+#[test]
+fn completed_controller_is_pruned_and_restart_requeues_it() {
+    let invalidation = InvalidationSignal::new();
+    let coordinator = AnimationCoordinator::default();
+    let value = AnimatedValue::new(0.0f32, invalidation.clone());
+    let handle = AnimationControllerBuilder::new(coordinator.clone(), invalidation)
+        .track(
+            value,
+            AnimationSpec::from(
+                Keyframes::timed(Duration::from_millis(100))
+                    .at(Duration::ZERO, 0.0)
+                    .at(Duration::from_millis(100), 1.0),
+            ),
+        )
+        .build();
+
+    handle.play();
+    let completed =
+        coordinator.refresh_and_next_frame_deadline(Instant::now() + Duration::from_secs(1), true);
+    assert_eq!(completed.visited_controllers, 1);
+    assert_eq!(completed.next_deadline, None);
+    assert_eq!(handle.status(), AnimationStatus::Completed);
+
+    let idle = coordinator.refresh_and_next_frame_deadline(Instant::now(), false);
+    assert_eq!(idle.visited_controllers, 0);
+
+    handle.restart();
+    let restarted = coordinator.refresh_and_next_frame_deadline(Instant::now(), false);
+    assert_eq!(restarted.visited_controllers, 1);
+    assert!(restarted.next_deadline.is_some());
 }
 
 #[test]
@@ -267,6 +338,178 @@ fn refresh_skips_settled_slots_without_reporting_change() {
     let refresh = engine.refresh(start + Duration::from_secs(10));
     assert!(!refresh.changed);
     assert!(!engine.has_active_animations());
+}
+
+#[test]
+fn sparse_refresh_visits_only_running_slots() {
+    let mut engine = AnimationEngine::default();
+    let start = Instant::now();
+    for id in 0..4096 {
+        engine.resolve_f32(
+            AnimationKey::Widget {
+                id,
+                property: WidgetProperty::Opacity,
+            },
+            0.0,
+            None,
+            start,
+        );
+    }
+
+    let active_key = AnimationKey::Widget {
+        id: 2048,
+        property: WidgetProperty::Opacity,
+    };
+    engine.resolve_f32(
+        active_key,
+        1.0,
+        Some(Transition::linear(Duration::from_secs(1))),
+        start + Duration::from_millis(1),
+    );
+
+    let refresh = engine.refresh(start + Duration::from_millis(501));
+    assert!(refresh.changed);
+    assert_eq!(refresh.visited_slots, 1);
+    assert_eq!(refresh.scene_widget_ids.as_slice(), &[2048]);
+}
+
+#[test]
+fn refresh_marks_only_accessibility_geometry_animations() {
+    let mut engine = AnimationEngine::default();
+    let start = Instant::now();
+    let transition = Transition::linear(Duration::from_secs(1));
+
+    for (id, property) in [
+        (1, WidgetProperty::Background),
+        (2, WidgetProperty::Opacity),
+        (3, WidgetProperty::Offset),
+    ] {
+        let key = AnimationKey::Widget { id, property };
+        if property == WidgetProperty::Offset {
+            engine.resolve_point(key, Point::ZERO, None, start);
+            engine.resolve_point(
+                key,
+                Point::new(dp(20.0), dp(10.0)),
+                Some(transition),
+                start + Duration::from_millis(1),
+            );
+        } else if property == WidgetProperty::Background {
+            engine.resolve_color(key, Color::BLACK, None, start);
+            engine.resolve_color(
+                key,
+                Color::WHITE,
+                Some(transition),
+                start + Duration::from_millis(1),
+            );
+        } else {
+            engine.resolve_f32(key, 0.0, None, start);
+            engine.resolve_f32(key, 1.0, Some(transition), start + Duration::from_millis(1));
+        }
+    }
+
+    let refresh = engine.refresh(start + Duration::from_millis(501));
+    assert!(refresh.changed);
+    assert!(refresh.accessibility_geometry_changed);
+
+    let mut paint_only = AnimationEngine::default();
+    paint_only.resolve_f32(key(WidgetProperty::Opacity), 0.0, None, start);
+    paint_only.resolve_f32(
+        key(WidgetProperty::Opacity),
+        1.0,
+        Some(transition),
+        start + Duration::from_millis(1),
+    );
+    let refresh = paint_only.refresh(start + Duration::from_millis(501));
+    assert!(refresh.changed);
+    assert!(!refresh.accessibility_geometry_changed);
+}
+
+#[test]
+fn immediate_settle_keeps_dense_active_index_consistent() {
+    let mut engine = AnimationEngine::default();
+    let start = Instant::now();
+    let transition = Transition::linear(Duration::from_secs(1));
+    for id in 0..128 {
+        let key = AnimationKey::Widget {
+            id,
+            property: WidgetProperty::Opacity,
+        };
+        engine.resolve_f32(key, 0.0, None, start);
+        engine.resolve_f32(key, 1.0, Some(transition), start + Duration::from_millis(1));
+    }
+
+    // Models reduced motion becoming active while a large group is running. Alternating keys force
+    // the dense index through both direct removals and swap-moved entries.
+    for id in (0..128).step_by(2) {
+        engine.resolve_f32(
+            AnimationKey::Widget {
+                id,
+                property: WidgetProperty::Opacity,
+            },
+            1.0,
+            None,
+            start + Duration::from_millis(2),
+        );
+    }
+
+    let refresh = engine.refresh(start + Duration::from_millis(502));
+    assert_eq!(refresh.visited_slots, 64);
+    assert_eq!(refresh.scene_widget_ids.len(), 64);
+
+    for id in (1..128).step_by(2) {
+        assert_eq!(
+            engine.resolve_f32(
+                AnimationKey::Widget {
+                    id,
+                    property: WidgetProperty::Opacity,
+                },
+                1.0,
+                Some(Transition::linear(Duration::ZERO)),
+                start + Duration::from_millis(503),
+            ),
+            1.0
+        );
+    }
+    assert!(!engine.has_active_animations());
+    assert_eq!(
+        engine
+            .refresh(start + Duration::from_millis(504))
+            .visited_slots,
+        0
+    );
+}
+
+#[test]
+fn refresh_completion_removes_active_slots_and_allows_reactivation() {
+    let mut engine = AnimationEngine::default();
+    let start = Instant::now();
+    let transition = Transition::linear(Duration::from_millis(100));
+    for id in 0..64 {
+        let key = AnimationKey::Widget {
+            id,
+            property: WidgetProperty::Opacity,
+        };
+        engine.resolve_f32(key, 0.0, None, start);
+        engine.resolve_f32(key, 1.0, Some(transition), start + Duration::from_millis(1));
+    }
+
+    let completed = engine.refresh(start + Duration::from_millis(201));
+    assert_eq!(completed.visited_slots, 64);
+    assert!(!engine.has_active_animations());
+
+    let reactivated_key = AnimationKey::Widget {
+        id: 17,
+        property: WidgetProperty::Opacity,
+    };
+    engine.resolve_f32(
+        reactivated_key,
+        0.0,
+        Some(transition),
+        start + Duration::from_millis(202),
+    );
+    let refresh = engine.refresh(start + Duration::from_millis(252));
+    assert_eq!(refresh.visited_slots, 1);
+    assert_eq!(refresh.scene_widget_ids.as_slice(), &[17]);
 }
 
 #[test]

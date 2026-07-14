@@ -161,7 +161,7 @@ pub(super) fn button_style_base(
     visual: &VisualStyle,
     variant: crate::ui::widget::common::ButtonVariantKind,
 ) -> WidgetButtonStyle {
-    let mut base = WidgetButtonStyle::default_for_theme(context.theme, variant);
+    let mut base = WidgetButtonStyle::default_for_density(context.theme, context.density, variant);
     context.theme.components.button.apply(&mut base, context);
     style_sheet.apply_button(&mut base, context, variant, visual);
     base
@@ -172,7 +172,7 @@ pub(super) fn checkbox_style_base(
     style_sheet: &crate::ui::widget::StyleSheet,
     visual: &VisualStyle,
 ) -> WidgetCheckboxStyle {
-    let mut base = WidgetCheckboxStyle::default_for_theme(context.theme);
+    let mut base = WidgetCheckboxStyle::default_for_density(context.theme, context.density);
     context.theme.components.checkbox.apply(&mut base, context);
     style_sheet.apply_checkbox(&mut base, context, visual);
     base
@@ -183,7 +183,7 @@ pub(super) fn radio_style_base(
     style_sheet: &crate::ui::widget::StyleSheet,
     visual: &VisualStyle,
 ) -> WidgetRadioStyle {
-    let mut base = WidgetRadioStyle::default_for_theme(context.theme);
+    let mut base = WidgetRadioStyle::default_for_density(context.theme, context.density);
     context.theme.components.radio.apply(&mut base, context);
     style_sheet.apply_radio(&mut base, context, visual);
     base
@@ -194,7 +194,8 @@ pub(super) fn switch_style_base(
     style_sheet: &crate::ui::widget::StyleSheet,
     visual: &VisualStyle,
 ) -> super::super::style::SwitchStyle {
-    let mut base = super::super::style::SwitchStyle::default_for_theme(context.theme);
+    let mut base =
+        super::super::style::SwitchStyle::default_for_density(context.theme, context.density);
     context.theme.components.switch.apply(&mut base, context);
     style_sheet.apply_switch(&mut base, context, visual);
     base
@@ -205,7 +206,7 @@ pub(super) fn select_style_base(
     style_sheet: &crate::ui::widget::StyleSheet,
     visual: &VisualStyle,
 ) -> WidgetSelectStyle {
-    let mut base = WidgetSelectStyle::default_for_theme(context.theme);
+    let mut base = WidgetSelectStyle::default_for_density(context.theme, context.density);
     context.theme.components.select.apply(&mut base, context);
     style_sheet.apply_select(&mut base, context, visual);
     base
@@ -216,7 +217,7 @@ pub(super) fn slider_style_base(
     style_sheet: &crate::ui::widget::StyleSheet,
     visual: &VisualStyle,
 ) -> WidgetSliderStyle {
-    let mut base = WidgetSliderStyle::default_for_theme(context.theme);
+    let mut base = WidgetSliderStyle::default_for_density(context.theme, context.density);
     context.theme.components.slider.apply(&mut base, context);
     style_sheet.apply_slider(&mut base, context, visual);
     base
@@ -264,7 +265,7 @@ pub(super) fn input_style_base(
     style_sheet: &crate::ui::widget::StyleSheet,
     visual: &VisualStyle,
 ) -> WidgetInputStyle {
-    let mut base = WidgetInputStyle::default_for_theme(context.theme);
+    let mut base = WidgetInputStyle::default_for_density(context.theme, context.density);
     context.theme.components.input.apply(&mut base, context);
     style_sheet.apply_input(&mut base, context, visual);
     base
@@ -275,7 +276,7 @@ pub(super) fn textarea_style_base(
     style_sheet: &crate::ui::widget::StyleSheet,
     visual: &VisualStyle,
 ) -> WidgetTextareaStyle {
-    let mut base = WidgetTextareaStyle::default_for_theme(context.theme);
+    let mut base = WidgetTextareaStyle::default_for_density(context.theme, context.density);
     context.theme.components.textarea.apply(&mut base, context);
     style_sheet.apply_textarea(&mut base, context, visual);
     base

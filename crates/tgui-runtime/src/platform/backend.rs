@@ -227,8 +227,8 @@ impl EventLoopProxy {
         Self { inner }
     }
 
-    pub fn wake_up(&self) {
-        let _ = self.inner.send_event(());
+    pub fn wake_up(&self) -> bool {
+        self.inner.send_event(()).is_ok()
     }
 }
 

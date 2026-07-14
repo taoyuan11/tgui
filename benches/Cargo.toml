@@ -51,6 +51,11 @@ path = "real_widget_pipeline.rs"
 harness = false
 
 [[bench]]
+name = "runtime_gpu_pipeline"
+path = "runtime_gpu_pipeline.rs"
+harness = false
+
+[[bench]]
 name = "scene_rendering"
 path = "scene_rendering.rs"
 harness = false

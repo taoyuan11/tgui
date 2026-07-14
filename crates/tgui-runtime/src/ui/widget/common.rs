@@ -28,7 +28,7 @@ use crate::foundation::color::Color;
 use crate::foundation::view_model::{Command, ValueCommand};
 use crate::text::font::{FontWeight, TextLayoutInfo};
 use crate::ui::layout::{
-    Align, Axis, Insets, Justify, Length, Overflow, ScrollbarStyle, Track, Value, Wrap,
+    Align, Axis, Insets, Justify, LayoutStyle, Length, Overflow, ScrollbarStyle, Track, Value, Wrap,
 };
 use crate::ui::theme::{Shadow, Theme, WidgetState};
 use crate::ui::unit::{dp, Dp, Sp, UnitContext};
@@ -54,6 +54,7 @@ use super::style::{InputStyle as WidgetInputStyle, TextareaStyle as WidgetTextar
 use super::text::Text;
 pub(crate) use event_handlers::*;
 use geometry::point_in_triangle;
+pub(crate) use geometry::CLIP_CULL_MARGIN;
 pub use geometry::{Point, Rect};
 pub use hit_scene::FocusScopeOptions;
 pub(crate) use hit_scene::*;

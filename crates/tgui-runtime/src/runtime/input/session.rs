@@ -370,6 +370,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     session.external_value = snapshot.text.clone();
                     session.external_revision = snapshot.revision;
                     session.current_text = snapshot.text.clone();
+                    session.current_text_is_ascii = snapshot.text.is_ascii();
                     session.rope = ropey::Rope::from_str(&snapshot.text);
                     session.pending_changes.clear();
                     session.pending_start_revision = None;

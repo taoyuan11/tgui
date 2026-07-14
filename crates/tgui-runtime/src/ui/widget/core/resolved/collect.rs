@@ -1,8 +1,88 @@
 use super::super::scene::ReactiveProgressLabel;
 use super::resolved_freeze::lifecycle_snapshot;
 use super::*;
+use crate::ui::widget::common::{ComputedSceneCursor, ComputedScenePrefixCursor};
 use crate::ui::widget::r#virtual::{apply_virtual_runtime_state_to_element, VirtualViewportHint};
 use crate::ui::widget::{FocusScopeState, TransformRecord};
+
+#[cfg(feature = "bench-support")]
+thread_local! {
+    static FORCE_LEGACY_SCENE_SNAPSHOTS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+#[cfg(feature = "bench-support")]
+pub(crate) fn with_legacy_scene_snapshots<R>(f: impl FnOnce() -> R) -> R {
+    FORCE_LEGACY_SCENE_SNAPSHOTS.with(|flag| {
+        let previous = flag.replace(true);
+        struct Reset<'a> {
+            flag: &'a std::cell::Cell<bool>,
+            previous: bool,
+        }
+        impl Drop for Reset<'_> {
+            fn drop(&mut self) {
+                self.flag.set(self.previous);
+            }
+        }
+        let _reset = Reset { flag, previous };
+        f()
+    })
+}
+
+#[cfg(feature = "bench-support")]
+fn use_legacy_scene_snapshots() -> bool {
+    FORCE_LEGACY_SCENE_SNAPSHOTS.with(std::cell::Cell::get)
+}
+
+pub(super) enum SceneDeltaSnapshot<VM> {
+    Cursor(ComputedSceneCursor, std::marker::PhantomData<fn() -> VM>),
+    #[cfg(feature = "bench-support")]
+    Legacy(ComputedScene<VM>),
+}
+
+impl<VM> SceneDeltaSnapshot<VM> {
+    fn capture(computed: &ComputedScene<VM>) -> Self {
+        #[cfg(feature = "bench-support")]
+        if use_legacy_scene_snapshots() {
+            return Self::Legacy(computed.clone());
+        }
+        Self::Cursor(computed.cursor(), std::marker::PhantomData)
+    }
+
+    fn delta(self, computed: &ComputedScene<VM>) -> ComputedScene<VM> {
+        match self {
+            Self::Cursor(cursor, _) => computed.delta_since_cursor(&cursor),
+            #[cfg(feature = "bench-support")]
+            Self::Legacy(base) => computed.delta_since(&base),
+        }
+    }
+}
+
+pub(super) enum ScenePrefixSnapshot<VM> {
+    Cursor(
+        ComputedScenePrefixCursor,
+        std::marker::PhantomData<fn() -> VM>,
+    ),
+    #[cfg(feature = "bench-support")]
+    Legacy(ComputedScene<VM>),
+}
+
+impl<VM> ScenePrefixSnapshot<VM> {
+    pub(super) fn capture(computed: &ComputedScene<VM>) -> Self {
+        #[cfg(feature = "bench-support")]
+        if use_legacy_scene_snapshots() {
+            return Self::Legacy(computed.clone());
+        }
+        Self::Cursor(computed.prefix_cursor(), std::marker::PhantomData)
+    }
+
+    pub(super) fn materialize(self, computed: &ComputedScene<VM>) -> ComputedScene<VM> {
+        match self {
+            Self::Cursor(cursor, _) => computed.prefix_at_cursor(&cursor),
+            #[cfg(feature = "bench-support")]
+            Self::Legacy(prefix) => prefix,
+        }
+    }
+}
 
 mod chrome;
 mod controls;
@@ -345,21 +425,14 @@ impl<VM: 'static> ResolvedElement<VM> {
                         return None;
                     }
                     let source = image.source.resolve();
-                    let metadata = context.media.image_snapshot(&source, None);
-                    let target_frame = crate::media::resolve_media_rect(
+                    let media_layout = crate::media::MediaTextureLayout::new(
                         visual.background_frame,
-                        metadata.intrinsic_size,
                         image.fit,
+                        context.units.scale_factor(),
                     );
-                    let snapshot = if let Some(raster_request) =
-                        crate::media::RasterRequest::from_frame(
-                            target_frame,
-                            context.units.scale_factor(),
-                        ) {
-                        context.media.image_snapshot(&source, Some(raster_request))
-                    } else {
-                        metadata
-                    };
+                    let (snapshot, target_frame, _) = context
+                        .media
+                        .image_snapshot_for_layout(&source, media_layout);
                     snapshot
                         .texture
                         .as_ref()
@@ -391,17 +464,15 @@ impl<VM: 'static> ResolvedElement<VM> {
                         return None;
                     }
                     let source = image.source.resolve();
-                    let metadata = context.media.image_snapshot(&source, None);
-                    let target_frame = crate::media::resolve_media_rect(
+                    let media_layout = crate::media::MediaTextureLayout::new(
                         visual.background_frame,
-                        metadata.intrinsic_size,
                         image.fit,
-                    );
-                    let raster_request = crate::media::RasterRequest::from_frame(
-                        target_frame,
                         context.units.scale_factor(),
-                    )?;
-                    let snapshot = context.media.image_snapshot(&source, Some(raster_request));
+                    );
+                    let (snapshot, target_frame, raster_request) = context
+                        .media
+                        .image_snapshot_for_layout(&source, media_layout);
+                    let raster_request = raster_request?;
                     snapshot
                         .texture
                         .map(|texture| ReactiveScenePropertyValue::Texture {
@@ -410,11 +481,7 @@ impl<VM: 'static> ResolvedElement<VM> {
                                 source,
                                 raster_request,
                             )),
-                            media_layout: Some(crate::media::MediaTextureLayout::new(
-                                visual.background_frame,
-                                image.fit,
-                                context.units.scale_factor(),
-                            )),
+                            media_layout: Some(media_layout),
                             frame: target_frame,
                             corner_radius: visual.background_radius.get(),
                             opacity: visual.opacity.clamp(0.0, 1.0),
@@ -448,19 +515,15 @@ impl<VM: 'static> ResolvedElement<VM> {
                         .background_image
                         .as_ref()?
                         .resolve_widget();
-                    let metadata = context.media.image_snapshot(&background_image.source, None);
-                    let target_frame = crate::media::resolve_media_rect(
+                    let media_layout = crate::media::MediaTextureLayout::new(
                         visual.background_frame,
-                        metadata.intrinsic_size,
                         background_image.fit,
-                    );
-                    let raster_request = crate::media::RasterRequest::from_frame(
-                        target_frame,
                         context.units.scale_factor(),
-                    )?;
-                    let snapshot = context
+                    );
+                    let (snapshot, target_frame, raster_request) = context
                         .media
-                        .image_snapshot(&background_image.source, Some(raster_request));
+                        .image_snapshot_for_layout(&background_image.source, media_layout);
+                    let raster_request = raster_request?;
                     snapshot
                         .texture
                         .map(|texture| ReactiveScenePropertyValue::Texture {
@@ -469,11 +532,7 @@ impl<VM: 'static> ResolvedElement<VM> {
                                 background_image.source,
                                 raster_request,
                             )),
-                            media_layout: Some(crate::media::MediaTextureLayout::new(
-                                visual.background_frame,
-                                background_image.fit,
-                                context.units.scale_factor(),
-                            )),
+                            media_layout: Some(media_layout),
                             frame: target_frame,
                             corner_radius: visual.background_radius.get(),
                             opacity: 1.0,
@@ -551,19 +610,15 @@ impl<VM: 'static> ResolvedElement<VM> {
                     .as_ref()
                     .and_then(|image| {
                         let image = image.resolve_widget();
-                        let metadata = context.media.image_snapshot(&image.source, None);
-                        let target_frame = crate::media::resolve_media_rect(
+                        let media_layout = crate::media::MediaTextureLayout::new(
                             visual.background_frame,
-                            metadata.intrinsic_size,
                             image.fit,
-                        );
-                        let raster_request = crate::media::RasterRequest::from_frame(
-                            target_frame,
                             context.units.scale_factor(),
-                        )?;
-                        let snapshot = context
+                        );
+                        let (snapshot, target_frame, raster_request) = context
                             .media
-                            .image_snapshot(&image.source, Some(raster_request));
+                            .image_snapshot_for_layout(&image.source, media_layout);
+                        let raster_request = raster_request?;
                         snapshot.texture.map(|texture| {
                             (
                                 texture,
@@ -571,11 +626,7 @@ impl<VM: 'static> ResolvedElement<VM> {
                                     image.source,
                                     raster_request,
                                 )),
-                                Some(crate::media::MediaTextureLayout::new(
-                                    visual.background_frame,
-                                    image.fit,
-                                    context.units.scale_factor(),
-                                )),
+                                Some(media_layout),
                                 target_frame,
                                 visual.background_radius.get(),
                                 1.0,
@@ -686,19 +737,15 @@ impl<VM: 'static> ResolvedElement<VM> {
                     .as_ref()
                     .and_then(|image| {
                         let image = image.resolve_widget();
-                        let metadata = context.media.image_snapshot(&image.source, None);
-                        let target_frame = crate::media::resolve_media_rect(
+                        let media_layout = crate::media::MediaTextureLayout::new(
                             visual.background_frame,
-                            metadata.intrinsic_size,
                             image.fit,
-                        );
-                        let raster_request = crate::media::RasterRequest::from_frame(
-                            target_frame,
                             context.units.scale_factor(),
-                        )?;
-                        let snapshot = context
+                        );
+                        let (snapshot, target_frame, raster_request) = context
                             .media
-                            .image_snapshot(&image.source, Some(raster_request));
+                            .image_snapshot_for_layout(&image.source, media_layout);
+                        let raster_request = raster_request?;
                         snapshot.texture.map(|texture| {
                             (
                                 texture,
@@ -706,11 +753,7 @@ impl<VM: 'static> ResolvedElement<VM> {
                                     image.source,
                                     raster_request,
                                 )),
-                                Some(crate::media::MediaTextureLayout::new(
-                                    visual.background_frame,
-                                    image.fit,
-                                    context.units.scale_factor(),
-                                )),
+                                Some(media_layout),
                                 target_frame,
                                 visual.background_radius.get(),
                                 1.0,
@@ -1487,14 +1530,14 @@ impl<VM: 'static> ResolvedElement<VM> {
         }
         self.clear_closed_modal_interactions(&mut computed);
         // `before_overlays` 仅在 `Container`/`Virtual` 节点上被消费(用于把 overlay 增量
-        // 并入 `chunk_parts.after_children`)。叶子节点占节点总数绝大多数,为它们克隆整份
-        // `computed` 是纯浪费 —— 因此把这次快照限定到带子节点的 kind。
+        // 并入 `chunk_parts.after_children`)。游标只记录各流长度和少量可覆盖 metadata，
+        // 避免带 runtime overlay 的深层容器为一次 delta 深拷贝整棵已收集子树。
         let is_container_like = matches!(
             self.kind,
             ResolvedWidgetKind::Container { .. } | ResolvedWidgetKind::Virtual { .. }
         );
-        let before_overlays =
-            (is_container_like && self.may_emit_runtime_overlay()).then(|| computed.clone());
+        let before_overlays = (is_container_like && self.may_emit_runtime_overlay())
+            .then(|| SceneDeltaSnapshot::capture(&computed));
 
         self.emit_tooltip_if_visible(context, &mut computed, &visual);
         self.emit_popover_overlay_if_visible(context, &mut computed, &visual);
@@ -1505,7 +1548,7 @@ impl<VM: 'static> ResolvedElement<VM> {
         self.emit_portal_if_open(context, &mut computed, &visual);
 
         if let Some(before_overlays) = before_overlays {
-            let overlay_delta = computed.delta_since(&before_overlays);
+            let overlay_delta = before_overlays.delta(&computed);
             if let Some(parts) = caches.chunk_parts.get_mut(&self.id) {
                 parts.after_children.extend(&overlay_delta);
             }
@@ -1523,15 +1566,10 @@ impl<VM: 'static> ResolvedElement<VM> {
             // `before_children: computed.clone()`)直接跳过,消除逐帧重收集里最大的单项独占开销
             // (n=1000 长列表约 22%)。即便未来出现意外读取,`recompose` 的 `chunk_parts.get(&id)?`
             // 会得到 `None` 并安全回退到整帧重收集,绝不会产生错误渲染。
-            if is_container_like {
-                caches
-                    .chunk_parts
-                    .entry(self.id)
-                    .or_insert_with(|| SceneChunkParts {
-                        before_children: computed.clone(),
-                        after_children: ComputedScene::default(),
-                    });
-            }
+            debug_assert!(
+                !is_container_like || caches.chunk_parts.contains_key(&self.id),
+                "container-like collection must install SceneChunkParts"
+            );
             if let Some(gpu_scroll_container) = context.gpu_scroll_container {
                 computed.fill_gpu_scroll_container(gpu_scroll_container);
                 if let Some(parts) = caches.chunk_parts.get_mut(&self.id) {

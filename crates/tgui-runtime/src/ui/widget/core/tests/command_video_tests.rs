@@ -1,8 +1,12 @@
 use super::*;
 #[cfg(feature = "video")]
+use crate::ui::layout::{LayoutStyle, Value};
+#[cfg(feature = "video")]
 use crate::ui::widget::icon::SvgIconId;
 #[cfg(feature = "video")]
 use crate::ui::widget::VideoSurfaceStyle;
+#[cfg(feature = "video")]
+use crate::ui::widget::{ResolvedElement, VideoStyle};
 
 #[test]
 fn scoped_value_commands_cover_switch_canvas_and_media() {
@@ -535,6 +539,103 @@ fn video_style_public_entries_are_available() {
     let _components = crate::theme::ComponentThemes::default().video(|style, _| {
         style.gap = dp(6.0);
     });
+}
+
+#[cfg(feature = "video")]
+#[test]
+fn video_runtime_geometry_tracks_custom_style_on_the_same_tree() {
+    fn collect<VM>(
+        element: &ResolvedElement<VM>,
+        layouts: &mut Vec<LayoutStyle>,
+        gaps: &mut Vec<Value<crate::ui::layout::Length>>,
+    ) {
+        layouts.push(element.layout.clone());
+        if let ResolvedWidgetKind::Container {
+            layout, children, ..
+        } = &element.kind
+        {
+            gaps.push(layout.gap.clone());
+            for child in children {
+                collect(child, layouts, gaps);
+            }
+        }
+    }
+    let (controller, _) = recorded_video_controller(
+        VideoPlaybackState::Ready,
+        Some(std::time::Duration::from_secs(30)),
+        false,
+    );
+    let tree: WidgetTree<()> = WidgetTree::new(
+        Video::new(controller)
+            .style_full(|context| {
+                let mut style = VideoStyle::default_for_theme(context.theme);
+                let spacious = context.theme.density == crate::ui::theme::Density::Spacious;
+                style.progress_hit_height = dp(if spacious { 31.0 } else { 17.0 });
+                style.progress_height = dp(if spacious { 7.0 } else { 3.0 });
+                style.volume_width = dp(if spacious { 131.0 } else { 79.0 });
+                style.control_button_size = dp(if spacious { 43.0 } else { 29.0 });
+                style.control_icon_size = dp(if spacious { 27.0 } else { 15.0 });
+                style.controls_gap = dp(if spacious { 13.0 } else { 5.0 });
+                style.overlay_gap = dp(if spacious { 11.0 } else { 4.0 });
+                style.overlay_padding = Insets::all(dp(if spacious { 14.0 } else { 6.0 }));
+                style.status_padding = Insets::all(dp(if spacious { 9.0 } else { 3.0 }));
+                style
+            })
+            .size(dp(333.0), dp(187.0)),
+    );
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    for (density, hit, volume, button, controls_gap) in [
+        (
+            crate::ui::theme::Density::Compact,
+            dp(17.0),
+            dp(79.0),
+            dp(29.0),
+            dp(5.0),
+        ),
+        (
+            crate::ui::theme::Density::Spacious,
+            dp(31.0),
+            dp(131.0),
+            dp(43.0),
+            dp(13.0),
+        ),
+    ] {
+        let mut theme = Theme::dark();
+        theme.density = density;
+        let mut animations = AnimationEngine::default();
+        let layout = tree.build_scene_layout(
+            &font_manager,
+            &theme,
+            &media,
+            &mut animations,
+            UnitContext::default(),
+            &HashMap::new(),
+            &HashMap::new(),
+            Rect::new(0.0, 0.0, 400.0, 240.0),
+        );
+        assert_eq!(
+            layout.resolved_root.layout.width,
+            Some(Value::Static(crate::ui::layout::Length::Px(dp(333.0))))
+        );
+        assert_eq!(
+            layout.resolved_root.layout.height,
+            Some(Value::Static(crate::ui::layout::Length::Px(dp(187.0))))
+        );
+        let mut layouts = Vec::new();
+        let mut gaps = Vec::new();
+        collect(&layout.resolved_root, &mut layouts, &mut gaps);
+        assert!(layouts
+            .iter()
+            .any(|item| item.height == Some(Value::Static(crate::ui::layout::Length::Px(hit)))));
+        assert!(layouts
+            .iter()
+            .any(|item| item.width == Some(Value::Static(crate::ui::layout::Length::Px(volume)))));
+        assert!(layouts.iter().any(|item| item.width
+            == Some(Value::Static(crate::ui::layout::Length::Px(button)))
+            && item.height == Some(Value::Static(crate::ui::layout::Length::Px(button)))));
+        assert!(gaps.contains(&Value::Static(crate::ui::layout::Length::Px(controls_gap))));
+    }
 }
 
 #[cfg(feature = "video")]

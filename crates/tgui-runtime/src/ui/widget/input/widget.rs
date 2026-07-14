@@ -230,6 +230,7 @@ impl<VM> Input<VM> {
                     show_scrollbar: Value::Static(false),
                     auto_wrap: Value::Static(false),
                     validation: Value::Static(ValidationVisualState::default()),
+                    runtime_layout: None,
                 },
             },
         }
@@ -369,6 +370,19 @@ impl<VM> Input<VM> {
     ) -> Self {
         if let WidgetKind::TextEditor { input_style, .. } = &mut self.element.kind {
             *input_style = Some(StyleResolver::full_with_style_sheet(resolver));
+        }
+        self
+    }
+
+    pub(crate) fn runtime_layout(
+        mut self,
+        resolver: impl Fn(&mut LayoutStyle, &StyleContext<'_>, &crate::ui::widget::StyleSheet, &VisualStyle)
+            + Send
+            + Sync
+            + 'static,
+    ) -> Self {
+        if let WidgetKind::TextEditor { runtime_layout, .. } = &mut self.element.kind {
+            *runtime_layout = Some(std::sync::Arc::new(resolver));
         }
         self
     }

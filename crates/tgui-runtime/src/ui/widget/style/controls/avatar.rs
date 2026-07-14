@@ -23,7 +23,11 @@ impl AvatarStyle {
         Self {
             background: Value::Static(theme.colors.surface_low),
             foreground: Value::Static(theme.colors.on_surface_muted),
-            size: dp(40.0),
+            size: match theme.density {
+                Density::Compact => dp(32.0),
+                Density::Comfortable => dp(40.0),
+                Density::Spacious => dp(48.0),
+            },
             radius: match shape {
                 AvatarShape::Circle => theme.radius.full,
                 AvatarShape::Square => Dp::ZERO,

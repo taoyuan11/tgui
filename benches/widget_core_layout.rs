@@ -10,7 +10,9 @@ use tgui::core::{dp, Point, Rect};
 #[cfg(feature = "bench-support")]
 use tgui::layout::{Axis, Insets, Overflow};
 #[cfg(feature = "bench-support")]
-use tgui::widgets::{Button, Flex, Text, WidgetBenchmarkContext, WidgetTree};
+use tgui::widgets::{
+    Button, Flex, ItemLayout, Text, VirtualList, WidgetBenchmarkContext, WidgetTree,
+};
 
 #[cfg(feature = "bench-support")]
 fn viewport() -> Rect {
@@ -106,6 +108,17 @@ fn build_scroll_tree(rows: usize) -> WidgetTree<()> {
                     .overflow_y(Overflow::Scroll)
                     .child(content),
             ),
+    )
+}
+
+#[cfg(feature = "bench-support")]
+fn build_virtual_list_tree(rows: usize, item_layout: ItemLayout) -> WidgetTree<()> {
+    WidgetTree::new(
+        VirtualList::new((0..rows).collect::<Vec<_>>(), |index, _| {
+            Text::new(format!("row-{index}")).height(dp(40.0)).into()
+        })
+        .item_layout(item_layout)
+        .size(dp(960.0), dp(720.0)),
     )
 }
 
@@ -228,7 +241,7 @@ fn bench_hit_test(c: &mut Criterion) {
 fn bench_scroll_container_scene_recollect(c: &mut Criterion) {
     let mut group = c.benchmark_group("widget_scroll_scene_recollect_cached_layout");
 
-    for rows in [50_usize, 200, 500] {
+    for rows in [50_usize, 200, 500, 1_000] {
         let tree = build_scroll_tree(rows);
         group.bench_with_input(BenchmarkId::from_parameter(rows), &rows, |b, _| {
             let mut ctx = WidgetBenchmarkContext::new().with_viewport(viewport());
@@ -238,6 +251,128 @@ fn bench_scroll_container_scene_recollect(c: &mut Criterion) {
                 black_box(stats);
             });
         });
+    }
+
+    group.finish();
+}
+
+#[cfg(feature = "bench-support")]
+fn bench_scroll_content_bounds_cache(c: &mut Criterion) {
+    let mut group = c.benchmark_group("widget_scroll_content_bounds_cache");
+
+    for rows in [500_usize, 1_000] {
+        let tree = build_scroll_tree(rows);
+
+        group.bench_with_input(BenchmarkId::new("retained", rows), &rows, |b, _| {
+            let mut ctx = WidgetBenchmarkContext::new().with_viewport(viewport());
+            let _ = ctx.run_layout_and_scene(&tree, Instant::now());
+            b.iter(|| {
+                let stats = ctx.recollect_scene_only(black_box(&tree), Instant::now());
+                black_box(stats);
+            });
+        });
+
+        group.bench_with_input(BenchmarkId::new("forced_rescan", rows), &rows, |b, _| {
+            let mut ctx = WidgetBenchmarkContext::new().with_viewport(viewport());
+            let _ = ctx.run_layout_and_scene(&tree, Instant::now());
+            b.iter(|| {
+                ctx.clear_cached_content_bounds();
+                let stats = ctx.recollect_scene_only(black_box(&tree), Instant::now());
+                black_box(stats);
+            });
+        });
+    }
+
+    group.finish();
+}
+
+#[cfg(feature = "bench-support")]
+fn bench_scroll_child_culling(c: &mut Criterion) {
+    let mut group = c.benchmark_group("widget_scroll_child_culling");
+
+    for rows in [1_000_usize, 10_000] {
+        let tree = build_scroll_tree(rows);
+
+        group.bench_with_input(BenchmarkId::new("indexed", rows), &rows, |b, _| {
+            let mut ctx = WidgetBenchmarkContext::new().with_viewport(viewport());
+            let _ = ctx.run_layout_and_scene(&tree, Instant::now());
+            b.iter(|| {
+                let stats = ctx.recollect_scene_only(black_box(&tree), Instant::now());
+                black_box(stats);
+            });
+        });
+
+        group.bench_with_input(BenchmarkId::new("full_scan", rows), &rows, |b, _| {
+            let mut ctx = WidgetBenchmarkContext::new().with_viewport(viewport());
+            let _ = ctx.run_layout(&tree, Instant::now());
+            ctx.disable_cached_child_culling();
+            b.iter(|| {
+                let stats = ctx.recollect_scene_only(black_box(&tree), Instant::now());
+                black_box(stats);
+            });
+        });
+    }
+
+    group.finish();
+}
+
+#[cfg(feature = "bench-support")]
+fn bench_virtual_window_planning(c: &mut Criterion) {
+    let mut group = c.benchmark_group("widget_virtual_window_planning");
+
+    for rows in [1_000_usize, 10_000, 100_000] {
+        for (name, item_layout) in [
+            (
+                "fixed",
+                ItemLayout::Fixed {
+                    item_extent: dp(40.0),
+                    spacing: dp(4.0),
+                    overscan: 2,
+                },
+            ),
+            (
+                "estimated",
+                ItemLayout::Estimated {
+                    estimate: dp(40.0),
+                    spacing: dp(4.0),
+                    overscan: 2,
+                },
+            ),
+            (
+                "measured",
+                ItemLayout::Measured {
+                    estimate: dp(40.0),
+                    spacing: dp(4.0),
+                    overscan: 2,
+                },
+            ),
+        ] {
+            let tree = build_virtual_list_tree(rows, item_layout);
+            group.bench_with_input(
+                BenchmarkId::new(format!("{name}/bounded"), rows),
+                &rows,
+                |b, _| {
+                    let mut ctx = WidgetBenchmarkContext::new().with_viewport(viewport());
+                    b.iter(|| {
+                        ctx.invalidate_all();
+                        black_box(ctx.run_layout(black_box(&tree), Instant::now()));
+                    });
+                },
+            );
+            group.bench_with_input(
+                BenchmarkId::new(format!("{name}/legacy_full_scan"), rows),
+                &rows,
+                |b, _| {
+                    let mut ctx = WidgetBenchmarkContext::new().with_viewport(viewport());
+                    b.iter(|| {
+                        black_box(ctx.run_layout_with_legacy_virtual_window_plan(
+                            black_box(&tree),
+                            Instant::now(),
+                        ));
+                    });
+                },
+            );
+        }
     }
 
     group.finish();
@@ -320,7 +455,16 @@ fn bench_hit_test(_c: &mut Criterion) {}
 fn bench_scroll_container_scene_recollect(_c: &mut Criterion) {}
 
 #[cfg(not(feature = "bench-support"))]
+fn bench_scroll_content_bounds_cache(_c: &mut Criterion) {}
+
+#[cfg(not(feature = "bench-support"))]
+fn bench_scroll_child_culling(_c: &mut Criterion) {}
+
+#[cfg(not(feature = "bench-support"))]
 fn bench_single_row_update_paths(_c: &mut Criterion) {}
+
+#[cfg(not(feature = "bench-support"))]
+fn bench_virtual_window_planning(_c: &mut Criterion) {}
 
 criterion_group!(
     benches,
@@ -331,6 +475,9 @@ criterion_group!(
     bench_scene_recollect,
     bench_hit_test,
     bench_scroll_container_scene_recollect,
+    bench_scroll_content_bounds_cache,
+    bench_scroll_child_culling,
+    bench_virtual_window_planning,
     bench_single_row_update_paths,
 );
 criterion_main!(benches);

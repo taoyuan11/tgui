@@ -13,7 +13,7 @@ pub(crate) fn measure_select_content(
         .unwrap_or_else(|| {
             select_display_text(text_from_content(placeholder.clone()), select_style)
         });
-    let text_size = measure_text_content(&display, font_manager, theme, units);
+    let text_size = measure_text_content_with_layout(&display, font_manager, theme, units);
     let horizontal = units.resolve_dp(select_style.padding_x) * 2.0 + units.resolve_dp(dp(24.0));
     let vertical = units.resolve_dp(select_style.padding_y) * 2.0;
     (

@@ -1,9 +1,11 @@
 use std::hint::black_box;
+use std::time::Instant;
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
-use tgui::canvas::{CanvasRecorder, CanvasScene, CanvasSceneQueryOptions, PathBuilder};
+use tgui::canvas::{Canvas, CanvasRecorder, CanvasScene, CanvasSceneQueryOptions, PathBuilder};
 use tgui::core::{dp, Color, Point, Rect};
 use tgui::media::MediaSource;
+use tgui::widgets::{WidgetBenchmarkContext, WidgetTree};
 
 const IMAGE_BYTES: &[u8] = b"tgui-benchmark-image-bytes";
 
@@ -222,6 +224,50 @@ fn bench_canvas_recorder_polyline(c: &mut Criterion) {
     group.finish();
 }
 
+fn bench_canvas_complex_path_bounds(c: &mut Criterion) {
+    let mut group = c.benchmark_group("canvas_complex_path_bounds");
+
+    for segments in [64_usize, 256, 1024] {
+        let scene = CanvasRecorder::build(|canvas| {
+            canvas.set_fill(Color::rgb(32, 96, 160));
+            canvas.draw_path(build_complex_path(segments));
+        });
+        group.bench_with_input(BenchmarkId::from_parameter(segments), &segments, |b, _| {
+            b.iter(|| black_box(scene.bounds()));
+        });
+    }
+
+    group.finish();
+}
+
+fn bench_canvas_static_scene_recollect(c: &mut Criterion) {
+    let mut group = c.benchmark_group("canvas_static_scene_recollect");
+
+    for items in [200_usize, 1000] {
+        let scene = CanvasRecorder::build(|canvas| {
+            canvas.set_fill(Color::rgb(32, 96, 160));
+            for index in 0..items {
+                let col = (index % 20) as f32;
+                let row = (index / 20) as f32;
+                canvas.fill_round_rect(8.0 + col * 38.0, 8.0 + row * 32.0, 32.0, 24.0, 4.0);
+            }
+        });
+        let tree =
+            WidgetTree::<()>::new(Canvas::<()>::new(scene).width(dp(800.0)).height(dp(1800.0)));
+        let mut context =
+            WidgetBenchmarkContext::new().with_viewport(Rect::new(0.0, 0.0, 800.0, 1800.0));
+        let _ = context.recollect_scene_only(&tree, Instant::now());
+
+        group.bench_with_input(BenchmarkId::from_parameter(items), &items, |b, _| {
+            b.iter(|| {
+                black_box(context.recollect_scene_only(&tree, Instant::now()));
+            });
+        });
+    }
+
+    group.finish();
+}
+
 criterion_group!(
     benches,
     bench_canvas_scene_build,
@@ -233,5 +279,7 @@ criterion_group!(
     bench_canvas_image_stable_export,
     bench_canvas_path_builder,
     bench_canvas_recorder_polyline,
+    bench_canvas_complex_path_bounds,
+    bench_canvas_static_scene_recollect,
 );
 criterion_main!(benches);

@@ -4,7 +4,169 @@ use crate::runtime::overlay::{AnchorKey, AnchorSource};
 use crate::runtime::portal::ExternalPortalRequest;
 use crate::ui::widget::VirtualSceneStateUpdate;
 use smallvec::SmallVec;
+use std::collections::BTreeMap;
 use std::ops::Range;
+use std::sync::OnceLock;
+
+const HIT_TEST_INDEX_MIN_REGIONS: usize = 64;
+const HIT_TEST_CELL_HEIGHT: f32 = 64.0;
+const HIT_TEST_MAX_CELLS_PER_REGION: i64 = 32;
+const SCROLL_REGION_LOOKUP_MIN_REGIONS: usize = 16;
+
+#[derive(Debug, Default)]
+pub(crate) struct HitTestIndex {
+    normal: HitTestGrid,
+    overlay: HitTestGrid,
+}
+
+#[derive(Debug, Default)]
+struct HitTestGrid {
+    cells: Vec<HitTestCell>,
+    global: Vec<usize>,
+}
+
+#[derive(Debug)]
+struct HitTestCell {
+    coordinate: i64,
+    indices: SmallVec<[usize; 8]>,
+}
+
+impl HitTestIndex {
+    fn build<VM>(normal: &[HitRegion<VM>], overlay: &[HitRegion<VM>]) -> Self {
+        Self {
+            normal: HitTestGrid::build(normal),
+            overlay: HitTestGrid::build(overlay),
+        }
+    }
+
+    pub(crate) fn for_each_normal_candidate(&self, y: Dp, visit: impl FnMut(usize)) {
+        self.normal.for_each_candidate(y, visit);
+    }
+
+    pub(crate) fn for_each_overlay_candidate(&self, y: Dp, visit: impl FnMut(usize)) {
+        self.overlay.for_each_candidate(y, visit);
+    }
+}
+
+impl HitTestGrid {
+    fn build<VM>(regions: &[HitRegion<VM>]) -> Self {
+        let mut cells = BTreeMap::<i64, SmallVec<[usize; 8]>>::new();
+        let mut global = Vec::new();
+
+        for (index, hit) in regions.iter().enumerate() {
+            let start = hit.rect.y.get();
+            let end = hit.rect.bottom().get();
+            if !start.is_finite() || !end.is_finite() || end < start {
+                global.push(index);
+                continue;
+            }
+
+            let start_cell = hit_test_cell(start);
+            let end_cell = hit_test_cell(end);
+            let cell_count = end_cell.saturating_sub(start_cell).saturating_add(1);
+            if cell_count > HIT_TEST_MAX_CELLS_PER_REGION {
+                global.push(index);
+                continue;
+            }
+
+            for coordinate in start_cell..=end_cell {
+                cells.entry(coordinate).or_default().push(index);
+            }
+        }
+
+        Self {
+            cells: cells
+                .into_iter()
+                .map(|(coordinate, indices)| HitTestCell {
+                    coordinate,
+                    indices,
+                })
+                .collect(),
+            global,
+        }
+    }
+
+    fn for_each_candidate(&self, y: Dp, mut visit: impl FnMut(usize)) {
+        let cell_indices = y
+            .get()
+            .is_finite()
+            .then(|| hit_test_cell(y.get()))
+            .and_then(|coordinate| {
+                self.cells
+                    .binary_search_by_key(&coordinate, |cell| cell.coordinate)
+                    .ok()
+                    .map(|index| self.cells[index].indices.as_slice())
+            });
+        let cell_indices = cell_indices.unwrap_or(&[]);
+
+        // Both streams are in original hit-region order. Merging them retains exact z-order;
+        // a region belongs either to the global stream or to cells, never both.
+        let mut global_index = 0;
+        let mut cell_index = 0;
+        while global_index < self.global.len() || cell_index < cell_indices.len() {
+            let next = match (
+                self.global.get(global_index).copied(),
+                cell_indices.get(cell_index).copied(),
+            ) {
+                (Some(global), Some(cell)) if global < cell => {
+                    global_index += 1;
+                    global
+                }
+                (Some(_), Some(cell)) => {
+                    cell_index += 1;
+                    cell
+                }
+                (Some(global), None) => {
+                    global_index += 1;
+                    global
+                }
+                (None, Some(cell)) => {
+                    cell_index += 1;
+                    cell
+                }
+                (None, None) => break,
+            };
+            visit(next);
+        }
+    }
+}
+
+fn hit_test_cell(value: f32) -> i64 {
+    (value / HIT_TEST_CELL_HEIGHT).floor() as i64
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct ScrollRegionLookupIndex {
+    scrollable: Box<[usize]>,
+    scrollbars: Box<[usize]>,
+}
+
+impl ScrollRegionLookupIndex {
+    fn build(regions: &[ScrollRegion]) -> Self {
+        let mut scrollable = Vec::new();
+        let mut scrollbars = Vec::new();
+        for (index, region) in regions.iter().copied().enumerate() {
+            if region.can_scroll_x() || region.can_scroll_y() {
+                scrollable.push(index);
+            }
+            if region.horizontal_thumb.is_some() || region.vertical_thumb.is_some() {
+                scrollbars.push(index);
+            }
+        }
+        Self {
+            scrollable: scrollable.into_boxed_slice(),
+            scrollbars: scrollbars.into_boxed_slice(),
+        }
+    }
+
+    pub(crate) fn scrollable_indices(&self) -> &[usize] {
+        &self.scrollable
+    }
+
+    pub(crate) fn scrollbar_indices(&self) -> &[usize] {
+        &self.scrollbars
+    }
+}
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct ScrollRegion {
@@ -77,6 +239,41 @@ pub(crate) struct ComputedScene<VM> {
     pub virtual_state_updates: SmallVec<[VirtualSceneStateUpdate; 1]>,
     pub(crate) transform_records: HashMap<WidgetId, TransformRecord>,
     pub(crate) dependencies: DependencyGraph,
+    hit_test_index: OnceLock<Box<HitTestIndex>>,
+    scroll_region_lookup_index: OnceLock<Box<ScrollRegionLookupIndex>>,
+}
+
+/// Append-only position inside a `ComputedScene`.
+///
+/// Large primitive/command/hit payloads are represented by stream lengths. The few map-like
+/// metadata channels keep their small baseline values because collection may replace an existing
+/// anchor or transform record rather than append a new entry.
+#[derive(Clone)]
+pub(crate) struct ComputedSceneCursor {
+    scene: ScenePrimitiveCursor,
+    hit_regions: usize,
+    overlay_hit_regions: usize,
+    overlay_close_handlers: usize,
+    portal_overlay_counts: PortalOverlayCounts,
+    focus_scopes: usize,
+    carousel_auto_play: usize,
+    overlay_anchors: HashMap<AnchorKey, Rect>,
+    portal_entries: usize,
+    external_portal_requests: usize,
+    overlay_layers: [OverlayLayerBucketCursor; OVERLAY_LAYER_COUNT],
+    overlay_layer_graph: OverlayLayerGraphCursor,
+    scroll_regions: usize,
+    ime_cursor_area: Option<Rect>,
+    virtual_state_updates: usize,
+    transform_record_ids: SmallVec<[WidgetId; 4]>,
+}
+
+#[derive(Clone)]
+pub(crate) struct ComputedScenePrefixCursor {
+    cursor: ComputedSceneCursor,
+    overlay_layer_graph: OverlayLayerGraph,
+    transform_records: HashMap<WidgetId, TransformRecord>,
+    dependencies: DependencyGraph,
 }
 
 impl<VM> Clone for ComputedScene<VM> {
@@ -99,6 +296,8 @@ impl<VM> Clone for ComputedScene<VM> {
             virtual_state_updates: self.virtual_state_updates.clone(),
             transform_records: self.transform_records.clone(),
             dependencies: self.dependencies.clone(),
+            hit_test_index: OnceLock::new(),
+            scroll_region_lookup_index: OnceLock::new(),
         }
     }
 }
@@ -148,11 +347,24 @@ struct OverlayLayerGraphOffsets {
 }
 
 impl OverlayLayerGraph {
+    fn cursor(&self) -> OverlayLayerGraphCursor {
+        OverlayLayerGraphCursor {
+            layers: self.layers.len(),
+            anchor_slots: self.anchor_slots.clone(),
+        }
+    }
+
+    #[cfg(test)]
+    #[allow(dead_code)]
     fn delta_since(&self, base: &Self) -> Self {
+        self.delta_since_cursor(&base.cursor())
+    }
+
+    fn delta_since_cursor(&self, base: &OverlayLayerGraphCursor) -> Self {
         let mut delta = Self::default();
         delta
             .layers
-            .extend(self.layers.iter().skip(base.layers.len()).cloned());
+            .extend(self.layers.iter().skip(base.layers).cloned());
         delta.anchor_slots.extend(
             self.anchor_slots
                 .iter()
@@ -236,6 +448,12 @@ impl OverlayLayerGraph {
     }
 }
 
+#[derive(Clone, Debug, Default)]
+struct OverlayLayerGraphCursor {
+    layers: usize,
+    anchor_slots: SmallVec<[OverlayAnchorSlot; 4]>,
+}
+
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct PortalOverlayCounts {
     pub shapes: usize,
@@ -301,57 +519,129 @@ impl<VM> Clone for OverlayLayerBucket<VM> {
 }
 
 impl<VM> OverlayLayerBucket<VM> {
+    pub(crate) fn push_command(&mut self, command: RenderCommand, source: Option<WidgetId>) {
+        self.commands.push(command);
+        self.command_sources.push(source);
+    }
+
+    #[cfg(test)]
+    #[allow(dead_code)]
     fn delta_since(&self, base: &Self) -> Self {
+        self.delta_since_cursor(&base.cursor())
+    }
+
+    fn cursor(&self) -> OverlayLayerBucketCursor {
+        OverlayLayerBucketCursor {
+            commands: self.commands.len(),
+            command_sources: self.command_sources.len(),
+            backdrop_blurs: self.backdrop_blurs.len(),
+            shapes: self.shapes.len(),
+            textures: self.textures.len(),
+            meshes: self.meshes.len(),
+            texts: self.texts.len(),
+            text_decorations: self.text_decorations.len(),
+            hits: self.hits.len(),
+            close_handlers: self.close_handlers.len(),
+            focus_scopes: self.focus_scopes.len(),
+        }
+    }
+
+    fn delta_since_cursor(&self, base: &OverlayLayerBucketCursor) -> Self {
         let mut delta = Self::default();
         delta
             .commands
-            .extend(self.commands.iter().skip(base.commands.len()).cloned());
+            .extend(self.commands.iter().skip(base.commands).cloned());
         delta.command_sources.extend(
             self.command_sources
                 .iter()
-                .skip(base.command_sources.len())
+                .skip(base.command_sources)
                 .copied(),
         );
         delta.backdrop_blurs.extend(
             self.backdrop_blurs
                 .iter()
-                .skip(base.backdrop_blurs.len())
+                .skip(base.backdrop_blurs)
                 .copied(),
         );
         delta
             .shapes
-            .extend(self.shapes.iter().skip(base.shapes.len()).copied());
+            .extend(self.shapes.iter().skip(base.shapes).copied());
         delta
             .textures
-            .extend(self.textures.iter().skip(base.textures.len()).cloned());
+            .extend(self.textures.iter().skip(base.textures).cloned());
         delta
             .meshes
-            .extend(self.meshes.iter().skip(base.meshes.len()).cloned());
+            .extend(self.meshes.iter().skip(base.meshes).cloned());
         delta
             .texts
-            .extend(self.texts.iter().skip(base.texts.len()).cloned());
+            .extend(self.texts.iter().skip(base.texts).cloned());
         delta.text_decorations.extend(
             self.text_decorations
                 .iter()
-                .skip(base.text_decorations.len())
+                .skip(base.text_decorations)
                 .cloned(),
         );
-        delta
-            .hits
-            .extend(self.hits.iter().skip(base.hits.len()).cloned());
+        delta.hits.extend(self.hits.iter().skip(base.hits).cloned());
         delta.close_handlers.extend(
             self.close_handlers
                 .iter()
-                .skip(base.close_handlers.len())
-                .cloned(),
-        );
-        delta.focus_scopes.extend(
-            self.focus_scopes
-                .iter()
-                .skip(base.focus_scopes.len())
+                .skip(base.close_handlers)
                 .cloned(),
         );
         delta
+            .focus_scopes
+            .extend(self.focus_scopes.iter().skip(base.focus_scopes).cloned());
+        delta
+    }
+
+    fn prefix_at_cursor(&self, cursor: &OverlayLayerBucketCursor) -> Self {
+        let mut prefix = Self::default();
+        prefix
+            .commands
+            .extend(self.commands.iter().take(cursor.commands).cloned());
+        prefix.command_sources.extend(
+            self.command_sources
+                .iter()
+                .take(cursor.command_sources)
+                .copied(),
+        );
+        prefix.backdrop_blurs.extend(
+            self.backdrop_blurs
+                .iter()
+                .take(cursor.backdrop_blurs)
+                .copied(),
+        );
+        prefix
+            .shapes
+            .extend(self.shapes.iter().take(cursor.shapes).copied());
+        prefix
+            .textures
+            .extend(self.textures.iter().take(cursor.textures).cloned());
+        prefix
+            .meshes
+            .extend(self.meshes.iter().take(cursor.meshes).cloned());
+        prefix
+            .texts
+            .extend(self.texts.iter().take(cursor.texts).cloned());
+        prefix.text_decorations.extend(
+            self.text_decorations
+                .iter()
+                .take(cursor.text_decorations)
+                .cloned(),
+        );
+        prefix
+            .hits
+            .extend(self.hits.iter().take(cursor.hits).cloned());
+        prefix.close_handlers.extend(
+            self.close_handlers
+                .iter()
+                .take(cursor.close_handlers)
+                .cloned(),
+        );
+        prefix
+            .focus_scopes
+            .extend(self.focus_scopes.iter().take(cursor.focus_scopes).cloned());
+        prefix
     }
 
     fn extend_from(&mut self, other: &Self) {
@@ -371,6 +661,21 @@ impl<VM> OverlayLayerBucket<VM> {
             .extend(other.close_handlers.iter().cloned());
         self.focus_scopes.extend(other.focus_scopes.iter().cloned());
     }
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct OverlayLayerBucketCursor {
+    commands: usize,
+    command_sources: usize,
+    backdrop_blurs: usize,
+    shapes: usize,
+    textures: usize,
+    meshes: usize,
+    texts: usize,
+    text_decorations: usize,
+    hits: usize,
+    close_handlers: usize,
+    focus_scopes: usize,
 }
 
 #[derive(Clone, Default)]
@@ -430,11 +735,108 @@ impl<VM> Default for ComputedScene<VM> {
             virtual_state_updates: SmallVec::new(),
             dependencies: DependencyGraph::default(),
             transform_records: HashMap::new(),
+            hit_test_index: OnceLock::new(),
+            scroll_region_lookup_index: OnceLock::new(),
         }
     }
 }
 
 impl<VM> ComputedScene<VM> {
+    pub(crate) fn hit_test_index(&self) -> Option<&HitTestIndex> {
+        if !self.transform_records.is_empty()
+            || self.hit_regions.len() + self.overlay_hit_regions.len() < HIT_TEST_INDEX_MIN_REGIONS
+        {
+            return None;
+        }
+        Some(
+            self.hit_test_index
+                .get_or_init(|| {
+                    Box::new(HitTestIndex::build(
+                        &self.hit_regions,
+                        &self.overlay_hit_regions,
+                    ))
+                })
+                .as_ref(),
+        )
+    }
+
+    pub(crate) fn invalidate_hit_test_index(&mut self) {
+        self.hit_test_index = OnceLock::new();
+    }
+
+    pub(crate) fn scroll_region_lookup_index(&self) -> Option<&ScrollRegionLookupIndex> {
+        if self.scroll_regions.len() < SCROLL_REGION_LOOKUP_MIN_REGIONS {
+            return None;
+        }
+        Some(
+            self.scroll_region_lookup_index
+                .get_or_init(|| Box::new(ScrollRegionLookupIndex::build(&self.scroll_regions)))
+                .as_ref(),
+        )
+    }
+
+    pub(crate) fn invalidate_scroll_region_lookup_index(&mut self) {
+        self.scroll_region_lookup_index = OnceLock::new();
+    }
+
+    /// Whether scrolling can change bounds or scroll-value semantics exposed to AccessKit.
+    ///
+    /// Every container emits a `ScrollRegion`, including non-scrolling containers. Using the raw
+    /// runtime scroll epoch would therefore rebuild the accessibility tree for programmatic/no-op
+    /// offsets that clamp back to zero. Reuse the lazy interaction index for larger scenes and
+    /// scan at most the small-scene threshold otherwise.
+    pub(crate) fn has_accessible_scroll_state(&self) -> bool {
+        self.scroll_region_lookup_index()
+            .map(|index| !index.scrollable_indices().is_empty())
+            .unwrap_or_else(|| {
+                self.scroll_regions
+                    .iter()
+                    .copied()
+                    .any(|region| region.can_scroll_x() || region.can_scroll_y())
+            })
+    }
+
+    /// Reset a materialized ancestor chunk for recomposition while retaining all reusable
+    /// backing allocations.
+    ///
+    /// The subsequent `extend` sequence is exactly the same `before + children + after` order as
+    /// the legacy clone-based path. Only storage ownership changes: the old flat ancestor chunk is
+    /// moved out of the cache and becomes the output buffer for its replacement.
+    pub(crate) fn clear_for_recompose(&mut self, seed: &Self) {
+        self.scene.clear_for_recompose(&seed.scene);
+        self.hit_regions.clear();
+        self.overlay_hit_regions.clear();
+        self.overlay_close_handlers.clear();
+        self.portal_overlay_counts = PortalOverlayCounts::default();
+        self.focus_scopes.clear();
+        self.carousel_auto_play.clear();
+        self.overlay_anchors.clear();
+        self.portal_entries.clear();
+        self.external_portal_requests.clear();
+        for layer in &mut self.overlay_layers {
+            layer.commands.clear();
+            layer.command_sources.clear();
+            layer.backdrop_blurs.clear();
+            layer.shapes.clear();
+            layer.textures.clear();
+            layer.meshes.clear();
+            layer.texts.clear();
+            layer.text_decorations.clear();
+            layer.hits.clear();
+            layer.close_handlers.clear();
+            layer.focus_scopes.clear();
+        }
+        self.overlay_layer_graph.layers.clear();
+        self.overlay_layer_graph.anchor_slots.clear();
+        self.scroll_regions.clear();
+        self.ime_cursor_area = None;
+        self.virtual_state_updates.clear();
+        self.transform_records.clear();
+        self.dependencies.clear();
+        self.invalidate_hit_test_index();
+        self.invalidate_scroll_region_lookup_index();
+    }
+
     pub(crate) fn fill_gpu_scroll_container(&mut self, id: WidgetId) {
         self.scene.fill_gpu_scroll_container(id);
         for hit in &mut self.hit_regions {
@@ -449,39 +851,69 @@ impl<VM> ComputedScene<VM> {
         }
     }
 
+    pub(crate) fn cursor(&self) -> ComputedSceneCursor {
+        ComputedSceneCursor {
+            scene: self.scene.cursor(),
+            hit_regions: self.hit_regions.len(),
+            overlay_hit_regions: self.overlay_hit_regions.len(),
+            overlay_close_handlers: self.overlay_close_handlers.len(),
+            portal_overlay_counts: self.portal_overlay_counts,
+            focus_scopes: self.focus_scopes.len(),
+            carousel_auto_play: self.carousel_auto_play.len(),
+            overlay_anchors: self.overlay_anchors.clone(),
+            portal_entries: self.portal_entries.len(),
+            external_portal_requests: self.external_portal_requests.len(),
+            overlay_layers: std::array::from_fn(|index| self.overlay_layers[index].cursor()),
+            overlay_layer_graph: self.overlay_layer_graph.cursor(),
+            scroll_regions: self.scroll_regions.len(),
+            ime_cursor_area: self.ime_cursor_area,
+            virtual_state_updates: self.virtual_state_updates.len(),
+            transform_record_ids: self.transform_records.keys().copied().collect(),
+        }
+    }
+
+    pub(crate) fn prefix_cursor(&self) -> ComputedScenePrefixCursor {
+        ComputedScenePrefixCursor {
+            cursor: self.cursor(),
+            overlay_layer_graph: self.overlay_layer_graph.clone(),
+            transform_records: self.transform_records.clone(),
+            dependencies: self.dependencies.clone(),
+        }
+    }
+
+    #[cfg(any(test, feature = "bench-support"))]
+    #[allow(dead_code)]
     pub(crate) fn delta_since(&self, base: &ComputedScene<VM>) -> ComputedScene<VM> {
+        self.delta_since_cursor(&base.cursor())
+    }
+
+    pub(crate) fn delta_since_cursor(&self, base: &ComputedSceneCursor) -> ComputedScene<VM> {
         let mut delta = ComputedScene {
-            scene: self.scene.delta_since(&base.scene),
+            scene: self.scene.delta_since_cursor(&base.scene),
             ..Default::default()
         };
-        delta.hit_regions.extend(
-            self.hit_regions
-                .iter()
-                .skip(base.hit_regions.len())
-                .cloned(),
-        );
+        delta
+            .hit_regions
+            .extend(self.hit_regions.iter().skip(base.hit_regions).cloned());
         delta.overlay_hit_regions.extend(
             self.overlay_hit_regions
                 .iter()
-                .skip(base.overlay_hit_regions.len())
+                .skip(base.overlay_hit_regions)
                 .cloned(),
         );
         delta.overlay_close_handlers.extend(
             self.overlay_close_handlers
                 .iter()
-                .skip(base.overlay_close_handlers.len())
+                .skip(base.overlay_close_handlers)
                 .cloned(),
         );
-        delta.focus_scopes.extend(
-            self.focus_scopes
-                .iter()
-                .skip(base.focus_scopes.len())
-                .cloned(),
-        );
+        delta
+            .focus_scopes
+            .extend(self.focus_scopes.iter().skip(base.focus_scopes).cloned());
         delta.carousel_auto_play.extend(
             self.carousel_auto_play
                 .iter()
-                .skip(base.carousel_auto_play.len())
+                .skip(base.carousel_auto_play)
                 .cloned(),
         );
         delta.overlay_anchors.extend(
@@ -493,13 +925,13 @@ impl<VM> ComputedScene<VM> {
         delta.portal_entries.extend(
             self.portal_entries
                 .iter()
-                .skip(base.portal_entries.len())
+                .skip(base.portal_entries)
                 .cloned(),
         );
         delta.external_portal_requests.extend(
             self.external_portal_requests
                 .iter()
-                .skip(base.external_portal_requests.len())
+                .skip(base.external_portal_requests)
                 .cloned(),
         );
         delta.portal_overlay_counts.shapes = self
@@ -518,6 +950,10 @@ impl<VM> ComputedScene<VM> {
             .portal_overlay_counts
             .texts
             .saturating_sub(base.portal_overlay_counts.texts);
+        delta.portal_overlay_counts.text_decorations = self
+            .portal_overlay_counts
+            .text_decorations
+            .saturating_sub(base.portal_overlay_counts.text_decorations);
         delta.portal_overlay_counts.commands = self
             .portal_overlay_counts
             .commands
@@ -535,15 +971,16 @@ impl<VM> ComputedScene<VM> {
             .focus_scopes
             .saturating_sub(base.portal_overlay_counts.focus_scopes);
         for i in 0..OVERLAY_LAYER_COUNT {
-            delta.overlay_layers[i] = self.overlay_layers[i].delta_since(&base.overlay_layers[i]);
+            delta.overlay_layers[i] =
+                self.overlay_layers[i].delta_since_cursor(&base.overlay_layers[i]);
         }
         delta.overlay_layer_graph = self
             .overlay_layer_graph
-            .delta_since(&base.overlay_layer_graph);
+            .delta_since_cursor(&base.overlay_layer_graph);
         delta.scroll_regions.extend(
             self.scroll_regions
                 .iter()
-                .skip(base.scroll_regions.len())
+                .skip(base.scroll_regions)
                 .copied(),
         );
         if base.ime_cursor_area.is_none() {
@@ -552,20 +989,92 @@ impl<VM> ComputedScene<VM> {
         delta.virtual_state_updates.extend(
             self.virtual_state_updates
                 .iter()
-                .skip(base.virtual_state_updates.len())
+                .skip(base.virtual_state_updates)
                 .cloned(),
         );
         delta.transform_records.extend(
             self.transform_records
                 .iter()
-                .filter(|(id, _)| !base.transform_records.contains_key(id))
+                .filter(|(id, _)| !base.transform_record_ids.contains(id))
                 .map(|(id, record)| (*id, *record)),
         );
         delta.dependencies = self.dependencies.clone();
         delta
     }
 
+    pub(crate) fn prefix_at_cursor(
+        &self,
+        prefix_cursor: &ComputedScenePrefixCursor,
+    ) -> ComputedScene<VM> {
+        let cursor = &prefix_cursor.cursor;
+        let mut prefix = ComputedScene {
+            scene: self.scene.prefix_at_cursor(&cursor.scene),
+            portal_overlay_counts: cursor.portal_overlay_counts,
+            overlay_anchors: cursor.overlay_anchors.clone(),
+            overlay_layer_graph: prefix_cursor.overlay_layer_graph.clone(),
+            ime_cursor_area: cursor.ime_cursor_area,
+            transform_records: prefix_cursor.transform_records.clone(),
+            dependencies: prefix_cursor.dependencies.clone(),
+            ..Default::default()
+        };
+        prefix
+            .hit_regions
+            .extend(self.hit_regions.iter().take(cursor.hit_regions).cloned());
+        prefix.overlay_hit_regions.extend(
+            self.overlay_hit_regions
+                .iter()
+                .take(cursor.overlay_hit_regions)
+                .cloned(),
+        );
+        prefix.overlay_close_handlers.extend(
+            self.overlay_close_handlers
+                .iter()
+                .take(cursor.overlay_close_handlers)
+                .cloned(),
+        );
+        prefix
+            .focus_scopes
+            .extend(self.focus_scopes.iter().take(cursor.focus_scopes).cloned());
+        prefix.carousel_auto_play.extend(
+            self.carousel_auto_play
+                .iter()
+                .take(cursor.carousel_auto_play)
+                .cloned(),
+        );
+        prefix.portal_entries.extend(
+            self.portal_entries
+                .iter()
+                .take(cursor.portal_entries)
+                .cloned(),
+        );
+        prefix.external_portal_requests.extend(
+            self.external_portal_requests
+                .iter()
+                .take(cursor.external_portal_requests)
+                .cloned(),
+        );
+        for i in 0..OVERLAY_LAYER_COUNT {
+            prefix.overlay_layers[i] =
+                self.overlay_layers[i].prefix_at_cursor(&cursor.overlay_layers[i]);
+        }
+        prefix.scroll_regions.extend(
+            self.scroll_regions
+                .iter()
+                .take(cursor.scroll_regions)
+                .copied(),
+        );
+        prefix.virtual_state_updates.extend(
+            self.virtual_state_updates
+                .iter()
+                .take(cursor.virtual_state_updates)
+                .cloned(),
+        );
+        prefix
+    }
+
     pub(crate) fn extend(&mut self, other: &ComputedScene<VM>) {
+        self.invalidate_hit_test_index();
+        self.invalidate_scroll_region_lookup_index();
         let graph_offsets = OverlayLayerGraphOffsets {
             commands: self.scene.overlay_commands.len(),
             hits: self.overlay_hit_regions.len(),
@@ -618,6 +1127,7 @@ impl<VM> ComputedScene<VM> {
     }
 
     pub(crate) fn finalize_overlay_layers(&mut self) {
+        self.invalidate_hit_test_index();
         for layer in crate::runtime::overlay::OverlayLayer::ALL {
             let bucket = std::mem::take(&mut self.overlay_layers[layer.index()]);
             debug_assert_eq!(
@@ -633,25 +1143,31 @@ impl<VM> ComputedScene<VM> {
             };
             self.overlay_layer_graph
                 .push_layer(layer, &bucket, graph_offsets);
-            self.scene.backdrop_blurs.extend(bucket.backdrop_blurs);
-            self.scene.overlay_shapes.extend(bucket.shapes);
-            self.scene.overlay_textures.extend(bucket.textures);
-            self.scene.overlay_meshes.extend(bucket.meshes);
-            self.scene.overlay_texts.extend(bucket.texts);
-            self.scene
-                .overlay_text_decorations
-                .extend(bucket.text_decorations);
-            self.scene.overlay_commands.extend(bucket.commands);
-            self.scene
-                .overlay_command_sources
-                .extend(bucket.command_sources);
-            self.overlay_hit_regions.extend(bucket.hits);
-            self.overlay_close_handlers.extend(bucket.close_handlers);
-            self.focus_scopes.extend(bucket.focus_scopes);
+            let OverlayLayerBucket {
+                commands,
+                command_sources,
+                hits,
+                close_handlers,
+                focus_scopes,
+                ..
+            } = bucket;
+            let mut command_sources = command_sources.into_iter();
+            for command in commands {
+                self.scene
+                    .push_portal_overlay_command(command, command_sources.next().unwrap_or(None));
+            }
+            debug_assert!(
+                command_sources.next().is_none(),
+                "overlay command sources must stay aligned with overlay commands"
+            );
+            self.overlay_hit_regions.extend(hits);
+            self.overlay_close_handlers.extend(close_handlers);
+            self.focus_scopes.extend(focus_scopes);
         }
     }
 
     pub(crate) fn finalize_portals(&mut self, viewport: Rect) {
+        self.invalidate_hit_test_index();
         let base_shapes = self
             .scene
             .overlay_shapes
@@ -750,6 +1266,7 @@ impl<VM> ComputedScene<VM> {
         viewport: Rect,
         entries: impl IntoIterator<Item = PortalEntry<VM>>,
     ) {
+        self.invalidate_hit_test_index();
         let base_shapes = self.scene.overlay_shapes.len();
         let base_textures = self.scene.overlay_textures.len();
         let base_meshes = self.scene.overlay_meshes.len();
@@ -1088,6 +1605,8 @@ impl<VM> ComputedScene<VM> {
         if scroll_end > self.scroll_regions.len() {
             return false;
         }
+        self.invalidate_hit_test_index();
+        self.invalidate_scroll_region_lookup_index();
         self.hit_regions[hit_offset..hit_end].clone_from_slice(&chunk.hit_regions);
         self.scroll_regions[scroll_offset..scroll_end].clone_from_slice(&chunk.scroll_regions);
         true

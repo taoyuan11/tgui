@@ -12,7 +12,7 @@ use tgui::layout::{Axis, Insets};
 #[cfg(feature = "bench-support")]
 use tgui::mvvm::ViewModelContext;
 #[cfg(feature = "bench-support")]
-use tgui::widgets::bench_support_ext::{BenchRopeBuffer, BenchTextLayout};
+use tgui::widgets::bench_support_ext::{BenchFontManager, BenchRopeBuffer, BenchTextLayout};
 #[cfg(feature = "bench-support")]
 use tgui::widgets::{Flex, Text, Textarea, WidgetBenchmarkContext, WidgetTree};
 
@@ -158,6 +158,149 @@ fn bench_text_layout(c: &mut Criterion) {
         );
     }
 
+    group.finish();
+}
+
+#[cfg(feature = "bench-support")]
+fn bench_text_layout_cache_hit(c: &mut Criterion) {
+    let mut group = c.benchmark_group("text_layout_cache_hit_key");
+
+    for size in [64_usize, 4096, 16384] {
+        let text = repeated_text(size);
+        let manager = BenchFontManager::new();
+        black_box(manager.measure_layout(&text, None));
+        group.bench_with_input(
+            BenchmarkId::new("borrowed_prehashed", size),
+            &size,
+            |b, _| {
+                b.iter(|| black_box(manager.measure_layout(black_box(&text), None)));
+            },
+        );
+        group.bench_with_input(
+            BenchmarkId::new("legacy_owned_copy", size),
+            &size,
+            |b, _| {
+                b.iter(|| {
+                    black_box(manager.measure_layout_with_legacy_owned_key(black_box(&text), None))
+                });
+            },
+        );
+    }
+
+    let wrapped = repeated_text(4096);
+    let manager = BenchFontManager::new();
+    black_box(manager.measure_layout(&wrapped, Some(480.0)));
+    group.bench_function("wrapped_4096", |b| {
+        b.iter(|| black_box(manager.measure_layout(black_box(&wrapped), Some(480.0))));
+    });
+
+    group.finish();
+}
+
+#[cfg(feature = "bench-support")]
+fn bench_text_measure_only_vs_precise_layout(c: &mut Criterion) {
+    let mut group = c.benchmark_group("text_intrinsic_measure_uncached_geometry");
+    let cases = [
+        ("single_line_ascii_4096", repeated_text(4096), None),
+        (
+            "wrapped_unicode_4096",
+            repeated_unicode_text(4096),
+            Some(320.0),
+        ),
+    ];
+
+    for (name, text, wrap_width) in cases {
+        let manager = BenchFontManager::new();
+        group.bench_function(BenchmarkId::new("measure_only", name), |b| {
+            b.iter(|| {
+                black_box(manager.measure_size_uncached(black_box(&text), black_box(wrap_width)))
+            });
+        });
+        group.bench_function(BenchmarkId::new("precise_layout", name), |b| {
+            b.iter(|| {
+                black_box(
+                    manager
+                        .measure_precise_layout_uncached(black_box(&text), black_box(wrap_width)),
+                )
+            });
+        });
+    }
+
+    group.finish();
+}
+
+#[cfg(feature = "bench-support")]
+fn bench_text_widget_measure_route(c: &mut Criterion) {
+    let mut group = c.benchmark_group("text_widget_full_layout_scene_measure_route");
+    let sample = repeated_text(96);
+
+    for line_count in [20_usize, 100] {
+        let tree = build_text_tree(line_count, &sample);
+
+        let mut optimized_probe = WidgetBenchmarkContext::new().with_viewport(viewport());
+        optimized_probe.clear_text_measure_caches();
+        optimized_probe.reset_text_measure_activity();
+        black_box(optimized_probe.run_layout_and_scene(&tree, Instant::now()));
+        let optimized_activity = optimized_probe.text_measure_activity();
+        assert_eq!(
+            optimized_activity.measure_only_cache_misses,
+            line_count as u64
+        );
+        assert_eq!(optimized_activity.precise_measure_calls, 0);
+        assert_eq!(optimized_activity.precise_layout_builds, 0);
+
+        let mut legacy_probe = WidgetBenchmarkContext::new().with_viewport(viewport());
+        legacy_probe.force_precise_text_measurement(true);
+        legacy_probe.clear_text_measure_caches();
+        legacy_probe.reset_text_measure_activity();
+        black_box(legacy_probe.run_layout_and_scene(&tree, Instant::now()));
+        let legacy_activity = legacy_probe.text_measure_activity();
+        assert_eq!(legacy_activity.measure_only_cache_misses, 0);
+        assert!(legacy_activity.precise_measure_calls >= line_count as u64);
+        assert_eq!(legacy_activity.precise_layout_builds, line_count as u64);
+
+        let mut optimized = WidgetBenchmarkContext::new().with_viewport(viewport());
+        group.bench_function(BenchmarkId::new("measure_only", line_count), |b| {
+            b.iter(|| {
+                optimized.clear_text_measure_caches();
+                optimized.invalidate_all();
+                black_box(optimized.run_layout_and_scene(black_box(&tree), Instant::now()))
+            });
+        });
+
+        let mut legacy = WidgetBenchmarkContext::new().with_viewport(viewport());
+        legacy.force_precise_text_measurement(true);
+        group.bench_function(BenchmarkId::new("precise_layout", line_count), |b| {
+            b.iter(|| {
+                legacy.clear_text_measure_caches();
+                legacy.invalidate_all();
+                black_box(legacy.run_layout_and_scene(black_box(&tree), Instant::now()))
+            });
+        });
+    }
+
+    group.finish();
+}
+
+#[cfg(feature = "bench-support")]
+fn bench_font_family_resolution(c: &mut Criterion) {
+    let mut group = c.benchmark_group("font_family_resolution");
+    let manager = BenchFontManager::new();
+    let text = "Hello 你好 مرحبا 👨‍👩‍👧‍👦 retained text";
+
+    group.bench_function("cold_buffer_attrs", |b| {
+        b.iter(|| {
+            manager.clear_family_resolution_cache();
+            black_box(manager.resolve_buffer_attrs(black_box(text), None))
+        });
+    });
+
+    black_box(manager.resolve_buffer_attrs(text, None));
+    group.bench_function("hot_buffer_attrs", |b| {
+        b.iter(|| black_box(manager.resolve_buffer_attrs(black_box(text), None)));
+    });
+
+    black_box(manager.family_resolution_query_count());
     group.finish();
 }
 
@@ -370,6 +513,26 @@ fn bench_rope_buffer_boundary_walk(c: &mut Criterion) {
 }
 
 #[cfg(feature = "bench-support")]
+fn bench_rope_buffer_grapheme_walk(c: &mut Criterion) {
+    let mut group = c.benchmark_group("text_rope_buffer_grapheme_walk");
+
+    for bytes in [4096_usize, 65_536] {
+        let sample = repeated_unicode_text(bytes);
+        let buffer = BenchRopeBuffer::from_text(&sample);
+        let cursor = clamp_to_char_boundary(&sample, sample.len() / 2);
+        group.bench_with_input(BenchmarkId::from_parameter(bytes), &bytes, |b, _| {
+            b.iter(|| {
+                let previous = buffer.prev_grapheme_boundary_byte(black_box(cursor));
+                let next = buffer.next_grapheme_boundary_byte(black_box(cursor));
+                black_box((previous, next));
+            });
+        });
+    }
+
+    group.finish();
+}
+
+#[cfg(feature = "bench-support")]
 fn bench_text_layout_line_queries(c: &mut Criterion) {
     let mut group = c.benchmark_group("text_layout_line_queries");
 
@@ -462,6 +625,18 @@ fn bench_text_shaping(_c: &mut Criterion) {
 fn bench_text_layout(_c: &mut Criterion) {}
 
 #[cfg(not(feature = "bench-support"))]
+fn bench_text_layout_cache_hit(_c: &mut Criterion) {}
+
+#[cfg(not(feature = "bench-support"))]
+fn bench_text_measure_only_vs_precise_layout(_c: &mut Criterion) {}
+
+#[cfg(not(feature = "bench-support"))]
+fn bench_text_widget_measure_route(_c: &mut Criterion) {}
+
+#[cfg(not(feature = "bench-support"))]
+fn bench_font_family_resolution(_c: &mut Criterion) {}
+
+#[cfg(not(feature = "bench-support"))]
 fn bench_text_measurement(_c: &mut Criterion) {}
 
 #[cfg(not(feature = "bench-support"))]
@@ -489,6 +664,9 @@ fn bench_rope_buffer_replace(_c: &mut Criterion) {}
 fn bench_rope_buffer_boundary_walk(_c: &mut Criterion) {}
 
 #[cfg(not(feature = "bench-support"))]
+fn bench_rope_buffer_grapheme_walk(_c: &mut Criterion) {}
+
+#[cfg(not(feature = "bench-support"))]
 fn bench_text_layout_line_queries(_c: &mut Criterion) {}
 
 #[cfg(not(feature = "bench-support"))]
@@ -501,6 +679,10 @@ criterion_group!(
     benches,
     bench_text_shaping,
     bench_text_layout,
+    bench_text_layout_cache_hit,
+    bench_text_measure_only_vs_precise_layout,
+    bench_text_widget_measure_route,
+    bench_font_family_resolution,
     bench_text_measurement,
     bench_text_hit_test,
     bench_text_controller_insert,
@@ -510,6 +692,7 @@ criterion_group!(
     bench_text_wrapping,
     bench_rope_buffer_replace,
     bench_rope_buffer_boundary_walk,
+    bench_rope_buffer_grapheme_walk,
     bench_text_layout_line_queries,
     bench_text_layout_boundary_queries,
     bench_text_layout_hit_queries,

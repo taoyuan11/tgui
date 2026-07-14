@@ -285,6 +285,41 @@ pub struct ScenePrimitives {
     active_transform_chain: TransformChain,
 }
 
+/// Append-only position inside every retained scene stream.
+///
+/// Collection uses this instead of cloning all primitives merely to remember where a later
+/// overlay/child delta begins. The two owned fields are tiny frame-local state rather than draw
+/// payloads; all primitive and command streams are represented by counts only.
+#[derive(Clone)]
+pub(crate) struct ScenePrimitiveCursor {
+    backdrop_blurs: usize,
+    brushes: usize,
+    canvas_composites: usize,
+    shapes: usize,
+    meshes: usize,
+    textures: usize,
+    #[cfg(feature = "video")]
+    video_textures: usize,
+    texts: usize,
+    text_decorations: usize,
+    overlay_shapes: usize,
+    overlay_textures: usize,
+    overlay_meshes: usize,
+    overlay_texts: usize,
+    overlay_text_decorations: usize,
+    commands: usize,
+    overlay_commands: usize,
+    overlay_command_sources: usize,
+    command_gpu_scroll_containers: usize,
+    overlay_command_gpu_scroll_containers: usize,
+    command_transform_chains: usize,
+    overlay_command_transform_chains: usize,
+    dirty_draw_ranges: SmallVec<[DirtyDrawRange; 4]>,
+    prepare_cache_serial: u64,
+    active_gpu_scroll_container: Option<WidgetId>,
+    active_transform_chain: TransformChain,
+}
+
 impl ScenePrimitives {
     pub(crate) fn new_prepare_cache_root() -> Self {
         Self {
@@ -303,6 +338,46 @@ impl ScenePrimitives {
 
     pub(crate) fn clear_dirty_draw_ranges(&mut self) {
         self.dirty_draw_ranges.clear();
+    }
+
+    /// Clear every retained draw stream without releasing its backing allocation.
+    ///
+    /// A scene-only subtree fallback repeatedly materializes the same ancestor chunks. Reusing
+    /// those buffers avoids allocating a fresh set of parallel primitive/command vectors for
+    /// every ancestor while preserving the existing flat representation used by slot patching and
+    /// renderer preparation.
+    pub(crate) fn clear_for_recompose(&mut self, seed: &Self) {
+        self.backdrop_blurs.clear();
+        self.brushes.clear();
+        self.canvas_composites.clear();
+        self.shapes.clear();
+        self.meshes.clear();
+        self.textures.clear();
+        #[cfg(feature = "video")]
+        self.video_textures.clear();
+        self.texts.clear();
+        self.text_decorations.clear();
+        self.overlay_shapes.clear();
+        self.overlay_textures.clear();
+        self.overlay_meshes.clear();
+        self.overlay_texts.clear();
+        self.overlay_text_decorations.clear();
+        self.commands.clear();
+        self.overlay_commands.clear();
+        self.overlay_command_sources.clear();
+        self.command_gpu_scroll_containers.clear();
+        self.overlay_command_gpu_scroll_containers.clear();
+        self.command_transform_chains.clear();
+        self.overlay_command_transform_chains.clear();
+        self.dirty_draw_ranges.clear();
+        // `extend` appends streams but deliberately does not overwrite collection state. The
+        // legacy path starts from `before_children.clone()`, so copy those scalar states exactly;
+        // this matters if a later finalize step appends commands to the recomposed root.
+        self.prepare_cache_serial = seed.prepare_cache_serial;
+        self.active_gpu_scroll_container = seed.active_gpu_scroll_container;
+        self.active_transform_chain.clear();
+        self.active_transform_chain
+            .extend(seed.active_transform_chain.iter().copied());
     }
 
     pub(crate) fn set_active_gpu_scroll_container(&mut self, id: Option<WidgetId>) {
@@ -387,117 +462,151 @@ impl ScenePrimitives {
             .push(self.active_transform_chain.clone());
     }
 
+    pub(crate) fn cursor(&self) -> ScenePrimitiveCursor {
+        ScenePrimitiveCursor {
+            backdrop_blurs: self.backdrop_blurs.len(),
+            brushes: self.brushes.len(),
+            canvas_composites: self.canvas_composites.len(),
+            shapes: self.shapes.len(),
+            meshes: self.meshes.len(),
+            textures: self.textures.len(),
+            #[cfg(feature = "video")]
+            video_textures: self.video_textures.len(),
+            texts: self.texts.len(),
+            text_decorations: self.text_decorations.len(),
+            overlay_shapes: self.overlay_shapes.len(),
+            overlay_textures: self.overlay_textures.len(),
+            overlay_meshes: self.overlay_meshes.len(),
+            overlay_texts: self.overlay_texts.len(),
+            overlay_text_decorations: self.overlay_text_decorations.len(),
+            commands: self.commands.len(),
+            overlay_commands: self.overlay_commands.len(),
+            overlay_command_sources: self.overlay_command_sources.len(),
+            command_gpu_scroll_containers: self.command_gpu_scroll_containers.len(),
+            overlay_command_gpu_scroll_containers: self.overlay_command_gpu_scroll_containers.len(),
+            command_transform_chains: self.command_transform_chains.len(),
+            overlay_command_transform_chains: self.overlay_command_transform_chains.len(),
+            dirty_draw_ranges: self.dirty_draw_ranges.clone(),
+            prepare_cache_serial: self.prepare_cache_serial,
+            active_gpu_scroll_container: self.active_gpu_scroll_container,
+            active_transform_chain: self.active_transform_chain.clone(),
+        }
+    }
+
+    #[cfg(test)]
+    #[allow(dead_code)]
     pub(crate) fn delta_since(&self, base: &ScenePrimitives) -> ScenePrimitives {
+        self.delta_since_cursor(&base.cursor())
+    }
+
+    pub(crate) fn delta_since_cursor(&self, base: &ScenePrimitiveCursor) -> ScenePrimitives {
         let mut delta = ScenePrimitives::default();
         delta.prepare_cache_serial = self.prepare_cache_serial;
         delta.backdrop_blurs.extend(
             self.backdrop_blurs
                 .iter()
-                .skip(base.backdrop_blurs.len())
+                .skip(base.backdrop_blurs)
                 .copied(),
         );
         delta
             .brushes
-            .extend(self.brushes.iter().skip(base.brushes.len()).cloned());
+            .extend(self.brushes.iter().skip(base.brushes).cloned());
         delta.canvas_composites.extend(
             self.canvas_composites
                 .iter()
-                .skip(base.canvas_composites.len())
+                .skip(base.canvas_composites)
                 .cloned(),
         );
         delta
             .shapes
-            .extend(self.shapes.iter().skip(base.shapes.len()).copied());
+            .extend(self.shapes.iter().skip(base.shapes).copied());
         delta
             .meshes
-            .extend(self.meshes.iter().skip(base.meshes.len()).cloned());
+            .extend(self.meshes.iter().skip(base.meshes).cloned());
         delta
             .textures
-            .extend(self.textures.iter().skip(base.textures.len()).cloned());
+            .extend(self.textures.iter().skip(base.textures).cloned());
         #[cfg(feature = "video")]
         delta.video_textures.extend(
             self.video_textures
                 .iter()
-                .skip(base.video_textures.len())
+                .skip(base.video_textures)
                 .cloned(),
         );
         delta
             .texts
-            .extend(self.texts.iter().skip(base.texts.len()).cloned());
+            .extend(self.texts.iter().skip(base.texts).cloned());
         delta.text_decorations.extend(
             self.text_decorations
                 .iter()
-                .skip(base.text_decorations.len())
+                .skip(base.text_decorations)
                 .cloned(),
         );
         delta.overlay_shapes.extend(
             self.overlay_shapes
                 .iter()
-                .skip(base.overlay_shapes.len())
+                .skip(base.overlay_shapes)
                 .copied(),
         );
         delta.overlay_textures.extend(
             self.overlay_textures
                 .iter()
-                .skip(base.overlay_textures.len())
+                .skip(base.overlay_textures)
                 .cloned(),
         );
         delta.overlay_meshes.extend(
             self.overlay_meshes
                 .iter()
-                .skip(base.overlay_meshes.len())
+                .skip(base.overlay_meshes)
                 .cloned(),
         );
-        delta.overlay_texts.extend(
-            self.overlay_texts
-                .iter()
-                .skip(base.overlay_texts.len())
-                .cloned(),
-        );
+        delta
+            .overlay_texts
+            .extend(self.overlay_texts.iter().skip(base.overlay_texts).cloned());
         delta.overlay_text_decorations.extend(
             self.overlay_text_decorations
                 .iter()
-                .skip(base.overlay_text_decorations.len())
+                .skip(base.overlay_text_decorations)
                 .cloned(),
         );
         delta
             .commands
-            .extend(self.commands.iter().skip(base.commands.len()).cloned());
+            .extend(self.commands.iter().skip(base.commands).cloned());
         delta.overlay_commands.extend(
             self.overlay_commands
                 .iter()
-                .skip(base.overlay_commands.len())
+                .skip(base.overlay_commands)
                 .cloned(),
         );
         delta.overlay_command_sources.extend(
             self.overlay_command_sources
                 .iter()
-                .skip(base.overlay_command_sources.len())
+                .skip(base.overlay_command_sources)
                 .copied(),
         );
         {
             delta.command_gpu_scroll_containers.extend(
                 self.command_gpu_scroll_containers
                     .iter()
-                    .skip(base.command_gpu_scroll_containers.len())
+                    .skip(base.command_gpu_scroll_containers)
                     .copied(),
             );
             delta.overlay_command_gpu_scroll_containers.extend(
                 self.overlay_command_gpu_scroll_containers
                     .iter()
-                    .skip(base.overlay_command_gpu_scroll_containers.len())
+                    .skip(base.overlay_command_gpu_scroll_containers)
                     .copied(),
             );
             delta.command_transform_chains.extend(
                 self.command_transform_chains
                     .iter()
-                    .skip(base.command_transform_chains.len())
+                    .skip(base.command_transform_chains)
                     .cloned(),
             );
             delta.overlay_command_transform_chains.extend(
                 self.overlay_command_transform_chains
                     .iter()
-                    .skip(base.overlay_command_transform_chains.len())
+                    .skip(base.overlay_command_transform_chains)
                     .cloned(),
             );
         }
@@ -505,6 +614,129 @@ impl ScenePrimitives {
             .dirty_draw_ranges
             .extend(self.dirty_draw_ranges.iter().cloned());
         delta
+    }
+
+    /// Materialize the prefix retained at `cursor` after append-only collection continued.
+    ///
+    /// `SceneChunkParts` currently owns a mutable local prefix for reactive media slot patching,
+    /// so one prefix copy remains structurally necessary. Capturing the position itself is now
+    /// O(1) in draw payload size and can later map directly to a segmented/COW representation.
+    pub(crate) fn prefix_at_cursor(&self, cursor: &ScenePrimitiveCursor) -> ScenePrimitives {
+        let mut prefix = ScenePrimitives::default();
+        prefix.backdrop_blurs.extend(
+            self.backdrop_blurs
+                .iter()
+                .take(cursor.backdrop_blurs)
+                .copied(),
+        );
+        prefix
+            .brushes
+            .extend(self.brushes.iter().take(cursor.brushes).cloned());
+        prefix.canvas_composites.extend(
+            self.canvas_composites
+                .iter()
+                .take(cursor.canvas_composites)
+                .cloned(),
+        );
+        prefix
+            .shapes
+            .extend(self.shapes.iter().take(cursor.shapes).copied());
+        prefix
+            .meshes
+            .extend(self.meshes.iter().take(cursor.meshes).cloned());
+        prefix
+            .textures
+            .extend(self.textures.iter().take(cursor.textures).cloned());
+        #[cfg(feature = "video")]
+        prefix.video_textures.extend(
+            self.video_textures
+                .iter()
+                .take(cursor.video_textures)
+                .cloned(),
+        );
+        prefix
+            .texts
+            .extend(self.texts.iter().take(cursor.texts).cloned());
+        prefix.text_decorations.extend(
+            self.text_decorations
+                .iter()
+                .take(cursor.text_decorations)
+                .cloned(),
+        );
+        prefix.overlay_shapes.extend(
+            self.overlay_shapes
+                .iter()
+                .take(cursor.overlay_shapes)
+                .copied(),
+        );
+        prefix.overlay_textures.extend(
+            self.overlay_textures
+                .iter()
+                .take(cursor.overlay_textures)
+                .cloned(),
+        );
+        prefix.overlay_meshes.extend(
+            self.overlay_meshes
+                .iter()
+                .take(cursor.overlay_meshes)
+                .cloned(),
+        );
+        prefix.overlay_texts.extend(
+            self.overlay_texts
+                .iter()
+                .take(cursor.overlay_texts)
+                .cloned(),
+        );
+        prefix.overlay_text_decorations.extend(
+            self.overlay_text_decorations
+                .iter()
+                .take(cursor.overlay_text_decorations)
+                .cloned(),
+        );
+        prefix
+            .commands
+            .extend(self.commands.iter().take(cursor.commands).cloned());
+        prefix.overlay_commands.extend(
+            self.overlay_commands
+                .iter()
+                .take(cursor.overlay_commands)
+                .cloned(),
+        );
+        prefix.overlay_command_sources.extend(
+            self.overlay_command_sources
+                .iter()
+                .take(cursor.overlay_command_sources)
+                .copied(),
+        );
+        prefix.command_gpu_scroll_containers.extend(
+            self.command_gpu_scroll_containers
+                .iter()
+                .take(cursor.command_gpu_scroll_containers)
+                .copied(),
+        );
+        prefix.overlay_command_gpu_scroll_containers.extend(
+            self.overlay_command_gpu_scroll_containers
+                .iter()
+                .take(cursor.overlay_command_gpu_scroll_containers)
+                .copied(),
+        );
+        prefix.command_transform_chains.extend(
+            self.command_transform_chains
+                .iter()
+                .take(cursor.command_transform_chains)
+                .cloned(),
+        );
+        prefix.overlay_command_transform_chains.extend(
+            self.overlay_command_transform_chains
+                .iter()
+                .take(cursor.overlay_command_transform_chains)
+                .cloned(),
+        );
+        prefix.dirty_draw_ranges = cursor.dirty_draw_ranges.clone();
+        prefix.prepare_cache_serial = cursor.prepare_cache_serial;
+        prefix.active_gpu_scroll_container = cursor.active_gpu_scroll_container;
+        prefix.active_transform_chain = cursor.active_transform_chain.clone();
+        prefix
     }
 
     pub(crate) fn push_render_command(&mut self, command: RenderCommand) {
@@ -520,6 +752,26 @@ impl ScenePrimitives {
             RenderCommand::TextDecoration(primitive) => self.push_text_decoration(primitive),
             RenderCommand::Mesh(primitive) => self.push_mesh(primitive),
         }
+    }
+
+    /// Consume the ordered command streams while dropping their parallel primitive copies first.
+    ///
+    /// Portal collection translates a nested scene into window coordinates from the command
+    /// streams. Dropping the source scene's parallel arrays before returning those commands makes
+    /// Arc-backed mesh/decoration payloads uniquely owned in the common case, so translation can
+    /// mutate them in place instead of allocating and copying their full buffers.
+    pub(crate) fn into_command_streams(
+        mut self,
+    ) -> (
+        SmallVec<[RenderCommand; 1]>,
+        SmallVec<[RenderCommand; 1]>,
+        SmallVec<[Option<WidgetId>; 1]>,
+    ) {
+        let commands = std::mem::take(&mut self.commands);
+        let overlay_commands = std::mem::take(&mut self.overlay_commands);
+        let overlay_command_sources = std::mem::take(&mut self.overlay_command_sources);
+        drop(self);
+        (commands, overlay_commands, overlay_command_sources)
     }
 
     pub(crate) fn push_backdrop_blur(&mut self, primitive: BackdropBlurPrimitive) {
@@ -629,6 +881,34 @@ impl ScenePrimitives {
         }
         self.overlay_text_decorations.push(primitive.clone());
         self.push_overlay_command(RenderCommand::TextDecoration(primitive));
+    }
+
+    /// Append a portal command to the retained overlay stream and materialize the corresponding
+    /// type-grouped primitive exactly once, at final layer composition time.
+    ///
+    /// The temporary overlay-layer buckets deliberately keep only the ordered command plus its
+    /// source metadata. This avoids retaining and cloning a second primitive copy while a
+    /// `ComputedScene` is still being collected or patched.
+    pub(crate) fn push_portal_overlay_command(
+        &mut self,
+        command: RenderCommand,
+        source: Option<WidgetId>,
+    ) {
+        match &command {
+            RenderCommand::BackdropBlur(primitive) => self.backdrop_blurs.push(*primitive),
+            RenderCommand::Shape(primitive) => self.overlay_shapes.push(*primitive),
+            RenderCommand::Texture(primitive) => self.overlay_textures.push(primitive.clone()),
+            #[cfg(feature = "video")]
+            RenderCommand::VideoTexture(_) => {}
+            RenderCommand::Text(primitive) => self.overlay_texts.push((**primitive).clone()),
+            RenderCommand::TextDecoration(primitive) => {
+                self.overlay_text_decorations.push(primitive.clone())
+            }
+            RenderCommand::Mesh(primitive) => self.overlay_meshes.push(primitive.clone()),
+            RenderCommand::Brush(_) | RenderCommand::CanvasComposite(_) => {}
+        }
+        self.overlay_commands.push(command);
+        self.overlay_command_sources.push(source);
     }
 
     pub(crate) fn matching_shape_slots(

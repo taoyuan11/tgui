@@ -1,5 +1,44 @@
 use super::*;
 
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct LayoutPatchStats {
+    pub(crate) visited_nodes: usize,
+    pub(crate) reused_children: usize,
+    pub(crate) rebuilt_children: usize,
+    pub(crate) removed_subtrees: usize,
+}
+
+#[cfg(test)]
+thread_local! {
+    static LAYOUT_PATCH_STATS: std::cell::Cell<LayoutPatchStats> =
+        const { std::cell::Cell::new(LayoutPatchStats {
+            visited_nodes: 0,
+            reused_children: 0,
+            rebuilt_children: 0,
+            removed_subtrees: 0,
+        }) };
+}
+
+#[cfg(test)]
+pub(crate) fn reset_layout_patch_stats() {
+    LAYOUT_PATCH_STATS.set(LayoutPatchStats::default());
+}
+
+#[cfg(test)]
+pub(crate) fn take_layout_patch_stats() -> LayoutPatchStats {
+    LAYOUT_PATCH_STATS.replace(LayoutPatchStats::default())
+}
+
+#[cfg(test)]
+fn update_layout_patch_stats(update: impl FnOnce(&mut LayoutPatchStats)) {
+    LAYOUT_PATCH_STATS.with(|cell| {
+        let mut stats = cell.get();
+        update(&mut stats);
+        cell.set(stats);
+    });
+}
+
 pub(super) fn collect_indexes<VM>(
     node: &ResolvedElement<VM>,
     parent: Option<WidgetId>,
@@ -8,16 +47,35 @@ pub(super) fn collect_indexes<VM>(
     paths: &mut HashMap<WidgetId, Vec<usize>>,
     parents: &mut HashMap<WidgetId, Option<WidgetId>>,
     depths: &mut HashMap<WidgetId, usize>,
-) {
+    subtree_sizes: &mut HashMap<WidgetId, usize>,
+    scroll_view_controllers: &mut HashMap<
+        WidgetId,
+        crate::foundation::binding::ScrollViewController,
+    >,
+    virtual_widgets: &mut HashSet<WidgetId>,
+) -> usize {
     paths.insert(node.id, path.clone());
     parents.insert(node.id, parent);
     depths.insert(node.id, depth);
+    if matches!(&node.kind, ResolvedWidgetKind::Virtual { .. }) {
+        virtual_widgets.insert(node.id);
+    }
+    if let ResolvedWidgetKind::Container { layout, .. } = &node.kind {
+        if let Some(controller) = layout
+            .scroll_view
+            .as_ref()
+            .and_then(|scroll_view| scroll_view.controller.clone())
+        {
+            scroll_view_controllers.insert(node.id, controller);
+        }
+    }
+    let mut subtree_size = 1;
     if let ResolvedWidgetKind::Container { children, .. }
     | ResolvedWidgetKind::Virtual { children, .. } = &node.kind
     {
         for (index, child) in children.iter().enumerate() {
             path.push(index);
-            collect_indexes(
+            subtree_size += collect_indexes(
                 child,
                 Some(node.id),
                 depth + 1,
@@ -25,10 +83,15 @@ pub(super) fn collect_indexes<VM>(
                 paths,
                 parents,
                 depths,
+                subtree_sizes,
+                scroll_view_controllers,
+                virtual_widgets,
             );
             path.pop();
         }
     }
+    subtree_sizes.insert(node.id, subtree_size);
+    subtree_size
 }
 
 pub(super) fn collect_resolved_widget_ids<VM>(node: &ResolvedElement<VM>, ids: &mut Vec<WidgetId>) {
@@ -110,6 +173,9 @@ fn patch_layout_tree<VM>(
     now: std::time::Instant,
     is_root: bool,
 ) -> Result<ResolvedElement<VM>, taffy::TaffyError> {
+    #[cfg(test)]
+    update_layout_patch_stats(|stats| stats.visited_nodes += 1);
+
     let owner = next.id.dependency_owner(DependencyPhase::Layout);
     track_dependency_scope(owner, || {
         let next_parent_kind = match &next.kind {
@@ -123,14 +189,11 @@ fn patch_layout_tree<VM>(
             ResolvedWidgetKind::Container {
                 layout: ContainerLayout::flow(),
                 children: Vec::new(),
-                runtime_style: {
-                    let theme = Theme::default();
-                    ResolvedRuntimeSurfaceStyle {
-                        base: crate::ui::widget::style::ContainerStyle::default_for_theme(&theme),
-                        local: None,
-                        explicit_visual: VisualStyle::default(),
-                        explicit_background: None,
-                    }
+                runtime_style: ResolvedRuntimeSurfaceStyle {
+                    base: crate::ui::widget::style::ContainerStyle::default_for_theme(theme),
+                    local: None,
+                    explicit_visual: VisualStyle::default(),
+                    explicit_background: None,
                 },
             },
         ) {
@@ -161,6 +224,8 @@ fn patch_layout_tree<VM>(
             if let Some((mut existing_child, mut existing_layout)) =
                 old_children_by_id.remove(&child.id)
             {
+                #[cfg(test)]
+                update_layout_patch_stats(|stats| stats.reused_children += 1);
                 let patched_child = patch_layout_tree(
                     &mut existing_child,
                     child,
@@ -177,6 +242,8 @@ fn patch_layout_tree<VM>(
                 patched_children.push(patched_child);
                 patched_layout_children.push(existing_layout);
             } else {
+                #[cfg(test)]
+                update_layout_patch_stats(|stats| stats.rebuilt_children += 1);
                 let new_layout = child.build_layout_tree(
                     taffy,
                     animations,
@@ -193,6 +260,8 @@ fn patch_layout_tree<VM>(
         }
 
         for (_, (_, stale_layout)) in old_children_by_id {
+            #[cfg(test)]
+            update_layout_patch_stats(|stats| stats.removed_subtrees += 1);
             remove_layout_subtree(taffy, &stale_layout)?;
         }
 
@@ -228,6 +297,8 @@ fn patch_layout_tree<VM>(
             taffy.set_children(layout_node.node, &child_nodes)?;
         }
         layout_node.children = patched_layout_children;
+        layout_node.cached_child_content_bounds = std::sync::OnceLock::new();
+        layout_node.cached_child_cull_index = std::sync::OnceLock::new();
         Ok(next)
     })
 }

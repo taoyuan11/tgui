@@ -1,17 +1,18 @@
 use super::text_layout::{TextBoundary, TextLayoutInfo, TextLineLayoutInfo};
+use std::sync::Arc;
 
 pub(in crate::text::font) fn empty_text_layout(line_height: f32) -> TextLayoutInfo {
     TextLayoutInfo {
         width: 0.0,
         height: line_height,
-        lines: vec![TextLineLayoutInfo {
+        lines: Arc::new(vec![TextLineLayoutInfo {
             start_index: 0,
             end_index: 0,
             top: 0.0,
             height: line_height,
             width: 0.0,
             boundaries: vec![TextBoundary { index: 0, x: 0.0 }],
-        }],
+        }]),
     }
 }
 

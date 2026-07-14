@@ -61,9 +61,28 @@ impl<VM> Container<VM> {
                     layout,
                     children: Vec::new(),
                     style: None,
+                    runtime_layout: None,
                 },
             },
         }
+    }
+
+    pub(crate) fn runtime_layout(
+        mut self,
+        resolver: impl Fn(
+                &mut LayoutStyle,
+                &mut super::super::common::ContainerLayout,
+                &StyleContext<'_>,
+                &super::super::style::StyleSheet,
+                &mut VisualStyle,
+            ) + Send
+            + Sync
+            + 'static,
+    ) -> Self {
+        if let WidgetKind::Container { runtime_layout, .. } = &mut self.element.kind {
+            *runtime_layout = Some(std::sync::Arc::new(resolver));
+        }
+        self
     }
 
     pub fn style(

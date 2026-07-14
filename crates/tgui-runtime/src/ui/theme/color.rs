@@ -87,6 +87,7 @@ impl Default for ColorScheme {
 
 impl ColorScheme {
     pub fn light() -> Self {
+        let primary = Color::hexa(0x2563EBFF);
         Self {
             background: Color::hexa(0xFAFAFAFF),
             on_background: Color::hexa(0x09090BFF),
@@ -96,10 +97,10 @@ impl ColorScheme {
             surface_overlay: Color::hexa(0xFFFFFFFA),
             on_surface: Color::hexa(0x18181BFF),
             on_surface_muted: Color::hexa(0x71717AFF),
-            primary: Color::hexa(0x18181BFF),
-            on_primary: Color::hexa(0xFAFAFAFF),
-            primary_container: Color::hexa(0xF4F4F5FF),
-            on_primary_container: Color::hexa(0x09090BFF),
+            primary,
+            on_primary: Color::hexa(0xFFFFFFFF),
+            primary_container: Color::hexa(0xDBEAFEFF),
+            on_primary_container: Color::hexa(0x1E3A8AFF),
             success: Color::hexa(0x10B981FF),
             on_success: Color::hexa(0x09090BFF),
             warning: Color::hexa(0xF59E0BFF),
@@ -108,8 +109,8 @@ impl ColorScheme {
             on_error: Color::hexa(0xFAFAFAFF),
             outline: Color::hexa(0xD4D4D8FF),
             outline_muted: Color::hexa(0xE4E4E780),
-            focus_ring: Color::hexa(0x09090B33),
-            selection: Color::hexa(0x18181B1A),
+            focus_ring: primary.with_alpha_factor(0.40),
+            selection: primary.with_alpha_factor(0.18),
             disabled: Color::hexa(0xF4F4F5FF),
             on_disabled: Color::hexa(0xA1A1AAFF),
             scrim: Color::hexa(0x09090B66),
@@ -117,6 +118,7 @@ impl ColorScheme {
     }
 
     pub fn dark() -> Self {
+        let primary = Color::hexa(0x60A5FAFF);
         Self {
             background: Color::hexa(0x09090BFF),
             on_background: Color::hexa(0xFAFAFAFF),
@@ -126,10 +128,10 @@ impl ColorScheme {
             surface_overlay: Color::hexa(0x18181BFA),
             on_surface: Color::hexa(0xF4F4F5FF),
             on_surface_muted: Color::hexa(0xA1A1AAFF),
-            primary: Color::hexa(0xFAFAFAFF),
-            on_primary: Color::hexa(0x09090BFF),
-            primary_container: Color::hexa(0x27272AFF),
-            on_primary_container: Color::hexa(0xFAFAFAFF),
+            primary,
+            on_primary: Color::hexa(0x08111FFF),
+            primary_container: Color::hexa(0x172554FF),
+            on_primary_container: Color::hexa(0xDBEAFEFF),
             success: Color::hexa(0x34D399FF),
             on_success: Color::hexa(0x09090BFF),
             warning: Color::hexa(0xFBBF24FF),
@@ -138,8 +140,8 @@ impl ColorScheme {
             on_error: Color::hexa(0x09090BFF),
             outline: Color::hexa(0x52525BFF),
             outline_muted: Color::hexa(0x3F3F4680),
-            focus_ring: Color::hexa(0xFAFAFA4D),
-            selection: Color::hexa(0xFAFAFA26),
+            focus_ring: primary.with_alpha_factor(0.50),
+            selection: primary.with_alpha_factor(0.24),
             disabled: Color::hexa(0x27272AFF),
             on_disabled: Color::hexa(0x71717AFF),
             scrim: Color::hexa(0x000000CC),
@@ -160,9 +162,12 @@ mod tests {
         assert_eq!(light.surface_low, Color::hexa(0xF4F4F5FF));
         assert_eq!(light.surface_high, Color::hexa(0xE4E4E7FF));
         assert_eq!(light.surface_overlay, Color::hexa(0xFFFFFFFA));
-        assert_eq!(light.primary, Color::hexa(0x18181BFF));
-        assert_eq!(light.focus_ring, Color::hexa(0x09090B33));
-        assert_eq!(light.selection, Color::hexa(0x18181B1A));
+        assert_eq!(light.primary, Color::hexa(0x2563EBFF));
+        assert_eq!(light.on_primary, Color::WHITE);
+        assert_eq!(light.primary_container, Color::hexa(0xDBEAFEFF));
+        assert_eq!(light.on_primary_container, Color::hexa(0x1E3A8AFF));
+        assert_eq!(light.focus_ring, Color::hexa(0x2563EB66));
+        assert_eq!(light.selection, Color::hexa(0x2563EB2E));
 
         let dark = ColorScheme::dark();
         assert_eq!(dark.background, Color::hexa(0x09090BFF));
@@ -171,8 +176,11 @@ mod tests {
         assert_eq!(dark.surface_low, Color::hexa(0x27272AFF));
         assert_eq!(dark.surface_high, Color::hexa(0x3F3F46FF));
         assert_eq!(dark.surface_overlay, Color::hexa(0x18181BFA));
-        assert_eq!(dark.primary, Color::hexa(0xFAFAFAFF));
-        assert_eq!(dark.focus_ring, Color::hexa(0xFAFAFA4D));
-        assert_eq!(dark.selection, Color::hexa(0xFAFAFA26));
+        assert_eq!(dark.primary, Color::hexa(0x60A5FAFF));
+        assert_eq!(dark.on_primary, Color::hexa(0x08111FFF));
+        assert_eq!(dark.primary_container, Color::hexa(0x172554FF));
+        assert_eq!(dark.on_primary_container, Color::hexa(0xDBEAFEFF));
+        assert_eq!(dark.focus_ring, Color::hexa(0x60A5FA80));
+        assert_eq!(dark.selection, Color::hexa(0x60A5FA3D));
     }
 }

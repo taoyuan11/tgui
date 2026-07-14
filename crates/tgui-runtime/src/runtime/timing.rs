@@ -122,7 +122,10 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             ControlFlow::WaitUntil(deadline) => deadline <= now,
             ControlFlow::Poll | ControlFlow::Wait => true,
         };
-        let controller_changed = frame_clock_due && self.animations.refresh(now);
+        let controller_frame = self
+            .animations
+            .refresh_and_next_frame_deadline(now, frame_clock_due);
+        let controller_changed = controller_frame.changed;
         if controller_changed {
             frame_advanced = true;
             self.animation_epoch = self.animation_epoch.wrapping_add(1);
@@ -141,6 +144,10 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         if animation_refresh.changed {
             frame_advanced = true;
             self.animation_epoch = self.animation_epoch.wrapping_add(1);
+            if animation_refresh.accessibility_geometry_changed {
+                self.accessibility_animation_epoch =
+                    self.accessibility_animation_epoch.wrapping_add(1);
+            }
             if animation_refresh.layout_changed {
                 self.layout_animation_epoch = self.layout_animation_epoch.wrapping_add(1);
             }
@@ -160,7 +167,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         }
 
         let animation_deadline = self.animation_engine.next_frame_deadline(now);
-        let controller_deadline = self.animations.next_frame_deadline(now);
+        let controller_deadline = controller_frame.next_deadline;
         let media_deadline = self.next_media_animation_deadline();
         let click_deadline = self.pending_click_deadline();
         let gesture_deadline = self

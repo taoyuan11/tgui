@@ -3,7 +3,6 @@ use std::sync::Arc;
 use crate::media::{MediaBytes, MediaSource};
 use crate::theme::{StyleContext, WidgetState};
 use crate::ui::layout::{Align, Insets, LayoutStyle, Length, PositionType, Value};
-use crate::ui::theme::Theme;
 use crate::ui::unit::sp;
 
 mod svg;
@@ -374,7 +373,6 @@ impl<VM> Icon<VM> {
 
 impl<VM: 'static> From<Icon<VM>> for Element<VM> {
     fn from(icon: Icon<VM>) -> Self {
-        let layout_style = resolve_icon_style_for_layout(icon.style.as_ref());
         let mut root: Element<VM> = match icon.source {
             IconSourceKind::Internal(source) => icon_svg(source, icon.style.clone()),
             IconSourceKind::Public(IconSource::Builtin(icon_source)) => {
@@ -392,7 +390,24 @@ impl<VM: 'static> From<Icon<VM>> for Element<VM> {
                 let style = icon.style.clone();
                 with_visual_identity(
                     Image::new(MediaSource::bytes(bytes))
-                        .size(layout_style.size, layout_style.size)
+                        .runtime_layout({
+                            let style = style.clone();
+                            move |layout, context, style_sheet, visual| {
+                                let resolved = resolve_icon_style_with_sheet(
+                                    style.as_ref(),
+                                    context,
+                                    style_sheet,
+                                    visual,
+                                    WidgetState::default(),
+                                );
+                                if layout.width.is_none() {
+                                    layout.width = Some(Value::Static(Length::Px(resolved.size)));
+                                }
+                                if layout.height.is_none() {
+                                    layout.height = Some(Value::Static(Length::Px(resolved.size)));
+                                }
+                            }
+                        })
                         .style_full_with_style_sheet(move |context, style_sheet, visual, state| {
                             let _ = resolve_icon_style_with_sheet(
                                 style.as_ref(),
@@ -419,16 +434,14 @@ fn icon_svg<VM: 'static>(
     source: SvgIconId,
     style: Option<StyleResolver<IconStyle>>,
 ) -> Element<VM> {
-    let layout_style = resolve_icon_style_for_layout(style.as_ref());
-    let layout = LayoutStyle {
-        width: Some(Value::Static(Length::Px(layout_style.size))),
-        height: Some(Value::Static(Length::Px(layout_style.size))),
-        ..Default::default()
-    };
     Element {
         id: WidgetId::next(),
         key: None,
-        layout,
+        // Icon geometry is resolved from the active theme during element
+        // resolution. Keeping this empty here avoids freezing the default
+        // theme into a retained tree; explicit `.size/.width/.height` values
+        // are merged by the caller and therefore retain precedence.
+        layout: LayoutStyle::default(),
         focus: Default::default(),
         visual: VisualStyle::default(),
         interactions: Default::default(),
@@ -483,20 +496,6 @@ fn icon_text<VM: 'static>(
     )
 }
 
-fn resolve_icon_style(
-    style: Option<&StyleResolver<IconStyle>>,
-    context: &StyleContext<'_>,
-) -> IconStyle {
-    let style_sheet = StyleSheet::default();
-    resolve_icon_style_with_sheet(
-        style,
-        context,
-        &style_sheet,
-        &VisualStyle::default(),
-        WidgetState::default(),
-    )
-}
-
 pub(crate) fn resolve_icon_style_with_sheet(
     style: Option<&StyleResolver<IconStyle>>,
     context: &StyleContext<'_>,
@@ -515,10 +514,4 @@ pub(crate) fn resolve_icon_style_with_sheet(
         |sheet, base, context, visual| sheet.apply_icon(base, context, visual),
         |sheet, base, context, visual, state| sheet.apply_icon_state(base, context, visual, state),
     )
-}
-
-fn resolve_icon_style_for_layout(style: Option<&StyleResolver<IconStyle>>) -> IconStyle {
-    let theme = Theme::default();
-    let context = StyleContext::from_theme(&theme);
-    resolve_icon_style(style, &context)
 }

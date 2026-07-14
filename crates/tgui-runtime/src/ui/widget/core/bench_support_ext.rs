@@ -10,7 +10,7 @@ use std::time::Instant;
 
 #[cfg(feature = "bench-support")]
 use crate::animation::Playback;
-use crate::foundation::binding::{Signal, State, ViewModelContext};
+use crate::foundation::binding::{InvalidationSignal, Signal, State, ViewModelContext};
 use crate::foundation::view_model::{Command, ValueCommand};
 use crate::ui::layout::Axis;
 use crate::ui::unit::dp;
@@ -172,6 +172,121 @@ impl BenchTextLayout {
 }
 
 #[cfg(feature = "bench-support")]
+pub struct BenchFontManager {
+    inner: crate::text::font::FontManager,
+}
+
+#[cfg(feature = "bench-support")]
+impl BenchFontManager {
+    pub fn new() -> Self {
+        Self {
+            inner: crate::text::font::FontManager::new(&crate::text::font::FontCatalog::default()),
+        }
+    }
+
+    pub fn measure_layout(&self, text: &str, wrap_width: Option<f32>) -> (f32, f32, usize) {
+        let request = crate::text::font::TextFontRequest {
+            preferred_font: None,
+            weight: crate::text::font::FontWeight::NORMAL,
+        };
+        let layout = match wrap_width {
+            Some(width) => self
+                .inner
+                .measure_text_layout_wrapped(text, request, 16.0, 24.0, 0.0, width),
+            None => self
+                .inner
+                .measure_text_layout(text, request, 16.0, 24.0, 0.0),
+        };
+        (layout.width, layout.height, layout.line_count())
+    }
+
+    /// Reproduces the former hit-path owned-key allocation before performing
+    /// the same cache lookup. This keeps the A/B benchmark honest without
+    /// retaining the old cache implementation in production.
+    pub fn measure_layout_with_legacy_owned_key(
+        &self,
+        text: &str,
+        wrap_width: Option<f32>,
+    ) -> (f32, f32, usize) {
+        std::hint::black_box(text.to_owned());
+        self.measure_layout(text, wrap_width)
+    }
+
+    pub fn reset_text_key_activity(&self) {
+        self.inner.reset_text_key_activity();
+    }
+
+    pub fn text_key_activity(&self) -> (u64, u64) {
+        self.inner.text_key_activity()
+    }
+
+    pub fn measure_size_uncached(&self, text: &str, wrap_width: Option<f32>) -> (f32, f32) {
+        self.inner.measure_text_size_uncached(
+            text,
+            crate::text::font::TextFontRequest {
+                preferred_font: None,
+                weight: crate::text::font::FontWeight::NORMAL,
+            },
+            16.0,
+            24.0,
+            0.0,
+            wrap_width,
+        )
+    }
+
+    pub fn measure_precise_layout_uncached(
+        &self,
+        text: &str,
+        wrap_width: Option<f32>,
+    ) -> (f32, f32) {
+        self.inner.benchmark_precise_text_size_uncached(
+            text,
+            crate::text::font::TextFontRequest {
+                preferred_font: None,
+                weight: crate::text::font::FontWeight::NORMAL,
+            },
+            16.0,
+            24.0,
+            0.0,
+            wrap_width,
+        )
+    }
+
+    /// Exercise the exact attribute-resolution path used when configuring a
+    /// cosmic-text Buffer, without paying shaping/layout cost.
+    pub fn resolve_buffer_attrs(&self, text: &str, preferred_font: Option<&str>) -> String {
+        let request = crate::text::font::TextFontRequest {
+            preferred_font,
+            weight: crate::text::font::FontWeight::NORMAL,
+        };
+        self.inner.with_font_system(|font_system| {
+            let attrs = self
+                .inner
+                .buffer_attrs_owned(font_system, text, request, 16.0, 0.0);
+            match attrs.as_attrs().family {
+                cosmic_text::Family::Name(name) => name.to_owned(),
+                _ => String::new(),
+            }
+        })
+    }
+
+    pub fn clear_family_resolution_cache(&self) {
+        self.inner.clear_resolve_cache_for_benchmark();
+    }
+
+    pub fn family_resolution_query_count(&self) -> u64 {
+        self.inner.resolve_query_count()
+    }
+}
+
+#[cfg(feature = "bench-support")]
+impl Default for BenchFontManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(feature = "bench-support")]
 pub struct BenchRopeBuffer {
     inner: crate::text::rope_buffer::RopeBuffer,
 }
@@ -198,6 +313,14 @@ impl BenchRopeBuffer {
 
     pub fn next_char_boundary_byte(&self, byte_index: usize) -> usize {
         self.inner.next_char_boundary_byte(byte_index)
+    }
+
+    pub fn prev_grapheme_boundary_byte(&self, byte_index: usize) -> usize {
+        self.inner.prev_grapheme_boundary_byte(byte_index)
+    }
+
+    pub fn next_grapheme_boundary_byte(&self, byte_index: usize) -> usize {
+        self.inner.next_grapheme_boundary_byte(byte_index)
     }
 }
 
@@ -699,6 +822,45 @@ pub fn create_real_animation_engine_with_settled_slots(count: usize) -> RealAnim
     RealAnimationEngineBench { engine, now, count }
 }
 
+pub fn create_real_animation_engine_with_sparse_active_slots(
+    settled_count: usize,
+    active_count: usize,
+) -> RealAnimationEngineBench {
+    let mut engine = crate::animation::AnimationEngine::default();
+    let start = Instant::now();
+    for index in 0..settled_count {
+        engine.resolve_f32(
+            crate::animation::AnimationKey::Widget {
+                id: index as u64,
+                property: crate::animation::WidgetProperty::Opacity,
+            },
+            0.0,
+            None,
+            start,
+        );
+    }
+
+    let transition = crate::animation::Transition::linear(Duration::from_secs(60));
+    let animation_start = start + Duration::from_millis(1);
+    for index in 0..active_count.min(settled_count) {
+        engine.resolve_f32(
+            crate::animation::AnimationKey::Widget {
+                id: index as u64,
+                property: crate::animation::WidgetProperty::Opacity,
+            },
+            1.0,
+            Some(transition),
+            animation_start,
+        );
+    }
+
+    RealAnimationEngineBench {
+        engine,
+        now: animation_start + Duration::from_secs(1),
+        count: settled_count,
+    }
+}
+
 pub fn refresh_real_animation_engine(engine: &mut RealAnimationEngineBench) -> bool {
     let refresh = engine.engine.refresh(engine.now);
     refresh.changed
@@ -721,6 +883,46 @@ pub fn resolve_real_animation_engine_settled_slots(engine: &mut RealAnimationEng
         );
     }
     total
+}
+
+pub struct RealAnimationCoordinatorBench {
+    coordinator: crate::animation::AnimationCoordinator,
+    _handles: Vec<crate::animation::AnimationControllerHandle>,
+    now: Instant,
+}
+
+pub fn create_real_animation_coordinator(
+    controller_count: usize,
+    running_count: usize,
+) -> RealAnimationCoordinatorBench {
+    let invalidation = InvalidationSignal::new();
+    let coordinator = crate::animation::AnimationCoordinator::default();
+    let handles = (0..controller_count)
+        .map(|_| {
+            crate::animation::AnimationControllerBuilder::new(
+                coordinator.clone(),
+                invalidation.clone(),
+            )
+            .build()
+        })
+        .collect::<Vec<_>>();
+    for handle in handles.iter().take(running_count) {
+        handle.play();
+    }
+
+    RealAnimationCoordinatorBench {
+        coordinator,
+        _handles: handles,
+        now: Instant::now(),
+    }
+}
+
+pub fn inspect_real_animation_coordinator(coordinator: &RealAnimationCoordinatorBench) -> bool {
+    coordinator
+        .coordinator
+        .refresh_and_next_frame_deadline(coordinator.now, false)
+        .next_deadline
+        .is_some()
 }
 
 #[derive(Copy, Clone)]

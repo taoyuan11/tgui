@@ -394,14 +394,20 @@ fn next_selected_keys<VM>(
     toggle: bool,
 ) -> Vec<WidgetKey> {
     match state.selection_mode {
-        ListSelectionMode::None => state.selected_keys.resolve(),
+        ListSelectionMode::None => state
+            .selection
+            .selected_keys
+            .resolve_ref(|keys| keys.to_vec()),
         ListSelectionMode::Single => vec![state.key.clone()],
         ListSelectionMode::Multiple if extend => {
             let anchor = anchor_key.unwrap_or(&state.key);
             merge_selected_range(state, range_keys(state, anchor, &state.key))
         }
         ListSelectionMode::Multiple if toggle => {
-            let mut keys = state.selected_keys.resolve();
+            let mut keys = state
+                .selection
+                .selected_keys
+                .resolve_ref(|keys| keys.to_vec());
             if let Some(index) = keys.iter().position(|key| key == &state.key) {
                 keys.remove(index);
             } else {
@@ -418,34 +424,45 @@ fn range_keys<VM>(
     anchor: &WidgetKey,
     focused: &WidgetKey,
 ) -> Vec<WidgetKey> {
-    let Some(anchor_index) = state.sibling_keys.iter().position(|key| key == anchor) else {
+    let Some(&anchor_index) = state.selection.sibling_index_by_key.get(anchor) else {
         return vec![focused.clone()];
     };
-    let Some(focused_index) = state.sibling_keys.iter().position(|key| key == focused) else {
+    let Some(&focused_index) = state.selection.sibling_index_by_key.get(focused) else {
         return vec![focused.clone()];
     };
     let start = anchor_index.min(focused_index);
     let end = anchor_index.max(focused_index);
     state
+        .selection
         .sibling_keys
         .iter()
         .enumerate()
         .skip(start)
         .take(end - start + 1)
         .filter_map(|(index, key)| {
-            (!state.sibling_disabled.get(index).copied().unwrap_or(false)).then(|| key.clone())
+            (!state
+                .selection
+                .sibling_disabled
+                .get(index)
+                .copied()
+                .unwrap_or(false))
+            .then(|| key.clone())
         })
         .collect()
 }
 
 fn merge_selected_range<VM>(state: &ListItemState<VM>, range: Vec<WidgetKey>) -> Vec<WidgetKey> {
-    let mut selected = state.selected_keys.resolve();
+    let mut selected = state
+        .selection
+        .selected_keys
+        .resolve_ref(|keys| keys.to_vec());
     for key in range {
         if !selected.iter().any(|selected_key| selected_key == &key) {
             selected.push(key);
         }
     }
     state
+        .selection
         .sibling_keys
         .iter()
         .filter(|key| selected.iter().any(|selected_key| selected_key == *key))

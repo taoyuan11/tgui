@@ -130,7 +130,7 @@ fn build_scrollable_interactive_tree(count: usize) -> WidgetTree<()> {
 fn bench_hit_test_flat(c: &mut Criterion) {
     let mut group = c.benchmark_group("event_cached_hit_path_flat");
 
-    for widget_count in [10_usize, 50, 100, 200, 500, 1000] {
+    for widget_count in [10_usize, 50, 100, 200, 500, 1_000, 10_000] {
         let tree = build_flat_interactive_tree(widget_count);
         group.bench_with_input(
             BenchmarkId::from_parameter(widget_count),
@@ -140,6 +140,33 @@ fn bench_hit_test_flat(c: &mut Criterion) {
                 let _ = ctx.run_layout_and_scene(&tree, Instant::now());
                 b.iter(|| {
                     let result = ctx.cached_hit_path_len(
+                        black_box(&tree),
+                        black_box(Point::new(720.0, 360.0)),
+                        Instant::now(),
+                    );
+                    black_box(result);
+                });
+            },
+        );
+    }
+
+    group.finish();
+}
+
+#[cfg(feature = "bench-support")]
+fn bench_hit_test_flat_full_scan(c: &mut Criterion) {
+    let mut group = c.benchmark_group("event_cached_hit_path_flat_full_scan");
+
+    for widget_count in [1_000_usize, 10_000] {
+        let tree = build_flat_interactive_tree(widget_count);
+        group.bench_with_input(
+            BenchmarkId::from_parameter(widget_count),
+            &widget_count,
+            |b, _| {
+                let mut ctx = WidgetBenchmarkContext::new().with_viewport(viewport());
+                let _ = ctx.run_layout_and_scene(&tree, Instant::now());
+                b.iter(|| {
+                    let result = ctx.cached_hit_path_len_full_scan(
                         black_box(&tree),
                         black_box(Point::new(720.0, 360.0)),
                         Instant::now(),
@@ -339,6 +366,58 @@ fn bench_scroll_event_handling(c: &mut Criterion) {
 }
 
 #[cfg(feature = "bench-support")]
+fn bench_scroll_region_target_lookup(c: &mut Criterion) {
+    let mut indexed = c.benchmark_group("event_scroll_region_target_indexed");
+    for widget_count in [1_000_usize, 10_000] {
+        let tree = build_scrollable_interactive_tree(widget_count);
+        indexed.bench_with_input(
+            BenchmarkId::from_parameter(widget_count),
+            &widget_count,
+            |b, _| {
+                let mut ctx = WidgetBenchmarkContext::new().with_viewport(viewport());
+                let _ = ctx.run_layout_and_scene(&tree, Instant::now());
+                let point = Point::new(40.0, 40.0);
+                let delta = Point::new(0.0, -48.0);
+                let _ = ctx.cached_scroll_target(&tree, point, delta, Instant::now());
+                b.iter(|| {
+                    black_box(ctx.cached_scroll_target(
+                        black_box(&tree),
+                        black_box(point),
+                        black_box(delta),
+                        Instant::now(),
+                    ));
+                });
+            },
+        );
+    }
+    indexed.finish();
+
+    let mut full_scan = c.benchmark_group("event_scroll_region_target_full_scan");
+    for widget_count in [1_000_usize, 10_000] {
+        let tree = build_scrollable_interactive_tree(widget_count);
+        full_scan.bench_with_input(
+            BenchmarkId::from_parameter(widget_count),
+            &widget_count,
+            |b, _| {
+                let mut ctx = WidgetBenchmarkContext::new().with_viewport(viewport());
+                let _ = ctx.run_layout_and_scene(&tree, Instant::now());
+                let point = Point::new(40.0, 40.0);
+                let delta = Point::new(0.0, -48.0);
+                b.iter(|| {
+                    black_box(ctx.cached_scroll_target_full_scan(
+                        black_box(&tree),
+                        black_box(point),
+                        black_box(delta),
+                        Instant::now(),
+                    ));
+                });
+            },
+        );
+    }
+    full_scan.finish();
+}
+
+#[cfg(feature = "bench-support")]
 fn bench_drag_tracking(c: &mut Criterion) {
     let tree = build_flat_interactive_tree(200);
     let mut ctx = WidgetBenchmarkContext::new().with_viewport(viewport());
@@ -405,6 +484,9 @@ fn bench_hit_test_flat(_c: &mut Criterion) {
 }
 
 #[cfg(not(feature = "bench-support"))]
+fn bench_hit_test_flat_full_scan(_c: &mut Criterion) {}
+
+#[cfg(not(feature = "bench-support"))]
 fn bench_hit_test_nested(_c: &mut Criterion) {}
 
 #[cfg(not(feature = "bench-support"))]
@@ -432,6 +514,9 @@ fn bench_scoped_value_command_dispatch(_c: &mut Criterion) {}
 fn bench_scroll_event_handling(_c: &mut Criterion) {}
 
 #[cfg(not(feature = "bench-support"))]
+fn bench_scroll_region_target_lookup(_c: &mut Criterion) {}
+
+#[cfg(not(feature = "bench-support"))]
 fn bench_drag_tracking(_c: &mut Criterion) {}
 
 #[cfg(not(feature = "bench-support"))]
@@ -443,6 +528,7 @@ fn bench_event_bubbling(_c: &mut Criterion) {}
 criterion_group!(
     benches,
     bench_hit_test_flat,
+    bench_hit_test_flat_full_scan,
     bench_hit_test_nested,
     bench_hover_state_update,
     bench_focus_navigation,
@@ -452,6 +538,7 @@ criterion_group!(
     bench_scoped_command_dispatch,
     bench_scoped_value_command_dispatch,
     bench_scroll_event_handling,
+    bench_scroll_region_target_lookup,
     bench_drag_tracking,
     bench_gesture_recognition,
     bench_event_bubbling,

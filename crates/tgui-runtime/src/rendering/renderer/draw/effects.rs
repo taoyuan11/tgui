@@ -2,13 +2,11 @@ use wgpu::util::DeviceExt;
 
 use crate::foundation::error::TguiError;
 use crate::text::font::FontManager;
-use crate::ui::widget::{CanvasBlendMode, Rect};
+use crate::ui::widget::CanvasBlendMode;
 
 use super::super::prepare::{DrawStream, PreparedBackdropBlur, PreparedCanvasComposite};
 use super::super::surface::surface_clear_color;
-use super::super::{
-    BlurUniform, CompositeUniform, OffscreenTarget, Renderer, TextQuadSpec, TextVertex,
-};
+use super::super::{BlurUniform, CompositeUniform, OffscreenTarget, Renderer};
 
 impl Renderer {
     pub(super) fn apply_backdrop_blur_to_target(
@@ -241,7 +239,7 @@ impl Renderer {
         let mut composite_cleared = true;
         self.execute_prepared_commands_to_target(
             encoder,
-            &content_prepared.0,
+            &content_prepared.commands,
             font_manager,
             &composite_target,
             &mut composite_cleared,
@@ -268,7 +266,7 @@ impl Renderer {
             let mut mask_cleared = true;
             self.execute_prepared_commands_to_target(
                 encoder,
-                &mask_prepared.0,
+                &mask_prepared.commands,
                 font_manager,
                 &composite_mask_target,
                 &mut mask_cleared,
@@ -395,48 +393,13 @@ impl Renderer {
     pub(in super::super) fn blit_scene_to_surface(
         &self,
         encoder: &mut wgpu::CommandEncoder,
-        scene_view: &wgpu::TextureView,
         color_attachment_view: &wgpu::TextureView,
         resolve_target: Option<&wgpu::TextureView>,
     ) {
-        let bind_group_entries = [
-            wgpu::BindGroupEntry {
-                binding: 0,
-                resource: wgpu::BindingResource::TextureView(scene_view),
-            },
-            wgpu::BindGroupEntry {
-                binding: 1,
-                resource: wgpu::BindingResource::Sampler(&self.text_sampler),
-            },
-        ];
-
-        let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("tgui-scene-present-bind-group"),
-            layout: &self.present_bind_group_layout,
-            entries: &bind_group_entries,
-        });
-        let quad = TextVertex::quad(
-            TextQuadSpec {
-                rect: Rect::new(
-                    0.0,
-                    0.0,
-                    self.config.width as f32 / self.scale_factor,
-                    self.config.height as f32 / self.scale_factor,
-                ),
-                uv_rect: None,
-                corner_radius: 0.0,
-                clip_mask: None,
-                opacity: 1.0,
-            },
-            self.vertex_viewport(),
-        );
-        let vertex_buffer = self
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("tgui-scene-present-vertices"),
-                contents: bytemuck::cast_slice(&quad),
-                usage: wgpu::BufferUsages::VERTEX,
-            });
+        let present = self
+            .present_resources
+            .as_ref()
+            .expect("present resources initialized with scene target");
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("tgui-present-pass"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -455,9 +418,9 @@ impl Renderer {
         });
         pass.set_pipeline(&self.text_pipeline);
         self.set_scroll_translate(&mut pass, None);
-        pass.set_vertex_buffer(0, vertex_buffer.slice(..));
-        pass.set_bind_group(0, &bind_group, &[]);
-        pass.draw(0..quad.len() as u32, 0..1);
+        pass.set_vertex_buffer(0, present.vertex_buffer.slice(..));
+        pass.set_bind_group(0, &present.bind_group, &[]);
+        pass.draw(0..present.vertex_count, 0..1);
     }
 }
 

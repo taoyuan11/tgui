@@ -78,6 +78,15 @@ pub(crate) struct DependencyGraph {
 }
 
 impl DependencyGraph {
+    /// Drop every retained edge while keeping the backing hash-table allocations available.
+    ///
+    /// Scene chunk recomposition rebuilds dependency metadata from its local fragments. Keeping
+    /// these tables avoids allocating the same ancestor dependency graph on every fallback patch.
+    pub(crate) fn clear(&mut self) {
+        self.dependencies.clear();
+        self.global_owners.clear();
+    }
+
     pub(crate) fn owners_for(&self, dependency: DependencyId) -> Option<&HashSet<DependencyOwner>> {
         self.dependencies.get(&dependency)
     }

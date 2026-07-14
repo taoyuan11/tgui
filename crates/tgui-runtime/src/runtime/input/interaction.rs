@@ -26,7 +26,116 @@ fn scrollbar_axis_thumb_area(region: &ScrollRegion, axis: ScrollbarAxis) -> Opti
     Some(thumb.width.get() * thumb.height.get())
 }
 
+#[cfg(test)]
+pub(crate) mod scroll_region_lookup_probe {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    static WHEEL_CANDIDATE_VISITS: AtomicUsize = AtomicUsize::new(0);
+    static SCROLLBAR_CANDIDATE_VISITS: AtomicUsize = AtomicUsize::new(0);
+    static TOUCH_CANDIDATE_VISITS: AtomicUsize = AtomicUsize::new(0);
+    static DRAG_ID_FALLBACK_VISITS: AtomicUsize = AtomicUsize::new(0);
+
+    pub(crate) fn reset() {
+        WHEEL_CANDIDATE_VISITS.store(0, Ordering::Relaxed);
+        SCROLLBAR_CANDIDATE_VISITS.store(0, Ordering::Relaxed);
+        TOUCH_CANDIDATE_VISITS.store(0, Ordering::Relaxed);
+        DRAG_ID_FALLBACK_VISITS.store(0, Ordering::Relaxed);
+    }
+
+    pub(super) fn record_wheel_candidate() {
+        WHEEL_CANDIDATE_VISITS.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub(super) fn record_scrollbar_candidate() {
+        SCROLLBAR_CANDIDATE_VISITS.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub(super) fn record_touch_candidate() {
+        TOUCH_CANDIDATE_VISITS.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub(super) fn record_drag_id_fallback_candidate() {
+        DRAG_ID_FALLBACK_VISITS.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub(crate) fn wheel_candidate_visits() -> usize {
+        WHEEL_CANDIDATE_VISITS.load(Ordering::Relaxed)
+    }
+
+    pub(crate) fn scrollbar_candidate_visits() -> usize {
+        SCROLLBAR_CANDIDATE_VISITS.load(Ordering::Relaxed)
+    }
+
+    pub(crate) fn touch_candidate_visits() -> usize {
+        TOUCH_CANDIDATE_VISITS.load(Ordering::Relaxed)
+    }
+
+    pub(crate) fn drag_id_fallback_visits() -> usize {
+        DRAG_ID_FALLBACK_VISITS.load(Ordering::Relaxed)
+    }
+}
+
 impl<VM: 'static> BoundRuntimeHandler<VM> {
+    fn mouse_wheel_scroll_target_from_indices(
+        &self,
+        scroll_regions: &[ScrollRegion],
+        indices: impl DoubleEndedIterator<Item = usize>,
+        cursor_position: Point,
+        scroll_delta: Point,
+    ) -> Option<(WidgetId, Point)> {
+        for index in indices.rev() {
+            #[cfg(test)]
+            scroll_region_lookup_probe::record_wheel_candidate();
+            let Some(region) = scroll_regions.get(index).copied() else {
+                continue;
+            };
+            if region.visible_frame.is_empty() || !region.visible_frame.contains(cursor_position) {
+                continue;
+            }
+
+            let max_offset = region.max_offset();
+            let current_offset = self.effective_scroll_offset(region.id, region.scroll_offset);
+            let mut next_offset = current_offset;
+            if region.can_scroll_x() {
+                next_offset.x = (next_offset.x - scroll_delta.x).clamp(0.0, max_offset.x);
+            }
+            if region.can_scroll_y() {
+                next_offset.y = (next_offset.y - scroll_delta.y).clamp(0.0, max_offset.y);
+            }
+
+            if (next_offset.x - current_offset.x).abs() > 0.01
+                || (next_offset.y - current_offset.y).abs() > 0.01
+            {
+                return Some((region.id, next_offset));
+            }
+        }
+        None
+    }
+
+    fn mouse_wheel_scroll_target(
+        &self,
+        cursor_position: Point,
+        scroll_delta: Point,
+    ) -> Option<(WidgetId, Point)> {
+        let cached = self.cached_scene.as_ref()?;
+        let computed = &cached.computed;
+        let scroll_regions = computed.scroll_regions.as_slice();
+        if let Some(index) = computed.scroll_region_lookup_index() {
+            return self.mouse_wheel_scroll_target_from_indices(
+                scroll_regions,
+                index.scrollable_indices().iter().copied(),
+                cursor_position,
+                scroll_delta,
+            );
+        }
+        self.mouse_wheel_scroll_target_from_indices(
+            scroll_regions,
+            0..scroll_regions.len(),
+            cursor_position,
+            scroll_delta,
+        )
+    }
+
     pub(in crate::runtime) fn handle_mouse_wheel(&mut self, delta: MouseScrollDelta) -> bool {
         let Some(cursor_position) = self.cursor_position else {
             return false;
@@ -106,36 +215,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         // during mouse wheel handling, which causes stack overflow on Windows.
         // Copy only the target region instead of cloning the whole region table on
         // every wheel event.
-        let target = self.cached_scene.as_ref().and_then(|cached| {
-            cached
-                .computed
-                .scroll_regions
-                .iter()
-                .rev()
-                .copied()
-                .find_map(|region| {
-                    if region.visible_frame.is_empty()
-                        || !region.visible_frame.contains(cursor_position)
-                    {
-                        return None;
-                    }
-
-                    let max_offset = region.max_offset();
-                    let current_offset =
-                        self.effective_scroll_offset(region.id, region.scroll_offset);
-                    let mut next_offset = current_offset;
-                    if region.can_scroll_x() {
-                        next_offset.x = (next_offset.x - scroll_delta.x).clamp(0.0, max_offset.x);
-                    }
-                    if region.can_scroll_y() {
-                        next_offset.y = (next_offset.y - scroll_delta.y).clamp(0.0, max_offset.y);
-                    }
-
-                    ((next_offset.x - current_offset.x).abs() > 0.01
-                        || (next_offset.y - current_offset.y).abs() > 0.01)
-                        .then_some((region.id, next_offset))
-                })
-        });
+        let target = self.mouse_wheel_scroll_target(cursor_position, scroll_delta);
 
         let Some((widget_id, next_offset)) = target else {
             return false;
@@ -161,59 +241,117 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         false
     }
 
-    pub(super) fn scrollbar_thumb_hit(&mut self) -> Option<ScrollbarHandle> {
-        let cursor_position = self.cursor_position?;
-        // CRITICAL: Use cached scroll_regions to avoid stack overflow
-        let scroll_regions = self
-            .cached_scene
-            .as_ref()?
-            .computed
-            .scroll_regions
-            .as_slice();
-        scroll_regions
-            .iter()
-            .filter_map(|region| {
+    fn scrollbar_thumb_hit_from_indices(
+        scroll_regions: &[ScrollRegion],
+        indices: impl Iterator<Item = usize>,
+        cursor_position: Point,
+    ) -> Option<(ScrollbarHandle, usize)> {
+        indices
+            .filter_map(|index| {
+                #[cfg(test)]
+                scroll_region_lookup_probe::record_scrollbar_candidate();
+                let region = scroll_regions.get(index)?;
                 if region.visible_frame.is_empty()
                     || !region.visible_frame.contains(cursor_position)
                 {
                     return None;
                 }
-                if region
+                if let Some(thumb) = region
                     .vertical_thumb
-                    .map(|thumb: Rect| thumb.contains(cursor_position))
-                    .unwrap_or(false)
+                    .filter(|thumb| thumb.contains(cursor_position))
                 {
-                    let thumb = region.vertical_thumb?;
                     return Some((
                         ScrollbarHandle {
                             id: region.id,
                             axis: ScrollbarAxis::Vertical,
                         },
+                        index,
                         thumb.width.get() * thumb.height.get(),
                     ));
                 }
-                if region
+                if let Some(thumb) = region
                     .horizontal_thumb
-                    .map(|thumb: Rect| thumb.contains(cursor_position))
-                    .unwrap_or(false)
+                    .filter(|thumb| thumb.contains(cursor_position))
                 {
-                    let thumb = region.horizontal_thumb?;
                     return Some((
                         ScrollbarHandle {
                             id: region.id,
                             axis: ScrollbarAxis::Horizontal,
                         },
+                        index,
                         thumb.width.get() * thumb.height.get(),
                     ));
                 }
                 None
             })
-            .min_by(|(_, a), (_, b)| a.total_cmp(b))
+            .min_by(|(_, _, a), (_, _, b)| a.total_cmp(b))
+            .map(|(handle, index, _)| (handle, index))
+    }
+
+    fn scrollbar_thumb_hit_with_index(&mut self) -> Option<(ScrollbarHandle, usize)> {
+        let cursor_position = self.cursor_position?;
+        // CRITICAL: Use cached scroll_regions to avoid stack overflow
+        let computed = &self.cached_scene.as_ref()?.computed;
+        let scroll_regions = computed.scroll_regions.as_slice();
+        if let Some(index) = computed.scroll_region_lookup_index() {
+            return Self::scrollbar_thumb_hit_from_indices(
+                scroll_regions,
+                index.scrollbar_indices().iter().copied(),
+                cursor_position,
+            );
+        }
+        Self::scrollbar_thumb_hit_from_indices(
+            scroll_regions,
+            0..scroll_regions.len(),
+            cursor_position,
+        )
+    }
+
+    pub(super) fn scrollbar_thumb_hit(&mut self) -> Option<ScrollbarHandle> {
+        self.scrollbar_thumb_hit_with_index()
             .map(|(handle, _)| handle)
     }
 
-    pub(super) fn begin_scrollbar_drag(&mut self) -> bool {
-        let Some(handle) = self.scrollbar_thumb_hit() else {
+    fn topmost_scrollable_region_from_indices(
+        scroll_regions: &[ScrollRegion],
+        indices: impl DoubleEndedIterator<Item = usize>,
+        cursor_position: Point,
+    ) -> Option<ScrollRegion> {
+        for index in indices.rev() {
+            #[cfg(test)]
+            scroll_region_lookup_probe::record_touch_candidate();
+            let Some(region) = scroll_regions.get(index).copied() else {
+                continue;
+            };
+            if !region.visible_frame.is_empty()
+                && region.visible_frame.contains(cursor_position)
+                && (region.can_scroll_x() || region.can_scroll_y())
+            {
+                return Some(region);
+            }
+        }
+        None
+    }
+
+    pub(super) fn topmost_scrollable_region(&self, cursor_position: Point) -> Option<ScrollRegion> {
+        let computed = &self.cached_scene.as_ref()?.computed;
+        let scroll_regions = computed.scroll_regions.as_slice();
+        if let Some(index) = computed.scroll_region_lookup_index() {
+            return Self::topmost_scrollable_region_from_indices(
+                scroll_regions,
+                index.scrollable_indices().iter().copied(),
+                cursor_position,
+            );
+        }
+        Self::topmost_scrollable_region_from_indices(
+            scroll_regions,
+            0..scroll_regions.len(),
+            cursor_position,
+        )
+    }
+
+    pub(in crate::runtime) fn begin_scrollbar_drag(&mut self) -> bool {
+        let Some((handle, scroll_region_index)) = self.scrollbar_thumb_hit_with_index() else {
             return false;
         };
         let Some(cursor_position) = self.cursor_position else {
@@ -225,13 +363,10 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         } else {
             return false;
         };
-        let Some(region) = scroll_regions
-            .iter()
-            .copied()
-            .find(|region| region.id == handle.id)
-        else {
+        let Some(region) = scroll_regions.get(scroll_region_index).copied() else {
             return false;
         };
+        debug_assert_eq!(region.id, handle.id);
 
         let (track, thumb, max_offset) = match handle.axis {
             ScrollbarAxis::Horizontal => (
@@ -252,6 +387,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         self.cancel_scroll_motion(handle.id);
         self.active_scrollbar_drag = Some(ScrollbarDrag {
             handle,
+            scroll_region_index,
             start_cursor: cursor_position,
             start_scroll_offset: region.scroll_offset,
             track,
@@ -263,7 +399,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         true
     }
 
-    pub(super) fn handle_scrollbar_drag(&mut self) -> bool {
+    pub(in crate::runtime) fn handle_scrollbar_drag(&mut self) -> bool {
         let Some(drag) = self.active_scrollbar_drag else {
             return false;
         };
@@ -326,34 +462,80 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
     fn rebind_active_scrollbar_drag_if_needed(&mut self, drag: ScrollbarDrag, next_offset: Point) {
         // CRITICAL: Do NOT call computed_scene() here - it causes stack overflow on Windows
         // during scroll drag events. Use cached scene if available, otherwise skip rebind.
-        let Some(region) = ({
+        let Some((scroll_region_index, region)) = ({
             let scroll_regions = if let Some(cached) = self.cached_scene.as_ref() {
                 &cached.computed.scroll_regions
             } else {
                 return; // No cached scene available, skip rebind
             };
             if scroll_regions
-                .iter()
-                .any(|region| region.id == drag.handle.id)
+                .get(drag.scroll_region_index)
+                .is_some_and(|region| region.id == drag.handle.id)
             {
                 return;
             }
 
-            scroll_regions
-                .iter()
-                .filter(|region| {
-                    !region.visible_frame.is_empty()
-                        && region.visible_frame.contains(drag.start_cursor)
-                        && scrollbar_region_axis_hit(region, drag.handle.axis, drag.start_cursor)
-                })
-                .min_by(|a, b| {
-                    scrollbar_axis_thumb_area(a, drag.handle.axis)
-                        .unwrap_or(f32::MAX)
-                        .total_cmp(
-                            &scrollbar_axis_thumb_area(b, drag.handle.axis).unwrap_or(f32::MAX),
-                        )
-                })
-                .copied()
+            if let Some(scroll_region_index) = scroll_regions.iter().position(|region| {
+                #[cfg(test)]
+                scroll_region_lookup_probe::record_drag_id_fallback_candidate();
+                region.id == drag.handle.id
+            }) {
+                self.active_scrollbar_drag = Some(ScrollbarDrag {
+                    scroll_region_index,
+                    ..drag
+                });
+                return;
+            }
+
+            let candidate_indices = self
+                .cached_scene
+                .as_ref()
+                .and_then(|cached| cached.computed.scroll_region_lookup_index())
+                .map(|index| index.scrollbar_indices());
+            if let Some(indices) = candidate_indices {
+                indices
+                    .iter()
+                    .copied()
+                    .filter_map(|index| scroll_regions.get(index).map(|region| (index, region)))
+                    .filter(|(_, region)| {
+                        !region.visible_frame.is_empty()
+                            && region.visible_frame.contains(drag.start_cursor)
+                            && scrollbar_region_axis_hit(
+                                region,
+                                drag.handle.axis,
+                                drag.start_cursor,
+                            )
+                    })
+                    .min_by(|(_, a), (_, b)| {
+                        scrollbar_axis_thumb_area(a, drag.handle.axis)
+                            .unwrap_or(f32::MAX)
+                            .total_cmp(
+                                &scrollbar_axis_thumb_area(b, drag.handle.axis).unwrap_or(f32::MAX),
+                            )
+                    })
+                    .map(|(index, region)| (index, *region))
+            } else {
+                scroll_regions
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, region)| {
+                        !region.visible_frame.is_empty()
+                            && region.visible_frame.contains(drag.start_cursor)
+                            && scrollbar_region_axis_hit(
+                                region,
+                                drag.handle.axis,
+                                drag.start_cursor,
+                            )
+                    })
+                    .min_by(|(_, a), (_, b)| {
+                        scrollbar_axis_thumb_area(a, drag.handle.axis)
+                            .unwrap_or(f32::MAX)
+                            .total_cmp(
+                                &scrollbar_axis_thumb_area(b, drag.handle.axis).unwrap_or(f32::MAX),
+                            )
+                    })
+                    .map(|(index, region)| (index, *region))
+            }
         }) else {
             return;
         };
@@ -382,6 +564,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 id: region.id,
                 axis: drag.handle.axis,
             },
+            scroll_region_index,
             start_cursor: drag.start_cursor,
             start_scroll_offset: drag.start_scroll_offset,
             track,

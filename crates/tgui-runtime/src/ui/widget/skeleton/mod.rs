@@ -1,6 +1,5 @@
 use crate::theme::{StyleContext, WidgetState};
 use crate::ui::layout::{pct, LayoutStyle, Value};
-use crate::ui::theme::Theme;
 use crate::ui::unit::{dp, Dp};
 
 use super::common::VisualStyle;
@@ -84,15 +83,36 @@ impl<VM> Skeleton<VM> {
 
 impl<VM: 'static> From<Skeleton<VM>> for Element<VM> {
     fn from(skeleton: Skeleton<VM>) -> Self {
-        let layout_style = resolve_skeleton_style_for_layout(skeleton.style.as_ref());
         let visual_identity = skeleton.visual.clone();
-        let block = |width: Dp, height: Dp, radius: Dp| -> Element<VM> {
+        let block = |width: Dp, height: Dp, radius: Dp, uses_line_height: bool| -> Element<VM> {
             let style = skeleton.style.clone();
             let shimmer_style = skeleton.style.clone();
+            let layout_style = skeleton.style.clone();
             let shimmer_identity = visual_identity.clone();
             with_visual_identity(
                 Stack::new()
-                    .size(width, height)
+                    .runtime_layout(move |layout, _container, context, style_sheet, visual| {
+                        let resolved = resolve_skeleton_style_with_sheet(
+                            layout_style.as_ref(),
+                            context,
+                            style_sheet,
+                            visual,
+                            WidgetState::default(),
+                        );
+                        if layout.width.is_none() {
+                            layout.width =
+                                Some(Value::Static(crate::ui::layout::Length::Px(width)));
+                        }
+                        if layout.height.is_none() {
+                            layout.height = Some(Value::Static(crate::ui::layout::Length::Px(
+                                if uses_line_height {
+                                    resolved.line_height
+                                } else {
+                                    height
+                                },
+                            )));
+                        }
+                    })
                     .style_full_with_style_sheet(move |context, style_sheet, visual, state| {
                         let resolved = resolve_skeleton_style_with_sheet(
                             style.as_ref(),
@@ -103,7 +123,12 @@ impl<VM: 'static> From<Skeleton<VM>> for Element<VM> {
                         );
                         let mut container = ContainerStyle::default_for_theme(context.theme);
                         container.surface.background = Some(resolved.base);
-                        container.surface.border_radius = Some(Value::Static(radius));
+                        container.surface.border_radius =
+                            Some(Value::Static(if radius >= dp(999.0) {
+                                dp(999.0)
+                            } else {
+                                resolved.radius
+                            }));
                         container
                     })
                     .child(with_visual_identity(
@@ -127,8 +152,16 @@ impl<VM: 'static> From<Skeleton<VM>> for Element<VM> {
                                     progress.track_color =
                                         Value::Static(crate::foundation::color::Color::TRANSPARENT);
                                     progress.fill_color = resolved.highlight;
-                                    progress.radius = Value::Static(radius);
-                                    progress.height = height;
+                                    progress.radius = Value::Static(if radius >= dp(999.0) {
+                                        dp(999.0)
+                                    } else {
+                                        resolved.radius
+                                    });
+                                    progress.height = if uses_line_height {
+                                        resolved.line_height
+                                    } else {
+                                        height
+                                    };
                                     progress.min_width = Dp::ZERO;
                                     progress.indeterminate_segment_ratio = 0.42;
                                     progress
@@ -149,17 +182,29 @@ impl<VM: 'static> From<Skeleton<VM>> for Element<VM> {
                     } else {
                         dp(220.0)
                     };
-                    block(width, layout_style.line_height, layout_style.radius)
+                    block(width, dp(16.0), dp(8.0), true)
                 })
                 .collect::<Vec<_>>();
-            Flex::vertical().gap(layout_style.gap).child(lines).into()
+            let style = skeleton.style.clone();
+            Flex::vertical()
+                .gap(crate::ui::unit::dp(0.0))
+                .runtime_layout(move |_layout, container, context, style_sheet, visual| {
+                    let resolved = resolve_skeleton_style_with_sheet(
+                        style.as_ref(),
+                        context,
+                        style_sheet,
+                        visual,
+                        WidgetState::default(),
+                    );
+                    container.gap = Value::Static(crate::ui::layout::Length::Px(resolved.gap));
+                })
+                .child(lines)
+                .into()
         } else {
             match skeleton.shape {
-                SkeletonShape::Circle => block(dp(40.0), dp(40.0), dp(999.0)),
-                SkeletonShape::Line => {
-                    block(dp(220.0), layout_style.line_height, layout_style.radius)
-                }
-                SkeletonShape::Rect => block(dp(220.0), dp(120.0), layout_style.radius),
+                SkeletonShape::Circle => block(dp(40.0), dp(40.0), dp(999.0), false),
+                SkeletonShape::Line => block(dp(220.0), dp(16.0), dp(8.0), true),
+                SkeletonShape::Rect => block(dp(220.0), dp(120.0), dp(8.0), false),
             }
         };
         root.key = skeleton.key;
@@ -167,20 +212,6 @@ impl<VM: 'static> From<Skeleton<VM>> for Element<VM> {
         root.layout = merge_layout(root.layout, skeleton.layout);
         root
     }
-}
-
-fn resolve_skeleton_style(
-    style: Option<&StyleResolver<SkeletonStyle>>,
-    context: &StyleContext<'_>,
-) -> SkeletonStyle {
-    let style_sheet = StyleSheet::default();
-    resolve_skeleton_style_with_sheet(
-        style,
-        context,
-        &style_sheet,
-        &VisualStyle::default(),
-        WidgetState::default(),
-    )
 }
 
 fn resolve_skeleton_style_with_sheet(
@@ -203,12 +234,4 @@ fn resolve_skeleton_style_with_sheet(
             sheet.apply_skeleton_state(base, context, visual, state)
         },
     )
-}
-
-fn resolve_skeleton_style_for_layout(
-    style: Option<&StyleResolver<SkeletonStyle>>,
-) -> SkeletonStyle {
-    let theme = Theme::default();
-    let context = StyleContext::from_theme(&theme);
-    resolve_skeleton_style(style, &context)
 }

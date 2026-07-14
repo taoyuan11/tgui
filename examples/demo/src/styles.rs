@@ -1,319 +1,226 @@
+use std::sync::OnceLock;
+
 use tgui::prelude::*;
 
-fn with_alpha(color: Color, factor: f32) -> Color {
-    let alpha = ((color.a as f32) * factor.clamp(0.0, 1.0)).round() as u8;
-    Color::rgba(color.r, color.g, color.b, alpha)
-}
+/// Demo chrome switches as one coherent palette when the resolved system mode changes.
+///
+/// `StyleContext::theme` may contain an in-progress interpolation for the subset of
+/// theme colors that animate. Other foreground tokens switch immediately, which can
+/// temporarily pair light text with dark custom surfaces. The component gallery uses
+/// the canonical token set for the resolved mode so all of its custom chrome changes
+/// atomically; built-in controls keep their framework-managed transitions.
+fn demo_colors(ctx: &StyleContext<'_>) -> &'static ColorScheme {
+    static LIGHT: OnceLock<ColorScheme> = OnceLock::new();
+    static DARK: OnceLock<ColorScheme> = OnceLock::new();
 
-pub(crate) fn text_style(ctx: &StyleContext<'_>, size: Sp) -> TextWidgetStyle {
-    let mut style = TextWidgetStyle::default_for_theme(ctx.theme);
-    style.typography.size = size;
-    style
-}
-
-fn primary_text_color(mode: ResolvedThemeMode) -> Color {
-    match mode {
-        ResolvedThemeMode::Light => Color::hexa(0x0F172AFF),
-        ResolvedThemeMode::Dark => Color::hexa(0xF8FAFCFF),
+    match ctx.mode {
+        ResolvedThemeMode::Light => LIGHT.get_or_init(ColorScheme::light),
+        ResolvedThemeMode::Dark => DARK.get_or_init(ColorScheme::dark),
     }
 }
 
-pub(crate) fn title_style(ctx: &StyleContext<'_>) -> TextWidgetStyle {
-    let mut style = text_style(ctx, sp(28.0));
-    style.typography.weight = FontWeight::SemiBold;
-    style.color = primary_text_color(ctx.mode).into();
+fn text_style(ctx: &StyleContext<'_>, typography: TextStyle, color: Color) -> TextWidgetStyle {
+    let mut style = TextWidgetStyle::default_for_theme(ctx.theme);
+    style.typography = typography;
+    style.color = color.into();
     style
+}
+
+pub(crate) fn title_style(ctx: &StyleContext<'_>) -> TextWidgetStyle {
+    text_style(
+        ctx,
+        ctx.theme.typography.headline.clone(),
+        demo_colors(ctx).on_background,
+    )
+}
+
+pub(crate) fn page_description_style(ctx: &StyleContext<'_>) -> TextWidgetStyle {
+    text_style(
+        ctx,
+        ctx.theme.typography.body.clone(),
+        demo_colors(ctx).on_surface_muted,
+    )
 }
 
 pub(crate) fn section_title_style(ctx: &StyleContext<'_>) -> TextWidgetStyle {
-    let mut style = text_style(ctx, sp(20.0));
-    style.typography.weight = FontWeight::SemiBold;
-    style.color = primary_text_color(ctx.mode).into();
-    style
+    text_style(
+        ctx,
+        ctx.theme.typography.title.clone(),
+        demo_colors(ctx).on_surface,
+    )
 }
 
 pub(crate) fn usage_title_style(ctx: &StyleContext<'_>) -> TextWidgetStyle {
-    let mut style = text_style(ctx, sp(16.0));
-    style.typography.weight = FontWeight::SemiBold;
-    style.color = primary_text_color(ctx.mode).into();
-    style
+    text_style(
+        ctx,
+        ctx.theme.typography.label.clone(),
+        demo_colors(ctx).on_surface,
+    )
 }
 
 pub(crate) fn status_style(ctx: &StyleContext<'_>) -> TextWidgetStyle {
-    muted_text_style(ctx, sp(14.0))
+    text_style(
+        ctx,
+        ctx.theme.typography.body_small.clone(),
+        demo_colors(ctx).on_surface_muted,
+    )
 }
 
-pub(crate) fn muted_text_style(ctx: &StyleContext<'_>, size: Sp) -> TextWidgetStyle {
-    let mode = ctx.mode;
-    let mut style = text_style(ctx, size);
-    style.color = match mode {
-        ResolvedThemeMode::Light => Color::hexa(0x475569FF).into(),
-        ResolvedThemeMode::Dark => Color::hexa(0xCBD5E1FF).into(),
-    };
-    style
+pub(crate) fn field_label_style(ctx: &StyleContext<'_>) -> TextWidgetStyle {
+    text_style(
+        ctx,
+        ctx.theme.typography.label.clone(),
+        demo_colors(ctx).on_surface,
+    )
+}
+
+pub(crate) fn error_text_style(ctx: &StyleContext<'_>) -> TextWidgetStyle {
+    text_style(
+        ctx,
+        ctx.theme.typography.label_small.clone(),
+        demo_colors(ctx).error,
+    )
 }
 
 pub(crate) fn code_text_style(ctx: &StyleContext<'_>) -> TextWidgetStyle {
-    let mode = ctx.mode;
-    let mut style = text_style(ctx, sp(13.0));
-    style.color = match mode {
-        ResolvedThemeMode::Light => Color::hexa(0x1F2937FF).into(),
-        ResolvedThemeMode::Dark => Color::hexa(0xE5E7EBFF).into(),
-    };
-    style
+    text_style(
+        ctx,
+        ctx.theme.typography.code.clone(),
+        demo_colors(ctx).on_surface,
+    )
 }
 
 pub(crate) fn root_style(ctx: &StyleContext<'_>) -> ContainerStyle {
-    let mode = ctx.mode;
     let mut style = ContainerStyle::default_for_theme(ctx.theme);
-    style.surface.background = Some(
-        match mode {
-            ResolvedThemeMode::Light => Color::hexa(0xF8FAFCFF),
-            ResolvedThemeMode::Dark => Color::hexa(0x0B1120FF),
-        }
-        .into(),
-    );
+    style.surface.background = Some(demo_colors(ctx).background.into());
     style
 }
 
 pub(crate) fn sidebar_style(ctx: &StyleContext<'_>) -> ContainerStyle {
-    let mode = ctx.mode;
     let mut style = ContainerStyle::default_for_theme(ctx.theme);
-    style.surface.background = Some(
-        match mode {
-            ResolvedThemeMode::Light => Color::hexa(0xFFFFFFFF),
-            ResolvedThemeMode::Dark => Color::hexa(0x111827FF),
-        }
-        .into(),
-    );
-    style.surface.border_color = Some(
-        match mode {
-            ResolvedThemeMode::Light => Color::hexa(0xE2E8F0FF),
-            ResolvedThemeMode::Dark => Color::hexa(0x243044FF),
-        }
-        .into(),
-    );
-    style.surface.border_width = Some(dp(1.0).into());
+    style.surface.background = Some(demo_colors(ctx).surface.into());
+    style.surface.border_color = Some(demo_colors(ctx).outline_muted.into());
+    style.surface.border_width = Some(ctx.theme.border.thin.into());
     style
 }
 
-pub(crate) fn nav_item_style(ctx: &StyleContext<'_>, active: bool, accent: u32) -> ContainerStyle {
-    let mode = ctx.mode;
-    let accent = Color::hexa(accent);
+pub(crate) fn nav_item_style(ctx: &StyleContext<'_>, active: bool) -> ContainerStyle {
     let mut style = ContainerStyle::default_for_theme(ctx.theme);
-    style.surface.background = Some(
-        match (mode, active) {
-            (ResolvedThemeMode::Light, true) => with_alpha(accent, 0.12),
-            (ResolvedThemeMode::Dark, true) => with_alpha(accent, 0.18),
-            (ResolvedThemeMode::Light, false) => Color::hexa(0xF8FAFC00),
-            (ResolvedThemeMode::Dark, false) => Color::hexa(0x11182700),
-        }
-        .into(),
-    );
-    style.surface.border_color = Some(
-        match (mode, active) {
-            (ResolvedThemeMode::Light, true) => with_alpha(accent, 0.38),
-            (ResolvedThemeMode::Dark, true) => with_alpha(accent, 0.52),
-            (ResolvedThemeMode::Light, false) => Color::hexa(0xE2E8F000),
-            (ResolvedThemeMode::Dark, false) => Color::hexa(0x33415500),
-        }
-        .into(),
-    );
-    style.surface.border_width = Some(dp(1.0).into());
-    style.surface.border_radius = Some(dp(8.0).into());
     if active {
-        style.surface.shadow = Some(
-            Shadow {
-                offset_x: dp(0.0),
-                offset_y: dp(8.0),
-                blur: dp(18.0),
-                spread: dp(-12.0),
-                color: with_alpha(
-                    accent,
-                    match mode {
-                        ResolvedThemeMode::Light => 0.30,
-                        ResolvedThemeMode::Dark => 0.42,
-                    },
-                ),
-            }
-            .into(),
-        );
+        style.surface.background = Some(demo_colors(ctx).primary_container.into());
     }
+    style.surface.border_radius = Some(ctx.theme.radius.lg.into());
     style
 }
 
-pub(crate) fn nav_badge_style(ctx: &StyleContext<'_>, active: bool, accent: u32) -> ContainerStyle {
-    let mode = ctx.mode;
-    let accent = Color::hexa(accent);
+pub(crate) fn nav_badge_style(ctx: &StyleContext<'_>, active: bool) -> ContainerStyle {
     let mut style = ContainerStyle::default_for_theme(ctx.theme);
     style.surface.background = Some(
         if active {
-            accent
+            demo_colors(ctx).primary
         } else {
-            match mode {
-                ResolvedThemeMode::Light => with_alpha(accent, 0.14),
-                ResolvedThemeMode::Dark => with_alpha(accent, 0.22),
-            }
+            demo_colors(ctx).surface_low
         }
         .into(),
     );
     style.surface.border_color = Some(
-        match mode {
-            ResolvedThemeMode::Light => with_alpha(accent, if active { 0.0 } else { 0.24 }),
-            ResolvedThemeMode::Dark => with_alpha(accent, if active { 0.0 } else { 0.36 }),
+        if active {
+            demo_colors(ctx).primary
+        } else {
+            demo_colors(ctx).outline_muted
         }
         .into(),
     );
-    style.surface.border_width = Some(dp(1.0).into());
-    style.surface.border_radius = Some(dp(8.0).into());
+    style.surface.border_width = Some(ctx.theme.border.thin.into());
+    style.surface.border_radius = Some(ctx.theme.radius.full.into());
     style
 }
 
 pub(crate) fn nav_badge_text_style(ctx: &StyleContext<'_>, active: bool) -> TextWidgetStyle {
-    let mode = ctx.mode;
-    let mut style = text_style(ctx, sp(13.0));
-    style.typography.weight = FontWeight::SemiBold;
-    style.color = if active {
-        Color::hexa(0xFFFFFFFF).into()
-    } else {
-        match mode {
-            ResolvedThemeMode::Light => Color::hexa(0x334155FF),
-            ResolvedThemeMode::Dark => Color::hexa(0xE2E8F0FF),
-        }
-        .into()
-    };
-    style
+    text_style(
+        ctx,
+        ctx.theme.typography.label_small.clone(),
+        if active {
+            demo_colors(ctx).on_primary
+        } else {
+            demo_colors(ctx).on_surface_muted
+        },
+    )
 }
 
 pub(crate) fn nav_title_style(ctx: &StyleContext<'_>, active: bool) -> TextWidgetStyle {
-    let mode = ctx.mode;
-    let mut style = text_style(ctx, sp(14.0));
-    style.typography.weight = FontWeight::SemiBold;
-    style.color = match (mode, active) {
-        (ResolvedThemeMode::Light, true) => Color::hexa(0x0F172AFF),
-        (ResolvedThemeMode::Light, false) => Color::hexa(0x334155FF),
-        (ResolvedThemeMode::Dark, true) => Color::hexa(0xF8FAFCFF),
-        (ResolvedThemeMode::Dark, false) => Color::hexa(0xCBD5E1FF),
-    }
-    .into();
-    style
+    text_style(
+        ctx,
+        ctx.theme.typography.label.clone(),
+        if active {
+            demo_colors(ctx).on_primary_container
+        } else {
+            demo_colors(ctx).on_surface
+        },
+    )
 }
 
 pub(crate) fn nav_description_style(ctx: &StyleContext<'_>, active: bool) -> TextWidgetStyle {
-    let mode = ctx.mode;
-    let mut style = text_style(ctx, sp(12.0));
-    style.color = match (mode, active) {
-        (ResolvedThemeMode::Light, true) => Color::hexa(0x475569FF),
-        (ResolvedThemeMode::Light, false) => Color::hexa(0x64748BFF),
-        (ResolvedThemeMode::Dark, true) => Color::hexa(0xD7DEE8FF),
-        (ResolvedThemeMode::Dark, false) => Color::hexa(0x94A3B8FF),
-    }
-    .into();
+    text_style(
+        ctx,
+        ctx.theme.typography.label_small.clone(),
+        if active {
+            demo_colors(ctx).on_primary_container
+        } else {
+            demo_colors(ctx).on_surface_muted
+        },
+    )
+}
+
+pub(crate) fn component_card_style(ctx: &StyleContext<'_>) -> CardStyle {
+    let mut style = CardStyle::default_for_theme(ctx.theme);
+    style.background = demo_colors(ctx).surface.into();
+    style.border = demo_colors(ctx).outline_muted.into();
+    style.border_width = ctx.theme.border.thin;
+    style.radius = ctx.theme.radius.xl;
+    style.shadow = ctx.theme.elevation.sm.clone();
+    style.padding = Insets::all(ctx.theme.spacing.md);
+    style.gap = ctx.theme.spacing.md;
     style
 }
 
-pub(crate) fn component_card_style(ctx: &StyleContext<'_>) -> ContainerStyle {
-    let mode = ctx.mode;
-    let mut style = ContainerStyle::default_for_theme(ctx.theme);
-    style.surface.background = Some(
-        match mode {
-            ResolvedThemeMode::Light => Color::hexa(0xFFFFFFFF),
-            ResolvedThemeMode::Dark => Color::hexa(0x111827FF),
-        }
-        .into(),
-    );
-    style.surface.border_color = Some(
-        match mode {
-            ResolvedThemeMode::Light => Color::hexa(0xE2E8F0FF),
-            ResolvedThemeMode::Dark => Color::hexa(0x334155FF),
-        }
-        .into(),
-    );
-    style.surface.border_width = Some(dp(1.0).into());
-    style.surface.border_radius = Some(dp(8.0).into());
-    style
-}
-
-pub(crate) fn usage_card_style(ctx: &StyleContext<'_>) -> ContainerStyle {
-    let mode = ctx.mode;
-    let mut style = ContainerStyle::default_for_theme(ctx.theme);
-    style.surface.background = Some(
-        match mode {
-            ResolvedThemeMode::Light => Color::hexa(0xF8FAFCFF),
-            ResolvedThemeMode::Dark => Color::hexa(0x0F172AFF),
-        }
-        .into(),
-    );
-    style.surface.border_color = Some(
-        match mode {
-            ResolvedThemeMode::Light => Color::hexa(0xE2E8F0FF),
-            ResolvedThemeMode::Dark => Color::hexa(0x253145FF),
-        }
-        .into(),
-    );
-    style.surface.border_width = Some(dp(1.0).into());
-    style.surface.border_radius = Some(dp(8.0).into());
+pub(crate) fn usage_card_style(ctx: &StyleContext<'_>) -> CardStyle {
+    let mut style = CardStyle::default_for_theme(ctx.theme);
+    style.background = demo_colors(ctx).surface_low.into();
+    style.border = demo_colors(ctx).outline_muted.into();
+    style.border_width = ctx.theme.border.thin;
+    style.radius = ctx.theme.radius.lg;
+    style.shadow = ctx.theme.elevation.none.clone();
+    style.padding = Insets::all(ctx.theme.spacing.md);
+    style.gap = ctx.theme.spacing.sm + ctx.theme.spacing.xs;
     style
 }
 
 pub(crate) fn preview_style(ctx: &StyleContext<'_>) -> ContainerStyle {
-    let mode = ctx.mode;
     let mut style = ContainerStyle::default_for_theme(ctx.theme);
-    style.surface.background = Some(
-        match mode {
-            ResolvedThemeMode::Light => Color::hexa(0xFFFFFFFF),
-            ResolvedThemeMode::Dark => Color::hexa(0x172033FF),
-        }
-        .into(),
-    );
-    style.surface.border_color = Some(
-        match mode {
-            ResolvedThemeMode::Light => Color::hexa(0xE5E7EBFF),
-            ResolvedThemeMode::Dark => Color::hexa(0x334155FF),
-        }
-        .into(),
-    );
-    style.surface.border_width = Some(dp(1.0).into());
-    style.surface.border_radius = Some(dp(8.0).into());
+    style.surface.background = Some(demo_colors(ctx).surface.into());
+    style.surface.border_color = Some(demo_colors(ctx).outline_muted.into());
+    style.surface.border_width = Some(ctx.theme.border.thin.into());
+    style.surface.border_radius = Some(ctx.theme.radius.lg.into());
     style
 }
 
 pub(crate) fn code_block_style(ctx: &StyleContext<'_>) -> ContainerStyle {
-    let mode = ctx.mode;
     let mut style = ContainerStyle::default_for_theme(ctx.theme);
-    style.surface.background = Some(
-        match mode {
-            ResolvedThemeMode::Light => Color::hexa(0xF1F5F9FF),
-            ResolvedThemeMode::Dark => Color::hexa(0x020617FF),
-        }
-        .into(),
-    );
-    style.surface.border_color = Some(
-        match mode {
-            ResolvedThemeMode::Light => Color::hexa(0xCBD5E1FF),
-            ResolvedThemeMode::Dark => Color::hexa(0x334155FF),
-        }
-        .into(),
-    );
-    style.surface.border_width = Some(dp(1.0).into());
-    style.surface.border_radius = Some(dp(8.0).into());
+    style.surface.background = Some(demo_colors(ctx).background.into());
+    style.surface.border_color = Some(demo_colors(ctx).outline_muted.into());
+    style.surface.border_width = Some(ctx.theme.border.thin.into());
+    style.surface.border_radius = Some(ctx.theme.radius.lg.into());
     style
 }
 
 pub(crate) fn shadow_showcase_style(ctx: &StyleContext<'_>) -> ContainerStyle {
     let mut style = ContainerStyle::default_for_theme(ctx.theme);
-    style.surface.background = Some(Color::hexa(0xFFFFFFFF).into());
-    style.surface.border_radius = Some(dp(50.0).into());
-    style.surface.shadow = Some(
-        Shadow {
-            offset_x: dp(0.0),
-            offset_y: dp(7.0),
-            blur: dp(30.0),
-            spread: dp(0.0),
-            color: Color::hex(0x64646F),
-        }
-        .into(),
-    );
+    style.surface.background = Some(demo_colors(ctx).surface_overlay.into());
+    style.surface.border_color = Some(demo_colors(ctx).outline_muted.into());
+    style.surface.border_width = Some(ctx.theme.border.thin.into());
+    style.surface.border_radius = Some(ctx.theme.radius.full.into());
+    style.surface.shadow = Some(ctx.theme.elevation.lg.clone().into());
     style
 }
 
@@ -322,18 +229,95 @@ mod tests {
     use super::*;
 
     #[test]
-    fn usage_title_style_changes_between_theme_modes() {
+    fn typography_and_colors_follow_the_active_theme() {
         let light = Theme::light();
         let dark = Theme::dark();
-        let light_color = usage_title_style(&StyleContext::from_theme(&light))
-            .color
-            .resolve();
-        let dark_color = usage_title_style(&StyleContext::from_theme(&dark))
-            .color
-            .resolve();
+        let light_context = StyleContext::from_theme(&light);
+        let dark_context = StyleContext::from_theme(&dark);
 
-        assert_eq!(light_color, Color::hexa(0x0F172AFF));
-        assert_eq!(dark_color, Color::hexa(0xF8FAFCFF));
-        assert_ne!(light_color, dark_color);
+        let light_title = title_style(&light_context);
+        let dark_title = title_style(&dark_context);
+        assert_eq!(light_title.typography, light.typography.headline);
+        assert_eq!(dark_title.typography, dark.typography.headline);
+        assert_eq!(light_title.color.resolve(), light.colors.on_background);
+        assert_eq!(dark_title.color.resolve(), dark.colors.on_background);
+
+        let light_card = component_card_style(&light_context);
+        let dark_card = component_card_style(&dark_context);
+        assert_eq!(light_card.background.resolve(), light.colors.surface);
+        assert_eq!(dark_card.background.resolve(), dark.colors.surface);
+        assert_eq!(light_card.radius, light.radius.xl);
+        assert_eq!(dark_card.shadow, dark.elevation.sm);
+    }
+
+    #[test]
+    fn shell_surfaces_switch_together_from_dark_to_light_mode() {
+        let light_tokens = ColorScheme::light();
+        let dark_tokens = ColorScheme::dark();
+
+        // Reproduce the first frame of the framework theme transition: the resolved
+        // mode and non-animated foregrounds are light, while animated surface tokens
+        // can still carry their dark starting values.
+        let mut transitioning_to_light = Theme::light();
+        transitioning_to_light.colors.background = dark_tokens.background;
+        transitioning_to_light.colors.surface = dark_tokens.surface;
+        transitioning_to_light.colors.surface_low = dark_tokens.surface_low;
+        let light_context = StyleContext::from_theme(&transitioning_to_light);
+
+        let light_root = root_style(&light_context);
+        let light_sidebar = sidebar_style(&light_context);
+        let light_card = component_card_style(&light_context);
+        assert_eq!(
+            light_root.surface.background.unwrap().resolve(),
+            light_tokens.background
+        );
+        assert_eq!(
+            light_sidebar.surface.background.unwrap().resolve(),
+            light_tokens.surface
+        );
+        assert_eq!(light_card.background.resolve(), light_tokens.surface);
+        assert_eq!(
+            title_style(&light_context).color.resolve(),
+            light_tokens.on_background
+        );
+
+        let dark_theme = Theme::dark();
+        let dark_context = StyleContext::from_theme(&dark_theme);
+        let dark_root = root_style(&dark_context);
+        let dark_sidebar = sidebar_style(&dark_context);
+        let dark_card = component_card_style(&dark_context);
+        assert_eq!(
+            dark_root.surface.background.unwrap().resolve(),
+            dark_tokens.background
+        );
+        assert_eq!(
+            dark_sidebar.surface.background.unwrap().resolve(),
+            dark_tokens.surface
+        );
+        assert_eq!(dark_card.background.resolve(), dark_tokens.surface);
+
+        assert_ne!(light_tokens.background, dark_tokens.background);
+        assert_ne!(light_tokens.surface, dark_tokens.surface);
+    }
+
+    #[test]
+    fn active_navigation_uses_primary_theme_tokens() {
+        let theme = Theme::light();
+        let context = StyleContext::from_theme(&theme);
+        let item = nav_item_style(&context, true);
+        let badge = nav_badge_style(&context, true);
+
+        assert_eq!(
+            item.surface.background.unwrap().resolve(),
+            theme.colors.primary_container
+        );
+        assert_eq!(
+            badge.surface.background.unwrap().resolve(),
+            theme.colors.primary
+        );
+        assert_eq!(
+            nav_title_style(&context, true).color.resolve(),
+            theme.colors.on_primary_container
+        );
     }
 }

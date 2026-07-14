@@ -230,6 +230,7 @@ impl<VM> Textarea<VM> {
                     show_scrollbar: Value::Static(true),
                     auto_wrap: Value::Static(false),
                     validation: Value::Static(ValidationVisualState::default()),
+                    runtime_layout: None,
                 },
             },
         }

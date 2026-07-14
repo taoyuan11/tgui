@@ -76,18 +76,21 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
     pub(in crate::runtime) fn append_external_portals_to_computed(
         &mut self,
         computed: &mut ComputedScene<VM>,
+        widget_states: &crate::ui::widget::WidgetStateMap,
         now: Instant,
     ) {
         if self.external_portal_requests.is_empty() {
             return;
         }
 
-        let requests = self.external_portal_requests.clone();
+        // 请求中持有完整的 portal `Element` 子树。目标窗口每次重收集都 clone 整组请求会
+        // 深拷贝这些树；临时移出后按引用收集，结束时原样放回，既避开 clone，也保留
+        // registry 给出的稳定顺序和请求身份。
+        let requests = std::mem::take(&mut self.external_portal_requests);
         let viewport = self.viewport_rect();
         let units = self.unit_context();
         let theme = self.animated_theme(now);
         let active_scrollbar = self.active_scrollbar_drag.map(|drag| drag.handle);
-        let widget_states = self.widget_state_map(active_scrollbar);
         let focused_input = self.focused_text_input_id_cached(computed);
         let focused_text_state = focused_input
             .and_then(|id| self.text_edit_state(id))
@@ -128,7 +131,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             selected_text_state: selected_text_state.as_ref(),
             hovered_scrollbar: self.hovered_scrollbar,
             active_scrollbar,
-            widget_states: &widget_states,
+            widget_states,
             select_open_states: &self.select_open_states,
             menu_open_states: &self.menu_open_states,
             menubar_active_states: &self.menubar_active_states,
@@ -151,8 +154,8 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             transform_stack: smallvec::SmallVec::new(),
         };
 
-        for request in requests {
-            let Some(anchor) = resolve_external_portal_anchor(&request, viewport, computed) else {
+        for request in &requests {
+            let Some(anchor) = resolve_external_portal_anchor(request, viewport, computed) else {
                 continue;
             };
             let Some((content_scene, content_size)) =
@@ -172,6 +175,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 OverlayContent::Scene(Box::new(content_scene)),
             );
         }
+        self.external_portal_requests = requests;
 
         computed.finalize_additional_portals(viewport, std::iter::empty());
 

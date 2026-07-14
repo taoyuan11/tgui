@@ -81,3 +81,85 @@ fn larger_font_sizes_scale_default_line_height() {
     assert_eq!(font_size, 30.0);
     assert_eq!(line_height, 41.25);
 }
+
+#[test]
+fn ordinary_text_tree_uses_measure_only_without_building_edit_geometry() {
+    let theme = Theme::default();
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let mut animations = AnimationEngine::default();
+    let tree: WidgetTree<()> = WidgetTree::new(
+        Flex::new(Axis::Vertical)
+            .child(Text::new("plain label 0"))
+            .child(Text::new("plain label 1 中文"))
+            .child(Text::new("plain label 2 👨‍👩‍👧‍👦")),
+    );
+
+    font_manager.reset_text_measure_activity();
+    let rendered = tree.render_output(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        None,
+        None,
+        &HashMap::new(),
+        Rect::new(0.0, 0.0, 640.0, 480.0),
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+
+    assert_eq!(rendered.primitives.texts.len(), 3);
+    let (measure_calls, measure_misses, precise_calls, precise_builds) =
+        font_manager.text_measure_activity();
+    assert!(measure_calls >= 3);
+    assert_eq!(measure_misses, 3);
+    assert_eq!(precise_calls, 0);
+    assert_eq!(precise_builds, 0);
+}
+
+#[test]
+fn input_and_precise_text_routes_build_layout_once_and_reuse_it_in_scene() {
+    let theme = Theme::default();
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let mut animations = AnimationEngine::default();
+    let tree: WidgetTree<()> = WidgetTree::new(
+        Flex::new(Axis::Vertical)
+            .child(crate::ui::widget::Button::new("centered button"))
+            .child(Input::new("editable input"))
+            .child(Text::new("selectable text").user_select(true))
+            .child(Text::new("multiline\ntext")),
+    );
+
+    font_manager.reset_text_measure_activity();
+    let rendered = tree.render_output(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        None,
+        None,
+        &HashMap::new(),
+        Rect::new(0.0, 0.0, 640.0, 480.0),
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+
+    assert_eq!(rendered.primitives.texts.len(), 4);
+    let (measure_calls, measure_misses, precise_calls, precise_builds) =
+        font_manager.text_measure_activity();
+    assert_eq!(measure_calls, 0);
+    assert_eq!(measure_misses, 0);
+    assert!(precise_calls >= 4);
+    assert_eq!(
+        precise_builds, 4,
+        "scene collection should hit the four layouts warmed by Taffy"
+    );
+}

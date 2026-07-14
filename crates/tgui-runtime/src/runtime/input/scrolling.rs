@@ -3,7 +3,7 @@ use super::*;
 use smallvec::SmallVec;
 
 impl<VM: 'static> BoundRuntimeHandler<VM> {
-    pub(super) fn begin_touch_scroll_drag(&mut self, viewport: Rect) -> bool {
+    pub(in crate::runtime) fn begin_touch_scroll_drag(&mut self, viewport: Rect) -> bool {
         if self.active_touch_scroll.is_some()
             || self.active_scrollbar_drag.is_some()
             || self.active_slider_drag.is_some()
@@ -31,24 +31,10 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             return false;
         }
 
-        // CRITICAL: Use cached scroll_regions to avoid triggering computed_scene()
-        // during input handling, which causes stack overflow on Windows
-        let region = {
-            let scroll_regions = if let Some(cached) = self.cached_scene.as_ref() {
-                &cached.computed.scroll_regions
-            } else {
-                return false; // No cached scene, cannot start scroll
-            };
-
-            let region = scroll_regions.iter().rev().find(|region| {
-                !region.visible_frame.is_empty()
-                    && region.visible_frame.contains(cursor_position)
-                    && (region.can_scroll_x() || region.can_scroll_y())
-            });
-
-            // Copy the region data before releasing the borrow
-            region.copied()
-        };
+        // CRITICAL: Use the cached scene rather than triggering computed_scene() during input.
+        // Large scenes keep a lazy list of the few actually-scrollable region indices, while
+        // preserving the exact reverse scene order used for nested-scroll targeting.
+        let region = self.topmost_scrollable_region(cursor_position);
 
         let Some(region) = region else {
             return false;

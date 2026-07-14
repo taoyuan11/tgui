@@ -135,7 +135,11 @@ impl<VM> ResolvedElement<VM> {
         if let Some(list_item) = self.list_item.as_ref() {
             let color = if list_item.disabled.resolve() {
                 list_item.item_disabled_background.resolve()
-            } else if list_item.selected_keys.resolve().contains(&list_item.key) {
+            } else if list_item
+                .selection
+                .selected_key_membership
+                .resolve_ref(|membership| membership.contains(&list_item.key))
+            {
                 list_item.item_selected_background.resolve()
             } else if widget_state.hovered || widget_state.pressed || widget_state.focused {
                 list_item.item_hover_background.resolve()

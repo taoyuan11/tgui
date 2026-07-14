@@ -24,7 +24,12 @@ pub struct SliderStyle {
 
 impl SliderStyle {
     pub fn default_for_theme(theme: &Theme) -> Self {
+        Self::default_for_density(theme, theme.density)
+    }
+
+    pub(crate) fn default_for_density(theme: &Theme, density: Density) -> Self {
         let palette = palette_from_theme(theme);
+        let metrics = control_density_metrics(theme, density);
         Self {
             surface: WidgetSurfaceStyle::default(),
             track: stateful_single(
@@ -59,14 +64,14 @@ impl SliderStyle {
                 palette.disabled_content,
             ),
             focus_ring: None,
-            track_height: dp(4.0),
-            thumb_size: theme.spacing.md + theme.spacing.xs,
+            track_height: metrics.slider_track_height,
+            thumb_size: metrics.slider_thumb_size,
             radius: Value::Static(theme.radius.full),
             border_width: Value::Static(theme.border.none),
-            tick_size: theme.spacing.xs,
-            label_gap: theme.spacing.sm,
-            min_width: dp(160.0),
-            min_height: dp(32.0),
+            tick_size: metrics.slider_tick_size,
+            label_gap: metrics.slider_label_gap,
+            min_width: metrics.slider_min_width,
+            min_height: metrics.slider_min_height,
             text_style: theme.typography.label.clone(),
         }
     }

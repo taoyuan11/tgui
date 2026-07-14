@@ -127,7 +127,7 @@ impl<VM: 'static> Element<VM> {
         // holds the recursive child subtree) is borrowed and rebuilt, never cloned.
         // Cloning `self` here would deep-copy the entire subtree at every level of
         // the recursion, which dominates full scene rebuilds.
-        let layout = self.layout.clone();
+        let mut layout = self.layout.clone();
         let mut visual = self.visual.clone();
         let mut background = self.background.clone();
         let mut child_source_spans = Vec::new();
@@ -136,6 +136,7 @@ impl<VM: 'static> Element<VM> {
                 layout: container_layout,
                 children,
                 style,
+                runtime_layout,
             } => {
                 let base_style = container_style_base(context, style_sheet, &self.visual);
                 let resolved_style = apply_local_style(
@@ -146,8 +147,17 @@ impl<VM: 'static> Element<VM> {
                     &self.visual,
                 );
                 apply_surface_style(&mut background, &mut visual, &resolved_style.surface);
-                let mut layout = container_layout.clone();
-                layout.scrollbar_style = resolved_style.scrollbar;
+                let mut resolved_container_layout = container_layout.clone();
+                if let Some(runtime_layout) = runtime_layout {
+                    runtime_layout(
+                        &mut layout,
+                        &mut resolved_container_layout,
+                        context,
+                        style_sheet,
+                        &mut visual,
+                    );
+                }
+                resolved_container_layout.scrollbar_style = resolved_style.scrollbar;
                 let previous_children = previous
                     .and_then(|previous| match &previous.kind {
                         ResolvedWidgetKind::Container { children, .. } => Some(children.as_slice()),
@@ -174,7 +184,7 @@ impl<VM: 'static> Element<VM> {
                 })
                 .collect();
                 ResolvedWidgetKind::Container {
-                    layout,
+                    layout: resolved_container_layout,
                     children: resolved_children,
                     runtime_style: ResolvedRuntimeSurfaceStyle {
                         base: base_style,
@@ -192,6 +202,7 @@ impl<VM: 'static> Element<VM> {
                 overflow_x,
                 overflow_y,
                 style,
+                runtime_layout,
                 runtime_state,
             } => {
                 let base_style = container_style_base(context, style_sheet, &self.visual);
@@ -203,18 +214,29 @@ impl<VM: 'static> Element<VM> {
                     &self.visual,
                 );
                 apply_surface_style(&mut background, &mut visual, &resolved_style.surface);
+                let mut resolved_item_layout = *item_layout;
+                if let Some(runtime_layout) = runtime_layout {
+                    runtime_layout(
+                        &mut layout,
+                        &mut resolved_item_layout,
+                        context,
+                        style_sheet,
+                        &self.visual,
+                    );
+                }
                 let mut runtime_state = runtime_state.clone();
                 if let Some(cache) = virtual_states.get(&id) {
                     runtime_state.viewport_hint = cache.viewport_hint.clone();
-                    runtime_state.measured_extents = cache.measured_extents.clone();
+                    runtime_state.measurements = cache.measurements.clone();
                     runtime_state.widget_ids_by_key = cache.widget_ids_by_key.clone();
                     runtime_state.bootstrap = runtime_state.viewport_hint.is_none();
                 } else {
                     runtime_state.viewport_hint = None;
-                    runtime_state.measured_extents.clear();
+                    runtime_state.measurements = Default::default();
                     runtime_state.widget_ids_by_key.clear();
                     runtime_state.bootstrap = true;
                 }
+                runtime_state.source_revision = source.revision();
                 runtime_state.fallback_viewport_hint = fallback_viewport_hint.clone();
                 runtime_state.scroll_offset =
                     scroll_offsets.get(&id).copied().unwrap_or(Point::ZERO);
@@ -233,7 +255,7 @@ impl<VM: 'static> Element<VM> {
                 }
                 let window_plan = resolve_virtual_window_plan(
                     *arrangement,
-                    *item_layout,
+                    resolved_item_layout,
                     &runtime_state,
                     source.len(),
                     runtime_state.fallback_viewport_hint.clone(),
@@ -337,7 +359,7 @@ impl<VM: 'static> Element<VM> {
                 }
                 ResolvedWidgetKind::Virtual {
                     arrangement: *arrangement,
-                    item_layout: *item_layout,
+                    item_layout: resolved_item_layout,
                     content_cross_extent: content_cross_extent.clone(),
                     overflow_x: *overflow_x,
                     overflow_y: *overflow_y,
@@ -382,6 +404,9 @@ impl<VM: 'static> Element<VM> {
                 audio: audio.clone(),
             },
             WidgetKind::Image { image } => {
+                if let Some(runtime_layout) = image.runtime_layout.as_ref() {
+                    runtime_layout(&mut layout, context, style_sheet, &self.visual);
+                }
                 let mut image = image.clone();
                 let local_style = image.style.as_ref().cloned();
                 let base_style = image_style_base(context, style_sheet, &self.visual);
@@ -405,7 +430,28 @@ impl<VM: 'static> Element<VM> {
                     },
                 }
             }
-            WidgetKind::Icon { icon } => ResolvedWidgetKind::Icon { icon: icon.clone() },
+            WidgetKind::Icon { icon } => {
+                // Built-in icons are leaf widgets (not Containers), so their
+                // theme-derived geometry must be applied in the same runtime
+                // resolution pass as container runtime layouts. This keeps a
+                // retained tree responsive to theme/density changes without
+                // adding wrapper nodes. Explicit layout values were merged by
+                // the builder and always win over these defaults.
+                let resolved = crate::ui::widget::icon::resolve_icon_style_with_sheet(
+                    icon.style.as_ref(),
+                    context,
+                    style_sheet,
+                    &self.visual,
+                    WidgetState::default(),
+                );
+                if layout.width.is_none() {
+                    layout.width = Some(Value::Static(Length::Px(resolved.size)));
+                }
+                if layout.height.is_none() {
+                    layout.height = Some(Value::Static(Length::Px(resolved.size)));
+                }
+                ResolvedWidgetKind::Icon { icon: icon.clone() }
+            }
             WidgetKind::Canvas {
                 scene,
                 item_interactions,
@@ -462,7 +508,11 @@ impl<VM: 'static> Element<VM> {
                 disabled,
                 variant,
                 style,
+                runtime_layout,
             } => {
+                if let Some(runtime_layout) = runtime_layout {
+                    runtime_layout(&mut layout, context, style_sheet, &self.visual);
+                }
                 let base_style = button_style_base(context, style_sheet, &self.visual, *variant);
                 let resolved_style = apply_local_style(
                     style.as_ref(),
@@ -636,7 +686,11 @@ impl<VM: 'static> Element<VM> {
                 disabled,
                 validation,
                 style,
+                runtime_layout,
             } => {
+                if let Some(runtime_layout) = runtime_layout.as_ref() {
+                    runtime_layout(&mut layout, context, style_sheet, &self.visual);
+                }
                 let base_style = slider_style_base(context, style_sheet, &self.visual);
                 let resolved_style = apply_local_style(
                     style.as_ref(),
@@ -764,6 +818,7 @@ impl<VM: 'static> Element<VM> {
                 show_scrollbar,
                 auto_wrap,
                 validation,
+                runtime_layout,
             } => {
                 let (resolved_style, runtime_style) = if *multiline {
                     let base_style = textarea_style_base(context, style_sheet, &self.visual);
@@ -798,6 +853,9 @@ impl<VM: 'static> Element<VM> {
                         }),
                     )
                 };
+                if let Some(runtime_layout) = runtime_layout {
+                    runtime_layout(&mut layout, context, style_sheet, &self.visual);
+                }
                 ResolvedWidgetKind::TextEditor {
                     controller: controller.clone(),
                     placeholder: placeholder.clone(),

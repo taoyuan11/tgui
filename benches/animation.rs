@@ -51,6 +51,51 @@ fn bench_real_animation_idle_refresh(c: &mut Criterion) {
 }
 
 #[cfg(feature = "bench-support")]
+fn bench_real_animation_sparse_active_refresh(c: &mut Criterion) {
+    let mut group = c.benchmark_group("real_animation_sparse_active_refresh");
+
+    for (settled_count, active_count) in [(1000_usize, 1_usize), (8000, 1), (8000, 16)] {
+        let mut engine =
+            create_real_animation_engine_with_sparse_active_slots(settled_count, active_count);
+        group.bench_with_input(
+            BenchmarkId::new(format!("slots_{settled_count}"), active_count),
+            &(settled_count, active_count),
+            |b, _| {
+                b.iter(|| {
+                    let changed = refresh_real_animation_engine(black_box(&mut engine));
+                    black_box(changed);
+                });
+            },
+        );
+    }
+
+    group.finish();
+}
+
+#[cfg(feature = "bench-support")]
+fn bench_real_animation_sparse_active_controllers(c: &mut Criterion) {
+    let mut group = c.benchmark_group("real_animation_sparse_active_controllers");
+
+    for (controller_count, running_count) in
+        [(1000_usize, 0_usize), (8000, 0), (8000, 1), (8000, 16)]
+    {
+        let coordinator = create_real_animation_coordinator(controller_count, running_count);
+        group.bench_with_input(
+            BenchmarkId::new(format!("controllers_{controller_count}"), running_count),
+            &(controller_count, running_count),
+            |b, _| {
+                b.iter(|| {
+                    let active = inspect_real_animation_coordinator(black_box(&coordinator));
+                    black_box(active);
+                });
+            },
+        );
+    }
+
+    group.finish();
+}
+
+#[cfg(feature = "bench-support")]
 fn bench_real_animation_resolve_settled(c: &mut Criterion) {
     let mut group = c.benchmark_group("real_animation_resolve_settled_slots");
 
@@ -290,6 +335,12 @@ fn bench_real_animation_idle_refresh(_c: &mut Criterion) {}
 fn bench_real_animation_resolve_settled(_c: &mut Criterion) {}
 
 #[cfg(not(feature = "bench-support"))]
+fn bench_real_animation_sparse_active_refresh(_c: &mut Criterion) {}
+
+#[cfg(not(feature = "bench-support"))]
+fn bench_real_animation_sparse_active_controllers(_c: &mut Criterion) {}
+
+#[cfg(not(feature = "bench-support"))]
 fn bench_animation_interpolation(_c: &mut Criterion) {}
 
 #[cfg(not(feature = "bench-support"))]
@@ -323,6 +374,8 @@ criterion_group!(
     benches,
     bench_animation_update,
     bench_real_animation_idle_refresh,
+    bench_real_animation_sparse_active_refresh,
+    bench_real_animation_sparse_active_controllers,
     bench_real_animation_resolve_settled,
     bench_animation_interpolation,
     bench_real_animation_curve_sample,

@@ -39,6 +39,22 @@ macro_rules! impl_container_properties {
                 Self(self.0.style_full_with_style_sheet(resolver))
             }
 
+            #[allow(dead_code)] // Composed widgets currently use this hook on Flex and Stack.
+            pub(crate) fn runtime_layout(
+                self,
+                resolver: impl Fn(
+                        &mut crate::ui::layout::LayoutStyle,
+                        &mut crate::ui::widget::common::ContainerLayout,
+                        &StyleContext<'_>,
+                        &crate::ui::widget::StyleSheet,
+                        &mut crate::ui::widget::common::VisualStyle,
+                    ) + Send
+                    + Sync
+                    + 'static,
+            ) -> Self {
+                Self(self.0.runtime_layout(resolver))
+            }
+
             /// 注册点击命令。
             ///
             /// # 参数

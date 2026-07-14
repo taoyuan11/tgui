@@ -21,13 +21,16 @@
 //!   `ModalDescriptor` + collect 阶段 sentinel overlay 完成；
 //! - `close_on_backdrop_click` 由 backdrop 自己的 `on_click` 命令直接驱动。
 
+use std::sync::Arc;
 use std::time::Duration;
+
+use parking_lot::RwLock;
 
 use crate::animation::Transition;
 use crate::foundation::color::Color;
 use crate::foundation::view_model::{Command, CommandContext, ValueCommand};
-use crate::ui::layout::{pct, Align, Axis, Insets, Overflow, Value};
-use crate::ui::theme::{StyleContext, WidgetState};
+use crate::ui::layout::{pct, Align, Axis, Insets, Length, Overflow, Value};
+use crate::ui::theme::{StyleContext, TextStyle, WidgetState};
 use crate::ui::unit::Dp;
 use crate::ui::widget::button::Button;
 use crate::ui::widget::common::VisualStyle;
@@ -43,6 +46,57 @@ use super::action::ModalAction;
 use super::descriptor::ModalDescriptor;
 
 const MODAL_FADE_DURATION_MS: u64 = 160;
+
+#[derive(Clone, Debug, PartialEq)]
+struct ModalRuntimeMetrics {
+    min_width: Dp,
+    max_width: Dp,
+    max_height: Dp,
+    margin: Insets,
+    padding: Insets,
+    title_padding: Insets,
+    title_text_style: TextStyle,
+    content_padding: Insets,
+    actions_gap: Dp,
+    actions_padding: Insets,
+    enter_scale: f32,
+}
+
+impl Default for ModalRuntimeMetrics {
+    fn default() -> Self {
+        Self {
+            min_width: Dp::ZERO,
+            max_width: Dp::ZERO,
+            max_height: Dp::ZERO,
+            margin: Insets::ZERO,
+            padding: Insets::ZERO,
+            title_padding: Insets::ZERO,
+            title_text_style: TextStyle::default(),
+            content_padding: Insets::ZERO,
+            actions_gap: Dp::ZERO,
+            actions_padding: Insets::ZERO,
+            enter_scale: 0.96,
+        }
+    }
+}
+
+impl From<&ModalStyle> for ModalRuntimeMetrics {
+    fn from(style: &ModalStyle) -> Self {
+        Self {
+            min_width: style.min_width,
+            max_width: style.max_width,
+            max_height: style.max_height,
+            margin: style.margin,
+            padding: style.padding,
+            title_padding: style.title_padding,
+            title_text_style: style.title_text_style.clone(),
+            content_padding: style.content_padding,
+            actions_gap: style.actions_gap,
+            actions_padding: style.actions_padding,
+            enter_scale: style.enter_scale.clamp(0.01, 16.0),
+        }
+    }
+}
 
 /// 应用内阻塞式对话框 builder。
 pub struct Modal<VM> {
@@ -182,16 +236,7 @@ impl<VM: 'static> From<Modal<VM>> for Element<VM> {
                     .animated(fade_transition),
             ),
         };
-        let resolved_style_for_layout = resolve_modal_style_for_layout(style.as_ref());
-        let enter_scale = resolved_style_for_layout.enter_scale.clamp(0.01, 16.0);
-        let scale_value: Value<f32> = match open.clone() {
-            Value::Static(open_now) => Value::Static(if open_now { 1.0 } else { enter_scale }),
-            Value::Signal(signal) => Value::Signal(
-                signal
-                    .map(move |o| if o { 1.0 } else { enter_scale })
-                    .animated(fade_transition),
-            ),
-        };
+        let runtime_metrics = Arc::new(RwLock::new(ModalRuntimeMetrics::default()));
 
         // -----------------------------------------------------------------
         // close 命令：把 on_open_change(false) 包成 Command<VM>，用于 backdrop
@@ -243,6 +288,8 @@ impl<VM: 'static> From<Modal<VM>> for Element<VM> {
         // -----------------------------------------------------------------
         let modal_style_for_card = style.clone();
         let title_value_for_render = title.clone();
+        let card_runtime_metrics = runtime_metrics.clone();
+        let card_open = open.clone();
         let mut card: Flex<VM> = Flex::new(Axis::Vertical)
             .style_full_with_style_sheet(move |context, style_sheet, visual, state| {
                 let resolved = resolve_modal_style_with_sheet(
@@ -260,28 +307,38 @@ impl<VM: 'static> From<Modal<VM>> for Element<VM> {
                 s.surface.shadow = Some(resolved.shadow.into());
                 s
             })
+            .runtime_layout(move |layout, container, _, _, visual| {
+                let metrics = card_runtime_metrics.read().clone();
+                layout.min_width = Some(Value::Static(Length::Px(metrics.min_width)));
+                layout.max_width = Some(Value::Static(Length::Px(metrics.max_width)));
+                layout.max_height = Some(Value::Static(Length::Px(metrics.max_height)));
+                layout.margin = Value::Static(metrics.margin);
+                container.padding = Some(Value::Static(metrics.padding));
+                visual.scale = match card_open.clone() {
+                    Value::Static(open_now) => {
+                        Value::Static(if open_now { 1.0 } else { metrics.enter_scale })
+                    }
+                    Value::Signal(signal) => Value::Signal(
+                        signal
+                            .map(move |open| if open { 1.0 } else { metrics.enter_scale })
+                            .animated(fade_transition),
+                    ),
+                };
+            })
             .opacity(visibility_value.clone())
-            .scale(scale_value)
             .overflow(Overflow::Hidden);
-        // 计算尺寸 / margin / padding：style 在 builder 阶段一次性解析。
-        card = card
-            .min_width(resolved_style_for_layout.min_width)
-            .max_width(resolved_style_for_layout.max_width)
-            .max_height(resolved_style_for_layout.max_height)
-            .margin(resolved_style_for_layout.margin);
-        if resolved_style_for_layout.padding != Insets::ZERO {
-            card = card.padding(resolved_style_for_layout.padding);
-        }
 
         // title 段（如果给了 title）
         if let Some(title_value) = title_value_for_render {
-            let title_padding = resolved_style_for_layout.title_padding;
-            let title_text_style = resolved_style_for_layout.title_text_style.clone();
+            let title_metrics = runtime_metrics.clone();
+            let title_text_metrics = runtime_metrics.clone();
             let title_element: Element<VM> = Flex::<VM>::new(Axis::Horizontal)
-                .padding(title_padding)
+                .runtime_layout(move |_, container, _, _, _| {
+                    container.padding = Some(Value::Static(title_metrics.read().title_padding));
+                })
                 .child(Text::new(title_value).style_full(move |context| {
                     let mut s = TextWidgetStyle::default_for_theme(context.theme);
-                    s.typography = title_text_style.clone();
+                    s.typography = title_text_metrics.read().title_text_style.clone();
                     s
                 }))
                 .into();
@@ -290,9 +347,11 @@ impl<VM: 'static> From<Modal<VM>> for Element<VM> {
 
         // content 段（如果给了 content）
         if let Some(content_element) = content {
-            let content_padding = resolved_style_for_layout.content_padding;
+            let content_metrics = runtime_metrics.clone();
             let wrapped: Element<VM> = Stack::<VM>::new()
-                .padding(content_padding)
+                .runtime_layout(move |_, container, _, _, _| {
+                    container.padding = Some(Value::Static(content_metrics.read().content_padding));
+                })
                 .child(content_element)
                 .into();
             card = card.child(wrapped);
@@ -300,11 +359,13 @@ impl<VM: 'static> From<Modal<VM>> for Element<VM> {
 
         // actions 段（如果有 action）
         if !actions.is_empty() {
-            let actions_gap = resolved_style_for_layout.actions_gap;
-            let actions_padding = resolved_style_for_layout.actions_padding;
+            let actions_metrics = runtime_metrics.clone();
             let mut actions_row = Flex::<VM>::new(Axis::Horizontal)
-                .padding(actions_padding)
-                .gap(actions_gap)
+                .runtime_layout(move |_, container, _, _, _| {
+                    let metrics = actions_metrics.read();
+                    container.padding = Some(Value::Static(metrics.actions_padding));
+                    container.gap = Value::Static(Length::Px(metrics.actions_gap));
+                })
                 .justify(crate::ui::layout::Justify::End);
             let total = actions.len();
             for (idx, action) in actions.into_iter().enumerate() {
@@ -361,8 +422,20 @@ impl<VM: 'static> From<Modal<VM>> for Element<VM> {
         // 这样省去一层 Centered Stack，降低 collect 递归深度（生产环境堆栈更
         // 安全，测试也不需要更大的 stack size）。
         // -----------------------------------------------------------------
+        let outer_style = style.clone();
+        let outer_runtime_metrics = runtime_metrics;
         let outer: Stack<VM> = Stack::<VM>::new()
             .size(pct(100.0), pct(100.0))
+            .runtime_layout(move |_, _, context, style_sheet, visual| {
+                let resolved = resolve_modal_style_with_sheet(
+                    outer_style.as_ref(),
+                    context,
+                    style_sheet,
+                    visual,
+                    WidgetState::default(),
+                );
+                *outer_runtime_metrics.write() = ModalRuntimeMetrics::from(&resolved);
+            })
             .align(Align::Center)
             .justify(crate::ui::layout::Justify::Center)
             .focus_scope(
@@ -402,21 +475,6 @@ impl<VM> Modal<VM> {
     }
 }
 
-fn resolve_modal_style(
-    style: Option<&StyleResolver<ModalStyle>>,
-    context: &StyleContext<'_>,
-) -> ModalStyle {
-    let style_sheet = StyleSheet::default();
-    let visual = VisualStyle::default();
-    resolve_modal_style_with_sheet(
-        style,
-        context,
-        &style_sheet,
-        &visual,
-        WidgetState::default(),
-    )
-}
-
 fn resolve_modal_style_with_sheet(
     style: Option<&StyleResolver<ModalStyle>>,
     context: &StyleContext<'_>,
@@ -431,10 +489,4 @@ fn resolve_modal_style_with_sheet(
     style
         .map(|resolver| resolver.resolve_from(base.clone(), context))
         .unwrap_or(base)
-}
-
-fn resolve_modal_style_for_layout(style: Option<&StyleResolver<ModalStyle>>) -> ModalStyle {
-    let theme = crate::ui::theme::Theme::default();
-    let context = StyleContext::from_theme(&theme);
-    resolve_modal_style(style, &context)
 }

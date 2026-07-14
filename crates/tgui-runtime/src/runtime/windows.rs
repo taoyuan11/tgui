@@ -369,6 +369,7 @@ impl<VM: ViewModel> ApplicationHandler for MultiWindowHandler<VM> {
     }
 
     fn user_event(&mut self, _event_loop: &winit::event_loop::ActiveEventLoop, _event: ()) {
+        self.invalidation.acknowledge_wake();
         self.drain_dialog_completions();
         self.drain_notification_completions();
         self.drain_task_completions();

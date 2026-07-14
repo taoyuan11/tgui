@@ -32,58 +32,50 @@ pub(crate) struct NavigationItem {
     pub title: &'static str,
     pub description: &'static str,
     pub badge: &'static str,
-    pub accent: u32,
 }
 
 pub(crate) const NAV_ITEMS: [NavigationItem; 7] = [
+    NavigationItem {
+        page: DemoPage::Forms,
+        title: "Forms",
+        description: "Inputs and validation",
+        badge: "F",
+    },
     NavigationItem {
         page: DemoPage::Basics,
         title: "Basics",
         description: "Text, Button, Divider",
         badge: "B",
-        accent: 0x2563EBFF,
     },
     NavigationItem {
         page: DemoPage::Icons,
         title: "Icons",
         description: "Common built-in icons",
         badge: "I",
-        accent: 0x0EA5E9FF,
-    },
-    NavigationItem {
-        page: DemoPage::Forms,
-        title: "Forms",
-        description: "Inputs and validation",
-        badge: "F",
-        accent: 0x14B8A6FF,
     },
     NavigationItem {
         page: DemoPage::Feedback,
         title: "Feedback",
         description: "Toast and notification",
         badge: "!",
-        accent: 0xF59E0BFF,
     },
     NavigationItem {
         page: DemoPage::Overlays,
         title: "Overlays",
         description: "Floating UI layers",
         badge: "O",
-        accent: 0x8B5CF6FF,
     },
     NavigationItem {
         page: DemoPage::Data,
         title: "Data",
         description: "Lists, tabs, tables",
         badge: "D",
-        accent: 0x22C55EFF,
     },
     NavigationItem {
         page: DemoPage::MediaCanvas,
         title: "Media & Canvas",
         description: "Canvas and playback",
         badge: "M",
-        accent: 0xEF4444FF,
     },
 ];
 
@@ -92,21 +84,22 @@ pub(crate) fn sidebar(app: &App) -> Element<App> {
 
     items.push(
         Flex::vertical()
-            .gap(dp(4.0))
-            .child(Text::new("TGUI Demo").style_full(styles::section_title_style))
-            .child(Text::new("组件文档式示例").style_full(styles::status_style))
+            .gap(dp(2.0))
+            .child(Text::new("tgui").style_full(styles::section_title_style))
+            .child(Text::new("Component gallery").style_full(styles::status_style))
             .into(),
     );
+    items.push(Divider::new().into());
 
     for item in NAV_ITEMS {
         items.push(nav_item(app, item));
     }
 
     Flex::vertical()
-        .width(dp(260.0))
+        .width(dp(248.0))
         .height(pct(100.0))
-        .gap(dp(12.0))
-        .padding(Insets::all(dp(16.0)))
+        .gap(dp(6.0))
+        .padding(Insets::all(dp(20.0)))
         .style_full(styles::sidebar_style)
         .child(items)
         .into()
@@ -118,7 +111,6 @@ fn nav_item(app: &App, item: NavigationItem) -> Element<App> {
         .current_page
         .signal()
         .map(move |current| current == page);
-    let accent = item.accent;
     let active_for_item = active.clone();
     let active_for_badge = active.clone();
     let active_for_badge_text = active.clone();
@@ -127,9 +119,9 @@ fn nav_item(app: &App, item: NavigationItem) -> Element<App> {
 
     Stack::new()
         .width(pct(100.0))
-        .padding(Insets::symmetric(dp(12.0), dp(10.0)))
+        .padding(Insets::symmetric(dp(12.0), dp(9.0)))
         .cursor(CursorStyle::Pointer)
-        .style_full(move |ctx| styles::nav_item_style(ctx, active_for_item.get(), accent))
+        .style_full(move |ctx| styles::nav_item_style(ctx, active_for_item.get()))
         .on_click(Command::new_with_context(move |app: &mut App, ctx| {
             app.show_page_with_rebuild(page, ctx);
         }))
@@ -139,11 +131,9 @@ fn nav_item(app: &App, item: NavigationItem) -> Element<App> {
                 .align(Align::Center)
                 .child(
                     Stack::new()
-                        .size(dp(34.0), dp(34.0))
+                        .size(dp(32.0), dp(32.0))
                         .center()
-                        .style_full(move |ctx| {
-                            styles::nav_badge_style(ctx, active_for_badge.get(), accent)
-                        })
+                        .style_full(move |ctx| styles::nav_badge_style(ctx, active_for_badge.get()))
                         .child(Text::new(item.badge).style_full(move |ctx| {
                             styles::nav_badge_text_style(ctx, active_for_badge_text.get())
                         })),

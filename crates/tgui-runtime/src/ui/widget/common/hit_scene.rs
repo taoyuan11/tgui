@@ -185,6 +185,61 @@ pub(crate) enum MeasureContext {
 pub(crate) struct LayoutNode {
     pub node: TaffyNodeId,
     pub children: Vec<LayoutNode>,
+    /// Immediate-child content bounds in coordinates local to this node.
+    ///
+    /// Scene-only recollection keeps the Taffy layout stable, so scroll containers with
+    /// static child offsets can reuse this value instead of walking every child each frame.
+    /// `None` inside the lock represents a container without children; an uninitialized lock
+    /// means either the bounds have not been computed yet or a dynamic child offset prevents
+    /// caching.
+    pub(crate) cached_child_content_bounds: std::sync::OnceLock<Option<Rect>>,
+    /// Monotonic immediate-child intervals used to binary-search the visible slice during
+    /// scene recollection. `Some(None)` records that this layout cannot use the fast path.
+    pub(crate) cached_child_cull_index: std::sync::OnceLock<Option<ChildCullIndex>>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ChildCullAxis {
+    Horizontal,
+    Vertical,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct ChildCullIndex {
+    pub(crate) axis: ChildCullAxis,
+    pub(crate) intervals: Vec<ChildCullInterval>,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct ChildCullInterval {
+    pub(crate) start: Dp,
+    pub(crate) end: Dp,
+}
+
+impl LayoutNode {
+    #[cfg(feature = "bench-support")]
+    pub(crate) fn clear_cached_child_content_bounds(&mut self) {
+        self.cached_child_content_bounds = std::sync::OnceLock::new();
+        for child in &mut self.children {
+            child.clear_cached_child_content_bounds();
+        }
+    }
+
+    pub(crate) fn clear_cached_layout_metadata(&mut self) {
+        self.cached_child_content_bounds = std::sync::OnceLock::new();
+        self.cached_child_cull_index = std::sync::OnceLock::new();
+        for child in &mut self.children {
+            child.clear_cached_layout_metadata();
+        }
+    }
+
+    #[cfg(feature = "bench-support")]
+    pub(crate) fn disable_cached_child_culling(&mut self) {
+        self.cached_child_cull_index = std::sync::OnceLock::from(None);
+        for child in &mut self.children {
+            child.disable_cached_child_culling();
+        }
+    }
 }
 
 pub(crate) enum HitInteraction<VM> {

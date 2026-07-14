@@ -6,7 +6,7 @@ use crate::foundation::view_model::{Command, ValueCommand};
 use crate::media::ContentFit;
 use crate::theme::{StyleContext, WidgetState};
 use crate::ui::layout::{pct, Align, Insets, LayoutStyle, Overflow, Value};
-use crate::ui::theme::{StateValue, Theme};
+use crate::ui::theme::StateValue;
 use crate::ui::unit::dp;
 use crate::video::{VideoController, VideoPlaybackState};
 
@@ -499,33 +499,52 @@ impl<VM> Video<VM> {
 
 impl<VM: 'static> From<Video<VM>> for Element<VM> {
     fn from(video: Video<VM>) -> Self {
-        let layout_style = resolve_video_style_for_layout(video.style.as_ref());
         let controller = video.controller.clone();
         let show_controls = video.show_controls.resolve();
         let show_status = video.show_status.resolve();
         let show_volume = video.show_volume.resolve();
         let fit = video.fit;
 
+        let surface_style = video.style.clone();
         let mut surface: Element<VM> = VideoSurface::new(controller.clone())
             .size(pct(100.0), pct(100.0))
             .position_absolute()
             .inset(dp(0.0))
-            .style(move |style, _| {
+            .style(move |style, context| {
                 style.fit = fit;
                 style.surface.background = Some(Color::hexa(0x000000FF).into());
-                style.surface.border_radius = Some(Value::Static(layout_style.radius));
+                let resolved = resolve_video_style(surface_style.as_ref(), context);
+                style.surface.border_radius = Some(Value::Static(resolved.radius));
             })
             .into();
         surface.media_events = video.media_events.clone();
 
         let root_style = video.style.clone();
+        let root_layout_style = video.style.clone();
         let mut root = Stack::new()
-            .size(
-                layout_style.default_surface_width,
-                layout_style.default_surface_height,
-            )
             .aspect_ratio(16.0 / 9.0)
-            .padding(layout_style.padding)
+            .runtime_layout(move |layout, _container, context, style_sheet, visual| {
+                let resolved = resolve_video_style_with_sheet(
+                    root_layout_style.as_ref(),
+                    context,
+                    style_sheet,
+                    visual,
+                    WidgetState::default(),
+                );
+                if layout.width.is_none() {
+                    layout.width = Some(Value::Static(crate::ui::layout::Length::Px(
+                        resolved.default_surface_width,
+                    )));
+                }
+                if layout.height.is_none() {
+                    layout.height = Some(Value::Static(crate::ui::layout::Length::Px(
+                        resolved.default_surface_height,
+                    )));
+                }
+                if layout.padding.is_none() {
+                    layout.padding = Some(Value::Static(resolved.padding));
+                }
+            })
             .overflow(Overflow::Hidden)
             .style_full_with_style_sheet(move |context, style_sheet, visual, state| {
                 let resolved = resolve_video_style_with_sheet(
@@ -579,7 +598,6 @@ fn video_controls<VM: 'static>(
     style: Option<StyleResolver<VideoStyle>>,
     visual: VisualStyle,
 ) -> Element<VM> {
-    let layout_style = resolve_video_style_for_layout(style.as_ref());
     let progress = progress_signal(&controller);
     let buffered = buffered_signal(&controller);
     let seek_disabled = controller
@@ -626,7 +644,23 @@ fn video_controls<VM: 'static>(
     let seek = Slider::new(progress, 0.0, 1.0)
         .step(0.001)
         .width(pct(100.0))
-        .height(layout_style.progress_hit_height)
+        .runtime_layout({
+            let style = style.clone();
+            move |layout, context, style_sheet, visual| {
+                let resolved = resolve_video_style_with_sheet(
+                    style.as_ref(),
+                    context,
+                    style_sheet,
+                    visual,
+                    WidgetState::default(),
+                );
+                if layout.height.is_none() {
+                    layout.height = Some(Value::Static(crate::ui::layout::Length::Px(
+                        resolved.progress_hit_height,
+                    )));
+                }
+            }
+        })
         .disable(seek_disabled)
         .style_full_with_style_sheet(video_slider_style(style.clone(), visual.clone()))
         .on_change(ValueCommand::new(move |_, fraction| {
@@ -636,23 +670,45 @@ fn video_controls<VM: 'static>(
             seek_to_fraction(&seek_end_controller, fraction);
         }));
 
+    let progress_layout_style = style.clone();
     let progress_track = Stack::new()
         .width(pct(100.0))
-        .height(layout_style.progress_hit_height)
+        .runtime_layout(move |layout, _container, context, style_sheet, visual| {
+            let resolved = resolve_video_style_with_sheet(
+                progress_layout_style.as_ref(),
+                context,
+                style_sheet,
+                visual,
+                WidgetState::default(),
+            );
+            layout.height = Some(Value::Static(crate::ui::layout::Length::Px(
+                resolved.progress_hit_height,
+            )));
+        })
         .center()
         .child(
             ProgressBar::new(buffered)
                 .show_label(false)
                 .width(pct(100.0))
-                .height(layout_style.progress_height)
                 .style_full_with_style_sheet(video_progress_style(style.clone(), visual.clone())),
         )
         .child(seek);
 
+    let controls_style = style.clone();
     let mut controls = Flex::horizontal()
         .width(pct(100.0))
         .align(Align::Center)
-        .gap(layout_style.controls_gap)
+        .gap(crate::ui::unit::dp(0.0))
+        .runtime_layout(move |_layout, container, context, style_sheet, visual| {
+            let resolved = resolve_video_style_with_sheet(
+                controls_style.as_ref(),
+                context,
+                style_sheet,
+                visual,
+                WidgetState::default(),
+            );
+            container.gap = Value::Static(crate::ui::layout::Length::Px(resolved.controls_gap));
+        })
         .child(play_button)
         .child(time_text(controller.clone(), style.clone(), visual.clone()))
         .child(Stack::<VM>::new().grow(1.0));
@@ -712,10 +768,28 @@ fn video_controls<VM: 'static>(
         );
 
         let volume_controller = controller.clone();
+        let volume_layout_style = style.clone();
         let volume = Slider::new(controller.volume(), 0.0, 1.0)
             .step(0.01)
-            .width(layout_style.volume_width)
-            .height(layout_style.control_button_size)
+            .runtime_layout(move |layout, context, style_sheet, visual| {
+                let resolved = resolve_video_style_with_sheet(
+                    volume_layout_style.as_ref(),
+                    context,
+                    style_sheet,
+                    visual,
+                    WidgetState::default(),
+                );
+                if layout.width.is_none() {
+                    layout.width = Some(Value::Static(crate::ui::layout::Length::Px(
+                        resolved.volume_width,
+                    )));
+                }
+                if layout.height.is_none() {
+                    layout.height = Some(Value::Static(crate::ui::layout::Length::Px(
+                        resolved.control_button_size,
+                    )));
+                }
+            })
             .style_full_with_style_sheet(video_slider_style(style.clone(), visual.clone()))
             .on_change(ValueCommand::new(move |_, volume| {
                 volume_controller.set_volume(volume);
@@ -724,14 +798,26 @@ fn video_controls<VM: 'static>(
         controls = controls.child(mute).child(volume);
     }
 
+    let overlay_style = style.clone();
     Flex::vertical()
         .width(pct(100.0))
         .position_absolute()
         .left(dp(0.0))
         .right(dp(0.0))
         .bottom(dp(0.0))
-        .padding(layout_style.overlay_padding)
-        .gap(layout_style.overlay_gap)
+        .padding(crate::ui::layout::Insets::ZERO)
+        .gap(crate::ui::unit::dp(0.0))
+        .runtime_layout(move |layout, container, context, style_sheet, visual| {
+            let resolved = resolve_video_style_with_sheet(
+                overlay_style.as_ref(),
+                context,
+                style_sheet,
+                visual,
+                WidgetState::default(),
+            );
+            layout.padding = Some(Value::Static(resolved.overlay_padding));
+            container.gap = Value::Static(crate::ui::layout::Length::Px(resolved.overlay_gap));
+        })
         .style_full_with_style_sheet(video_overlay_style(style.clone()))
         .child(progress_track)
         .child(controls)
@@ -764,13 +850,23 @@ fn status_overlay<VM: 'static>(
     style: Option<StyleResolver<VideoStyle>>,
     visual_identity: VisualStyle,
 ) -> Element<VM> {
-    let layout_style = resolve_video_style_for_layout(style.as_ref());
     let text = status_text(controller, style.clone(), visual_identity);
+    let runtime_style = style.clone();
     Stack::new()
         .position_absolute()
         .left(dp(12.0))
         .top(dp(12.0))
-        .padding(layout_style.status_padding)
+        .padding(crate::ui::layout::Insets::ZERO)
+        .runtime_layout(move |layout, _container, context, style_sheet, visual| {
+            let resolved = resolve_video_style_with_sheet(
+                runtime_style.as_ref(),
+                context,
+                style_sheet,
+                visual,
+                WidgetState::default(),
+            );
+            layout.padding = Some(Value::Static(resolved.status_padding));
+        })
         .style_full_with_style_sheet(video_status_style(style))
         .child(text)
         .into()
@@ -823,18 +919,28 @@ fn icon_button<VM: 'static>(
     style: Option<StyleResolver<VideoStyle>>,
     command: Command<VM>,
 ) -> Element<VM> {
-    let layout_style = resolve_video_style_for_layout(style.as_ref());
+    let runtime_style = style.clone();
+    let runtime_disabled = disabled.clone();
     Stack::new()
-        .size(
-            layout_style.control_button_size,
-            layout_style.control_button_size,
-        )
+        .runtime_layout(move |layout, _container, context, style_sheet, visual| {
+            let resolved = resolve_video_style_with_sheet(
+                runtime_style.as_ref(),
+                context,
+                style_sheet,
+                visual,
+                WidgetState::default(),
+            );
+            layout.width = Some(Value::Static(crate::ui::layout::Length::Px(
+                resolved.control_button_size,
+            )));
+            layout.height = Some(Value::Static(crate::ui::layout::Length::Px(
+                resolved.control_button_size,
+            )));
+            visual.opacity =
+                disabled_opacity(runtime_disabled.clone(), resolved.control_disabled_opacity);
+        })
         .center()
         .style_full_with_style_sheet(video_icon_button_style(style))
-        .opacity(disabled_opacity(
-            disabled.clone(),
-            layout_style.control_disabled_opacity,
-        ))
         .cursor(disabled_cursor(disabled.clone()))
         .child(icons)
         .on_click(guard_disabled_command(disabled, command))
@@ -859,10 +965,8 @@ fn video_icon<VM: 'static>(
     visual_identity: VisualStyle,
     disabled: bool,
 ) -> Element<VM> {
-    let layout_style = resolve_video_style_for_layout(style.as_ref());
     with_visual_identity(
         Icon::internal(icon)
-            .size(layout_style.control_icon_size)
             .style_full_with_style_sheet(move |context, style_sheet, visual, state| {
                 let resolved = resolve_video_style_with_sheet(
                     style.as_ref(),
@@ -1164,12 +1268,6 @@ fn resolve_video_style_with_sheet(
         |sheet, base, context, visual| sheet.apply_video(base, context, visual),
         |sheet, base, context, visual, state| sheet.apply_video_state(base, context, visual, state),
     )
-}
-
-fn resolve_video_style_for_layout(style: Option<&StyleResolver<VideoStyle>>) -> VideoStyle {
-    let theme = Theme::default();
-    let context = StyleContext::from_theme(&theme);
-    resolve_video_style(style, &context)
 }
 
 impl<VM> From<VideoSurface> for Element<VM> {

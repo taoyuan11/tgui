@@ -85,6 +85,13 @@ impl ImageEntry {
         }
     }
 
+    pub(in crate::media) fn intrinsic_size(&self) -> IntrinsicSize {
+        self.document
+            .as_ref()
+            .map(|document| document.intrinsic_size)
+            .unwrap_or(IntrinsicSize::ZERO)
+    }
+
     pub(in crate::media) fn has_pending_work(&self) -> bool {
         self.loading
             || self
@@ -190,7 +197,12 @@ pub(in crate::media) enum DocumentContent {
 pub(in crate::media) struct SvgDocument {
     tree: Arc<usvg::Tree>,
     raster_cache: Vec<SvgRasterEntry>,
+    last_exact_request: Option<(RasterRequest, usize)>,
     next_access_tick: u64,
+    #[cfg(test)]
+    exact_lookup_visits: usize,
+    #[cfg(test)]
+    exact_hot_hits: usize,
 }
 
 impl SvgDocument {
@@ -198,7 +210,12 @@ impl SvgDocument {
         Self {
             tree: Arc::new(tree),
             raster_cache: Vec::new(),
+            last_exact_request: None,
             next_access_tick: 1,
+            #[cfg(test)]
+            exact_lookup_visits: 0,
+            #[cfg(test)]
+            exact_hot_hits: 0,
         }
     }
 
@@ -209,11 +226,8 @@ impl SvgDocument {
     ) -> Result<Option<Arc<TextureFrame>>, TguiError> {
         let max_entries = budget.svg_raster_cache_entries;
         let tick = self.bump_access_tick();
-        if let Some(entry) = self
-            .raster_cache
-            .iter_mut()
-            .find(|entry| entry.request == raster_request)
-        {
+        if let Some(index) = self.exact_raster_index(raster_request) {
+            let entry = &mut self.raster_cache[index];
             entry.last_used = tick;
             return Ok(Some(entry.texture.clone()));
         }
@@ -227,8 +241,40 @@ impl SvgDocument {
             texture: texture.clone(),
             last_used: tick,
         });
+        self.last_exact_request = Some((raster_request, self.raster_cache.len() - 1));
         self.evict_if_needed(max_entries);
         Ok(Some(texture))
+    }
+
+    fn exact_raster_index(&mut self, request: RasterRequest) -> Option<usize> {
+        if let Some((cached_request, index)) = self.last_exact_request {
+            if cached_request == request
+                && self
+                    .raster_cache
+                    .get(index)
+                    .is_some_and(|entry| entry.request == request)
+            {
+                #[cfg(test)]
+                {
+                    self.exact_hot_hits += 1;
+                }
+                return Some(index);
+            }
+        }
+
+        let mut found = None;
+        for (index, entry) in self.raster_cache.iter().enumerate() {
+            #[cfg(test)]
+            {
+                self.exact_lookup_visits += 1;
+            }
+            if entry.request == request {
+                found = Some(index);
+                break;
+            }
+        }
+        self.last_exact_request = found.map(|index| (request, index));
+        found
     }
 
     fn bump_access_tick(&mut self) -> u64 {
@@ -246,10 +292,22 @@ impl SvgDocument {
                 .min_by_key(|(_, entry)| entry.last_used)
             {
                 self.raster_cache.remove(oldest_index);
+                self.last_exact_request = None;
             } else {
                 break;
             }
         }
+    }
+
+    #[cfg(test)]
+    pub(in crate::media) fn reset_exact_lookup_stats(&mut self) {
+        self.exact_lookup_visits = 0;
+        self.exact_hot_hits = 0;
+    }
+
+    #[cfg(test)]
+    pub(in crate::media) fn exact_lookup_stats(&self) -> (usize, usize) {
+        (self.exact_lookup_visits, self.exact_hot_hits)
     }
 }
 

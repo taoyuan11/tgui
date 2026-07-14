@@ -11,6 +11,7 @@ use super::controller::{sample_timeline, FRAME_INTERVAL};
 use super::spec::{AnimationCurve, Keyframe, Keyframes, Transition};
 
 const THEME_DURATION_MS: u64 = 240;
+const INACTIVE_SLOT_INDEX: usize = usize::MAX;
 
 /// 槽位回收软上限:槽位总数超过此值才会尝试回收陈旧的已稳定槽位。常规应用
 /// 远低于此值,因此不触发任何回收、零行为变化。
@@ -100,6 +101,21 @@ impl WidgetProperty {
 
     pub(crate) const fn affects_scene(self) -> bool {
         !self.affects_layout()
+    }
+
+    /// Whether an in-place scene animation can change geometry exposed through AccessKit.
+    ///
+    /// Layout properties already force a layout/scene rebuild (and therefore a new retained-scene
+    /// serial). Most scene properties are paint-only and must not make accessibility rebuild the
+    /// complete tree every animation frame. Offset/scale are the exceptions: they can move the
+    /// hit-region bounds used by the accessibility tree while the retained scene serial stays
+    /// stable. The currently dormant collapse/carousel channels remain conservative because their
+    /// eventual implementations may move or window child content.
+    pub(crate) const fn affects_accessibility_geometry(self) -> bool {
+        matches!(
+            self,
+            Self::Offset | Self::Scale | Self::CollapseProgress | Self::CarouselSlideProgress
+        )
     }
 }
 
@@ -289,6 +305,10 @@ struct SlotState<T> {
     /// 总数超过软上限时回收长期未触达的「已稳定」槽位(对应已销毁的 widget),
     /// 避免长会话中动态创建/销毁的 widget 让槽位表无界增长。
     last_touch: Instant,
+    /// Index in `AnimationStore::active_keys`, or `INACTIVE_SLOT_INDEX` while settled. Keeping the
+    /// index beside the slot makes activation/deactivation O(1), including a reduced-motion switch
+    /// that immediately settles a large batch of running transitions.
+    active_index: usize,
 }
 
 impl<T: Animatable> SlotState<T> {
@@ -298,12 +318,13 @@ impl<T: Animatable> SlotState<T> {
             target: value,
             animation: None,
             last_touch: now,
+            active_index: INACTIVE_SLOT_INDEX,
         }
     }
 
-    fn sample(&mut self, now: Instant) -> T {
+    fn advance(&mut self, now: Instant) {
         let Some(animation) = self.animation.as_ref() else {
-            return self.displayed.clone();
+            return;
         };
 
         let Some(sample) = sample_timeline(
@@ -312,7 +333,7 @@ impl<T: Animatable> SlotState<T> {
             now.saturating_duration_since(animation.started_at),
         ) else {
             self.displayed = animation.from.clone();
-            return self.displayed.clone();
+            return;
         };
 
         let progress = if animation.transition.duration().is_zero() {
@@ -336,25 +357,82 @@ impl<T: Animatable> SlotState<T> {
             self.target = self.displayed.clone();
             self.animation = None;
         }
+    }
+
+    fn sample(&mut self, now: Instant) -> T {
+        self.advance(now);
         self.displayed.clone()
     }
 }
 
 struct AnimationStore<T> {
     slots: HashMap<AnimationKey, SlotState<T>>,
-    active_count: usize,
+    /// Dense list of running slots. A stable scene can retain thousands of settled slots, while
+    /// only a handful animate; refreshing this list avoids walking every retained HashMap bucket.
+    // Boxed lazily so adding the dense index does not grow the inline `AnimationStore` (and, in
+    // turn, every runtime handler) compared with the former `active_count: usize` field.
+    active_keys: Option<Box<Vec<AnimationKey>>>,
 }
 
 impl<T> Default for AnimationStore<T> {
     fn default() -> Self {
         Self {
             slots: HashMap::new(),
-            active_count: 0,
+            active_keys: None,
         }
     }
 }
 
 impl<T: Animatable> AnimationStore<T> {
+    fn activate(&mut self, key: AnimationKey) {
+        let active_index = self
+            .active_keys
+            .as_ref()
+            .map_or(0, |active_keys| active_keys.len());
+        let state = self
+            .slots
+            .get_mut(&key)
+            .expect("animation slot must exist before activation");
+        debug_assert!(state.animation.is_some());
+        debug_assert_eq!(state.active_index, INACTIVE_SLOT_INDEX);
+        state.active_index = active_index;
+        self.active_keys
+            .get_or_insert_with(|| Box::new(Vec::new()))
+            .push(key);
+    }
+
+    fn deactivate_at(&mut self, index: usize) {
+        let (removed_key, moved_key) = {
+            let active_keys = self
+                .active_keys
+                .as_mut()
+                .expect("active animation index must be allocated");
+            let removed_key = active_keys.swap_remove(index);
+            (removed_key, active_keys.get(index).copied())
+        };
+        self.slots
+            .get_mut(&removed_key)
+            .expect("active animation slot must exist")
+            .active_index = INACTIVE_SLOT_INDEX;
+
+        if let Some(moved_key) = moved_key {
+            self.slots
+                .get_mut(&moved_key)
+                .expect("moved active animation slot must exist")
+                .active_index = index;
+        }
+    }
+
+    fn deactivate(&mut self, key: AnimationKey) {
+        let index = self
+            .slots
+            .get(&key)
+            .expect("animation slot must exist before deactivation")
+            .active_index;
+        debug_assert_ne!(index, INACTIVE_SLOT_INDEX);
+        self.deactivate_at(index);
+    }
+
     fn contains(&self, key: AnimationKey) -> bool {
         self.slots.contains_key(&key)
     }
@@ -376,7 +454,7 @@ impl<T: Animatable> AnimationStore<T> {
                     state.target = target.clone();
                 }
                 if was_active {
-                    self.active_count = self.active_count.saturating_sub(1);
+                    self.deactivate(key);
                 }
             } else {
                 self.slots
@@ -418,54 +496,74 @@ impl<T: Animatable> AnimationStore<T> {
             (value, was_active, is_active)
         };
         match (was_active, is_active) {
-            (false, true) => self.active_count += 1,
-            (true, false) => self.active_count = self.active_count.saturating_sub(1),
+            (false, true) => self.activate(key),
+            (true, false) => self.deactivate(key),
             _ => {}
         }
 
         value
     }
 
-    fn refresh(&mut self, now: Instant) -> AnimationRefresh {
-        if self.active_count == 0 {
+    fn refresh(&mut self, now: Instant, refresh: &mut AnimationRefresh) {
+        if !self.has_active() {
             self.gc_stale_settled_slots_if_needed(now);
-            return AnimationRefresh::default();
+            return;
         }
 
-        let mut refresh = AnimationRefresh::default();
-        let mut completed_count = 0;
-        for (key, state) in self.slots.iter_mut() {
-            // 「已稳定」(无活动动画)的槽位采样必然返回 `displayed` 不变,不可能产生变化 ——
-            // 直接跳过,使每帧 refresh 的成本正比于「活动动画数」而非「槽位总数」,
-            // 同时省掉每个已稳定槽位每帧两次 `displayed.clone()`。
-            if state.animation.is_none() {
-                continue;
+        let mut active_index = 0;
+        while self
+            .active_keys
+            .as_ref()
+            .is_some_and(|active_keys| active_index < active_keys.len())
+        {
+            let key = self
+                .active_keys
+                .as_ref()
+                .expect("active animation index must be allocated")[active_index];
+            #[cfg(test)]
+            {
+                refresh.visited_slots += 1;
             }
-            let before = state.displayed.clone();
-            if state.sample(now) != before {
+            let (changed, completed) = {
+                let state = self
+                    .slots
+                    .get_mut(&key)
+                    .expect("active animation key must reference a retained slot");
+                debug_assert_eq!(state.active_index, active_index);
+                debug_assert!(state.animation.is_some());
+                let before = state.displayed.clone();
+                state.advance(now);
+                (state.displayed != before, state.animation.is_none())
+            };
+
+            if changed {
                 refresh.changed = true;
                 if key.affects_layout() {
                     refresh.layout_changed = true;
                     if let AnimationKey::Widget { id, .. } = key {
-                        refresh.push_layout_widget(*id);
+                        refresh.push_layout_widget(id);
                     }
                 } else if let AnimationKey::Widget { id, property } = key {
                     if property.affects_scene() {
-                        refresh.push_scene_widget(*id);
+                        refresh.push_scene_widget(id);
+                    }
+                    if property.affects_accessibility_geometry() {
+                        refresh.accessibility_geometry_changed = true;
                     }
                 }
             }
-            if state.animation.is_none() {
-                completed_count += 1;
+
+            if completed {
+                // `swap_remove` moves another active key into this index, so process the same index
+                // again instead of incrementing it.
+                self.deactivate_at(active_index);
+            } else {
+                active_index += 1;
             }
-        }
-        if completed_count > 0 {
-            self.active_count = self.active_count.saturating_sub(completed_count);
         }
         if self.slots.len() > SLOT_GC_SOFT_CAP {
             self.gc_stale_settled_slots(now);
         }
-        refresh
     }
 
     /// 当槽位总数超过软上限时,回收长期未被 `resolve` 触达的已稳定槽位 ——
@@ -487,7 +585,9 @@ impl<T: Animatable> AnimationStore<T> {
     }
 
     fn has_active(&self) -> bool {
-        self.active_count > 0
+        self.active_keys
+            .as_ref()
+            .is_some_and(|active_keys| !active_keys.is_empty())
     }
 
     fn settled_at(&self, key: AnimationKey, target: &T) -> bool {
@@ -504,8 +604,11 @@ impl<T: Animatable> AnimationStore<T> {
 pub(crate) struct AnimationRefresh {
     pub(crate) changed: bool,
     pub(crate) layout_changed: bool,
+    pub(crate) accessibility_geometry_changed: bool,
     pub(crate) layout_widget_ids: SmallVec<[u64; 16]>,
     pub(crate) scene_widget_ids: SmallVec<[u64; 16]>,
+    #[cfg(test)]
+    pub(crate) visited_slots: usize,
 }
 
 impl AnimationRefresh {
@@ -604,26 +707,13 @@ impl AnimationEngine {
             return AnimationRefresh::default();
         }
 
-        let stores = [
-            self.colors.refresh(now),
-            self.floats.refresh(now),
-            self.dps.refresh(now),
-            self.points.refresh(now),
-            self.insets.refresh(now),
-        ];
-        stores
-            .into_iter()
-            .fold(AnimationRefresh::default(), |mut acc, next| {
-                acc.changed |= next.changed;
-                acc.layout_changed |= next.layout_changed;
-                for widget_id in next.layout_widget_ids {
-                    acc.push_layout_widget(widget_id);
-                }
-                for widget_id in next.scene_widget_ids {
-                    acc.push_scene_widget(widget_id);
-                }
-                acc
-            })
+        let mut refresh = AnimationRefresh::default();
+        self.colors.refresh(now, &mut refresh);
+        self.floats.refresh(now, &mut refresh);
+        self.dps.refresh(now, &mut refresh);
+        self.points.refresh(now, &mut refresh);
+        self.insets.refresh(now, &mut refresh);
+        refresh
     }
 
     pub(crate) fn has_active_animations(&self) -> bool {

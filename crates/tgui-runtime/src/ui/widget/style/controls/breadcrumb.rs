@@ -11,11 +11,20 @@ pub struct BreadcrumbStyle {
 
 impl BreadcrumbStyle {
     pub fn default_for_theme(theme: &Theme) -> Self {
+        Self::default_for_density(theme, theme.density)
+    }
+
+    pub fn default_for_density(theme: &Theme, density: Density) -> Self {
+        let gap = match density {
+            Density::Compact => theme.spacing.xs,
+            Density::Comfortable => theme.spacing.sm - theme.spacing.xxs,
+            Density::Spacious => theme.spacing.sm,
+        };
         Self {
-            foreground: Value::Static(theme.colors.primary),
+            foreground: Value::Static(theme.colors.on_surface_muted),
             current_foreground: Value::Static(theme.colors.on_surface),
-            separator: Value::Static(theme.colors.on_surface_muted),
-            gap: theme.spacing.xs,
+            separator: Value::Static(theme.colors.outline),
+            gap,
             text_style: theme.typography.label.clone(),
         }
     }

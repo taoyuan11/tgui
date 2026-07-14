@@ -1,7 +1,8 @@
+use crate::foundation::color::Color;
 use crate::foundation::view_model::{Command, ValueCommand};
 use crate::theme::{StyleContext, WidgetState};
-use crate::ui::layout::{Align, LayoutStyle, Value};
-use crate::ui::theme::Theme;
+use crate::ui::layout::{Align, LayoutStyle, Length, Value};
+use crate::ui::theme::{Density, StateValue};
 
 use super::common::VisualStyle;
 use super::core::Element;
@@ -9,7 +10,7 @@ use super::p3_support::{
     impl_p3_layout_api, merge_layout, resolve_component_style_with_sheet, with_visual_identity,
 };
 use super::style::{ButtonStyle, PaginationStyle, StyleResolver, StyleSheet};
-use super::{Button, Flex, WidgetKey};
+use super::{Button, Flex, Stack, WidgetKey};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct PaginationChange {
@@ -83,7 +84,6 @@ impl<VM> Pagination<VM> {
 
 impl<VM: 'static> From<Pagination<VM>> for Element<VM> {
     fn from(pagination: Pagination<VM>) -> Self {
-        let layout_style = resolve_pagination_style_for_layout(pagination.style.as_ref());
         let page_count = pagination.page_count.resolve().max(1);
         let page = pagination.page.resolve().clamp(1, page_count);
         let page_size = pagination.page_size.resolve().max(1);
@@ -105,7 +105,7 @@ impl<VM: 'static> From<Pagination<VM>> for Element<VM> {
         };
         let mut children: Vec<Element<VM>> = vec![pagination_button(
             Button::new("Prev")
-                .secondary()
+                .ghost()
                 .disable(page <= 1)
                 .on_click(change(
                     page.saturating_sub(1),
@@ -114,17 +114,13 @@ impl<VM: 'static> From<Pagination<VM>> for Element<VM> {
                 )),
             pagination.style.clone(),
             pagination.visual.clone(),
+            PaginationButtonRole::Navigation,
         )];
         for item in pagination_window(page, page_count) {
             match item {
                 PageItem::Page(value) => {
-                    let button = if value == page {
-                        Button::new(value.to_string()).primary()
-                    } else {
-                        Button::new(value.to_string()).secondary()
-                    }
-                    .width(layout_style.page_width)
-                    .on_click(change(
+                    let selected = value == page;
+                    let button = Button::new(value.to_string()).ghost().on_click(change(
                         value,
                         page_size,
                         pagination.on_change.clone(),
@@ -133,39 +129,55 @@ impl<VM: 'static> From<Pagination<VM>> for Element<VM> {
                         button,
                         pagination.style.clone(),
                         pagination.visual.clone(),
+                        PaginationButtonRole::Page { selected },
                     ));
                 }
                 PageItem::Ellipsis { target } => children.push(pagination_button(
-                    Button::new("...")
-                        .ghost()
-                        .width(layout_style.page_width)
-                        .on_click(change(target, page_size, pagination.on_change.clone())),
+                    Button::new("...").ghost().on_click(change(
+                        target,
+                        page_size,
+                        pagination.on_change.clone(),
+                    )),
                     pagination.style.clone(),
                     pagination.visual.clone(),
+                    PaginationButtonRole::Page { selected: false },
                 )),
             }
         }
         children.push(pagination_button(
             Button::new("Next")
-                .secondary()
+                .ghost()
                 .disable(page >= page_count)
                 .on_click(change(page + 1, page_size, pagination.on_change.clone())),
             pagination.style.clone(),
             pagination.visual.clone(),
+            PaginationButtonRole::Navigation,
         ));
         for option in pagination.page_size_options {
+            let selected = option == page_size;
             children.push(pagination_button(
                 Button::new(format!("{option}/page"))
                     .ghost()
-                    .disable(option == page_size)
+                    .disable(selected)
                     .on_click(change(page, option, pagination.on_change.clone())),
                 pagination.style.clone(),
                 pagination.visual.clone(),
+                PaginationButtonRole::PageSize { selected },
             ));
         }
+        let root_style = pagination.style.clone();
         let mut root: Element<VM> = Flex::horizontal()
             .align(Align::Center)
-            .gap(layout_style.gap)
+            .runtime_layout(move |_layout, container, context, style_sheet, visual| {
+                let resolved = resolve_pagination_style_with_sheet(
+                    root_style.as_ref(),
+                    context,
+                    style_sheet,
+                    visual,
+                    WidgetState::default(),
+                );
+                container.gap = Value::Static(Length::Px(resolved.gap));
+            })
             .child(children)
             .into();
         root.key = pagination.key;
@@ -175,17 +187,44 @@ impl<VM: 'static> From<Pagination<VM>> for Element<VM> {
     }
 }
 
+#[derive(Clone, Copy)]
+enum PaginationButtonRole {
+    Navigation,
+    Page { selected: bool },
+    PageSize { selected: bool },
+}
+
+impl PaginationButtonRole {
+    fn selected(self) -> bool {
+        match self {
+            Self::Navigation => false,
+            Self::Page { selected } | Self::PageSize { selected } => selected,
+        }
+    }
+
+    fn fixed_page_width(self) -> bool {
+        matches!(self, Self::Page { .. })
+    }
+}
+
 fn pagination_button<VM: 'static>(
     button: Button<VM>,
     style: Option<StyleResolver<PaginationStyle>>,
     visual_identity: VisualStyle,
+    role: PaginationButtonRole,
 ) -> Element<VM> {
+    let button = if role.fixed_page_width() {
+        button.width(Length::Percent(1.0))
+    } else {
+        button
+    };
     let variant = button.variant();
-    with_visual_identity(
+    let button_style = style.clone();
+    let button = with_visual_identity(
         button
             .style_full_with_style_sheet(move |context, style_sheet, visual, state| {
                 let resolved = resolve_pagination_style_with_sheet(
-                    style.as_ref(),
+                    button_style.as_ref(),
                     context,
                     style_sheet,
                     visual,
@@ -193,11 +232,84 @@ fn pagination_button<VM: 'static>(
                 );
                 let mut button = ButtonStyle::default_for_theme(context.theme, variant);
                 button.text_style = resolved.text_style;
+                button.padding_x = match context.theme.density {
+                    Density::Compact => context.theme.spacing.xs,
+                    Density::Comfortable => context.theme.spacing.sm - context.theme.spacing.xxs,
+                    Density::Spacious => context.theme.spacing.sm,
+                };
+                // Button measurement already honors min_height; pagination keeps
+                // the compact 32/40/48dp rhythm without adding a second vertical inset.
+                button.padding_y = crate::ui::unit::Dp::ZERO;
+                let colors = &context.theme.colors;
+                let selected = role.selected();
+                let normal_background = if selected {
+                    colors.primary_container
+                } else {
+                    Color::TRANSPARENT
+                };
+                let normal_foreground = if selected {
+                    colors.on_primary_container
+                } else {
+                    colors.on_surface
+                };
+                button.background = StateValue::interactive(
+                    Value::Static(normal_background),
+                    Value::Static(colors.primary_container.with_alpha_factor(if selected {
+                        1.0
+                    } else {
+                        0.46
+                    })),
+                    Value::Static(colors.primary_container.with_alpha_factor(if selected {
+                        0.82
+                    } else {
+                        0.68
+                    })),
+                    Value::Static(if selected {
+                        colors.primary_container
+                    } else {
+                        Color::TRANSPARENT
+                    }),
+                );
+                button.foreground = StateValue::interactive(
+                    Value::Static(normal_foreground),
+                    Value::Static(if selected {
+                        colors.on_primary_container
+                    } else {
+                        colors.primary
+                    }),
+                    Value::Static(colors.on_primary_container),
+                    Value::Static(if selected {
+                        colors.on_primary_container
+                    } else {
+                        colors.on_disabled
+                    }),
+                );
+                button.border = StateValue::new(Value::Static(Color::TRANSPARENT));
+                button.border_width = Value::Static(crate::ui::unit::Dp::ZERO);
                 button
             })
             .into(),
         &visual_identity,
-    )
+    );
+
+    if role.fixed_page_width() {
+        let slot_style = style;
+        Stack::new()
+            .runtime_layout(move |layout, _container, context, style_sheet, visual| {
+                let resolved = resolve_pagination_style_with_sheet(
+                    slot_style.as_ref(),
+                    context,
+                    style_sheet,
+                    visual,
+                    WidgetState::default(),
+                );
+                layout.width = Some(Value::Static(Length::Px(resolved.page_width)));
+            })
+            .child(button)
+            .into()
+    } else {
+        button
+    }
 }
 
 enum PageItem {
@@ -229,20 +341,6 @@ fn pagination_window(page: usize, page_count: usize) -> Vec<PageItem> {
     items
 }
 
-fn resolve_pagination_style(
-    style: Option<&StyleResolver<PaginationStyle>>,
-    context: &StyleContext<'_>,
-) -> PaginationStyle {
-    let style_sheet = StyleSheet::default();
-    resolve_pagination_style_with_sheet(
-        style,
-        context,
-        &style_sheet,
-        &VisualStyle::default(),
-        WidgetState::default(),
-    )
-}
-
 fn resolve_pagination_style_with_sheet(
     style: Option<&StyleResolver<PaginationStyle>>,
     context: &StyleContext<'_>,
@@ -263,14 +361,6 @@ fn resolve_pagination_style_with_sheet(
             sheet.apply_pagination_state(base, context, visual, state)
         },
     )
-}
-
-fn resolve_pagination_style_for_layout(
-    style: Option<&StyleResolver<PaginationStyle>>,
-) -> PaginationStyle {
-    let theme = Theme::default();
-    let context = StyleContext::from_theme(&theme);
-    resolve_pagination_style(style, &context)
 }
 
 #[cfg(test)]

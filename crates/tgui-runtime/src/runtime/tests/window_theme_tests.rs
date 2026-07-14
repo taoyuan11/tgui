@@ -1,4 +1,108 @@
 use super::*;
+use raw_window_handle::{
+    DisplayHandle, HandleError, HasDisplayHandle, HasWindowHandle, WindowHandle,
+};
+
+struct BindingProbeWindow {
+    title_calls: AtomicUsize,
+    title: Mutex<String>,
+    theme_calls: AtomicUsize,
+    theme: Mutex<Option<crate::platform::window::Theme>>,
+}
+
+impl BindingProbeWindow {
+    fn new(theme: Option<crate::platform::window::Theme>) -> Self {
+        Self {
+            title_calls: AtomicUsize::new(0),
+            title: Mutex::new(String::new()),
+            theme_calls: AtomicUsize::new(0),
+            theme: Mutex::new(theme),
+        }
+    }
+}
+
+impl HasDisplayHandle for BindingProbeWindow {
+    fn display_handle(&self) -> Result<DisplayHandle<'_>, HandleError> {
+        Err(HandleError::Unavailable)
+    }
+}
+
+impl HasWindowHandle for BindingProbeWindow {
+    fn window_handle(&self) -> Result<WindowHandle<'_>, HandleError> {
+        Err(HandleError::Unavailable)
+    }
+}
+
+impl Window for BindingProbeWindow {
+    fn id(&self) -> crate::platform::window::WindowId {
+        crate::platform::window::WindowId::dummy()
+    }
+
+    fn scale_factor(&self) -> f64 {
+        1.0
+    }
+
+    fn request_redraw(&self) {}
+
+    fn pre_present_notify(&self) {}
+
+    fn surface_size(&self) -> PhysicalSize<u32> {
+        PhysicalSize::new(200, 120)
+    }
+
+    fn set_visible(&self, _visible: bool) {}
+
+    fn set_title(&self, title: &str) {
+        self.title_calls.fetch_add(1, Ordering::Relaxed);
+        *self.title.lock().expect("title lock poisoned") = title.to_owned();
+    }
+
+    fn is_decorated(&self) -> bool {
+        true
+    }
+
+    fn set_decorations(&self, _decorations: bool) {}
+
+    fn has_focus(&self) -> bool {
+        true
+    }
+
+    fn is_maximized(&self) -> bool {
+        false
+    }
+
+    fn set_maximized(&self, _maximized: bool) {}
+
+    fn set_minimized(&self, _minimized: bool) {}
+
+    fn drag_window(&self) -> Result<(), winit::error::ExternalError> {
+        Ok(())
+    }
+
+    fn drag_resize_window(
+        &self,
+        _direction: winit::window::ResizeDirection,
+    ) -> Result<(), winit::error::ExternalError> {
+        Ok(())
+    }
+
+    fn set_cursor(&self, _cursor: winit::window::Cursor) {}
+
+    fn theme(&self) -> Option<crate::platform::window::Theme> {
+        self.theme_calls.fetch_add(1, Ordering::Relaxed);
+        *self.theme.lock().expect("theme lock poisoned")
+    }
+
+    fn request_ime_update(
+        &self,
+        _request: crate::platform::window::ImeRequest,
+    ) -> Result<(), winit::error::ExternalError> {
+        Ok(())
+    }
+
+    #[cfg(target_os = "windows")]
+    fn set_enable(&self, _enabled: bool) {}
+}
 
 #[test]
 fn centered_window_position_uses_monitor_center() {
@@ -88,9 +192,155 @@ fn bound_theme_set_updates_current_theme_without_mode_change() {
     assert_eq!(handler.theme, updated_light);
 }
 
+#[test]
+fn stable_title_binding_does_not_repeat_platform_set_title() {
+    let invalidation = InvalidationSignal::new();
+    let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+    let title = context.state("Inbox".to_string());
+    let unrelated = context.state(0usize);
+    let window = Arc::new(BindingProbeWindow::new(None));
+    let mut handler = test_handler(None, invalidation);
+    handler.window_bindings.title = Some(title.signal());
+    handler.window = Some(window.clone());
+
+    handler.sync_bindings(Instant::now());
+    for _ in 0..1024 {
+        handler.sync_bindings(Instant::now());
+    }
+    unrelated.set(1);
+    handler.sync_bindings(Instant::now());
+
+    assert_eq!(window.title_calls.load(Ordering::Relaxed), 1);
+    assert_eq!(&*window.title.lock().expect("title lock poisoned"), "Inbox");
+
+    title.set("Archive".to_string());
+    handler.sync_bindings(Instant::now());
+    assert_eq!(window.title_calls.load(Ordering::Relaxed), 2);
+    assert_eq!(
+        &*window.title.lock().expect("title lock poisoned"),
+        "Archive"
+    );
+
+    let replacement = Arc::new(BindingProbeWindow::new(None));
+    handler.window = Some(replacement.clone());
+    handler.sync_bindings(Instant::now());
+    assert_eq!(replacement.title_calls.load(Ordering::Relaxed), 1);
+    assert_eq!(
+        &*replacement.title.lock().expect("title lock poisoned"),
+        "Archive"
+    );
+}
+
+#[test]
+fn opaque_title_binding_uses_global_revision_but_skips_equal_platform_value() {
+    let invalidation = InvalidationSignal::new();
+    let value = Arc::new(Mutex::new("Stable".to_string()));
+    let reads = Arc::new(AtomicUsize::new(0));
+    let signal = Signal::new(
+        {
+            let value = value.clone();
+            let reads = reads.clone();
+            move || {
+                reads.fetch_add(1, Ordering::Relaxed);
+                value.lock().expect("value lock poisoned").clone()
+            }
+        },
+        invalidation.clone(),
+    );
+    let window = Arc::new(BindingProbeWindow::new(None));
+    let mut handler = test_handler(None, invalidation.clone());
+    handler.window_bindings.title = Some(signal);
+    handler.window = Some(window.clone());
+
+    handler.sync_bindings(Instant::now());
+    invalidation.mark_dirty();
+    handler.sync_bindings(Instant::now());
+    assert_eq!(reads.load(Ordering::Relaxed), 2);
+    assert_eq!(window.title_calls.load(Ordering::Relaxed), 1);
+
+    *value.lock().expect("value lock poisoned") = "Changed".to_string();
+    invalidation.mark_dirty();
+    handler.sync_bindings(Instant::now());
+    assert_eq!(reads.load(Ordering::Relaxed), 3);
+    assert_eq!(window.title_calls.load(Ordering::Relaxed), 2);
+}
+
+#[test]
+fn stable_theme_binding_skips_resolve_and_platform_theme_polling() {
+    let invalidation = InvalidationSignal::new();
+    let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+    let mode = context.state(ThemeMode::Light);
+    let unrelated = context.state(0usize);
+    let (theme_set, light, dark) = custom_theme_set();
+    let window = Arc::new(BindingProbeWindow::new(Some(
+        crate::platform::window::Theme::Dark,
+    )));
+    let mut handler = test_handler_with_config(
+        TestVm,
+        None,
+        invalidation,
+        test_config_with_theme(ThemeSelection::System, theme_set),
+    );
+    handler.window_bindings.theme_mode = Some(mode.signal());
+    handler.window = Some(window.clone());
+
+    handler.sync_theme_binding();
+    let baseline_resolves = handler.binding_sync.theme_resolves;
+    for _ in 0..1024 {
+        assert!(!handler.refresh_platform_theme());
+    }
+    unrelated.set(1);
+    handler.sync_theme_binding();
+
+    assert_eq!(handler.theme, light);
+    assert_eq!(handler.binding_sync.theme_resolves, baseline_resolves);
+    assert_eq!(window.theme_calls.load(Ordering::Relaxed), 1);
+
+    mode.set(ThemeMode::Dark);
+    assert!(handler.sync_theme_binding());
+    assert_eq!(handler.theme, dark);
+    assert_eq!(handler.binding_sync.theme_resolves, baseline_resolves + 1);
+}
+
+#[test]
+fn system_theme_events_are_window_local_and_do_not_poll() {
+    let invalidation = InvalidationSignal::new();
+    let (theme_set, light, dark) = custom_theme_set();
+    let dark_window = Arc::new(BindingProbeWindow::new(Some(
+        crate::platform::window::Theme::Dark,
+    )));
+    let light_window = Arc::new(BindingProbeWindow::new(Some(
+        crate::platform::window::Theme::Light,
+    )));
+    let config = test_config_with_theme(ThemeSelection::System, theme_set);
+    let mut dark_handler =
+        test_handler_with_config(TestVm, None, invalidation.clone(), config.clone());
+    let mut light_handler = test_handler_with_config(TestVm, None, invalidation, config);
+    dark_handler.window = Some(dark_window.clone());
+    light_handler.window = Some(light_window.clone());
+
+    dark_handler.sync_theme_binding();
+    light_handler.sync_theme_binding();
+    assert_eq!(dark_handler.theme, dark);
+    assert_eq!(light_handler.theme, light);
+    assert_eq!(dark_window.theme_calls.load(Ordering::Relaxed), 1);
+    assert_eq!(light_window.theme_calls.load(Ordering::Relaxed), 1);
+
+    dark_handler.apply_window_theme(Some(crate::platform::window::Theme::Light));
+    assert_eq!(dark_handler.theme, light);
+    assert_eq!(dark_window.theme_calls.load(Ordering::Relaxed), 1);
+    for _ in 0..1024 {
+        assert!(!dark_handler.refresh_platform_theme());
+        assert!(!light_handler.refresh_platform_theme());
+    }
+    assert_eq!(dark_window.theme_calls.load(Ordering::Relaxed), 1);
+    assert_eq!(light_window.theme_calls.load(Ordering::Relaxed), 1);
+}
+
 #[derive(Debug, Default)]
 struct CapturingEventLoop {
     control_flow: Mutex<Option<ControlFlow>>,
+    set_control_flow_calls: AtomicUsize,
 }
 
 impl ActiveEventLoop for CapturingEventLoop {
@@ -114,6 +364,7 @@ impl ActiveEventLoop for CapturingEventLoop {
     }
 
     fn set_control_flow(&self, control_flow: ControlFlow) {
+        self.set_control_flow_calls.fetch_add(1, Ordering::Relaxed);
         *self
             .control_flow
             .lock()
@@ -128,6 +379,25 @@ impl ActiveEventLoop for CapturingEventLoop {
     }
 
     fn exit(&self) {}
+}
+
+#[test]
+fn stable_wait_control_flow_is_not_reapplied() {
+    let handler = test_handler_with_config(
+        TestVm,
+        None,
+        InvalidationSignal::new(),
+        test_config_with_theme(ThemeSelection::Mode(ThemeMode::Light), ThemeSet::default()),
+    );
+    let event_loop = CapturingEventLoop::default();
+    let now = Instant::now();
+
+    for _ in 0..1024 {
+        handler.set_control_flow_for_deadline(&event_loop, None, now);
+    }
+
+    assert_eq!(event_loop.set_control_flow_calls.load(Ordering::Relaxed), 0);
+    assert!(matches!(event_loop.control_flow(), ControlFlow::Wait));
 }
 
 #[test]

@@ -31,15 +31,13 @@ fn translate_quad(quad: [Point; 4], origin: Point) -> [Point; 4] {
 }
 
 fn translate_triangles(
-    triangles: &std::sync::Arc<[[Point; 3]]>,
+    mut triangles: std::sync::Arc<[[Point; 3]]>,
     origin: Point,
 ) -> std::sync::Arc<[[Point; 3]]> {
-    let translated: Vec<_> = triangles
-        .iter()
-        .copied()
-        .map(|triangle| triangle.map(|point| Point::new(point.x + origin.x, point.y + origin.y)))
-        .collect();
-    std::sync::Arc::from(translated)
+    for triangle in std::sync::Arc::make_mut(&mut triangles) {
+        *triangle = triangle.map(|point| Point::new(point.x + origin.x, point.y + origin.y));
+    }
+    triangles
 }
 
 fn translate_backdrop(
@@ -63,14 +61,9 @@ fn translate_text_decoration(
     mut primitive: TextDecorationPrimitive,
     origin: Point,
 ) -> TextDecorationPrimitive {
-    primitive.segments = std::sync::Arc::from(
-        primitive
-            .segments
-            .iter()
-            .copied()
-            .map(|rect| translate_rect(rect, origin))
-            .collect::<Vec<_>>(),
-    );
+    for rect in std::sync::Arc::make_mut(&mut primitive.segments) {
+        *rect = translate_rect(*rect, origin);
+    }
     primitive.clip_rect = primitive.clip_rect.map(|rect| translate_rect(rect, origin));
     primitive.clip_mask = translate_clip_mask(primitive.clip_mask, origin);
     primitive
@@ -88,7 +81,7 @@ fn translate_hit_geometry(geometry: HitGeometry, origin: Point) -> HitGeometry {
         HitGeometry::Rect => HitGeometry::Rect,
         HitGeometry::Quad(quad) => HitGeometry::Quad(translate_quad(quad, origin)),
         HitGeometry::Triangles(triangles) => {
-            HitGeometry::Triangles(translate_triangles(&triangles, origin))
+            HitGeometry::Triangles(translate_triangles(triangles, origin))
         }
     }
 }
@@ -288,19 +281,11 @@ fn translate_render_command(command: RenderCommand, origin: Point) -> RenderComm
             RenderCommand::TextDecoration(translate_text_decoration(primitive, origin))
         }
         RenderCommand::Mesh(mut primitive) => {
-            let triangles = translate_triangles(&primitive.triangles, origin);
-            let vertices: Vec<_> = primitive
-                .vertices
-                .iter()
-                .copied()
-                .map(|mut vertex| {
-                    vertex.position[0] += origin.x.get();
-                    vertex.position[1] += origin.y.get();
-                    vertex
-                })
-                .collect();
-            primitive.triangles = triangles;
-            primitive.vertices = std::sync::Arc::from(vertices);
+            primitive.triangles = translate_triangles(primitive.triangles, origin);
+            for vertex in std::sync::Arc::make_mut(&mut primitive.vertices) {
+                vertex.position[0] += origin.x.get();
+                vertex.position[1] += origin.y.get();
+            }
             primitive.clip_rect = primitive.clip_rect.map(|rect| translate_rect(rect, origin));
             primitive.clip_mask = translate_clip_mask(primitive.clip_mask, origin);
             RenderCommand::Mesh(primitive)
@@ -339,22 +324,7 @@ fn translate_overlay_anchor_rect(rect: Rect, origin: Point) -> Rect {
 
 macro_rules! push_overlay_command {
     ($bucket:expr, $command:expr, $source:expr) => {{
-        let command = $command;
-        match &command {
-            RenderCommand::BackdropBlur(primitive) => $bucket.backdrop_blurs.push(*primitive),
-            RenderCommand::Shape(primitive) => $bucket.shapes.push(*primitive),
-            RenderCommand::Texture(primitive) => $bucket.textures.push(primitive.clone()),
-            #[cfg(feature = "video")]
-            RenderCommand::VideoTexture(_) => {}
-            RenderCommand::Text(primitive) => $bucket.texts.push((**primitive).clone()),
-            RenderCommand::TextDecoration(primitive) => {
-                $bucket.text_decorations.push(primitive.clone())
-            }
-            RenderCommand::Mesh(primitive) => $bucket.meshes.push(primitive.clone()),
-            RenderCommand::Brush(_) | RenderCommand::CanvasComposite(_) => {}
-        }
-        $bucket.commands.push(command);
-        $bucket.command_sources.push($source);
+        $bucket.push_command($command, $source);
     }};
 }
 
@@ -493,26 +463,11 @@ fn finalize_portal_entry<VM>(
                 );
             }
             OverlayPrimitive::Mesh(mut mesh) => {
-                let triangles: Vec<_> = mesh
-                    .triangles
-                    .iter()
-                    .copied()
-                    .map(|triangle| {
-                        triangle.map(|point| Point::new(point.x + origin.x, point.y + origin.y))
-                    })
-                    .collect();
-                let vertices: Vec<_> = mesh
-                    .vertices
-                    .iter()
-                    .copied()
-                    .map(|mut vertex| {
-                        vertex.position[0] += origin.x.get();
-                        vertex.position[1] += origin.y.get();
-                        vertex
-                    })
-                    .collect();
-                mesh.triangles = std::sync::Arc::from(triangles);
-                mesh.vertices = std::sync::Arc::from(vertices);
+                mesh.triangles = translate_triangles(mesh.triangles, origin);
+                for vertex in std::sync::Arc::make_mut(&mut mesh.vertices) {
+                    vertex.position[0] += origin.x.get();
+                    vertex.position[1] += origin.y.get();
+                }
                 mesh.clip_rect = content_clip;
                 mesh.clip_mask = translate_clip_mask(mesh.clip_mask, origin);
                 push_overlay_command!(bucket, RenderCommand::Mesh(mesh), entry.source_widget_id);
@@ -552,7 +507,13 @@ fn finalize_portal_entry<VM>(
             .map(|(key, rect)| (*key, translate_overlay_anchor_rect(*rect, origin)))
             .collect();
 
-        for command in scene.scene.commands {
+        // Consume the command streams only after the source scene's parallel primitive arrays
+        // have been dropped. Arc-backed mesh/decoration buffers are then uniquely owned in the
+        // common case and the translation helpers above can mutate them without reallocating.
+        let (commands, overlay_commands, overlay_command_sources) =
+            scene.scene.into_command_streams();
+
+        for command in commands {
             push_overlay_command!(
                 bucket,
                 translate_render_command(command, origin),
@@ -560,8 +521,8 @@ fn finalize_portal_entry<VM>(
             );
         }
         // 处理嵌套场景的 overlay_commands（例如光标）
-        let mut overlay_command_sources = scene.scene.overlay_command_sources.into_iter();
-        for command in scene.scene.overlay_commands {
+        let mut overlay_command_sources = overlay_command_sources.into_iter();
+        for command in overlay_commands {
             let source = overlay_command_sources
                 .next()
                 .flatten()

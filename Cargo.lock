@@ -4817,6 +4817,7 @@ dependencies = [
  "dpi",
  "ffmpeg-next",
  "geo",
+ "hashbrown 0.16.1",
  "image",
  "log",
  "lyon",

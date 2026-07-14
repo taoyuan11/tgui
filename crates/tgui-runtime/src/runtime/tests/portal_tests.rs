@@ -2,8 +2,8 @@ use super::*;
 
 use crate::runtime::portal::PortalRegistry;
 use crate::ui::widget::{
-    Button, ComputedScene, OverlayAlignment, OverlayLayer, OverlayPlacement, Portal, PortalAnchor,
-    PortalTarget,
+    Button, ComputedScene, FocusScopeOptions, OverlayAlignment, OverlayLayer, OverlayPlacement,
+    Portal, PortalAnchor, PortalTarget,
 };
 
 #[derive(Default)]
@@ -258,4 +258,97 @@ fn cross_window_portal_close_handlers_run_in_target_handler() {
     assert!(target.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::Escape))));
     let _ = target.consume_overlay_close_handlers_outside_click(Point::new(dp(300.0), dp(200.0)));
     assert_eq!(close_calls.lock().unwrap().as_slice(), &[false, false]);
+}
+
+#[test]
+fn repeated_external_portal_collection_preserves_order_focus_and_hit_metadata() {
+    let invalidation = InvalidationSignal::new();
+    let action: Element<PortalVm> = Button::new("first remote")
+        .size(dp(100.0), dp(30.0))
+        .on_click(Command::new(|_: &mut PortalVm| {}))
+        .into();
+    let action_id = action.id;
+    let portals: [Element<PortalVm>; 2] = [
+        Portal::new(action)
+            .target_window("target")
+            .anchor(Rect::new(20.0, 20.0, 1.0, 1.0))
+            .layer(OverlayLayer::Menu)
+            .close_on_escape(true)
+            .on_open_change(ValueCommand::new(|_: &mut PortalVm, _: bool| {}))
+            .focus_scope(FocusScopeOptions::new().trap(true))
+            .into(),
+        Portal::new(Text::new("second remote"))
+            .target_window("target")
+            .anchor(Rect::new(20.0, 70.0, 1.0, 1.0))
+            .layer(OverlayLayer::Menu)
+            .into(),
+    ];
+    let source_tree = WidgetTree::new(Stack::<PortalVm>::new().child(portals));
+    let target_tree = WidgetTree::new(Stack::<PortalVm>::new());
+    let mut source = portal_handler("source", source_tree, invalidation.clone(), (240.0, 160.0));
+    let mut target = portal_handler("target", target_tree, invalidation, (320.0, 220.0));
+
+    target.set_external_portal_requests(source.external_portal_requests_from_computed(), 1);
+    let fingerprints = target
+        .external_portal_requests
+        .iter()
+        .map(|request| request.fingerprint())
+        .collect::<Vec<_>>();
+
+    for _ in 0..2 {
+        target.invalidate_computed_scene();
+        let computed = target.computed_scene().clone();
+        let labels = overlay_labels(&computed);
+        let first = labels
+            .iter()
+            .position(|label| label == "first remote")
+            .expect("first external portal should render");
+        let second = labels
+            .iter()
+            .position(|label| label == "second remote")
+            .expect("second external portal should render");
+        assert!(
+            first < second,
+            "external portal emit order must stay stable"
+        );
+
+        let hit = computed
+            .overlay_hit_regions
+            .iter()
+            .find(|region| {
+                matches!(
+                    &region.interaction,
+                    HitInteraction::Widget { id, .. } if *id == action_id
+                )
+            })
+            .expect("external portal button should preserve hit metadata");
+        let scope = computed
+            .focus_scopes
+            .iter()
+            .find(|scope| scope.active && scope.options.is_trap())
+            .expect("external portal should preserve its focus scope");
+        assert_eq!(hit.scope_path, scope.path);
+        assert_eq!(
+            hit.focus
+                .as_ref()
+                .expect("button focus metadata should be retained")
+                .scope_path,
+            scope.path
+        );
+        assert!(computed
+            .overlay_close_handlers
+            .iter()
+            .any(|handler| handler.layer == OverlayLayer::Menu && handler.close_on_escape));
+
+        assert_eq!(target.external_portal_requests.len(), 2);
+        assert_eq!(
+            target
+                .external_portal_requests
+                .iter()
+                .map(|request| request.fingerprint())
+                .collect::<Vec<_>>(),
+            fingerprints,
+            "move-out collection must restore the original requests unchanged"
+        );
+    }
 }

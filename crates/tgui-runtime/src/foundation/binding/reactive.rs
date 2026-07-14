@@ -2,6 +2,8 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
+use smallvec::SmallVec;
+
 use super::dependency::DependencyOwner;
 
 static NEXT_SIGNAL_ID: AtomicU64 = AtomicU64::new(1);
@@ -25,6 +27,10 @@ pub(crate) enum ReactiveTarget {
 pub(crate) struct ReactiveDrain {
     pub(crate) processed_signals: usize,
     pub(crate) targets: Vec<ReactiveTarget>,
+    #[cfg(test)]
+    pub(crate) graph_lock_acquisitions: usize,
+    #[cfg(test)]
+    pub(crate) scratch_spilled: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -33,13 +39,10 @@ enum ReactiveSubscriber {
     Target(ReactiveTarget),
 }
 
-enum ReactiveDrainAction {
-    Signal {
-        signal: SignalId,
-        recompute: Option<Arc<dyn Fn() -> bool + Send + Sync>>,
-    },
-    Target(ReactiveTarget),
-}
+type ReactiveRecompute = Arc<dyn Fn() -> bool + Send + Sync>;
+type ReactiveRecomputeAction = (SignalId, ReactiveRecompute);
+
+const INLINE_DRAIN_FANOUT: usize = 8;
 
 #[derive(Default)]
 struct ReactiveGraphInner {
@@ -183,73 +186,93 @@ impl ReactiveGraph {
 
     pub(crate) fn drain(&self) -> ReactiveDrain {
         let mut processed_signals = 0;
+        let mut pending_changed_signals = SmallVec::<[SignalId; INLINE_DRAIN_FANOUT]>::new();
+        let mut subscribers = SmallVec::<[ReactiveSubscriber; INLINE_DRAIN_FANOUT]>::new();
+        let mut recomputes = SmallVec::<[ReactiveRecomputeAction; INLINE_DRAIN_FANOUT]>::new();
+        #[cfg(test)]
+        let mut graph_lock_acquisitions = 0;
+
         loop {
-            let Some(actions) = self.pop_dirty_signal_actions() else {
-                break;
-            };
-            processed_signals += 1;
-
-            let mut changed_signals = Vec::new();
-            let mut changed_targets = Vec::new();
-            for action in actions {
-                match action {
-                    ReactiveDrainAction::Signal { signal, recompute } => {
-                        let changed = recompute.map(|recompute| recompute()).unwrap_or(true);
-                        if changed {
-                            changed_signals.push(signal);
-                        }
+            subscribers.clear();
+            recomputes.clear();
+            #[cfg(test)]
+            {
+                graph_lock_acquisitions += 1;
+            }
+            let Some(targets) = self.prepare_next_dirty_signal(
+                &mut pending_changed_signals,
+                &mut subscribers,
+                &mut recomputes,
+            ) else {
+                processed_signals += 1;
+                for (signal, recompute) in &recomputes {
+                    if recompute() {
+                        pending_changed_signals.push(*signal);
                     }
-                    ReactiveDrainAction::Target(target) => changed_targets.push(target),
                 }
-            }
-
-            if !changed_signals.is_empty() || !changed_targets.is_empty() {
-                self.mark_dirty_batch(&changed_signals, &changed_targets);
-            }
-        }
-
-        let mut inner = self.inner.lock();
-        inner.dirty_target_set.clear();
-        let targets = inner.dirty_targets.drain(..).collect();
-        ReactiveDrain {
-            processed_signals,
-            targets,
+                continue;
+            };
+            return ReactiveDrain {
+                processed_signals,
+                targets,
+                #[cfg(test)]
+                graph_lock_acquisitions,
+                #[cfg(test)]
+                scratch_spilled: pending_changed_signals.spilled()
+                    || subscribers.spilled()
+                    || recomputes.spilled(),
+            };
         }
     }
 
-    fn pop_dirty_signal_actions(&self) -> Option<Vec<ReactiveDrainAction>> {
+    /// Applies changes produced by the previous recompute batch and prepares the next signal
+    /// while holding the graph mutex once. Direct targets and non-memo signal edges are queued
+    /// in-place; only memo closures escape the lock for execution.
+    fn prepare_next_dirty_signal(
+        &self,
+        pending_changed_signals: &mut SmallVec<[SignalId; INLINE_DRAIN_FANOUT]>,
+        subscribers: &mut SmallVec<[ReactiveSubscriber; INLINE_DRAIN_FANOUT]>,
+        recomputes: &mut SmallVec<[ReactiveRecomputeAction; INLINE_DRAIN_FANOUT]>,
+    ) -> Option<Vec<ReactiveTarget>> {
         let mut inner = self.inner.lock();
-        let signal = inner.dirty_signals.pop_front()?;
+        for signal in pending_changed_signals.drain(..) {
+            queue_dirty_signal(&mut inner, signal);
+        }
+
+        let Some(signal) = inner.dirty_signals.pop_front() else {
+            inner.dirty_target_set.clear();
+            return Some(inner.dirty_targets.drain(..).collect());
+        };
         inner.dirty_signal_set.remove(&signal);
-        Some(
-            inner
-                .subscribers
-                .get(&signal)
-                .into_iter()
-                .flat_map(|subscribers| subscribers.iter().copied())
-                .map(|subscriber| match subscriber {
-                    ReactiveSubscriber::Signal(signal) => ReactiveDrainAction::Signal {
-                        signal,
-                        recompute: inner.recomputers.get(&signal).cloned(),
-                    },
-                    ReactiveSubscriber::Target(target) => ReactiveDrainAction::Target(target),
-                })
-                .collect(),
-        )
-    }
 
-    fn mark_dirty_batch(&self, signals: &[SignalId], targets: &[ReactiveTarget]) {
-        let mut inner = self.inner.lock();
-        for signal in signals {
-            if inner.dirty_signal_set.insert(*signal) {
-                inner.dirty_signals.push_back(*signal);
+        if let Some(source_subscribers) = inner.subscribers.get(&signal) {
+            subscribers.extend(source_subscribers.iter().copied());
+        }
+        for subscriber in subscribers.iter().copied() {
+            match subscriber {
+                ReactiveSubscriber::Signal(signal) => {
+                    if let Some(recompute) = inner.recomputers.get(&signal).cloned() {
+                        recomputes.push((signal, recompute));
+                    } else {
+                        queue_dirty_signal(&mut inner, signal);
+                    }
+                }
+                ReactiveSubscriber::Target(target) => queue_dirty_target(&mut inner, target),
             }
         }
-        for target in targets {
-            if inner.dirty_target_set.insert(*target) {
-                inner.dirty_targets.push_back(*target);
-            }
-        }
+        None
+    }
+}
+
+fn queue_dirty_signal(inner: &mut ReactiveGraphInner, signal: SignalId) {
+    if inner.dirty_signal_set.insert(signal) {
+        inner.dirty_signals.push_back(signal);
+    }
+}
+
+fn queue_dirty_target(inner: &mut ReactiveGraphInner, target: ReactiveTarget) {
+    if inner.dirty_target_set.insert(target) {
+        inner.dirty_targets.push_back(target);
     }
 }
 

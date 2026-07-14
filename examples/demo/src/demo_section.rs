@@ -37,9 +37,9 @@ pub(crate) fn page(
     children.push(
         Flex::vertical()
             .width(pct(100.0))
-            .gap(dp(18.0))
+            .gap(dp(6.0))
             .child(Text::new(title).style_full(styles::title_style))
-            .child(Text::new(description).style_full(|ctx| styles::muted_text_style(ctx, sp(15.0))))
+            .child(Text::new(description).style_full(styles::page_description_style))
             .into(),
     );
     children.extend(sections);
@@ -51,7 +51,7 @@ pub(crate) fn page(
         .child(
             Flex::vertical()
                 .width(pct(100.0))
-                .gap(dp(18.0))
+                .gap(dp(20.0))
                 .padding(Insets::all(dp(24.0)))
                 .child(children),
         )
@@ -113,12 +113,15 @@ fn component_doc_with_layout(
         DemoLayout::Stacked => children.extend(demo_cards),
     }
 
-    Flex::vertical()
+    Card::new()
         .width(pct(100.0))
-        .gap(dp(14.0))
-        .padding(Insets::all(dp(16.0)))
         .style_full(styles::component_card_style)
-        .child(children)
+        .body(
+            Flex::vertical()
+                .width(pct(100.0))
+                .gap(dp(14.0))
+                .child(children),
+        )
         .into()
 }
 
@@ -126,15 +129,14 @@ fn usage_demo(app: &App, demo: UsageDemo, layout: DemoLayout) -> Element<App> {
     let id = demo.id;
     let code = demo.code;
 
-    let card = Flex::vertical().gap(dp(10.0));
+    let card = Card::new();
     let card = match layout {
         DemoLayout::Wrapped => card.min_width(dp(340.0)).basis(dp(420.0)).grow(1.0),
         DemoLayout::Stacked => card.width(pct(100.0)),
     };
 
-    card.padding(Insets::all(dp(12.0)))
-        .style_full(styles::usage_card_style)
-        .child(
+    card.style_full(styles::usage_card_style)
+        .header(
             Flex::vertical()
                 .gap(dp(4.0))
                 .child(
@@ -144,7 +146,7 @@ fn usage_demo(app: &App, demo: UsageDemo, layout: DemoLayout) -> Element<App> {
                 )
                 .child(Text::new(demo.description).style_full(styles::status_style)),
         )
-        .child(
+        .body(
             Flex::vertical()
                 .width(pct(100.0))
                 .align(Align::Stretch)
@@ -152,12 +154,17 @@ fn usage_demo(app: &App, demo: UsageDemo, layout: DemoLayout) -> Element<App> {
                 .style_full(styles::preview_style)
                 .child(demo.preview),
         )
-        .child(
-            Button::new(app.code_toggle_label(id))
-                .secondary()
-                .on_click(Command::new(move |app: &mut App| app.toggle_code(id))),
+        .footer(
+            Flex::vertical()
+                .width(pct(100.0))
+                .gap(dp(8.0))
+                .child(
+                    Button::new(app.code_toggle_label(id))
+                        .secondary()
+                        .on_click(Command::new(move |app: &mut App| app.toggle_code(id))),
+                )
+                .child(Show::new(app.code_expanded_signal(id), code_block(code))),
         )
-        .child(Show::new(app.code_expanded_signal(id), code_block(code)))
         .into()
 }
 

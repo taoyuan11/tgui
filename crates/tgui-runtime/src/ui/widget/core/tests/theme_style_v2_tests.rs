@@ -1,7 +1,7 @@
 use super::*;
 
 use crate::ui::layout::Value;
-use crate::ui::theme::{ComponentThemes, WidgetState};
+use crate::ui::theme::{ComponentThemes, Density, WidgetState};
 use crate::ui::widget::common::{ButtonVariantKind, VisualStyle};
 use crate::ui::widget::{
     ButtonSelector, DataGridStyle, ListStyle, MenuStyle, ModalStyle, ProgressBarStyle, SelectStyle,
@@ -10,6 +10,69 @@ use crate::ui::widget::{
 
 fn normal_color(value: &StateValue<Value<Color>>) -> Color {
     value.normal.clone().resolve()
+}
+
+fn intrinsic_child_height(theme: &Theme, child: Element<()>) -> f32 {
+    let tree = WidgetTree::new(Stack::new().child(child));
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let layout = tree.build_scene_layout(
+        &font_manager,
+        theme,
+        &media,
+        &mut AnimationEngine::default(),
+        UnitContext::default(),
+        &HashMap::new(),
+        &HashMap::new(),
+        Rect::new(0.0, 0.0, 400.0, 200.0),
+    );
+    let child = layout
+        .layout_root
+        .children
+        .first()
+        .expect("test stack should contain its control");
+    layout
+        .taffy
+        .layout(child.node)
+        .expect("control layout should be available")
+        .size
+        .height
+}
+
+#[test]
+fn density_geometry_reaches_intrinsic_core_layout() {
+    let heights = [Density::Compact, Density::Comfortable, Density::Spacious].map(|density| {
+        let mut theme = Theme::light();
+        theme.density = density;
+        let controls: Vec<Element<()>> = vec![
+            crate::ui::widget::Button::new("Density").into(),
+            Input::new("").into(),
+            Select::<(), &str, &str>::new(Vec::<SelectOption<&str, &str>>::new(), None::<&str>)
+                .into(),
+            Checkbox::new(false).into(),
+            Radio::new(false).into(),
+            Switch::new(false).into(),
+            Slider::new(0.5, 0.0, 1.0).into(),
+        ];
+
+        controls
+            .into_iter()
+            .map(|control| intrinsic_child_height(&theme, control))
+            .collect::<Vec<_>>()
+    });
+
+    for index in 0..heights[0].len() {
+        assert!(
+            heights[0][index] < heights[1][index],
+            "compact control {index} should be shorter than comfortable: {:?}",
+            heights
+        );
+        assert!(
+            heights[1][index] < heights[2][index],
+            "comfortable control {index} should be shorter than spacious: {:?}",
+            heights
+        );
+    }
 }
 
 #[test]
@@ -40,8 +103,8 @@ fn theme_tokens_drive_default_component_styles() {
     let button = ButtonStyle::default_for_theme(&theme, ButtonVariantKind::Primary);
     assert_eq!(normal_color(&button.background), theme.colors.primary);
     assert_eq!(normal_color(&button.foreground), theme.colors.on_primary);
-    assert_eq!(button.radius.resolve(), theme.radius.md);
-    assert_eq!(button.padding_x, theme.spacing.sm);
+    assert_eq!(button.radius.resolve(), theme.radius.lg);
+    assert_eq!(button.padding_x, theme.spacing.sm + theme.spacing.xs);
     assert_eq!(button.text_style.size, theme.typography.label.size);
 
     let input = InputStyle::default_for_theme(&theme);
@@ -54,7 +117,7 @@ fn theme_tokens_drive_default_component_styles() {
         input.selection.as_ref().unwrap().resolve(),
         theme.colors.selection
     );
-    assert_eq!(input.radius.resolve(), theme.radius.md);
+    assert_eq!(input.radius.resolve(), theme.radius.lg);
     assert_eq!(input.padding_x, theme.spacing.md - theme.spacing.xs);
     assert_eq!(input.text_style.size, theme.typography.body.size);
 
@@ -68,7 +131,7 @@ fn theme_tokens_drive_default_component_styles() {
         select.selected_option_background.resolve(),
         theme.colors.primary_container
     );
-    assert_eq!(select.radius.resolve(), theme.radius.md);
+    assert_eq!(select.radius.resolve(), theme.radius.lg);
 
     let slider = SliderStyle::default_for_theme(&theme);
     assert_eq!(normal_color(&slider.active_track), theme.colors.primary);
@@ -87,17 +150,21 @@ fn theme_tokens_drive_default_component_styles() {
     let list = ListStyle::default_for_theme(&theme);
     assert_eq!(
         list.item_selected_background.resolve(),
-        theme.colors.primary_container
+        theme.colors.primary.with_alpha_factor(0.12)
     );
-    assert_eq!(list.item_radius, theme.radius.md);
+    assert_eq!(list.item_radius, theme.radius.lg);
 
     let tree = TreeStyle::default_for_theme(&theme);
     assert_eq!(tree.checkbox_checked_color.resolve(), theme.colors.primary);
     assert_eq!(
+        tree.item_selected_background.resolve(),
+        theme.colors.primary.with_alpha_factor(0.12)
+    );
+    assert_eq!(
         tree.surface.background.as_ref().unwrap().resolve(),
         theme.colors.surface
     );
-    assert_eq!(tree.item_radius, theme.radius.md);
+    assert_eq!(tree.item_radius, theme.radius.lg);
 
     let grid = DataGridStyle::default_for_theme(&theme);
     assert_eq!(grid.cell_focused_border.resolve(), theme.colors.focus_ring);

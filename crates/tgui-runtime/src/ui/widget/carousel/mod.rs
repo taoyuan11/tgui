@@ -2,8 +2,7 @@ use std::time::Duration;
 
 use crate::foundation::view_model::{Command, ValueCommand};
 use crate::theme::{StyleContext, WidgetState};
-use crate::ui::layout::{Align, LayoutStyle, Value};
-use crate::ui::theme::Theme;
+use crate::ui::layout::{Align, LayoutStyle, Length, Value};
 
 use super::common::CarouselAutoPlayState;
 use super::common::VisualStyle;
@@ -73,7 +72,6 @@ impl<VM> Carousel<VM> {
 
 impl<VM: 'static> From<Carousel<VM>> for Element<VM> {
     fn from(carousel: Carousel<VM>) -> Self {
-        let layout_style = resolve_carousel_style_for_layout(carousel.style.as_ref());
         let count = carousel.items.len().max(1);
         let selected = carousel.selected.resolve().min(count - 1);
         let item = carousel
@@ -89,7 +87,26 @@ impl<VM: 'static> From<Carousel<VM>> for Element<VM> {
                 let style = carousel.style.clone();
                 with_visual_identity(
                     Stack::new()
-                        .size(layout_style.indicator_size, layout_style.indicator_size)
+                        .runtime_layout({
+                            let style = style.clone();
+                            move |layout, _container, context, style_sheet, visual| {
+                                let resolved = resolve_carousel_style_with_sheet(
+                                    style.as_ref(),
+                                    context,
+                                    style_sheet,
+                                    visual,
+                                    WidgetState::default(),
+                                );
+                                if layout.width.is_none() {
+                                    layout.width =
+                                        Some(Value::Static(Length::Px(resolved.indicator_size)));
+                                }
+                                if layout.height.is_none() {
+                                    layout.height =
+                                        Some(Value::Static(Length::Px(resolved.indicator_size)));
+                                }
+                            }
+                        })
                         .style_full_with_style_sheet(move |context, style_sheet, visual, state| {
                             let resolved = resolve_carousel_style_with_sheet(
                                 style.as_ref(),
@@ -121,12 +138,35 @@ impl<VM: 'static> From<Carousel<VM>> for Element<VM> {
                 )
             })
             .collect::<Vec<Element<VM>>>();
+        let root_style = carousel.style.clone();
+        let row_style = carousel.style.clone();
+        let indicator_row_style = carousel.style.clone();
         let mut root: Element<VM> = Flex::vertical()
-            .gap(layout_style.gap)
+            .gap(crate::ui::unit::dp(0.0))
+            .runtime_layout(move |_layout, container, context, style_sheet, visual| {
+                let resolved = resolve_carousel_style_with_sheet(
+                    root_style.as_ref(),
+                    context,
+                    style_sheet,
+                    visual,
+                    WidgetState::default(),
+                );
+                container.gap = Value::Static(Length::Px(resolved.gap));
+            })
             .child(
                 Flex::horizontal()
                     .align(Align::Center)
-                    .gap(layout_style.gap)
+                    .gap(crate::ui::unit::dp(0.0))
+                    .runtime_layout(move |_layout, container, context, style_sheet, visual| {
+                        let resolved = resolve_carousel_style_with_sheet(
+                            row_style.as_ref(),
+                            context,
+                            style_sheet,
+                            visual,
+                            WidgetState::default(),
+                        );
+                        container.gap = Value::Static(Length::Px(resolved.gap));
+                    })
                     .child(prev)
                     .child(Stack::new().grow(1.0).child(item))
                     .child(next),
@@ -134,7 +174,17 @@ impl<VM: 'static> From<Carousel<VM>> for Element<VM> {
             .child(
                 Flex::horizontal()
                     .center()
-                    .gap(layout_style.indicator_gap)
+                    .gap(crate::ui::unit::dp(0.0))
+                    .runtime_layout(move |_layout, container, context, style_sheet, visual| {
+                        let resolved = resolve_carousel_style_with_sheet(
+                            indicator_row_style.as_ref(),
+                            context,
+                            style_sheet,
+                            visual,
+                            WidgetState::default(),
+                        );
+                        container.gap = Value::Static(Length::Px(resolved.indicator_gap));
+                    })
                     .child(indicators),
             )
             .into();
@@ -186,20 +236,6 @@ fn carousel_change_button<VM: 'static>(
         .into()
 }
 
-fn resolve_carousel_style(
-    style: Option<&StyleResolver<CarouselStyle>>,
-    context: &StyleContext<'_>,
-) -> CarouselStyle {
-    let style_sheet = StyleSheet::default();
-    resolve_carousel_style_with_sheet(
-        style,
-        context,
-        &style_sheet,
-        &VisualStyle::default(),
-        WidgetState::default(),
-    )
-}
-
 fn resolve_carousel_style_with_sheet(
     style: Option<&StyleResolver<CarouselStyle>>,
     context: &StyleContext<'_>,
@@ -220,12 +256,4 @@ fn resolve_carousel_style_with_sheet(
             sheet.apply_carousel_state(base, context, visual, state)
         },
     )
-}
-
-fn resolve_carousel_style_for_layout(
-    style: Option<&StyleResolver<CarouselStyle>>,
-) -> CarouselStyle {
-    let theme = Theme::default();
-    let context = StyleContext::from_theme(&theme);
-    resolve_carousel_style(style, &context)
 }

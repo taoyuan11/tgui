@@ -2,7 +2,7 @@ use super::*;
 
 impl<VM: 'static> BoundRuntimeHandler<VM> {
     pub(in crate::runtime) fn uses_system_theme(&self) -> bool {
-        matches!(self.active_theme_selection(), ThemeSelection::System)
+        self.theme_store.mode() == ThemeMode::System
     }
 
     pub(in crate::runtime) fn apply_theme(&mut self, theme: Theme) {
@@ -13,13 +13,40 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
     }
 
     pub(in crate::runtime) fn apply_window_theme(&mut self, window_theme: Option<WindowTheme>) {
-        if self.uses_system_theme() {
-            self.apply_theme(resolve_theme(
-                &self.active_theme_selection(),
-                &self.active_theme_set(),
-                resolve_window_theme(self.window.as_deref()).or(window_theme),
-            ));
+        self.sync_platform_window_identity();
+        let system_theme = window_theme
+            .or_else(|| resolve_window_theme(self.window.as_deref()))
+            .or(self.theme_store.system_theme());
+        let changed = self.theme_store.set_system_theme(system_theme);
+        if changed && self.uses_system_theme() {
+            self.apply_theme(self.theme_store.current().as_ref().clone());
         }
+    }
+
+    pub(in crate::runtime) fn initialize_platform_window_binding_state(
+        &mut self,
+        window_theme: Option<WindowTheme>,
+    ) {
+        self.sync_platform_window_identity();
+        if self.theme_store.set_system_theme(window_theme) {
+            self.binding_sync.theme_initialized = false;
+        }
+    }
+
+    fn sync_platform_window_identity(&mut self) -> bool {
+        let identity = self
+            .window
+            .as_ref()
+            .map(|window| Arc::as_ptr(window) as *const () as usize);
+        if self.binding_sync.window_identity == identity {
+            return false;
+        }
+
+        self.binding_sync.window_identity = identity;
+        // A platform window owns its title. Replacing it must replay even an unchanged binding.
+        self.binding_sync.title_token = None;
+        self.binding_sync.title = None;
+        true
     }
 
     pub(in crate::runtime) fn active_theme_selection(&self) -> ThemeSelection {
@@ -46,84 +73,229 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             .unwrap_or(self.config.reduced_motion)
     }
 
-    pub(in crate::runtime) fn sync_theme_binding(&mut self) {
+    pub(in crate::runtime) fn sync_theme_binding(&mut self) -> bool {
         let started_at = text_profile_enabled().then_some(Instant::now());
-        let selection = self.active_theme_selection();
-        let theme_set = self.active_theme_set();
-        let resolved_system_theme = resolve_window_theme(self.window.as_deref());
-        let previous_store_theme = self.theme_store.system_theme();
-        let system_theme = resolved_system_theme.or(previous_store_theme);
-        self.theme_store.set_theme_set(theme_set.clone());
-        self.theme_store.set_system_theme(system_theme);
-        let resolved_theme = match selection {
-            ThemeSelection::System => {
-                self.theme_store.set_mode(ThemeMode::System);
-                self.theme_store.current().as_ref().clone()
-            }
-            ThemeSelection::Mode(mode) => {
-                self.theme_store.set_mode(mode);
-                self.theme_store.current().as_ref().clone()
-            }
-        };
-        let changed = self.theme != resolved_theme;
-        if self.theme != resolved_theme {
-            self.apply_theme(resolved_theme);
+        let window_changed = self.sync_platform_window_identity();
+        let mut inputs_changed = !self.binding_sync.theme_initialized;
+        let mut resolved_system_theme = None;
+
+        if window_changed {
+            resolved_system_theme = resolve_window_theme(self.window.as_deref());
+            let system_theme = resolved_system_theme.or(self.theme_store.system_theme());
+            inputs_changed |= self.theme_store.set_system_theme(system_theme);
         }
+
+        let revision = self.invalidation.revision();
+        let mode_identity = self
+            .window_bindings
+            .theme_mode
+            .as_ref()
+            .map(Signal::sync_identity);
+        let theme_set_identity = self
+            .window_bindings
+            .theme_set
+            .as_ref()
+            .map(Signal::sync_identity);
+        let theme_bindings_dirty = !self.binding_sync.theme_initialized
+            || self.binding_sync.theme_checked_revision != Some(revision)
+            || self.binding_sync.theme_mode_token.map(|token| token.0) != mode_identity
+            || self.binding_sync.theme_set_token.map(|token| token.0) != theme_set_identity;
+        if theme_bindings_dirty {
+            let mode_token = self
+                .window_bindings
+                .theme_mode
+                .as_ref()
+                .map(Signal::sync_token);
+            if !self.binding_sync.theme_initialized
+                || self.binding_sync.theme_mode_token != mode_token
+            {
+                let mode = self
+                    .window_bindings
+                    .theme_mode
+                    .as_ref()
+                    .map(Signal::get)
+                    .unwrap_or_else(|| match &self.config.theme {
+                        ThemeSelection::System => ThemeMode::System,
+                        ThemeSelection::Mode(mode) => *mode,
+                    });
+                self.binding_sync.theme_mode_token = mode_token;
+                inputs_changed |= self.theme_store.set_mode(mode);
+            }
+
+            let theme_set_token = self
+                .window_bindings
+                .theme_set
+                .as_ref()
+                .map(Signal::sync_token);
+            if !self.binding_sync.theme_initialized
+                || self.binding_sync.theme_set_token != theme_set_token
+            {
+                let theme_set = self
+                    .window_bindings
+                    .theme_set
+                    .as_ref()
+                    .map(Signal::get)
+                    .unwrap_or_else(|| self.config.theme_set.clone());
+                self.binding_sync.theme_set_token = theme_set_token;
+                if self.theme_store.theme_set() != &theme_set {
+                    inputs_changed |= self.theme_store.set_theme_set(theme_set);
+                }
+            }
+            self.binding_sync.theme_checked_revision = Some(revision);
+        }
+
+        self.binding_sync.theme_initialized = true;
+        let changed = if inputs_changed {
+            #[cfg(test)]
+            {
+                self.binding_sync.theme_resolves += 1;
+            }
+            let resolved_theme = self.theme_store.current().as_ref().clone();
+            if self.theme != resolved_theme {
+                self.apply_theme(resolved_theme);
+                true
+            } else {
+                false
+            }
+        } else {
+            false
+        };
+
         if let Some(started_at) = started_at {
             log_text_profile(
                 "textarea_theme_sync",
                 started_at.elapsed(),
                 format!(
-                    "selection={:?} resolved_system_theme={:?} previous_store_theme={:?} applied_system_theme={:?} changed={}",
-                    selection,
+                    "mode={:?} resolved_system_theme={:?} applied_system_theme={:?} inputs_changed={} changed={}",
+                    self.theme_store.mode(),
                     resolved_system_theme,
-                    previous_store_theme,
-                    system_theme,
+                    self.theme_store.system_theme(),
+                    inputs_changed,
                     changed,
                 ),
             );
         }
+        changed
     }
 
     pub(in crate::runtime) fn refresh_platform_theme(&mut self) -> bool {
-        let previous_theme = self.theme.clone();
-        self.sync_theme_binding();
-        self.theme != previous_theme
+        self.sync_theme_binding()
     }
 
     pub(in crate::runtime) fn sync_bindings(&mut self, now: Instant) -> bool {
         let started_at = text_profile_enabled().then_some(Instant::now());
-        let previous_theme = self.theme.clone();
-        self.sync_theme_binding();
-        let theme_changed = self.theme != previous_theme;
-        let previous_reduced_motion = self.reduced_motion;
-        self.reduced_motion = self.active_reduced_motion();
-        let reduced_motion_changed = previous_reduced_motion != self.reduced_motion;
+        let theme_changed = self.sync_theme_binding();
+        let revision = self.invalidation.revision();
+        let title_identity = self
+            .window_bindings
+            .title
+            .as_ref()
+            .map(Signal::sync_identity);
+        let reduced_motion_identity = self
+            .window_bindings
+            .reduced_motion
+            .as_ref()
+            .map(Signal::sync_identity);
+        let clear_color_identity = self
+            .window_bindings
+            .clear_color
+            .as_ref()
+            .map(Signal::sync_identity);
+        let window_properties_dirty = self.binding_sync.window_properties_checked_revision
+            != Some(revision)
+            || self.binding_sync.title_token.map(|token| token.0) != title_identity
+            || self.binding_sync.reduced_motion_token.map(|token| token.0)
+                != reduced_motion_identity
+            || self.binding_sync.clear_color_token.map(|token| token.0) != clear_color_identity;
 
-        if let Some(window) = self.window.as_ref() {
-            if let Some(signal) = self.window_bindings.title.as_ref() {
-                window.set_title(&signal.get());
+        let mut reduced_motion_changed = false;
+        if window_properties_dirty {
+            let reduced_motion_token = self
+                .window_bindings
+                .reduced_motion
+                .as_ref()
+                .map(Signal::sync_token);
+            if self.binding_sync.reduced_motion_token != reduced_motion_token {
+                self.binding_sync.reduced_motion_token = reduced_motion_token;
+                let next = self.active_reduced_motion();
+                reduced_motion_changed = self.reduced_motion != next;
+                self.reduced_motion = next;
             }
+
+            if let (Some(window), Some(signal)) =
+                (self.window.as_ref(), self.window_bindings.title.as_ref())
+            {
+                let token = signal.sync_token();
+                if self.binding_sync.title_token != Some(token) {
+                    let title = signal.get();
+                    self.binding_sync.title_token = Some(token);
+                    if self.binding_sync.title.as_ref() != Some(&title) {
+                        window.set_title(&title);
+                        self.binding_sync.title = Some(title);
+                    }
+                }
+            } else if let Some(signal) = self.window_bindings.title.as_ref() {
+                // Remember the source while suspended; attaching/replacing a window clears this
+                // token so the latest value is replayed exactly once.
+                self.binding_sync.title_token = Some(signal.sync_token());
+            } else {
+                self.binding_sync.title_token = None;
+                self.binding_sync.title = None;
+            }
+
+            if let Some(signal) = self.window_bindings.clear_color.as_ref() {
+                let token = signal.sync_token();
+                if self.binding_sync.clear_color_token != Some(token) {
+                    self.binding_sync.clear_color_token = Some(token);
+                    self.binding_sync.clear_color_target = Some(signal.get());
+                }
+            } else {
+                self.binding_sync.clear_color_token = None;
+                self.binding_sync.clear_color_target = None;
+                self.binding_sync.clear_color_animation_initialized = false;
+            }
+            self.binding_sync.window_properties_checked_revision = Some(revision);
         }
 
         let mut clear_color_changed = false;
-        let next_clear_color = if self.renderer.is_some() {
-            if let Some(signal) = self.window_bindings.clear_color.as_ref() {
-                Some(self.animation_engine.resolve_color(
-                    AnimationKey::Window(WindowProperty::ClearColor),
-                    signal.get(),
-                    signal.transition(),
-                    now,
-                ))
-            } else if !self.config.clear_color_overridden {
+        let next_clear_color = if self.renderer.is_none() {
+            None
+        } else if let Some(signal) = self.window_bindings.clear_color.as_ref() {
+            if self.binding_sync.clear_color_target.is_none() {
+                self.binding_sync.clear_color_target = Some(signal.get());
+            }
+            let target = self
+                .binding_sync
+                .clear_color_target
+                .unwrap_or(self.config.clear_color);
+            let key = AnimationKey::Window(WindowProperty::ClearColor);
+            if !self.binding_sync.clear_color_animation_initialized
+                || !self.animation_engine.color_settled_at(key, target)
+            {
+                self.binding_sync.clear_color_animation_initialized = true;
+                Some(
+                    self.animation_engine
+                        .resolve_color(key, target, signal.transition(), now),
+                )
+            } else {
+                None
+            }
+        } else if !self.config.clear_color_overridden {
+            self.binding_sync.clear_color_token = None;
+            self.binding_sync.clear_color_target = None;
+            self.binding_sync.clear_color_animation_initialized = false;
+            let target = self.theme.colors.background;
+            if self.last_synced_clear_color != Some(target)
+                || !self.window_color_settled_at(WindowProperty::ThemeBackground, target)
+            {
                 Some(self.theme_background_color(now))
             } else {
-                Some(
-                    self.last_synced_clear_color
-                        .unwrap_or(self.config.clear_color),
-                )
+                None
             }
         } else {
+            self.binding_sync.clear_color_token = None;
+            self.binding_sync.clear_color_target = None;
+            self.binding_sync.clear_color_animation_initialized = false;
             None
         };
         if let (Some(renderer), Some(next_clear_color)) = (self.renderer.as_mut(), next_clear_color)

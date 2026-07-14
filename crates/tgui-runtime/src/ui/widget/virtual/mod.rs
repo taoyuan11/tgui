@@ -3,6 +3,8 @@ use std::marker::PhantomData;
 use std::ops::Range;
 use std::sync::Arc;
 
+use parking_lot::RwLock;
+
 use crate::foundation::view_model::{Command, ValueCommand};
 use crate::theme::{StyleContext, WidgetState};
 use crate::ui::layout::{Align, Insets, Overflow, Value};
@@ -24,6 +26,15 @@ pub trait ItemSource<T>: Send + Sync + 'static {
 
     fn key(&self, _index: usize) -> Option<WidgetKey> {
         None
+    }
+
+    /// Monotonic revision for sources that mutate in place.
+    ///
+    /// Measured virtual layouts cache item extents by index. Sources backed by
+    /// interior mutability should advance this revision whenever insertion,
+    /// removal, reordering, or item content can invalidate those measurements.
+    fn revision(&self) -> u64 {
+        0
     }
 }
 
@@ -132,8 +143,30 @@ impl ItemLayout {
         matches!(self, Self::Measured { .. })
     }
 
-    pub(crate) fn is_fixed(self) -> bool {
-        matches!(self, Self::Fixed { .. })
+    pub(crate) fn with_estimate(self, extent: Dp) -> Self {
+        match self {
+            Self::Fixed {
+                spacing, overscan, ..
+            } => Self::Fixed {
+                item_extent: extent,
+                spacing,
+                overscan,
+            },
+            Self::Estimated {
+                spacing, overscan, ..
+            } => Self::Estimated {
+                estimate: extent,
+                spacing,
+                overscan,
+            },
+            Self::Measured {
+                spacing, overscan, ..
+            } => Self::Measured {
+                estimate: extent,
+                spacing,
+                overscan,
+            },
+        }
     }
 
     fn with_spacing(self, spacing: Dp) -> Self {
@@ -195,6 +228,390 @@ impl ItemLayout {
 
 pub(crate) const MEASURED_EXTENT_INVALIDATION_EPSILON: f32 = 0.5;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct MeasuredVirtualSignature {
+    source_revision: u64,
+    total_items: usize,
+    lanes: usize,
+    estimate_bits: u32,
+    viewport_cross_bits: u32,
+}
+
+impl MeasuredVirtualSignature {
+    fn new(
+        source_revision: u64,
+        total_items: usize,
+        lanes: usize,
+        estimate: Dp,
+        viewport_cross: Dp,
+    ) -> Self {
+        Self {
+            source_revision,
+            total_items,
+            lanes: lanes.max(1),
+            estimate_bits: estimate.max(Dp::ZERO).get().to_bits(),
+            viewport_cross_bits: viewport_cross.max(Dp::ZERO).get().to_bits(),
+        }
+    }
+
+    fn estimate(self) -> Dp {
+        Dp::new(f32::from_bits(self.estimate_bits))
+    }
+
+    fn stripe_count(self) -> usize {
+        self.total_items.div_ceil(self.lanes)
+    }
+}
+
+#[derive(Default)]
+struct SparseCorrectionNode {
+    correction_sum: f32,
+    left: Option<Box<Self>>,
+    right: Option<Box<Self>>,
+}
+
+#[derive(Default)]
+struct SparseCorrectionTree {
+    root: Option<Box<SparseCorrectionNode>>,
+}
+
+impl SparseCorrectionTree {
+    fn correction_sum(&self) -> f32 {
+        self.root
+            .as_ref()
+            .map(|root| root.correction_sum)
+            .unwrap_or(0.0)
+    }
+
+    fn set(&mut self, len: usize, index: usize, correction: f32) {
+        if len == 0 || index >= len {
+            return;
+        }
+        Self::set_node(&mut self.root, 0, len, index, correction);
+    }
+
+    fn set_node(
+        node: &mut Option<Box<SparseCorrectionNode>>,
+        start: usize,
+        end: usize,
+        index: usize,
+        correction: f32,
+    ) {
+        if end - start == 1 {
+            if correction == 0.0 {
+                *node = None;
+            } else {
+                *node = Some(Box::new(SparseCorrectionNode {
+                    correction_sum: correction,
+                    left: None,
+                    right: None,
+                }));
+            }
+            return;
+        }
+
+        let current = node.get_or_insert_with(Default::default);
+        let middle = start + (end - start) / 2;
+        if index < middle {
+            Self::set_node(&mut current.left, start, middle, index, correction);
+        } else {
+            Self::set_node(&mut current.right, middle, end, index, correction);
+        }
+        current.correction_sum = current
+            .left
+            .as_ref()
+            .map(|child| child.correction_sum)
+            .unwrap_or(0.0)
+            + current
+                .right
+                .as_ref()
+                .map(|child| child.correction_sum)
+                .unwrap_or(0.0);
+        if current.left.is_none() && current.right.is_none() {
+            *node = None;
+        }
+    }
+
+    fn prefix_sum(&self, len: usize, end: usize) -> f32 {
+        Self::prefix_sum_node(self.root.as_deref(), 0, len, end.min(len))
+    }
+
+    fn prefix_sum_node(
+        node: Option<&SparseCorrectionNode>,
+        start: usize,
+        end: usize,
+        query_end: usize,
+    ) -> f32 {
+        if query_end <= start || node.is_none() {
+            return 0.0;
+        }
+        let node = node.expect("checked above");
+        if end <= query_end {
+            return node.correction_sum;
+        }
+        let middle = start + (end - start) / 2;
+        Self::prefix_sum_node(node.left.as_deref(), start, middle, query_end)
+            + Self::prefix_sum_node(node.right.as_deref(), middle, end, query_end)
+    }
+
+    fn first_prefix_matching(
+        &self,
+        len: usize,
+        base_step: f32,
+        target: f32,
+        inclusive: bool,
+    ) -> Option<usize> {
+        if len == 0 {
+            return None;
+        }
+        let total = (base_step * len as f32 + self.correction_sum()).max(0.0);
+        let matches = if inclusive {
+            total >= target
+        } else {
+            total > target
+        };
+        if !matches {
+            return None;
+        }
+        Some(Self::first_prefix_matching_node(
+            self.root.as_deref(),
+            0,
+            len,
+            base_step,
+            target,
+            inclusive,
+            0.0,
+        ))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn first_prefix_matching_node(
+        node: Option<&SparseCorrectionNode>,
+        start: usize,
+        end: usize,
+        base_step: f32,
+        target: f32,
+        inclusive: bool,
+        prefix_before: f32,
+    ) -> usize {
+        if end - start == 1 {
+            return start;
+        }
+        let middle = start + (end - start) / 2;
+        let left_correction = node
+            .and_then(|node| node.left.as_deref())
+            .map(|left| left.correction_sum)
+            .unwrap_or(0.0);
+        let left_end =
+            prefix_before + (base_step * (middle - start) as f32 + left_correction).max(0.0);
+        let left_matches = if inclusive {
+            left_end >= target
+        } else {
+            left_end > target
+        };
+        if left_matches {
+            Self::first_prefix_matching_node(
+                node.and_then(|node| node.left.as_deref()),
+                start,
+                middle,
+                base_step,
+                target,
+                inclusive,
+                prefix_before,
+            )
+        } else {
+            Self::first_prefix_matching_node(
+                node.and_then(|node| node.right.as_deref()),
+                middle,
+                end,
+                base_step,
+                target,
+                inclusive,
+                left_end,
+            )
+        }
+    }
+}
+
+#[derive(Default)]
+struct MeasuredVirtualIndex {
+    signature: Option<MeasuredVirtualSignature>,
+    measured_extents: HashMap<usize, Dp>,
+    stripe_corrections: HashMap<usize, Dp>,
+    corrections: SparseCorrectionTree,
+    revision: u64,
+}
+
+impl MeasuredVirtualIndex {
+    fn prepare(&mut self, signature: MeasuredVirtualSignature) {
+        if self.signature == Some(signature) {
+            return;
+        }
+        self.signature = Some(signature);
+        self.measured_extents.clear();
+        self.stripe_corrections.clear();
+        self.corrections = SparseCorrectionTree::default();
+        self.revision = self.revision.wrapping_add(1);
+    }
+
+    fn stripe_extent(&self, stripe_index: usize) -> Dp {
+        let Some(signature) = self.signature else {
+            return Dp::ZERO;
+        };
+        signature.estimate()
+            + self
+                .stripe_corrections
+                .get(&stripe_index)
+                .copied()
+                .unwrap_or(Dp::ZERO)
+    }
+
+    fn stripe_offset(&self, stripe_index: usize, spacing: Dp) -> Dp {
+        let Some(signature) = self.signature else {
+            return Dp::ZERO;
+        };
+        let stripe_count = signature.stripe_count();
+        let stripe_index = stripe_index.min(stripe_count);
+        let base_step = signature.estimate() + spacing;
+        Dp::new(
+            base_step.get() * stripe_index as f32
+                + self.corrections.prefix_sum(stripe_count, stripe_index),
+        )
+    }
+
+    fn total_main_extent(&self, spacing: Dp) -> Dp {
+        let Some(signature) = self.signature else {
+            return Dp::ZERO;
+        };
+        let stripe_count = signature.stripe_count();
+        if stripe_count == 0 {
+            return Dp::ZERO;
+        }
+        let base_step = signature.estimate() + spacing;
+        Dp::new(
+            base_step.get() * stripe_count as f32 + self.corrections.correction_sum()
+                - spacing.get(),
+        )
+        .max(Dp::ZERO)
+    }
+
+    fn first_stripe_after(&self, spacing: Dp, target: Dp, inclusive: bool) -> Option<usize> {
+        let signature = self.signature?;
+        let stripe_count = signature.stripe_count();
+        let base_step = (signature.estimate() + spacing).get();
+        self.corrections
+            .first_prefix_matching(stripe_count, base_step, target.get(), inclusive)
+    }
+
+    fn update_measurements(&mut self, measurements: &[(usize, Dp)]) -> bool {
+        let Some(signature) = self.signature else {
+            return false;
+        };
+        let mut changed_stripes = Vec::new();
+        for (item_index, extent) in measurements {
+            if *item_index >= signature.total_items {
+                continue;
+            }
+            let extent = extent.max(Dp::ZERO);
+            let changed = self
+                .measured_extents
+                .get(item_index)
+                .copied()
+                .map(|previous| (previous - extent).abs() > MEASURED_EXTENT_INVALIDATION_EPSILON)
+                .unwrap_or(true);
+            if !changed {
+                continue;
+            }
+            self.measured_extents.insert(*item_index, extent);
+            let stripe_index = *item_index / signature.lanes;
+            if !changed_stripes.contains(&stripe_index) {
+                changed_stripes.push(stripe_index);
+            }
+        }
+
+        let mut prefix_changed = false;
+        let stripe_count = signature.stripe_count();
+        for stripe_index in changed_stripes {
+            let start = stripe_index * signature.lanes;
+            let end = ((stripe_index + 1) * signature.lanes).min(signature.total_items);
+            let mut extent = Dp::ZERO;
+            let mut all_measured = true;
+            for item_index in start..end {
+                if let Some(measured) = self.measured_extents.get(&item_index).copied() {
+                    extent = extent.max(measured);
+                } else {
+                    all_measured = false;
+                }
+            }
+            if !all_measured {
+                extent = extent.max(signature.estimate());
+            }
+            let correction = extent - signature.estimate();
+            let previous = self
+                .stripe_corrections
+                .get(&stripe_index)
+                .copied()
+                .unwrap_or(Dp::ZERO);
+            if (previous - correction).abs() <= MEASURED_EXTENT_INVALIDATION_EPSILON {
+                continue;
+            }
+            prefix_changed = true;
+            if correction == Dp::ZERO {
+                self.stripe_corrections.remove(&stripe_index);
+            } else {
+                self.stripe_corrections.insert(stripe_index, correction);
+            }
+            self.corrections
+                .set(stripe_count, stripe_index, correction.get());
+        }
+        if prefix_changed {
+            self.revision = self.revision.wrapping_add(1);
+        }
+        prefix_changed
+    }
+}
+
+#[derive(Clone, Default)]
+pub(crate) struct MeasuredVirtualState {
+    inner: Arc<RwLock<MeasuredVirtualIndex>>,
+}
+
+impl MeasuredVirtualState {
+    fn prepare(&self, signature: MeasuredVirtualSignature) {
+        self.inner.write().prepare(signature);
+    }
+
+    pub(crate) fn measured_extent(&self, item_index: usize) -> Option<Dp> {
+        self.inner.read().measured_extents.get(&item_index).copied()
+    }
+
+    pub(crate) fn signature(&self) -> Option<MeasuredVirtualSignature> {
+        self.inner.read().signature
+    }
+
+    pub(crate) fn update_measurements(
+        &self,
+        signature: MeasuredVirtualSignature,
+        measurements: &[(usize, Dp)],
+    ) -> bool {
+        let mut index = self.inner.write();
+        index.prepare(signature);
+        index.update_measurements(measurements)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn replace_measurements(
+        &self,
+        signature: MeasuredVirtualSignature,
+        measurements: impl IntoIterator<Item = (usize, Dp)>,
+    ) {
+        let measurements = measurements.into_iter().collect::<Vec<_>>();
+        let mut index = self.inner.write();
+        index.prepare(signature);
+        index.update_measurements(&measurements);
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 pub(crate) struct VirtualViewportHint {
     pub(crate) width: Dp,
@@ -206,15 +623,16 @@ pub(crate) struct VirtualRuntimeState {
     pub(crate) fallback_viewport_hint: VirtualViewportHint,
     pub(crate) viewport_hint: Option<VirtualViewportHint>,
     pub(crate) scroll_offset: Point,
-    pub(crate) measured_extents: HashMap<usize, Dp>,
+    pub(crate) measurements: MeasuredVirtualState,
     pub(crate) widget_ids_by_key: HashMap<WidgetKey, WidgetId>,
+    pub(crate) source_revision: u64,
     pub(crate) bootstrap: bool,
 }
 
 #[derive(Clone, Default)]
 pub(crate) struct VirtualCacheState {
     pub(crate) viewport_hint: Option<VirtualViewportHint>,
-    pub(crate) measured_extents: HashMap<usize, Dp>,
+    pub(crate) measurements: MeasuredVirtualState,
     pub(crate) widget_ids_by_key: HashMap<WidgetKey, WidgetId>,
 }
 
@@ -224,8 +642,9 @@ impl Default for VirtualRuntimeState {
             fallback_viewport_hint: VirtualViewportHint::default(),
             viewport_hint: None,
             scroll_offset: Point::ZERO,
-            measured_extents: HashMap::new(),
+            measurements: MeasuredVirtualState::default(),
             widget_ids_by_key: HashMap::new(),
+            source_revision: 0,
             bootstrap: true,
         }
     }
@@ -258,6 +677,7 @@ pub(crate) struct VirtualWindowPlan {
     pub(crate) visible_range: Range<usize>,
     pub(crate) placements: Vec<VirtualItemPlacement>,
     pub(crate) total_main_extent: Dp,
+    pub(crate) measurement_revision: u64,
     #[allow(
         dead_code,
         reason = "retained for lifecycle snapshots and debug tooling"
@@ -275,6 +695,7 @@ pub(crate) struct VirtualSceneStateUpdate {
     pub(crate) widget_id: WidgetId,
     pub(crate) viewport_hint: VirtualViewportHint,
     pub(crate) measured_extents: Vec<(usize, Dp)>,
+    pub(crate) measurement_signature: Option<MeasuredVirtualSignature>,
     pub(crate) widget_ids_by_key: Vec<(WidgetKey, WidgetId)>,
     pub(crate) invalidate_layout: bool,
 }
@@ -336,19 +757,21 @@ pub(crate) fn apply_virtual_runtime_state_to_element<VM>(
             runtime_state,
             arrangement,
             content_cross_extent,
+            source,
             ..
         } => {
             if let Some(cache) = virtual_states.get(&element.id) {
                 runtime_state.viewport_hint = cache.viewport_hint.clone();
-                runtime_state.measured_extents = cache.measured_extents.clone();
+                runtime_state.measurements = cache.measurements.clone();
                 runtime_state.widget_ids_by_key = cache.widget_ids_by_key.clone();
                 runtime_state.bootstrap = runtime_state.viewport_hint.is_none();
             } else {
                 runtime_state.viewport_hint = None;
-                runtime_state.measured_extents.clear();
+                runtime_state.measurements = MeasuredVirtualState::default();
                 runtime_state.widget_ids_by_key.clear();
                 runtime_state.bootstrap = true;
             }
+            runtime_state.source_revision = source.revision();
             runtime_state.fallback_viewport_hint = fallback_viewport_hint.clone();
             runtime_state.scroll_offset = scroll_offsets
                 .get(&element.id)
@@ -399,59 +822,85 @@ pub(crate) fn resolve_virtual_window_plan(
     let overscan = item_layout.overscan();
     let bootstrap = runtime_state.bootstrap;
 
-    let item_main_extent = |item_index: usize| -> Dp {
-        if item_layout.is_fixed() {
-            return item_layout.estimate().max(Dp::ZERO);
+    // Fixed and estimated layouts have one uniform extent per stripe. Building
+    // an offset for every item made an otherwise bounded virtual window O(N) on
+    // every layout/scroll update (including 100K+ item lists). Resolve the two
+    // boundary stripes with binary search and materialize offsets only for the
+    // visible window.
+    if !item_layout.is_measured() {
+        #[cfg(feature = "bench-support")]
+        if legacy_uniform_window_plan::enabled() {
+            return resolve_uniform_virtual_window_plan_legacy(
+                total_items,
+                lanes,
+                item_layout.estimate().max(Dp::ZERO),
+                spacing,
+                overscan,
+                viewport_main,
+                viewport_cross,
+                scroll_main,
+                viewport_hint,
+                bootstrap,
+            );
         }
-        if item_layout.is_measured() {
-            runtime_state
-                .measured_extents
-                .get(&item_index)
-                .copied()
-                .unwrap_or(item_layout.estimate())
-                .max(Dp::ZERO)
-        } else {
-            item_layout.estimate().max(Dp::ZERO)
-        }
-    };
-
-    let mut stripe_offsets = Vec::with_capacity(stripe_count);
-    let mut total_main_extent = Dp::ZERO;
-    for stripe_index in 0..stripe_count {
-        stripe_offsets.push(total_main_extent);
-        total_main_extent += stripe_extent_for(stripe_index, lanes, total_items, &item_main_extent);
-        if stripe_index + 1 < stripe_count {
-            total_main_extent += spacing;
-        }
+        return resolve_uniform_virtual_window_plan(
+            total_items,
+            lanes,
+            item_layout.estimate().max(Dp::ZERO),
+            spacing,
+            overscan,
+            viewport_main,
+            viewport_cross,
+            scroll_main,
+            viewport_hint,
+            bootstrap,
+        );
     }
 
-    let stripe_extent = |stripe_index: usize| -> Dp {
-        stripe_extent_for(stripe_index, lanes, total_items, &item_main_extent)
-    };
+    let signature = MeasuredVirtualSignature::new(
+        runtime_state.source_revision,
+        total_items,
+        lanes,
+        item_layout.estimate(),
+        viewport_cross,
+    );
+    runtime_state.measurements.prepare(signature);
+    let index = runtime_state.measurements.inner.read();
+
+    #[cfg(feature = "bench-support")]
+    if legacy_uniform_window_plan::enabled() {
+        return resolve_measured_virtual_window_plan_legacy(
+            total_items,
+            lanes,
+            item_layout.estimate().max(Dp::ZERO),
+            spacing,
+            overscan,
+            viewport_main,
+            viewport_cross,
+            scroll_main,
+            viewport_hint,
+            bootstrap,
+            &index.measured_extents,
+            index.revision,
+        );
+    }
+
+    let total_main_extent = index.total_main_extent(spacing);
     let viewport_end = scroll_main + viewport_main;
-
-    let mut first_stripe = 0usize;
-    while first_stripe + 1 < stripe_count {
-        let end = stripe_offsets[first_stripe] + stripe_extent(first_stripe) + spacing;
-        if end > scroll_main {
-            break;
-        }
-        first_stripe += 1;
-    }
-
-    let mut last_stripe = first_stripe;
-    while last_stripe + 1 < stripe_count {
-        let next_start = stripe_offsets[last_stripe + 1];
-        if next_start >= viewport_end {
-            break;
-        }
-        last_stripe += 1;
-    }
-    if stripe_count == 0 {
-        last_stripe = 0;
-    } else if last_stripe >= stripe_count {
-        last_stripe = stripe_count - 1;
-    }
+    let (first_stripe, last_stripe) = if stripe_count == 0 {
+        (0, 0)
+    } else {
+        let first = index
+            .first_stripe_after(spacing, scroll_main, false)
+            .unwrap_or(stripe_count - 1)
+            .min(stripe_count - 1);
+        let last = index
+            .first_stripe_after(spacing, viewport_end, true)
+            .unwrap_or(stripe_count - 1)
+            .min(stripe_count - 1)
+            .max(first);
+        (first, last)
+    };
 
     let visible_start = (first_stripe.saturating_sub(overscan)).saturating_mul(lanes);
     let visible_end = if stripe_count == 0 {
@@ -460,22 +909,92 @@ pub(crate) fn resolve_virtual_window_plan(
         ((last_stripe + 1 + overscan).min(stripe_count) * lanes).min(total_items)
     };
 
-    let lane_extent = if lanes == 0 {
+    let spacing_total = spacing * (lanes.saturating_sub(1) as f32);
+    let lane_extent = ((viewport_cross - spacing_total).max(0.0)) / lanes as f32;
+    let mut placements = Vec::with_capacity(visible_end.saturating_sub(visible_start));
+    let first_visible_stripe = visible_start / lanes;
+    let last_visible_stripe = visible_end.div_ceil(lanes);
+    let mut main_offset = index.stripe_offset(first_visible_stripe, spacing);
+    for stripe_index in first_visible_stripe..last_visible_stripe {
+        let item_start = (stripe_index * lanes).max(visible_start);
+        let item_end = ((stripe_index + 1) * lanes).min(visible_end);
+        for item_index in item_start..item_end {
+            let lane_index = item_index % lanes;
+            placements.push(VirtualItemPlacement {
+                item_index,
+                main_offset,
+                cross_offset: (lane_extent + spacing) * lane_index as f32,
+                cross_extent: lane_extent,
+            });
+        }
+        main_offset += index.stripe_extent(stripe_index) + spacing;
+    }
+
+    VirtualWindowPlan {
+        total_items,
+        visible_range: visible_start..visible_end,
+        placements,
+        total_main_extent,
+        measurement_revision: index.revision,
+        viewport_hint,
+        bootstrap,
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn resolve_uniform_virtual_window_plan(
+    total_items: usize,
+    lanes: usize,
+    stripe_extent: Dp,
+    spacing: Dp,
+    overscan: usize,
+    viewport_main: Dp,
+    viewport_cross: Dp,
+    scroll_main: Dp,
+    viewport_hint: VirtualViewportHint,
+    bootstrap: bool,
+) -> VirtualWindowPlan {
+    let stripe_count = total_items.div_ceil(lanes);
+    let stripe_step = stripe_extent + spacing;
+    let total_main_extent = if stripe_count == 0 {
         Dp::ZERO
     } else {
-        let spacing_total = spacing * (lanes.saturating_sub(1) as f32);
-        ((viewport_cross - spacing_total).max(0.0)) / lanes as f32
+        stripe_extent * stripe_count as f32 + spacing * stripe_count.saturating_sub(1) as f32
     };
+
+    let (first_stripe, last_stripe) = if stripe_count == 0 {
+        (0, 0)
+    } else {
+        // Match the general path's half-open viewport semantics exactly:
+        // - a stripe whose end equals scroll_main is no longer visible;
+        // - a stripe whose start equals viewport_end is not yet visible.
+        let first = partition_point(stripe_count.saturating_sub(1), |stripe_index| {
+            stripe_step * (stripe_index + 1) as f32 <= scroll_main
+        })
+        .min(stripe_count - 1);
+        let viewport_end = scroll_main + viewport_main;
+        let remaining = stripe_count.saturating_sub(first + 1);
+        let hidden_after = partition_point(remaining, |offset| {
+            stripe_step * ((first + 1 + offset) as f32) < viewport_end
+        });
+        (first, first + hidden_after)
+    };
+
+    let visible_start = first_stripe.saturating_sub(overscan).saturating_mul(lanes);
+    let visible_end = if stripe_count == 0 {
+        0
+    } else {
+        ((last_stripe + 1 + overscan).min(stripe_count) * lanes).min(total_items)
+    };
+    let spacing_total = spacing * lanes.saturating_sub(1) as f32;
+    let lane_extent = ((viewport_cross - spacing_total).max(0.0)) / lanes as f32;
     let mut placements = Vec::with_capacity(visible_end.saturating_sub(visible_start));
     for item_index in visible_start..visible_end {
         let stripe_index = item_index / lanes;
         let lane_index = item_index % lanes;
         placements.push(VirtualItemPlacement {
             item_index,
-            main_offset: stripe_offsets
-                .get(stripe_index)
-                .copied()
-                .unwrap_or(Dp::ZERO),
+            main_offset: stripe_step * stripe_index as f32,
             cross_offset: (lane_extent + spacing) * lane_index as f32,
             cross_extent: lane_extent,
         });
@@ -486,11 +1005,488 @@ pub(crate) fn resolve_virtual_window_plan(
         visible_range: visible_start..visible_end,
         placements,
         total_main_extent,
+        measurement_revision: 0,
         viewport_hint,
         bootstrap,
     }
 }
 
+/// Returns the number of leading indexes in `0..len` for which `predicate`
+/// holds. The predicate must be monotonic (`true...true,false...false`).
+fn partition_point(mut len: usize, mut predicate: impl FnMut(usize) -> bool) -> usize {
+    let mut base = 0usize;
+    while len > 0 {
+        let half = len / 2;
+        let middle = base + half;
+        if predicate(middle) {
+            base = middle + 1;
+            len -= half + 1;
+        } else {
+            len = half;
+        }
+    }
+    base
+}
+
+#[cfg(any(test, feature = "bench-support"))]
+#[allow(clippy::too_many_arguments)]
+fn resolve_uniform_virtual_window_plan_legacy(
+    total_items: usize,
+    lanes: usize,
+    stripe_extent: Dp,
+    spacing: Dp,
+    overscan: usize,
+    viewport_main: Dp,
+    viewport_cross: Dp,
+    scroll_main: Dp,
+    viewport_hint: VirtualViewportHint,
+    bootstrap: bool,
+) -> VirtualWindowPlan {
+    let stripe_count = total_items.div_ceil(lanes);
+    let mut stripe_offsets = Vec::with_capacity(stripe_count);
+    let mut total_main_extent = Dp::ZERO;
+    for stripe_index in 0..stripe_count {
+        stripe_offsets.push(total_main_extent);
+        total_main_extent += stripe_extent;
+        if stripe_index + 1 < stripe_count {
+            total_main_extent += spacing;
+        }
+    }
+    let viewport_end = scroll_main + viewport_main;
+    let mut first_stripe = 0usize;
+    while first_stripe + 1 < stripe_count {
+        let end = stripe_offsets[first_stripe] + stripe_extent + spacing;
+        if end > scroll_main {
+            break;
+        }
+        first_stripe += 1;
+    }
+    let mut last_stripe = first_stripe;
+    while last_stripe + 1 < stripe_count {
+        if stripe_offsets[last_stripe + 1] >= viewport_end {
+            break;
+        }
+        last_stripe += 1;
+    }
+    if stripe_count == 0 {
+        last_stripe = 0;
+    }
+    let visible_start = first_stripe.saturating_sub(overscan).saturating_mul(lanes);
+    let visible_end = if stripe_count == 0 {
+        0
+    } else {
+        ((last_stripe + 1 + overscan).min(stripe_count) * lanes).min(total_items)
+    };
+    let spacing_total = spacing * lanes.saturating_sub(1) as f32;
+    let lane_extent = ((viewport_cross - spacing_total).max(0.0)) / lanes as f32;
+    let placements = (visible_start..visible_end)
+        .map(|item_index| {
+            let stripe_index = item_index / lanes;
+            let lane_index = item_index % lanes;
+            VirtualItemPlacement {
+                item_index,
+                main_offset: stripe_offsets
+                    .get(stripe_index)
+                    .copied()
+                    .unwrap_or(Dp::ZERO),
+                cross_offset: (lane_extent + spacing) * lane_index as f32,
+                cross_extent: lane_extent,
+            }
+        })
+        .collect();
+    VirtualWindowPlan {
+        total_items,
+        visible_range: visible_start..visible_end,
+        placements,
+        total_main_extent,
+        measurement_revision: 0,
+        viewport_hint,
+        bootstrap,
+    }
+}
+
+#[cfg(any(test, feature = "bench-support"))]
+#[allow(clippy::too_many_arguments)]
+fn resolve_measured_virtual_window_plan_legacy(
+    total_items: usize,
+    lanes: usize,
+    estimate: Dp,
+    spacing: Dp,
+    overscan: usize,
+    viewport_main: Dp,
+    viewport_cross: Dp,
+    scroll_main: Dp,
+    viewport_hint: VirtualViewportHint,
+    bootstrap: bool,
+    measured_extents: &HashMap<usize, Dp>,
+    measurement_revision: u64,
+) -> VirtualWindowPlan {
+    let stripe_count = total_items.div_ceil(lanes);
+    let item_main_extent = |item_index: usize| -> Dp {
+        measured_extents
+            .get(&item_index)
+            .copied()
+            .unwrap_or(estimate)
+            .max(Dp::ZERO)
+    };
+    let mut stripe_offsets = Vec::with_capacity(stripe_count);
+    let mut total_main_extent = Dp::ZERO;
+    for stripe_index in 0..stripe_count {
+        stripe_offsets.push(total_main_extent);
+        total_main_extent += stripe_extent_for(stripe_index, lanes, total_items, &item_main_extent);
+        if stripe_index + 1 < stripe_count {
+            total_main_extent += spacing;
+        }
+    }
+    let stripe_extent = |stripe_index: usize| -> Dp {
+        stripe_extent_for(stripe_index, lanes, total_items, &item_main_extent)
+    };
+    let viewport_end = scroll_main + viewport_main;
+    let mut first_stripe = 0usize;
+    while first_stripe + 1 < stripe_count {
+        let end = stripe_offsets[first_stripe] + stripe_extent(first_stripe) + spacing;
+        if end > scroll_main {
+            break;
+        }
+        first_stripe += 1;
+    }
+    let mut last_stripe = first_stripe;
+    while last_stripe + 1 < stripe_count {
+        if stripe_offsets[last_stripe + 1] >= viewport_end {
+            break;
+        }
+        last_stripe += 1;
+    }
+    if stripe_count == 0 {
+        last_stripe = 0;
+    }
+    let visible_start = first_stripe.saturating_sub(overscan).saturating_mul(lanes);
+    let visible_end = if stripe_count == 0 {
+        0
+    } else {
+        ((last_stripe + 1 + overscan).min(stripe_count) * lanes).min(total_items)
+    };
+    let spacing_total = spacing * lanes.saturating_sub(1) as f32;
+    let lane_extent = ((viewport_cross - spacing_total).max(0.0)) / lanes as f32;
+    let placements = (visible_start..visible_end)
+        .map(|item_index| {
+            let stripe_index = item_index / lanes;
+            let lane_index = item_index % lanes;
+            VirtualItemPlacement {
+                item_index,
+                main_offset: stripe_offsets
+                    .get(stripe_index)
+                    .copied()
+                    .unwrap_or(Dp::ZERO),
+                cross_offset: (lane_extent + spacing) * lane_index as f32,
+                cross_extent: lane_extent,
+            }
+        })
+        .collect();
+    VirtualWindowPlan {
+        total_items,
+        visible_range: visible_start..visible_end,
+        placements,
+        total_main_extent,
+        measurement_revision,
+        viewport_hint,
+        bootstrap,
+    }
+}
+
+#[cfg(feature = "bench-support")]
+pub(crate) mod legacy_uniform_window_plan {
+    use std::cell::Cell;
+
+    thread_local! {
+        static ENABLED: Cell<bool> = const { Cell::new(false) };
+    }
+
+    pub(crate) fn enabled() -> bool {
+        ENABLED.with(Cell::get)
+    }
+
+    pub(crate) fn with_enabled<R>(f: impl FnOnce() -> R) -> R {
+        ENABLED.with(|enabled| {
+            let previous = enabled.replace(true);
+            struct Reset<'a> {
+                enabled: &'a Cell<bool>,
+                previous: bool,
+            }
+            impl Drop for Reset<'_> {
+                fn drop(&mut self) {
+                    self.enabled.set(self.previous);
+                }
+            }
+            let _reset = Reset { enabled, previous };
+            f()
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn assert_dp_close(actual: Dp, expected: Dp) {
+        assert!(
+            (actual - expected).abs() <= 0.02,
+            "expected {expected:?}, got {actual:?}"
+        );
+    }
+
+    fn assert_plans_equivalent(actual: &VirtualWindowPlan, expected: &VirtualWindowPlan) {
+        assert_eq!(actual.visible_range, expected.visible_range);
+        assert_eq!(actual.placements.len(), expected.placements.len());
+        assert_dp_close(actual.total_main_extent, expected.total_main_extent);
+        for (actual, expected) in actual.placements.iter().zip(&expected.placements) {
+            assert_eq!(actual.item_index, expected.item_index);
+            assert_dp_close(actual.main_offset, expected.main_offset);
+            assert_eq!(actual.cross_offset, expected.cross_offset);
+            assert_eq!(actual.cross_extent, expected.cross_extent);
+        }
+    }
+
+    #[test]
+    fn measured_prefix_plan_matches_full_scan_for_sparse_large_sources() {
+        for total_items in [0usize, 1, 31, 1_000, 10_000, 100_000] {
+            for lanes in [1usize, 2, 4, 7] {
+                let estimate = dp(40.0);
+                let spacing = dp(4.0);
+                let viewport_cross = dp(317.0);
+                let signature =
+                    MeasuredVirtualSignature::new(11, total_items, lanes, estimate, viewport_cross);
+                let measurements = MeasuredVirtualState::default();
+                let stripe_count = total_items.div_ceil(lanes);
+                let mut seeded = Vec::new();
+                for stripe_index in [
+                    0usize,
+                    1,
+                    17,
+                    stripe_count / 2,
+                    stripe_count.saturating_sub(1),
+                ] {
+                    if stripe_index >= stripe_count {
+                        continue;
+                    }
+                    let start = stripe_index * lanes;
+                    let end = ((stripe_index + 1) * lanes).min(total_items);
+                    for item_index in start..end {
+                        let extent = if stripe_index % 2 == 0 {
+                            dp(18.0 + (item_index % lanes) as f32 * 3.0)
+                        } else {
+                            dp(64.0 + (item_index % lanes) as f32 * 5.0)
+                        };
+                        seeded.push((item_index, extent));
+                    }
+                }
+                measurements.replace_measurements(signature, seeded);
+
+                let mut state = VirtualRuntimeState {
+                    viewport_hint: Some(VirtualViewportHint {
+                        width: viewport_cross,
+                        height: dp(137.0),
+                    }),
+                    measurements,
+                    source_revision: 11,
+                    bootstrap: false,
+                    ..Default::default()
+                };
+                let end_scroll = estimate * stripe_count as f32;
+                for scroll_main in [
+                    Dp::ZERO,
+                    dp(44.0),
+                    dp(44.0 * 17.0),
+                    end_scroll / 2.0,
+                    end_scroll,
+                    end_scroll + dp(400.0),
+                ] {
+                    state.scroll_offset = Point::new(Dp::ZERO, scroll_main);
+                    let item_layout = ItemLayout::Measured {
+                        estimate,
+                        spacing,
+                        overscan: 3,
+                    };
+                    let actual = resolve_virtual_window_plan(
+                        VirtualArrangement::Grid {
+                            direction: VirtualDirection::Vertical,
+                            lanes,
+                        },
+                        item_layout,
+                        &state,
+                        total_items,
+                        VirtualViewportHint::default(),
+                        None,
+                    );
+                    let index = state.measurements.inner.read();
+                    let expected = resolve_measured_virtual_window_plan_legacy(
+                        total_items,
+                        lanes,
+                        estimate,
+                        spacing,
+                        3,
+                        dp(137.0),
+                        viewport_cross,
+                        scroll_main,
+                        state.viewport_hint.clone().unwrap(),
+                        false,
+                        &index.measured_extents,
+                        index.revision,
+                    );
+                    assert_plans_equivalent(&actual, &expected);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn measured_prefix_updates_only_when_the_lane_max_changes() {
+        let signature = MeasuredVirtualSignature::new(7, 5, 2, dp(40.0), dp(200.0));
+        let measurements = MeasuredVirtualState::default();
+        assert!(measurements.update_measurements(signature, &[(0, dp(80.0))]));
+        assert!(measurements.update_measurements(signature, &[(1, dp(90.0))]));
+        assert!(measurements.update_measurements(signature, &[(1, dp(20.0))]));
+        assert!(
+            !measurements.update_measurements(signature, &[(1, dp(30.0))]),
+            "changing a non-max lane must not perturb the prefix index"
+        );
+        assert!(measurements.update_measurements(signature, &[(0, dp(20.0))]));
+
+        let index = measurements.inner.read();
+        assert_eq!(index.stripe_extent(0), dp(30.0));
+        assert_eq!(index.stripe_extent(1), dp(40.0));
+        assert_eq!(index.stripe_extent(2), dp(40.0));
+        assert_eq!(index.total_main_extent(dp(4.0)), dp(118.0));
+    }
+
+    #[test]
+    fn measured_signature_change_discards_stale_indexed_feedback() {
+        let measurements = MeasuredVirtualState::default();
+        let initial = MeasuredVirtualSignature::new(1, 100_000, 1, dp(40.0), dp(300.0));
+        assert!(measurements.update_measurements(initial, &[(50_000, dp(100.0))]));
+        assert_eq!(measurements.measured_extent(50_000), Some(dp(100.0)));
+
+        let reordered = MeasuredVirtualSignature::new(2, 100_000, 1, dp(40.0), dp(300.0));
+        measurements.prepare(reordered);
+        assert_eq!(measurements.measured_extent(50_000), None);
+        let index = measurements.inner.read();
+        assert_eq!(index.total_main_extent(Dp::ZERO), dp(4_000_000.0));
+    }
+
+    #[test]
+    fn uniform_window_plan_matches_legacy_boundaries_for_large_sources() {
+        for total_items in [0usize, 1, 2, 31, 1_000, 10_000, 100_000] {
+            for lanes in [1usize, 2, 4, 7] {
+                for stripe_extent in [Dp::ZERO, dp(20.0), dp(40.0)] {
+                    for spacing in [Dp::ZERO, dp(4.0)] {
+                        let step = stripe_extent + spacing;
+                        let stripe_count = total_items.div_ceil(lanes);
+                        let end = step * stripe_count.saturating_sub(1) as f32;
+                        for scroll_main in [
+                            Dp::ZERO,
+                            step,
+                            (step - dp(0.25)).max(Dp::ZERO),
+                            step * 17.0,
+                            end,
+                            end + step,
+                        ] {
+                            for overscan in [0usize, 1, 3] {
+                                let viewport_hint = VirtualViewportHint {
+                                    width: dp(311.0),
+                                    height: dp(123.0),
+                                };
+                                let fast = resolve_uniform_virtual_window_plan(
+                                    total_items,
+                                    lanes,
+                                    stripe_extent,
+                                    spacing,
+                                    overscan,
+                                    dp(123.0),
+                                    dp(311.0),
+                                    scroll_main,
+                                    viewport_hint.clone(),
+                                    false,
+                                );
+                                let legacy = resolve_uniform_virtual_window_plan_legacy(
+                                    total_items,
+                                    lanes,
+                                    stripe_extent,
+                                    spacing,
+                                    overscan,
+                                    dp(123.0),
+                                    dp(311.0),
+                                    scroll_main,
+                                    viewport_hint,
+                                    false,
+                                );
+                                assert_eq!(fast.visible_range, legacy.visible_range);
+                                assert_eq!(fast.placements.len(), legacy.placements.len());
+                                assert_eq!(fast.total_main_extent, legacy.total_main_extent);
+                                for (actual, expected) in
+                                    fast.placements.iter().zip(&legacy.placements)
+                                {
+                                    assert_eq!(actual.item_index, expected.item_index);
+                                    assert_eq!(actual.main_offset, expected.main_offset);
+                                    assert_eq!(actual.cross_offset, expected.cross_offset);
+                                    assert_eq!(actual.cross_extent, expected.cross_extent);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn fixed_and_estimated_layouts_route_through_equivalent_uniform_plan() {
+        let mut state = VirtualRuntimeState::default();
+        state.viewport_hint = Some(VirtualViewportHint {
+            width: dp(320.0),
+            height: dp(120.0),
+        });
+        state.scroll_offset = Point::new(Dp::ZERO, dp(400_000.0));
+        state.bootstrap = false;
+        for item_layout in [
+            ItemLayout::Fixed {
+                item_extent: dp(40.0),
+                spacing: dp(4.0),
+                overscan: 2,
+            },
+            ItemLayout::Estimated {
+                estimate: dp(40.0),
+                spacing: dp(4.0),
+                overscan: 2,
+            },
+        ] {
+            let plan = resolve_virtual_window_plan(
+                VirtualArrangement::Linear(VirtualDirection::Vertical),
+                item_layout,
+                &state,
+                100_000,
+                VirtualViewportHint::default(),
+                None,
+            );
+            let expected = resolve_uniform_virtual_window_plan_legacy(
+                100_000,
+                1,
+                dp(40.0),
+                dp(4.0),
+                2,
+                dp(120.0),
+                dp(320.0),
+                dp(400_000.0),
+                state.viewport_hint.clone().unwrap(),
+                false,
+            );
+            assert_eq!(plan.visible_range, expected.visible_range);
+            assert_eq!(plan.total_main_extent, expected.total_main_extent);
+            assert_eq!(plan.placements.len(), expected.placements.len());
+        }
+    }
+}
+
+#[cfg(any(test, feature = "bench-support"))]
 fn stripe_extent_for<F>(
     stripe_index: usize,
     lanes: usize,
@@ -515,6 +1511,7 @@ type VirtualBuildFn<VM> = dyn for<'a, 'b> Fn(usize, StyleContext<'a>, &'b StyleS
 
 pub(crate) struct ErasedVirtualItemSource<VM> {
     len_fn: Arc<dyn Fn() -> usize + Send + Sync>,
+    revision_fn: Arc<dyn Fn() -> u64 + Send + Sync>,
     key_fn: Arc<dyn Fn(usize) -> Option<WidgetKey> + Send + Sync>,
     build_fn: Arc<VirtualBuildFn<VM>>,
 }
@@ -523,9 +1520,16 @@ impl<VM> Clone for ErasedVirtualItemSource<VM> {
     fn clone(&self) -> Self {
         Self {
             len_fn: self.len_fn.clone(),
+            revision_fn: self.revision_fn.clone(),
             key_fn: self.key_fn.clone(),
             build_fn: self.build_fn.clone(),
         }
+    }
+}
+
+impl<VM> ErasedVirtualItemSource<VM> {
+    pub(crate) fn revision(&self) -> u64 {
+        (self.revision_fn)()
     }
 }
 
@@ -542,6 +1546,10 @@ impl<VM: 'static> ErasedVirtualItemSource<VM> {
             len_fn: {
                 let source = source.clone();
                 Arc::new(move || source.len())
+            },
+            revision_fn: {
+                let source = source.clone();
+                Arc::new(move || source.revision())
             },
             key_fn: {
                 let source = source.clone();
@@ -571,6 +1579,10 @@ impl<VM: 'static> ErasedVirtualItemSource<VM> {
                 let source = source.clone();
                 Arc::new(move || source.len())
             },
+            revision_fn: {
+                let source = source.clone();
+                Arc::new(move || source.revision())
+            },
             key_fn: {
                 let source = source.clone();
                 Arc::new(move |index| source.key(index))
@@ -594,6 +1606,10 @@ impl<VM: 'static> ErasedVirtualItemSource<VM> {
             len_fn: {
                 let source = source.clone();
                 Arc::new(move || source.len())
+            },
+            revision_fn: {
+                let source = source.clone();
+                Arc::new(move || source.revision())
             },
             key_fn: {
                 let source = source.clone();
@@ -638,10 +1654,12 @@ impl<VM: 'static> ErasedVirtualItemSource<VM> {
         VM: 'static,
     {
         let len_fn = self.len_fn.clone();
+        let revision_fn = self.revision_fn.clone();
         let key_fn = self.key_fn.clone();
         let build_fn = self.build_fn.clone();
         ErasedVirtualItemSource {
             len_fn,
+            revision_fn,
             key_fn,
             build_fn: Arc::new(move |index, context, style_sheet| {
                 build_fn(index, context, style_sheet)
@@ -709,6 +1727,7 @@ impl<T, VM: 'static> VirtualViewport<T, VM> {
                     overflow_x,
                     overflow_y,
                     style: None,
+                    runtime_layout: None,
                     runtime_state: VirtualRuntimeState::default(),
                 },
             },
@@ -771,6 +1790,7 @@ impl<T, VM: 'static> VirtualViewport<T, VM> {
                     overflow_x,
                     overflow_y,
                     style: None,
+                    runtime_layout: None,
                     runtime_state: VirtualRuntimeState::default(),
                 },
             },
@@ -889,6 +1909,24 @@ impl<T, VM: 'static> VirtualViewport<T, VM> {
     ) -> Self {
         if let WidgetKind::Virtual { style, .. } = &mut self.element.kind {
             *style = Some(StyleResolver::full_with_style_sheet(resolver));
+        }
+        self
+    }
+
+    pub(crate) fn runtime_layout(
+        mut self,
+        resolver: impl Fn(
+                &mut crate::ui::layout::LayoutStyle,
+                &mut ItemLayout,
+                &StyleContext<'_>,
+                &StyleSheet,
+                &VisualStyle,
+            ) + Send
+            + Sync
+            + 'static,
+    ) -> Self {
+        if let WidgetKind::Virtual { runtime_layout, .. } = &mut self.element.kind {
+            *runtime_layout = Some(Arc::new(resolver));
         }
         self
     }
@@ -1241,6 +2279,7 @@ impl<T, VM: 'static> VirtualList<T, VM> {
                         overflow_x: Overflow::Hidden,
                         overflow_y: Overflow::Scroll,
                         style: None,
+                        runtime_layout: None,
                         runtime_state: VirtualRuntimeState::default(),
                     },
                 },
@@ -1313,6 +2352,22 @@ impl<T, VM: 'static> VirtualList<T, VM> {
             + 'static,
     ) -> Self {
         self.viewport = self.viewport.style_full_with_style_sheet(resolver);
+        self
+    }
+
+    pub(crate) fn runtime_layout(
+        mut self,
+        resolver: impl Fn(
+                &mut crate::ui::layout::LayoutStyle,
+                &mut ItemLayout,
+                &StyleContext<'_>,
+                &StyleSheet,
+                &VisualStyle,
+            ) + Send
+            + Sync
+            + 'static,
+    ) -> Self {
+        self.viewport = self.viewport.runtime_layout(resolver);
         self
     }
 

@@ -3,7 +3,7 @@ use super::*;
 impl<VM: 'static> BoundRuntimeHandler<VM> {
     pub(in crate::runtime) fn move_focused_input_cursor(
         &mut self,
-        next_index: impl FnOnce(&RopeBuffer, &TextEditState) -> usize,
+        next_index: impl FnOnce(&str, bool, &TextEditState) -> usize,
         extend_selection: bool,
     ) -> bool {
         let Some(widget_id) = self.focused_text_input_id() else {
@@ -29,8 +29,11 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 .text_input_buffers
                 .get(&widget_id)
                 .expect("text input session should be initialized");
-            let buffer = RopeBuffer::from_str(session.current_text());
-            next_index(&buffer, &clamped_state)
+            next_index(
+                session.current_text(),
+                session.current_text_is_ascii,
+                &clamped_state,
+            )
         };
         let anchor = if extend_selection {
             clamped_state.anchor

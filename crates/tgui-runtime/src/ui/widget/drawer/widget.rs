@@ -27,7 +27,10 @@
 //! - `close_on_backdrop_click` 在 collect 阶段按当前 open 信号注入 backdrop hit
 //!   region，避免初始关闭的 Drawer 打开后缺少点击 handler。
 
+use std::sync::Arc;
 use std::time::Duration;
+
+use parking_lot::RwLock;
 
 use crate::animation::Transition;
 use crate::foundation::color::Color;
@@ -37,7 +40,9 @@ use crate::ui::layout::{pct, Axis, Insets, LayoutStyle, Value};
 use crate::ui::theme::{StyleContext, WidgetState};
 use crate::ui::unit::Dp;
 use crate::ui::widget::common::VisualStyle;
-use crate::ui::widget::container::{set_layout_length, set_layout_lengths, IntoLengthValue};
+use crate::ui::widget::container::{
+    set_layout_inset, set_layout_length, set_layout_lengths, IntoLengthValue,
+};
 use crate::ui::widget::container::{Flex, Stack};
 use crate::ui::widget::core::Element;
 use crate::ui::widget::style::{ContainerStyle, DrawerStyle, StyleResolver, StyleSheet};
@@ -47,6 +52,23 @@ use super::descriptor::DrawerDescriptor;
 use super::placement::DrawerPlacement;
 
 const DRAWER_SLIDE_DURATION_MS: u64 = 250;
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+struct DrawerRuntimeMetrics {
+    width: Dp,
+    height: Dp,
+    padding: Insets,
+}
+
+impl From<&DrawerStyle> for DrawerRuntimeMetrics {
+    fn from(style: &DrawerStyle) -> Self {
+        Self {
+            width: style.width,
+            height: style.height,
+            padding: style.padding,
+        }
+    }
+}
 
 /// Drawer presentation mode.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -242,55 +264,9 @@ impl<VM: 'static> From<Drawer<VM>> for Element<VM> {
         // panel：侧边栏面板，根据 placement 决定位置和滑动方向
         // -----------------------------------------------------------------
         let drawer_style_for_panel = style.clone();
-        let resolved_style_for_layout = resolve_drawer_style_for_layout(style.as_ref());
-
-        // 根据 placement 计算 panel 的位置和尺寸
-        let (panel_width, panel_height) = match placement {
-            DrawerPlacement::Left | DrawerPlacement::Right => {
-                (Some(resolved_style_for_layout.width), None)
-            }
-            DrawerPlacement::Top | DrawerPlacement::Bottom => {
-                (None, Some(resolved_style_for_layout.height))
-            }
-        };
-
-        // 计算 slide 动画的位移值
-        // open=true 时位置为 0，open=false 时位置为负的宽度/高度（隐藏在屏幕外）
-        // 注意：left/right/top/bottom 都使用负值来表示"移出屏幕"
-        let slide_offset: Value<Dp> = match open.clone() {
-            Value::Static(open_now) => {
-                if open_now {
-                    Value::Static(Dp::ZERO)
-                } else {
-                    match placement {
-                        DrawerPlacement::Left => Value::Static(-resolved_style_for_layout.width),
-                        DrawerPlacement::Right => Value::Static(-resolved_style_for_layout.width),
-                        DrawerPlacement::Top => Value::Static(-resolved_style_for_layout.height),
-                        DrawerPlacement::Bottom => Value::Static(-resolved_style_for_layout.height),
-                    }
-                }
-            }
-            Value::Signal(signal) => {
-                let width = resolved_style_for_layout.width;
-                let height = resolved_style_for_layout.height;
-                Value::Signal(
-                    signal
-                        .map(move |o| {
-                            if o {
-                                Dp::ZERO
-                            } else {
-                                match placement {
-                                    DrawerPlacement::Left => -width,
-                                    DrawerPlacement::Right => -width,
-                                    DrawerPlacement::Top => -height,
-                                    DrawerPlacement::Bottom => -height,
-                                }
-                            }
-                        })
-                        .animated(slide_transition),
-                )
-            }
-        };
+        let runtime_metrics = Arc::new(RwLock::new(DrawerRuntimeMetrics::default()));
+        let panel_runtime_metrics = runtime_metrics.clone();
+        let panel_open = open.clone();
 
         // 构建 panel 容器
         let mut panel: Flex<VM> = Flex::new(Axis::Vertical)
@@ -312,43 +288,47 @@ impl<VM: 'static> From<Drawer<VM>> for Element<VM> {
                 s.surface.border_radius = Some(resolved.radius.clone());
                 s.surface.shadow = Some(resolved.shadow.into());
                 s
+            })
+            .runtime_layout(move |layout, container, _, _, _| {
+                let metrics = *panel_runtime_metrics.read();
+                let hidden_extent = match placement {
+                    DrawerPlacement::Left | DrawerPlacement::Right => metrics.width,
+                    DrawerPlacement::Top | DrawerPlacement::Bottom => metrics.height,
+                };
+                let slide_offset = drawer_extent_value(
+                    panel_open.clone(),
+                    Dp::ZERO,
+                    -hidden_extent,
+                    slide_transition,
+                );
+                match placement {
+                    DrawerPlacement::Left => {
+                        set_layout_inset(&mut layout.left, slide_offset);
+                        set_layout_inset(&mut layout.top, Dp::ZERO);
+                        set_layout_length(&mut layout.width, metrics.width);
+                        set_layout_length(&mut layout.height, pct(100.0));
+                    }
+                    DrawerPlacement::Right => {
+                        set_layout_inset(&mut layout.right, slide_offset);
+                        set_layout_inset(&mut layout.top, Dp::ZERO);
+                        set_layout_length(&mut layout.width, metrics.width);
+                        set_layout_length(&mut layout.height, pct(100.0));
+                    }
+                    DrawerPlacement::Top => {
+                        set_layout_inset(&mut layout.left, Dp::ZERO);
+                        set_layout_inset(&mut layout.top, slide_offset);
+                        set_layout_length(&mut layout.width, pct(100.0));
+                        set_layout_length(&mut layout.height, metrics.height);
+                    }
+                    DrawerPlacement::Bottom => {
+                        set_layout_inset(&mut layout.left, Dp::ZERO);
+                        set_layout_inset(&mut layout.bottom, slide_offset);
+                        set_layout_length(&mut layout.width, pct(100.0));
+                        set_layout_length(&mut layout.height, metrics.height);
+                    }
+                }
+                container.padding = Some(Value::Static(metrics.padding));
             });
-        // 根据 placement 设置位置和尺寸
-        match placement {
-            DrawerPlacement::Left => {
-                panel = panel
-                    .left(slide_offset)
-                    .top(Dp::ZERO)
-                    .width(panel_width.unwrap())
-                    .height(pct(100.0));
-            }
-            DrawerPlacement::Right => {
-                panel = panel
-                    .right(slide_offset)
-                    .top(Dp::ZERO)
-                    .width(panel_width.unwrap())
-                    .height(pct(100.0));
-            }
-            DrawerPlacement::Top => {
-                panel = panel
-                    .left(Dp::ZERO)
-                    .top(slide_offset)
-                    .width(pct(100.0))
-                    .height(panel_height.unwrap());
-            }
-            DrawerPlacement::Bottom => {
-                panel = panel
-                    .left(Dp::ZERO)
-                    .bottom(slide_offset)
-                    .width(pct(100.0))
-                    .height(panel_height.unwrap());
-            }
-        }
-
-        // 设置 padding
-        if resolved_style_for_layout.padding != Insets::ZERO {
-            panel = panel.padding(resolved_style_for_layout.padding);
-        }
 
         // 添加内容
         if let Some(content_element) = content {
@@ -361,8 +341,20 @@ impl<VM: 'static> From<Drawer<VM>> for Element<VM> {
         // -----------------------------------------------------------------
         // 外层 Stack：全屏绝对定位容器，backdrop 仅在打开时捕获点击。
         // -----------------------------------------------------------------
+        let outer_style = style.clone();
+        let outer_runtime_metrics = runtime_metrics;
         let outer: Stack<VM> = Stack::<VM>::new()
             .size(pct(100.0), pct(100.0))
+            .runtime_layout(move |_, _, context, style_sheet, visual| {
+                let resolved = resolve_drawer_style_with_sheet(
+                    outer_style.as_ref(),
+                    context,
+                    style_sheet,
+                    visual,
+                    WidgetState::default(),
+                );
+                *outer_runtime_metrics.write() = DrawerRuntimeMetrics::from(&resolved);
+            })
             .position_absolute()
             .left(Dp::ZERO)
             .top(Dp::ZERO)
@@ -470,19 +462,9 @@ fn build_push_drawer_host<VM: 'static>(content: Element<VM>, drawer: Drawer<VM>)
 
     let slide_transition = Transition::ease_in_out(Duration::from_millis(DRAWER_SLIDE_DURATION_MS));
     let drawer_style_for_panel = style.clone();
-    let resolved_style_for_layout = resolve_drawer_style_for_layout(style.as_ref());
-    let target_extent = match placement {
-        DrawerPlacement::Left | DrawerPlacement::Right => resolved_style_for_layout.width,
-        DrawerPlacement::Top | DrawerPlacement::Bottom => resolved_style_for_layout.height,
-    };
-    let panel_extent: Value<Dp> = match open.clone() {
-        Value::Static(open_now) => Value::Static(if open_now { target_extent } else { Dp::ZERO }),
-        Value::Signal(signal) => Value::Signal(
-            signal
-                .map(move |open| if open { target_extent } else { Dp::ZERO })
-                .animated(slide_transition),
-        ),
-    };
+    let runtime_metrics = Arc::new(RwLock::new(DrawerRuntimeMetrics::default()));
+    let panel_runtime_metrics = runtime_metrics.clone();
+    let panel_open = open.clone();
 
     let mut panel: Flex<VM> = Flex::new(Axis::Vertical)
         .cursor(CursorStyle::Default)
@@ -508,19 +490,31 @@ fn build_push_drawer_host<VM: 'static>(content: Element<VM>, drawer: Drawer<VM>)
             s.surface.border_radius = Some(resolved.radius.clone());
             s.surface.shadow = Some(resolved.shadow.into());
             s
+        })
+        .runtime_layout(move |layout, container, _, _, _| {
+            let metrics = *panel_runtime_metrics.read();
+            let target_extent = match placement {
+                DrawerPlacement::Left | DrawerPlacement::Right => metrics.width,
+                DrawerPlacement::Top | DrawerPlacement::Bottom => metrics.height,
+            };
+            let panel_extent = drawer_extent_value(
+                panel_open.clone(),
+                target_extent,
+                Dp::ZERO,
+                slide_transition,
+            );
+            match placement {
+                DrawerPlacement::Left | DrawerPlacement::Right => {
+                    set_layout_length(&mut layout.width, panel_extent);
+                    set_layout_length(&mut layout.height, pct(100.0));
+                }
+                DrawerPlacement::Top | DrawerPlacement::Bottom => {
+                    set_layout_length(&mut layout.width, pct(100.0));
+                    set_layout_length(&mut layout.height, panel_extent);
+                }
+            }
+            container.padding = Some(Value::Static(metrics.padding));
         });
-
-    match placement {
-        DrawerPlacement::Left | DrawerPlacement::Right => {
-            panel = panel.width(panel_extent).height(pct(100.0));
-        }
-        DrawerPlacement::Top | DrawerPlacement::Bottom => {
-            panel = panel.width(pct(100.0)).height(panel_extent);
-        }
-    }
-    if resolved_style_for_layout.padding != Insets::ZERO {
-        panel = panel.padding(resolved_style_for_layout.padding);
-    }
     if let Some(content) = drawer_content {
         panel = panel.child(content);
     }
@@ -538,6 +532,18 @@ fn build_push_drawer_host<VM: 'static>(content: Element<VM>, drawer: Drawer<VM>)
         DrawerPlacement::Top => Flex::vertical().child(panel_element).child(main_content),
         DrawerPlacement::Bottom => Flex::vertical().child(main_content).child(panel_element),
     };
+    let root_style = style.clone();
+    let root_runtime_metrics = runtime_metrics;
+    let root = root.runtime_layout(move |_, _, context, style_sheet, visual| {
+        let resolved = resolve_drawer_style_with_sheet(
+            root_style.as_ref(),
+            context,
+            style_sheet,
+            visual,
+            WidgetState::default(),
+        );
+        *root_runtime_metrics.write() = DrawerRuntimeMetrics::from(&resolved);
+    });
     let mut root_element: Element<VM> = root.into();
     root_element.drawer = Some(Box::new(DrawerDescriptor {
         open,
@@ -567,19 +573,22 @@ impl<VM> Drawer<VM> {
     }
 }
 
-fn resolve_drawer_style(
-    style: Option<&StyleResolver<DrawerStyle>>,
-    context: &StyleContext<'_>,
-) -> DrawerStyle {
-    let style_sheet = StyleSheet::default();
-    let visual = VisualStyle::default();
-    resolve_drawer_style_with_sheet(
-        style,
-        context,
-        &style_sheet,
-        &visual,
-        WidgetState::default(),
-    )
+fn drawer_extent_value(
+    open: Value<bool>,
+    open_extent: Dp,
+    closed_extent: Dp,
+    transition: Transition,
+) -> Value<Dp> {
+    match open {
+        Value::Static(open_now) => {
+            Value::Static(if open_now { open_extent } else { closed_extent })
+        }
+        Value::Signal(signal) => Value::Signal(
+            signal
+                .map(move |open| if open { open_extent } else { closed_extent })
+                .animated(transition),
+        ),
+    }
 }
 
 fn resolve_drawer_style_with_sheet(
@@ -596,12 +605,6 @@ fn resolve_drawer_style_with_sheet(
     style
         .map(|resolver| resolver.resolve_from(base.clone(), context))
         .unwrap_or(base)
-}
-
-fn resolve_drawer_style_for_layout(style: Option<&StyleResolver<DrawerStyle>>) -> DrawerStyle {
-    let theme = crate::ui::theme::Theme::default();
-    let context = StyleContext::from_theme(&theme);
-    resolve_drawer_style(style, &context)
 }
 
 fn drawer_backdrop_color(open: Value<bool>, base: Value<Color>) -> Value<Color> {

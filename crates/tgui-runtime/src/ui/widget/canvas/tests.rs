@@ -23,6 +23,14 @@ fn test_media() -> MediaManager {
 }
 
 fn rendered_items(scene: &CanvasScene) -> Vec<super::CanvasSceneItemRender> {
+    rendered_items_with_context(scene, true, &test_media())
+}
+
+fn rendered_items_with_context(
+    scene: &CanvasScene,
+    collect_hit_metadata: bool,
+    media: &MediaManager,
+) -> Vec<super::CanvasSceneItemRender> {
     let font_manager = FontManager::new(&FontCatalog::default());
     tessellate_canvas_scene_items(
         scene,
@@ -30,8 +38,9 @@ fn rendered_items(scene: &CanvasScene) -> Vec<super::CanvasSceneItemRender> {
         1.0,
         None,
         None,
+        collect_hit_metadata,
         &font_manager,
-        &test_media(),
+        media,
         UnitContext::default(),
     )
 }

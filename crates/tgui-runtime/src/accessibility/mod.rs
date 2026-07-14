@@ -12,6 +12,29 @@ use crate::ui::widget::{
 pub(crate) const ROOT_NODE_ID: NodeId = NodeId(0);
 const WIDGET_NODE_OFFSET: u64 = 1;
 
+/// Runtime state that can change the contents or topology of the AccessKit tree.
+///
+/// A changed key always rebuilds the complete tree. Paint-only hover/animation state is excluded:
+/// it cannot change any node emitted below. Scene-only offset/scale animation has its own geometry
+/// epoch, while the scroll epoch participates only when the computed scene has an actually
+/// scrollable region. Keeping the key value-based (rather than hashing it) also avoids correctness
+/// depending on hash collision resistance.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct TreeUpdateKey {
+    pub(crate) invalidation_revision: u64,
+    pub(crate) scene_serial: u64,
+    pub(crate) viewport: Rect,
+    pub(crate) theme_epoch: u64,
+    pub(crate) style_sheet_version: u64,
+    pub(crate) density: crate::ui::theme::Density,
+    pub(crate) reduced_motion: bool,
+    pub(crate) text_scale_bits: u32,
+    pub(crate) accessibility_animation_epoch: u64,
+    pub(crate) scroll_epoch: Option<u64>,
+    pub(crate) text_input_epoch: u64,
+    pub(crate) external_portal_revision: u64,
+}
+
 pub(crate) fn node_id_from_widget(widget_id: WidgetId) -> NodeId {
     NodeId(widget_id.raw().saturating_add(WIDGET_NODE_OFFSET))
 }
@@ -276,9 +299,14 @@ fn apply_widget_semantics<VM: 'static>(
     }
 
     if let Some(list_item) = resolved.list_item.as_ref() {
-        node.set_selected(list_item.selected_keys.resolve().contains(&list_item.key));
+        node.set_selected(
+            list_item
+                .selection
+                .selected_key_membership
+                .resolve_ref(|membership| membership.contains(&list_item.key)),
+        );
         node.set_position_in_set(list_item.item_index + 1);
-        node.set_size_of_set(list_item.sibling_keys.len());
+        node.set_size_of_set(list_item.selection.sibling_keys.len());
         node.add_action(Action::Click);
         if list_item.disabled.resolve() {
             node.set_disabled();
@@ -380,7 +408,7 @@ fn apply_widget_semantics<VM: 'static>(
             } else if let Some(list_item) =
                 children.iter().find_map(|child| child.list_item.as_ref())
             {
-                node.set_size_of_set(list_item.sibling_keys.len());
+                node.set_size_of_set(list_item.selection.sibling_keys.len());
                 if list_item.selection_mode == crate::ui::widget::ListSelectionMode::Multiple {
                     node.set_multiselectable();
                 }

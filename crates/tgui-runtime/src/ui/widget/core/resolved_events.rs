@@ -7,6 +7,8 @@ impl<VM> ResolvedElement<VM> {
         media: &MediaManager,
         states: &mut Vec<MediaEventState<VM>>,
     ) {
+        #[cfg(test)]
+        media_event_walk_probe::record_visit();
         match &self.kind {
             ResolvedWidgetKind::Container { children, .. } => {
                 for child in children {
@@ -83,5 +85,26 @@ impl<VM> ResolvedElement<VM> {
                 child.collect_lifecycle_event_states(states);
             }
         }
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod media_event_walk_probe {
+    use std::cell::Cell;
+
+    thread_local! {
+        static VISITS: Cell<usize> = const { Cell::new(0) };
+    }
+
+    pub(crate) fn record_visit() {
+        VISITS.set(VISITS.get() + 1);
+    }
+
+    pub(crate) fn reset() {
+        VISITS.set(0);
+    }
+
+    pub(crate) fn visits() -> usize {
+        VISITS.get()
     }
 }

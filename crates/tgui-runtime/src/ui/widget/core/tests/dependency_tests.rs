@@ -886,9 +886,15 @@ fn measured_virtual_viewport_updates_total_extent_after_collect_feedback() {
 
     let next_virtual_state = VirtualCacheState {
         viewport_hint: Some(update.viewport_hint.clone()),
-        measured_extents: update.measured_extents.iter().copied().collect(),
         widget_ids_by_key: update.widget_ids_by_key.iter().cloned().collect(),
+        ..Default::default()
     };
+    next_virtual_state.measurements.update_measurements(
+        update
+            .measurement_signature
+            .expect("measured update should carry its index signature"),
+        &update.measured_extents,
+    );
     let second_layout = tree.build_scene_layout(
         &font_manager,
         &theme,
@@ -973,9 +979,15 @@ fn measured_virtual_viewport_can_shrink_below_estimate_after_collect_feedback() 
 
     let next_virtual_state = VirtualCacheState {
         viewport_hint: Some(update.viewport_hint.clone()),
-        measured_extents: update.measured_extents.iter().copied().collect(),
         widget_ids_by_key: update.widget_ids_by_key.iter().cloned().collect(),
+        ..Default::default()
     };
+    next_virtual_state.measurements.update_measurements(
+        update
+            .measurement_signature
+            .expect("measured update should carry its index signature"),
+        &update.measured_extents,
+    );
     let second_layout = tree.build_scene_layout(
         &font_manager,
         &theme,
@@ -1014,17 +1026,34 @@ fn measured_virtual_viewport_ignores_subpixel_extent_jitter() {
     .into();
     let widget_id = element.id;
     let tree: WidgetTree<()> = WidgetTree::new(element);
-    let virtual_states = HashMap::from([(
-        widget_id,
-        VirtualCacheState {
-            viewport_hint: Some(VirtualViewportHint {
-                width: dp(200.0),
-                height: dp(80.0),
-            }),
-            measured_extents: HashMap::from([(0, dp(30.0)), (1, dp(30.0)), (2, dp(30.0))]),
-            ..Default::default()
-        },
-    )]);
+    let initial_layout = tree.build_scene_layout(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        UnitContext::default(),
+        &HashMap::new(),
+        &HashMap::new(),
+        viewport,
+    );
+    let signature = match &initial_layout.resolved_root.kind {
+        ResolvedWidgetKind::Virtual { runtime_state, .. } => runtime_state
+            .measurements
+            .signature()
+            .expect("measured layout should prepare its index signature"),
+        _ => panic!("root should resolve to virtual widget"),
+    };
+    let seeded_state = VirtualCacheState {
+        viewport_hint: Some(VirtualViewportHint {
+            width: dp(200.0),
+            height: dp(80.0),
+        }),
+        ..Default::default()
+    };
+    seeded_state
+        .measurements
+        .update_measurements(signature, &[(0, dp(30.0)), (1, dp(30.0)), (2, dp(30.0))]);
+    let virtual_states = HashMap::from([(widget_id, seeded_state)]);
 
     let layout = tree.build_scene_layout(
         &font_manager,

@@ -1,7 +1,6 @@
 use crate::foundation::view_model::{Command, ValueCommand};
 use crate::theme::{StyleContext, WidgetState};
 use crate::ui::layout::{pct, Axis, LayoutStyle, Value};
-use crate::ui::theme::Theme;
 
 use super::common::VisualStyle;
 use super::core::Element;
@@ -118,7 +117,6 @@ impl<VM> ResizablePanels<VM> {
 
 impl<VM: 'static> From<ResizablePanels<VM>> for Element<VM> {
     fn from(splitter: ResizablePanels<VM>) -> Self {
-        let layout_style = resolve_splitter_style_for_layout(splitter.style.as_ref());
         let constraints = splitter
             .panes
             .iter()
@@ -137,29 +135,30 @@ impl<VM: 'static> From<ResizablePanels<VM>> for Element<VM> {
                 let style = splitter.style.clone();
                 let axis = splitter.axis;
                 let handle_identity = splitter.visual.clone();
-                let handle_width = if axis == SplitterAxis::Horizontal {
-                    crate::ui::layout::Length::Px(layout_style.hit_extent)
-                } else {
-                    pct(100.0)
-                };
-                let handle_height = if axis == SplitterAxis::Horizontal {
-                    pct(100.0)
-                } else {
-                    crate::ui::layout::Length::Px(layout_style.hit_extent)
-                };
-                let line_width = if axis == SplitterAxis::Horizontal {
-                    crate::ui::layout::Length::Px(layout_style.handle_thickness)
-                } else {
-                    pct(100.0)
-                };
-                let line_height = if axis == SplitterAxis::Horizontal {
-                    pct(100.0)
-                } else {
-                    crate::ui::layout::Length::Px(layout_style.handle_thickness)
-                };
+                let handle_layout_style = splitter.style.clone();
+                let line_layout_style = splitter.style.clone();
                 let mut handle: Element<VM> = with_visual_identity(
                     Stack::new()
-                        .size(handle_width, handle_height)
+                        .runtime_layout(move |layout, _container, context, style_sheet, visual| {
+                            let resolved = resolve_splitter_style_with_sheet(
+                                handle_layout_style.as_ref(),
+                                context,
+                                style_sheet,
+                                visual,
+                                WidgetState::default(),
+                            );
+                            if axis == SplitterAxis::Horizontal {
+                                layout.width = Some(Value::Static(crate::ui::layout::Length::Px(
+                                    resolved.hit_extent,
+                                )));
+                                layout.height = Some(Value::Static(pct(100.0)));
+                            } else {
+                                layout.width = Some(Value::Static(pct(100.0)));
+                                layout.height = Some(Value::Static(crate::ui::layout::Length::Px(
+                                    resolved.hit_extent,
+                                )));
+                            }
+                        })
                         .center()
                         .cursor(if axis == SplitterAxis::Horizontal {
                             CursorStyle::EwResize
@@ -206,7 +205,30 @@ impl<VM: 'static> From<ResizablePanels<VM>> for Element<VM> {
                         .tab_index(0)
                         .child(with_visual_identity(
                             Stack::<VM>::new()
-                                .size(line_width, line_height)
+                                .runtime_layout(
+                                    move |layout, _container, context, style_sheet, visual| {
+                                        let resolved = resolve_splitter_style_with_sheet(
+                                            line_layout_style.as_ref(),
+                                            context,
+                                            style_sheet,
+                                            visual,
+                                            WidgetState::default(),
+                                        );
+                                        if axis == SplitterAxis::Horizontal {
+                                            layout.width =
+                                                Some(Value::Static(crate::ui::layout::Length::Px(
+                                                    resolved.handle_thickness,
+                                                )));
+                                            layout.height = Some(Value::Static(pct(100.0)));
+                                        } else {
+                                            layout.width = Some(Value::Static(pct(100.0)));
+                                            layout.height =
+                                                Some(Value::Static(crate::ui::layout::Length::Px(
+                                                    resolved.handle_thickness,
+                                                )));
+                                        }
+                                    },
+                                )
                                 .style_full_with_style_sheet(
                                     move |context, style_sheet, visual, state| {
                                         let resolved = resolve_splitter_style_with_sheet(
@@ -243,11 +265,22 @@ impl<VM: 'static> From<ResizablePanels<VM>> for Element<VM> {
                 children.push(handle);
             }
         }
+        let runtime_style = splitter.style.clone();
         let mut root: Element<VM> = Flex::new(match splitter.axis {
             SplitterAxis::Horizontal => Axis::Horizontal,
             SplitterAxis::Vertical => Axis::Vertical,
         })
-        .gap(layout_style.gap)
+        .gap(crate::ui::unit::dp(0.0))
+        .runtime_layout(move |_layout, container, context, style_sheet, visual| {
+            let resolved = resolve_splitter_style_with_sheet(
+                runtime_style.as_ref(),
+                context,
+                style_sheet,
+                visual,
+                WidgetState::default(),
+            );
+            container.gap = Value::Static(crate::ui::layout::Length::Px(resolved.gap));
+        })
         .child(children)
         .into();
         root.key = splitter.key;
@@ -343,20 +376,6 @@ pub(crate) fn splitter_reset_sizes(count: usize) -> Vec<f32> {
     normalize_sizes(Vec::new(), count)
 }
 
-fn resolve_splitter_style(
-    style: Option<&StyleResolver<SplitterStyle>>,
-    context: &StyleContext<'_>,
-) -> SplitterStyle {
-    let style_sheet = StyleSheet::default();
-    resolve_splitter_style_with_sheet(
-        style,
-        context,
-        &style_sheet,
-        &VisualStyle::default(),
-        WidgetState::default(),
-    )
-}
-
 fn resolve_splitter_style_with_sheet(
     style: Option<&StyleResolver<SplitterStyle>>,
     context: &StyleContext<'_>,
@@ -377,14 +396,6 @@ fn resolve_splitter_style_with_sheet(
             sheet.apply_splitter_state(base, context, visual, state)
         },
     )
-}
-
-fn resolve_splitter_style_for_layout(
-    style: Option<&StyleResolver<SplitterStyle>>,
-) -> SplitterStyle {
-    let theme = Theme::default();
-    let context = StyleContext::from_theme(&theme);
-    resolve_splitter_style(style, &context)
 }
 
 #[cfg(test)]

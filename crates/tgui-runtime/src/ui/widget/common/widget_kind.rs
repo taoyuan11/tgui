@@ -51,6 +51,47 @@ pub(crate) struct ContainerLayout {
     pub scroll_view: Option<ScrollViewConfig>,
 }
 
+pub(crate) type RuntimeContainerLayoutResolver = Arc<
+    dyn Fn(
+            &mut LayoutStyle,
+            &mut ContainerLayout,
+            &crate::ui::theme::StyleContext<'_>,
+            &crate::ui::widget::style::StyleSheet,
+            &mut VisualStyle,
+        ) + Send
+        + Sync,
+>;
+pub(crate) type RuntimeWidgetLayoutResolver = Arc<
+    dyn Fn(
+            &mut LayoutStyle,
+            &crate::ui::theme::StyleContext<'_>,
+            &crate::ui::widget::style::StyleSheet,
+            &VisualStyle,
+        ) + Send
+        + Sync,
+>;
+
+pub(crate) type RuntimeElementLayoutResolver = Arc<
+    dyn Fn(
+            &mut LayoutStyle,
+            &crate::ui::theme::StyleContext<'_>,
+            &crate::ui::widget::style::StyleSheet,
+            &VisualStyle,
+        ) + Send
+        + Sync,
+>;
+
+pub(crate) type RuntimeVirtualLayoutResolver = Arc<
+    dyn Fn(
+            &mut LayoutStyle,
+            &mut ItemLayout,
+            &crate::ui::theme::StyleContext<'_>,
+            &crate::ui::widget::style::StyleSheet,
+            &VisualStyle,
+        ) + Send
+        + Sync,
+>;
+
 impl ContainerLayout {
     pub(crate) fn flow() -> Self {
         Self {
@@ -256,6 +297,7 @@ pub(crate) enum WidgetKind<VM> {
         layout: ContainerLayout,
         children: Vec<ChildSource<VM>>,
         style: Option<StyleResolver<ContainerStyle>>,
+        runtime_layout: Option<RuntimeContainerLayoutResolver>,
     },
     Virtual {
         arrangement: VirtualArrangement,
@@ -265,6 +307,7 @@ pub(crate) enum WidgetKind<VM> {
         overflow_x: Overflow,
         overflow_y: Overflow,
         style: Option<StyleResolver<ContainerStyle>>,
+        runtime_layout: Option<RuntimeVirtualLayoutResolver>,
         runtime_state: VirtualRuntimeState,
     },
     Text {
@@ -295,6 +338,7 @@ pub(crate) enum WidgetKind<VM> {
         disabled: Value<bool>,
         variant: ButtonVariantKind,
         style: Option<StyleResolver<WidgetButtonStyle>>,
+        runtime_layout: Option<RuntimeElementLayoutResolver>,
     },
     Checkbox {
         checked: Value<bool>,
@@ -355,6 +399,7 @@ pub(crate) enum WidgetKind<VM> {
         disabled: Value<bool>,
         validation: Value<ValidationVisualState>,
         style: Option<StyleResolver<WidgetSliderStyle>>,
+        runtime_layout: Option<RuntimeWidgetLayoutResolver>,
     },
     ProgressBar {
         value: Value<f32>,
@@ -390,6 +435,7 @@ pub(crate) enum WidgetKind<VM> {
         show_scrollbar: Value<bool>,
         auto_wrap: Value<bool>,
         validation: Value<ValidationVisualState>,
+        runtime_layout: Option<RuntimeElementLayoutResolver>,
     },
     ToastHost {
         queue: ToastQueue<VM>,
@@ -508,12 +554,20 @@ impl<VM: 'static> TabTriggerState<VM> {
     }
 }
 
+pub(crate) struct ListSelectionMetadata {
+    pub selected_keys: Value<std::sync::Arc<[WidgetKey]>>,
+    pub selected_key_membership: Value<std::sync::Arc<std::collections::HashSet<WidgetKey>>>,
+    pub sibling_keys: std::sync::Arc<[WidgetKey]>,
+    pub sibling_index_by_key: std::sync::Arc<std::collections::HashMap<WidgetKey, usize>>,
+    pub sibling_disabled: std::sync::Arc<[bool]>,
+}
+
 pub(crate) struct ListItemState<VM> {
     pub list_id: WidgetId,
     pub row_index: usize,
     pub item_index: usize,
     pub key: WidgetKey,
-    pub selected_keys: Value<Vec<WidgetKey>>,
+    pub selection: std::sync::Arc<ListSelectionMetadata>,
     pub selection_mode: crate::ui::widget::ListSelectionMode,
     pub disabled: Value<bool>,
     pub item_extent: Dp,
@@ -524,8 +578,6 @@ pub(crate) struct ListItemState<VM> {
     pub item_disabled_background: Value<Color>,
     pub on_selection_change: Option<ValueCommand<VM, crate::ui::widget::ListSelectionChange>>,
     pub on_item_action: Option<ValueCommand<VM, crate::ui::widget::ListItemAction>>,
-    pub sibling_keys: std::sync::Arc<[WidgetKey]>,
-    pub sibling_disabled: std::sync::Arc<[bool]>,
 }
 
 pub(crate) struct TreeRootState {
@@ -928,7 +980,7 @@ impl<VM> Clone for ListItemState<VM> {
             row_index: self.row_index,
             item_index: self.item_index,
             key: self.key.clone(),
-            selected_keys: self.selected_keys.clone(),
+            selection: self.selection.clone(),
             selection_mode: self.selection_mode,
             disabled: self.disabled.clone(),
             item_extent: self.item_extent,
@@ -939,8 +991,6 @@ impl<VM> Clone for ListItemState<VM> {
             item_disabled_background: self.item_disabled_background.clone(),
             on_selection_change: self.on_selection_change.clone(),
             on_item_action: self.on_item_action.clone(),
-            sibling_keys: self.sibling_keys.clone(),
-            sibling_disabled: self.sibling_disabled.clone(),
         }
     }
 }
@@ -1078,7 +1128,7 @@ impl<VM: 'static> ListItemState<VM> {
             row_index: self.row_index,
             item_index: self.item_index,
             key: self.key,
-            selected_keys: self.selected_keys,
+            selection: self.selection,
             selection_mode: self.selection_mode,
             disabled: self.disabled,
             item_extent: self.item_extent,
@@ -1091,8 +1141,6 @@ impl<VM: 'static> ListItemState<VM> {
                 .on_selection_change
                 .map(|command| command.scope(selector.clone())),
             on_item_action: self.on_item_action.map(|command| command.scope(selector)),
-            sibling_keys: self.sibling_keys,
-            sibling_disabled: self.sibling_disabled,
         }
     }
 }
@@ -1123,6 +1171,7 @@ impl<VM> Clone for WidgetKind<VM> {
                 layout,
                 children,
                 style,
+                runtime_layout,
             } => {
                 // CRITICAL: Deep container nesting can cause stack overflow on Windows (1MB stack)
                 // when cloning recursively. Use stacker to extend stack for deep clones.
@@ -1135,6 +1184,7 @@ impl<VM> Clone for WidgetKind<VM> {
                             layout: layout.clone(),
                             children: children.clone(),
                             style: style.clone(),
+                            runtime_layout: runtime_layout.clone(),
                         }
                     })
                 }
@@ -1144,6 +1194,7 @@ impl<VM> Clone for WidgetKind<VM> {
                         layout: layout.clone(),
                         children: children.clone(),
                         style: style.clone(),
+                        runtime_layout: runtime_layout.clone(),
                     }
                 }
             }
@@ -1155,6 +1206,7 @@ impl<VM> Clone for WidgetKind<VM> {
                 overflow_x,
                 overflow_y,
                 style,
+                runtime_layout,
                 runtime_state,
             } => Self::Virtual {
                 arrangement: *arrangement,
@@ -1164,6 +1216,7 @@ impl<VM> Clone for WidgetKind<VM> {
                 overflow_x: *overflow_x,
                 overflow_y: *overflow_y,
                 style: style.clone(),
+                runtime_layout: runtime_layout.clone(),
                 runtime_state: runtime_state.clone(),
             },
             Self::Text { text } => Self::Text { text: text.clone() },
@@ -1194,11 +1247,13 @@ impl<VM> Clone for WidgetKind<VM> {
                 disabled,
                 variant,
                 style,
+                runtime_layout,
             } => Self::Button {
                 label: label.clone(),
                 disabled: disabled.clone(),
                 variant: *variant,
                 style: style.clone(),
+                runtime_layout: runtime_layout.clone(),
             },
             Self::Checkbox {
                 checked,
@@ -1298,6 +1353,7 @@ impl<VM> Clone for WidgetKind<VM> {
                 disabled,
                 validation,
                 style,
+                runtime_layout,
             } => Self::Slider {
                 value: value.clone(),
                 min: *min,
@@ -1313,6 +1369,7 @@ impl<VM> Clone for WidgetKind<VM> {
                 disabled: disabled.clone(),
                 validation: validation.clone(),
                 style: style.clone(),
+                runtime_layout: runtime_layout.clone(),
             },
             Self::ProgressBar {
                 value,
@@ -1367,6 +1424,7 @@ impl<VM> Clone for WidgetKind<VM> {
                 show_scrollbar,
                 auto_wrap,
                 validation,
+                runtime_layout,
             } => Self::TextEditor {
                 controller: controller.clone(),
                 placeholder: placeholder.clone(),
@@ -1379,6 +1437,7 @@ impl<VM> Clone for WidgetKind<VM> {
                 show_scrollbar: show_scrollbar.clone(),
                 auto_wrap: auto_wrap.clone(),
                 validation: validation.clone(),
+                runtime_layout: runtime_layout.clone(),
             },
             Self::ToastHost {
                 queue,

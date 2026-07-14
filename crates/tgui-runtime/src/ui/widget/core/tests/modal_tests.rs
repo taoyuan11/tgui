@@ -4,6 +4,8 @@ use std::time::Duration;
 
 use crate::animation::Transition;
 use crate::foundation::view_model::ValueCommand;
+use crate::ui::layout::Value;
+use crate::ui::theme::Density;
 use crate::ui::widget::{Modal, ModalAction, ModalStyle};
 
 #[test]
@@ -169,6 +171,241 @@ fn modal_with_on_open_change_keeps_descriptor_attached() {
 fn modal_style_defaults_include_enter_scale() {
     let style = ModalStyle::default_for_theme(&Theme::light());
     assert!((style.enter_scale - 0.96).abs() < f32::EPSILON);
+}
+
+#[test]
+fn modal_density_geometry_reaches_real_scene_primitives() {
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let viewport = Rect::new(0.0, 0.0, 900.0, 700.0);
+
+    for (density, expected_width) in [
+        (Density::Compact, dp(272.0)),
+        (Density::Spacious, dp(360.0)),
+    ] {
+        let mut theme = Theme::light();
+        theme.density = density;
+        let modal_style = ModalStyle::default_for_density(&theme, density);
+        let mut animations = AnimationEngine::default();
+        let tree: WidgetTree<()> = WidgetTree::new(
+            Modal::new(true)
+                .title("Density-aware dialog")
+                .style_full(move |_| modal_style.clone()),
+        );
+        let computed = tree.compute_scene(
+            &font_manager,
+            &theme,
+            &media,
+            &mut animations,
+            None,
+            None,
+            &HashMap::new(),
+            viewport,
+            None,
+            None,
+            None,
+            None,
+            false,
+        );
+
+        let card = computed
+            .scene
+            .shapes
+            .iter()
+            .find(|shape| {
+                shape.color == theme.colors.outline_muted
+                    && (shape.rect.width - expected_width).abs() <= dp(0.1)
+            })
+            .unwrap_or_else(|| {
+                panic!(
+                    "modal card should use density width {expected_width:?}; shapes={:?}",
+                    computed
+                        .scene
+                        .shapes
+                        .iter()
+                        .map(|shape| (shape.rect, shape.color, shape.corner_radius))
+                        .collect::<Vec<_>>()
+                )
+            });
+        assert_eq!(card.corner_radius, theme.radius.xl.get());
+        assert!(
+            card.rect.x >= theme.spacing.md,
+            "modal card should retain a viewport margin: {:?}",
+            card.rect
+        );
+    }
+}
+
+#[test]
+fn modal_runtime_geometry_and_enter_scale_follow_the_same_tree() {
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let viewport = Rect::new(0.0, 0.0, 900.0, 700.0);
+    let modal = |open| {
+        Modal::new(open)
+            .title("Runtime modal")
+            .content(Text::new("Body"))
+            .action(ModalAction::primary("OK"))
+            .style(|style, context| match context.density {
+                Density::Compact => {
+                    style.min_width = dp(250.0);
+                    style.max_width = dp(290.0);
+                    style.max_height = dp(360.0);
+                    style.margin = Insets::all(dp(8.0));
+                    style.padding = Insets::all(dp(3.0));
+                    style.title_padding = Insets::all(dp(5.0));
+                    style.content_padding = Insets::all(dp(7.0));
+                    style.actions_padding = Insets::all(dp(9.0));
+                    style.actions_gap = dp(4.0);
+                    style.enter_scale = 0.88;
+                }
+                Density::Comfortable => {}
+                Density::Spacious => {
+                    style.min_width = dp(340.0);
+                    style.max_width = dp(420.0);
+                    style.max_height = dp(520.0);
+                    style.margin = Insets::all(dp(20.0));
+                    style.padding = Insets::all(dp(11.0));
+                    style.title_padding = Insets::all(dp(13.0));
+                    style.content_padding = Insets::all(dp(15.0));
+                    style.actions_padding = Insets::all(dp(17.0));
+                    style.actions_gap = dp(12.0);
+                    style.enter_scale = 0.94;
+                }
+            })
+    };
+    let open_tree: WidgetTree<()> = WidgetTree::new(modal(true));
+    let closed_tree: WidgetTree<()> = WidgetTree::new(modal(false));
+
+    for (
+        mut theme,
+        min_width,
+        max_width,
+        max_height,
+        margin,
+        card_padding,
+        title_padding,
+        content_padding,
+        actions_padding,
+        actions_gap,
+        enter_scale,
+    ) in [
+        (
+            Theme::light(),
+            dp(250.0),
+            dp(290.0),
+            dp(360.0),
+            dp(8.0),
+            dp(3.0),
+            dp(5.0),
+            dp(7.0),
+            dp(9.0),
+            dp(4.0),
+            0.88,
+        ),
+        (
+            Theme::dark(),
+            dp(340.0),
+            dp(420.0),
+            dp(520.0),
+            dp(20.0),
+            dp(11.0),
+            dp(13.0),
+            dp(15.0),
+            dp(17.0),
+            dp(12.0),
+            0.94,
+        ),
+    ] {
+        theme.density = if matches!(theme.mode, crate::ui::theme::ResolvedThemeMode::Light) {
+            Density::Compact
+        } else {
+            Density::Spacious
+        };
+        let mut animations = AnimationEngine::default();
+        let layout = open_tree.build_scene_layout(
+            &font_manager,
+            &theme,
+            &media,
+            &mut animations,
+            UnitContext::default(),
+            &HashMap::new(),
+            &HashMap::new(),
+            viewport,
+        );
+        let ResolvedWidgetKind::Container { children, .. } = &layout.resolved_root.kind else {
+            panic!("modal root should remain a container");
+        };
+        let card = &children[1];
+        assert_eq!(
+            card.layout.min_width,
+            Some(Value::Static(crate::ui::layout::Length::Px(min_width)))
+        );
+        assert_eq!(
+            card.layout.max_width,
+            Some(Value::Static(crate::ui::layout::Length::Px(max_width)))
+        );
+        assert_eq!(
+            card.layout.max_height,
+            Some(Value::Static(crate::ui::layout::Length::Px(max_height)))
+        );
+        assert_eq!(card.layout.margin, Value::Static(Insets::all(margin)));
+        let ResolvedWidgetKind::Container {
+            layout: card_container,
+            children: card_children,
+            ..
+        } = &card.kind
+        else {
+            panic!("modal card should remain a container");
+        };
+        assert_eq!(
+            card_container.padding,
+            Some(Value::Static(Insets::all(card_padding)))
+        );
+        for (child, expected_padding) in
+            card_children
+                .iter()
+                .zip([title_padding, content_padding, actions_padding])
+        {
+            let ResolvedWidgetKind::Container { layout, .. } = &child.kind else {
+                panic!("modal section should remain a container");
+            };
+            assert_eq!(
+                layout.padding,
+                Some(Value::Static(Insets::all(expected_padding)))
+            );
+        }
+        let ResolvedWidgetKind::Container {
+            layout: actions_layout,
+            ..
+        } = &card_children[2].kind
+        else {
+            panic!("modal actions should remain a container");
+        };
+        assert_eq!(
+            actions_layout.gap,
+            Value::Static(crate::ui::layout::Length::Px(actions_gap))
+        );
+
+        let mut animations = AnimationEngine::default();
+        let closed = closed_tree.build_scene_layout(
+            &font_manager,
+            &theme,
+            &media,
+            &mut animations,
+            UnitContext::default(),
+            &HashMap::new(),
+            &HashMap::new(),
+            viewport,
+        );
+        let ResolvedWidgetKind::Container { children, .. } = &closed.resolved_root.kind else {
+            panic!("modal root should remain a container");
+        };
+        assert!(
+            (children[1].visual.scale.resolve() - enter_scale).abs() <= f32::EPSILON,
+            "closed modal should use the active theme's enter scale"
+        );
+    }
 }
 
 #[test]

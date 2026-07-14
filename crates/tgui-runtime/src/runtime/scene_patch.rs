@@ -30,12 +30,33 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
 
     fn patch_cached_layout_for_roots_inner(&mut self, roots: &[WidgetId], now: Instant) -> bool {
         let started_at = text_profile_enabled().then_some(Instant::now());
-        let Some(cached) = self.cached_scene.as_ref() else {
-            return false;
+        let contains_virtual = {
+            let Some(cached) = self.cached_scene.as_ref() else {
+                return false;
+            };
+            let Some(layout) = cached.layout.as_ref() else {
+                return false;
+            };
+            roots
+                .iter()
+                .any(|root| layout.subtree_contains_virtual(*root))
         };
-        let Some(layout) = cached.layout.as_ref() else {
-            return false;
-        };
+        // A normal reactive/theme layout patch can include a Virtual descendant
+        // just as readily as a scroll-driven patch. Preserve its measured index,
+        // viewport hint, stable keyed ids, and scroll offset instead of silently
+        // rebuilding the window from empty runtime state.
+        if contains_virtual {
+            return self.patch_cached_layout_for_roots_with_runtime_state_inner(roots, now);
+        }
+
+        let cached = self
+            .cached_scene
+            .as_ref()
+            .expect("layout cache was validated above");
+        let layout = cached
+            .layout
+            .as_ref()
+            .expect("layout cache was validated above");
         let touched_owner_ids = roots
             .iter()
             .flat_map(|root| layout.subtree_widget_ids(*root))
@@ -421,7 +442,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         }
 
         let recompose_started_at = text_profile_enabled().then_some(Instant::now());
-        let mut updated_computed = {
+        {
             let Some(cached) = self.cached_scene.as_mut() else {
                 return false;
             };
@@ -652,6 +673,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             cached.computed_valid = true;
             cached.animation_epoch = self.animation_epoch;
             cached.layout_animation_epoch = self.layout_animation_epoch;
+            cached.accessibility_animation_epoch = self.accessibility_animation_epoch;
             if sync_runtime_scene_state {
                 cached.focused_widget = focused_widget;
                 cached.focus_visible = self.focus_visible;
@@ -670,23 +692,46 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 cached.hovered_scrollbar = self.hovered_scrollbar;
                 cached.active_scrollbar = active_scrollbar;
             }
-            cached.computed.clone()
+        }
+        // Preserve the old portal behavior: menu keyboard state is derived from the newly
+        // patched cached scene before that scene is moved out for portal collection.
+        let external_portal_widget_states = self.widget_state_map(active_scrollbar);
+        // The patched scene is now fully owned by `cached.computed`. Move it out while
+        // external portals are appended instead of cloning the entire retained scene.
+        // Every exit below restores the moved value before returning.
+        let mut updated_computed = {
+            let Some(cached) = self.cached_scene.as_mut() else {
+                return false;
+            };
+            std::mem::take(&mut cached.computed)
         };
-        self.append_external_portals_to_computed(&mut updated_computed, now);
+        self.append_external_portals_to_computed(
+            &mut updated_computed,
+            &external_portal_widget_states,
+            now,
+        );
         if let Some(cached) = self.cached_scene.as_mut() {
             cached
                 .dependencies
                 .merge_from(&updated_computed.dependencies);
-            cached.computed = updated_computed.clone();
         }
 
         let actual_focused_input = self.focused_text_input_id_cached(&updated_computed);
         let actual_caret_visible = self.caret_visible_at(now, actual_focused_input);
         if actual_focused_input != focused_input || actual_caret_visible != caret_visible {
+            if let Some(cached) = self.cached_scene.as_mut() {
+                cached.computed = updated_computed;
+            }
             return false;
         }
 
+        let updated_hit_region_count = updated_computed.hit_regions.len();
+        let updated_scroll_region_count = updated_computed.scroll_regions.len();
         self.sync_text_inputs_from_computed(&updated_computed);
+        if let Some(cached) = self.cached_scene.as_mut() {
+            cached.computed = updated_computed;
+        }
+        self.rebuild_scroll_view_controller_bindings();
         self.rebuild_reactive_slot_bindings(now);
         self.rebuild_media_texture_bindings();
         self.rebuild_caret_decoration_binding();
@@ -709,8 +754,8 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     sync_runtime_scene_state,
                     focused_input,
                     actual_focused_input,
-                    updated_computed.hit_regions.len(),
-                    updated_computed.scroll_regions.len(),
+                    updated_hit_region_count,
+                    updated_scroll_region_count,
                     collect_elapsed_ms,
                     resolve_roots_elapsed_ms,
                     focus_override_elapsed_ms,

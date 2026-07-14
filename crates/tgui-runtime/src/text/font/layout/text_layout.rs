@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use cosmic_text::{Buffer, FontSystem};
 use unicode_segmentation::UnicodeSegmentation;
 
@@ -8,7 +10,8 @@ use super::lines::logical_line_offsets;
 pub(crate) struct TextLayoutInfo {
     pub width: f32,
     pub height: f32,
-    pub(in crate::text::font) lines: Vec<TextLineLayoutInfo>,
+    // Cache hits retain the immutable line/caret geometry; incremental edits detach via COW.
+    pub(in crate::text::font) lines: Arc<Vec<TextLineLayoutInfo>>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -379,6 +382,6 @@ pub(crate) fn build_layout_info_from_buffer(
     TextLayoutInfo {
         width,
         height: height.max(line_height),
-        lines,
+        lines: Arc::new(lines),
     }
 }

@@ -20,8 +20,7 @@ use crate::foundation::binding::{
 use crate::foundation::color::Color;
 use crate::foundation::view_model::{Command, ValueCommand};
 use crate::media::{
-    media_placeholder_color, media_placeholder_label, resolve_media_rect, ContentFit,
-    IntrinsicSize, MediaManager, RasterRequest,
+    media_placeholder_color, media_placeholder_label, ContentFit, IntrinsicSize, MediaManager,
 };
 use crate::text::font::{FontManager, TextFontRequest, TextLayoutInfo};
 use crate::ui::layout::{
@@ -75,6 +74,8 @@ mod resolved;
 mod resolved_eq;
 mod resolved_eq_lifecycle;
 mod resolved_events;
+#[cfg(test)]
+pub(crate) use self::resolved_events::media_event_walk_probe;
 mod resolved_freeze;
 mod resolved_layout;
 mod scene;

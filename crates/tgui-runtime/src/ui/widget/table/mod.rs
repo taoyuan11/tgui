@@ -1,5 +1,7 @@
 use std::sync::Arc;
 
+use parking_lot::RwLock;
+
 use crate::foundation::color::Color;
 use crate::foundation::view_model::{Command, ValueCommand};
 use crate::theme::{StyleContext, WidgetState};
@@ -346,28 +348,38 @@ impl DataGridStyle {
         Self {
             surface: WidgetSurfaceStyle {
                 background: Some(Value::Static(theme.colors.surface)),
-                border_color: Some(Value::Static(theme.colors.outline_muted)),
-                border_width: Some(Value::Static(theme.border.thin)),
-                border_radius: Some(Value::Static(theme.radius.md)),
+                border_color: Some(Value::Static(Color::TRANSPARENT)),
+                border_width: Some(Value::Static(theme.border.none)),
+                border_radius: Some(Value::Static(theme.radius.lg)),
                 ..WidgetSurfaceStyle::default()
             },
             header_height: theme.spacing.xl + theme.spacing.sm,
             compact_row_height: theme.spacing.xl,
             regular_row_height: theme.spacing.xl + theme.spacing.sm,
-            spacious_row_height: theme.spacing.xxl,
+            spacious_row_height: theme.spacing.xxl + theme.spacing.sm,
             cell_padding: Insets::symmetric(theme.spacing.md, theme.spacing.xs + theme.spacing.xxs),
             header_background: Value::Static(theme.colors.surface_low),
-            header_text: Value::Static(palette.on_surface),
+            header_text: Value::Static(palette.on_surface_muted),
             row_background: Value::Static(Color::TRANSPARENT),
-            zebra_background: Value::Static(theme.colors.surface_low.with_alpha_factor(0.48)),
-            row_hover_background: Value::Static(theme.colors.surface_low),
-            row_selected_background: Value::Static(theme.colors.primary_container),
+            zebra_background: Value::Static(Color::TRANSPARENT),
+            row_hover_background: Value::Static(theme.colors.surface_low.with_alpha_factor(0.72)),
+            row_selected_background: Value::Static(
+                theme.colors.primary_container.with_alpha_factor(0.72),
+            ),
             cell_focused_border: Value::Static(theme.colors.focus_ring),
             cell_editing_background: Value::Static(theme.colors.surface),
-            grid_line: Value::Static(theme.colors.outline_muted),
+            grid_line: Value::Static(theme.colors.outline_muted.with_alpha_factor(0.64)),
             resize_handle: Value::Static(theme.colors.outline),
             sort_indicator: Value::Static(theme.colors.primary),
             scrollbar: ContainerStyle::default_for_theme(theme).scrollbar,
+        }
+    }
+
+    fn header_height_for_density(&self, density: DataGridDensity) -> Dp {
+        match density {
+            DataGridDensity::Compact => self.compact_row_height,
+            DataGridDensity::Regular => self.header_height,
+            DataGridDensity::Spacious => self.spacious_row_height,
         }
     }
 
@@ -376,6 +388,27 @@ impl DataGridStyle {
             DataGridDensity::Compact => self.compact_row_height,
             DataGridDensity::Regular => self.regular_row_height,
             DataGridDensity::Spacious => self.spacious_row_height,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct DataGridRuntimeMetrics {
+    header_height: Dp,
+    row_height: Dp,
+    cell_padding: Insets,
+}
+
+impl DataGridRuntimeMetrics {
+    fn resolve(
+        style: &DataGridStyle,
+        density: DataGridDensity,
+        row_height_override: Option<Dp>,
+    ) -> Self {
+        Self {
+            header_height: style.header_height_for_density(density),
+            row_height: row_height_override.unwrap_or_else(|| style.row_height(density)),
+            cell_padding: style.cell_padding,
         }
     }
 }
@@ -842,12 +875,17 @@ where
 
         let grid_id = WidgetId::next();
         let style_resolver = self.style.clone();
-        let style = resolve_data_grid_style_for_layout(style_resolver.as_ref());
-        let row_height = self
-            .row_height
-            .unwrap_or_else(|| style.row_height(self.density));
-        let item_layout = self.item_layout.unwrap_or(ItemLayout::Fixed {
-            item_extent: row_height,
+        let density = self.density;
+        let row_height_override = self.row_height;
+        let item_layout_override = self.item_layout;
+        let initial_row_height = row_height_override.unwrap_or(dp(40.0));
+        let runtime_metrics = Arc::new(RwLock::new(DataGridRuntimeMetrics {
+            header_height: dp(40.0),
+            row_height: initial_row_height,
+            cell_padding: Insets::ZERO,
+        }));
+        let initial_item_layout = item_layout_override.unwrap_or(ItemLayout::Fixed {
+            item_extent: initial_row_height,
             spacing: Dp::ZERO,
             overscan: 2,
         });
@@ -881,13 +919,12 @@ where
         let source = DataGridRowSource {
             rows: self.rows.into(),
         };
-        let style = Arc::new(style);
         let header = build_header(
             grid_id,
             body_id,
             columns.clone(),
             sort.clone(),
-            style.clone(),
+            runtime_metrics.clone(),
             style_resolver.clone(),
             self.on_sort_change.clone(),
             self.on_column_width_change.clone(),
@@ -899,15 +936,16 @@ where
         let on_cell_action = self.on_cell_action.clone();
         let on_cell_edit_commit = self.on_cell_edit_commit.clone();
         let context_menu = Arc::new(self.context_menu);
-        let row_style = style.clone();
         let row_columns = columns.clone();
         let row_selected_keys = selected_keys.clone();
         let row_style_resolver = style_resolver.clone();
         let body_style_resolver = style_resolver.clone();
+        let row_runtime_metrics = runtime_metrics.clone();
         let mut virtual_rows: Element<VM> =
             VirtualList::new(source, move |_visible, row| match row {
                 DataGridVirtualRow::Section(header) => {
                     let mut section = header.clone();
+                    let row_height = row_runtime_metrics.read().row_height;
                     section.layout.width =
                         Some(Value::Static(crate::ui::layout::Length::Px(total_width)));
                     section.layout.height =
@@ -932,9 +970,8 @@ where
                     selection_mode,
                     row_keys.clone(),
                     row_disabled.clone(),
-                    row_style.clone(),
+                    row_runtime_metrics.clone(),
                     row_style_resolver.clone(),
-                    row_height,
                     on_selection_change.clone(),
                     on_cell_action.clone(),
                     on_cell_edit_commit.clone(),
@@ -942,7 +979,21 @@ where
                     total_width,
                 ),
             })
-            .item_layout(item_layout)
+            .item_layout(initial_item_layout)
+            .runtime_layout({
+                let runtime_metrics = runtime_metrics.clone();
+                move |_, item_layout, _, _, _| {
+                    if let Some(item_layout_override) = item_layout_override {
+                        *item_layout = item_layout_override;
+                    } else {
+                        *item_layout = ItemLayout::Fixed {
+                            item_extent: runtime_metrics.read().row_height,
+                            spacing: Dp::ZERO,
+                            overscan: 2,
+                        };
+                    }
+                }
+            })
             .content_cross_extent(total_width)
             .width(pct(100.0))
             .overflow_x(Overflow::Scroll)
@@ -967,10 +1018,24 @@ where
             .into();
         virtual_rows.id = body_id;
 
+        let root_style_resolver = style_resolver.clone();
+        let root_runtime_metrics = runtime_metrics;
         let mut root: Element<VM> = Flex::vertical()
+            .runtime_layout(move |_, _, context, style_sheet, visual| {
+                let style = resolve_data_grid_style_with_sheet(
+                    root_style_resolver.as_ref(),
+                    context,
+                    style_sheet,
+                    visual,
+                    WidgetState::default(),
+                );
+                *root_runtime_metrics.write() =
+                    DataGridRuntimeMetrics::resolve(&style, density, row_height_override);
+            })
             .child(header)
             .child(virtual_rows)
             .align(Align::Stretch)
+            .overflow(Overflow::Hidden)
             .into();
         root.id = grid_id;
         root.key = self.key;
@@ -999,7 +1064,7 @@ fn build_header<T, VM: 'static>(
     scroll_container_id: WidgetId,
     columns: Arc<Vec<DataGridColumn<T, VM>>>,
     sort: Value<Vec<DataGridSort>>,
-    style: Arc<DataGridStyle>,
+    runtime_metrics: Arc<RwLock<DataGridRuntimeMetrics>>,
     style_resolver: Option<StyleResolver<DataGridStyle>>,
     on_sort_change: Option<ValueCommand<VM, DataGridSortChange>>,
     on_column_width_change: Option<ValueCommand<VM, DataGridColumnWidthChange>>,
@@ -1009,8 +1074,15 @@ fn build_header<T, VM: 'static>(
 where
     T: Clone + Send + Sync + 'static,
 {
+    let initial_metrics = *runtime_metrics.read();
+    let header_metrics = runtime_metrics.clone();
     let mut header = Flex::horizontal()
-        .height(style.header_height)
+        .height(initial_metrics.header_height)
+        .runtime_layout(move |layout, _, _, _, _| {
+            layout.height = Some(Value::Static(crate::ui::layout::Length::Px(
+                header_metrics.read().header_height,
+            )));
+        })
         .width(total_width);
     let pin_metrics = column_pin_metrics(columns.as_ref());
     for (column_index, column) in columns.iter().enumerate() {
@@ -1045,11 +1117,19 @@ where
             style_resolver.clone(),
             DataGridTextRole::Header,
         );
+        let cell_metrics = runtime_metrics.clone();
         let mut cell: Element<VM> = Stack::new()
             .child(child)
             .width(width)
-            .height(style.header_height)
-            .padding(style.cell_padding)
+            .height(initial_metrics.header_height)
+            .padding(initial_metrics.cell_padding)
+            .runtime_layout(move |layout, container, _, _, _| {
+                let metrics = *cell_metrics.read();
+                layout.height = Some(Value::Static(crate::ui::layout::Length::Px(
+                    metrics.header_height,
+                )));
+                container.padding = Some(Value::Static(metrics.cell_padding));
+            })
             .into();
         let header_focusable = Some(column.sortable || column.reorderable);
         let header_tab_index = Some(if column_index == 0 { 0 } else { -1 });
@@ -1080,9 +1160,15 @@ where
             on_column_reorder: on_column_reorder.clone(),
         };
         if column.resizable {
+            let handle_metrics = runtime_metrics.clone();
             let mut handle: Element<VM> = Stack::new()
                 .width(dp(6.0))
-                .height(style.header_height)
+                .height(initial_metrics.header_height)
+                .runtime_layout(move |layout, _, _, _, _| {
+                    layout.height = Some(Value::Static(crate::ui::layout::Length::Px(
+                        handle_metrics.read().header_height,
+                    )));
+                })
                 .position_absolute()
                 .right(dp(0.0))
                 .cursor(CursorStyle::EwResize)
@@ -1097,22 +1183,24 @@ where
                 max_width: column.max_width,
                 on_column_width_change: on_column_width_change.clone(),
             });
+            let wrapper_metrics = runtime_metrics.clone();
             cell = Stack::new()
                 .child(cell)
                 .child(handle)
                 .width(width)
-                .height(style.header_height)
+                .height(initial_metrics.header_height)
+                .runtime_layout(move |layout, _, _, _, _| {
+                    layout.height = Some(Value::Static(crate::ui::layout::Length::Px(
+                        wrapper_metrics.read().header_height,
+                    )));
+                })
                 .into();
-            cell.visual.border_color = Some(style.grid_line.clone());
-            cell.visual.border_width = Some(Value::Static(dp(0.5)));
             apply_data_grid_cell_container_style(&mut cell, style_resolver.clone());
             cell.focus.focusable = header_focusable;
             cell.focus.tab_index = header_tab_index;
             cell.interactions.cursor_style = header_cursor;
             cell.data_grid_header = Some(header_state);
         } else {
-            cell.visual.border_color = Some(style.grid_line.clone());
-            cell.visual.border_width = Some(Value::Static(dp(0.5)));
             apply_data_grid_cell_container_style(&mut cell, style_resolver.clone());
             cell.focus.focusable = header_focusable;
             cell.focus.tab_index = header_tab_index;
@@ -1140,9 +1228,8 @@ fn build_data_row<T, VM: 'static>(
     selection_mode: DataGridSelectionMode,
     sibling_keys: Arc<[WidgetKey]>,
     sibling_disabled: Arc<[bool]>,
-    style: Arc<DataGridStyle>,
+    runtime_metrics: Arc<RwLock<DataGridRuntimeMetrics>>,
     style_resolver: Option<StyleResolver<DataGridStyle>>,
-    row_height: Dp,
     on_selection_change: Option<ValueCommand<VM, DataGridSelectionChange>>,
     on_cell_action: Option<ValueCommand<VM, DataGridCellAction>>,
     on_cell_edit_commit: Option<ValueCommand<VM, DataGridCellEditCommit>>,
@@ -1154,7 +1241,16 @@ where
 {
     let selected = selected_keys.resolve().contains(&row_key);
     let disabled_now = disabled.resolve();
-    let mut row_element = Flex::horizontal().width(total_width).height(row_height);
+    let initial_metrics = *runtime_metrics.read();
+    let row_metrics = runtime_metrics.clone();
+    let mut row_element = Flex::horizontal()
+        .width(total_width)
+        .height(initial_metrics.row_height)
+        .runtime_layout(move |layout, _, _, _, _| {
+            layout.height = Some(Value::Static(crate::ui::layout::Length::Px(
+                row_metrics.read().row_height,
+            )));
+        });
     let pin_metrics = column_pin_metrics(columns.as_ref());
     for (column_index, column) in columns.iter().enumerate() {
         let column_width = resolved_column_width(column);
@@ -1179,15 +1275,21 @@ where
             style_resolver.clone(),
             DataGridTextRole::Cell,
         );
+        let cell_metrics = runtime_metrics.clone();
         let mut cell: Element<VM> = Stack::new()
             .child(child)
             .width(column_width)
-            .height(row_height)
-            .padding(style.cell_padding)
+            .height(initial_metrics.row_height)
+            .padding(initial_metrics.cell_padding)
+            .runtime_layout(move |layout, container, _, _, _| {
+                let metrics = *cell_metrics.read();
+                layout.height = Some(Value::Static(crate::ui::layout::Length::Px(
+                    metrics.row_height,
+                )));
+                container.padding = Some(Value::Static(metrics.cell_padding));
+            })
             .align_self(column.align)
             .into();
-        cell.visual.border_color = Some(style.grid_line.clone());
-        cell.visual.border_width = Some(Value::Static(dp(0.5)));
         apply_data_grid_cell_container_style(&mut cell, style_resolver.clone());
         cell.key = Some(WidgetKey::from(format!("{row_key:?}:{:?}", column.key)));
         cell.focus.focusable = Some(!disabled_now);
@@ -1281,14 +1383,6 @@ fn resolve_data_grid_style_with_sheet(
         .unwrap_or(base)
 }
 
-fn resolve_data_grid_style_for_layout(
-    style: Option<&StyleResolver<DataGridStyle>>,
-) -> DataGridStyle {
-    let theme = crate::ui::theme::Theme::default();
-    let context = StyleContext::from_theme(&theme);
-    resolve_data_grid_style(style, &context)
-}
-
 fn apply_container_style<VM>(
     element: &mut Element<VM>,
     resolver: impl Fn(&StyleContext<'_>, &StyleSheet, &VisualStyle, WidgetState) -> ContainerStyle
@@ -1320,6 +1414,9 @@ fn apply_data_grid_root_style<VM>(
         container.surface.background_image = style.surface.background_image;
         container.surface.background_blur = style.surface.background_blur;
         container.surface.shadow = style.surface.shadow;
+        container.surface.border_color = style.surface.border_color;
+        container.surface.border_width = style.surface.border_width;
+        container.surface.border_radius = style.surface.border_radius;
         container.surface.opacity = style.surface.opacity;
         container.surface.offset = style.surface.offset;
         container
@@ -1385,7 +1482,7 @@ fn apply_data_grid_cell_container_style<VM>(
         );
         let mut container = ContainerStyle::default_for_theme(context.theme);
         container.surface.border_color = Some(style.grid_line);
-        container.surface.border_width = Some(Value::Static(dp(0.5)));
+        container.surface.border_width = Some(Value::Static(context.theme.border.thin));
         container
     });
 }
@@ -1400,9 +1497,16 @@ fn apply_default_data_grid_text_style<VM>(
             text.style = Some(StyleResolver::full(move |context| {
                 let style = resolve_data_grid_style(style_resolver.as_ref(), context);
                 let mut text_style = TextWidgetStyle::default_for_theme(context.theme);
-                text_style.color = match role {
-                    DataGridTextRole::Header | DataGridTextRole::Cell => style.header_text,
-                };
+                match role {
+                    DataGridTextRole::Header => {
+                        text_style.color = style.header_text;
+                        text_style.typography = context.theme.typography.label.clone();
+                    }
+                    DataGridTextRole::Cell => {
+                        text_style.color = Value::Static(context.theme.colors.on_surface);
+                        text_style.typography = context.theme.typography.body_small.clone();
+                    }
+                }
                 text_style
             }));
         }

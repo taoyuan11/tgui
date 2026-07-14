@@ -1,6 +1,8 @@
 use crate::foundation::error::TguiError;
+use crate::ui::widget::Rect;
+use wgpu::util::DeviceExt;
 
-use super::{surface, OffscreenTarget, Renderer};
+use super::{surface, OffscreenTarget, PresentResources, Renderer, TextQuadSpec, TextVertex};
 
 const BACKDROP_BLUR_TARGET_SCALE: u32 = 2;
 
@@ -26,6 +28,55 @@ impl RendererTargets {
 }
 
 impl Renderer {
+    pub(super) fn recreate_present_resources(&mut self) {
+        self.present_resources = self.scene_target.as_ref().map(|scene_target| {
+            let quad = TextVertex::quad(
+                TextQuadSpec {
+                    rect: Rect::new(
+                        0.0,
+                        0.0,
+                        self.config.width as f32 / self.scale_factor,
+                        self.config.height as f32 / self.scale_factor,
+                    ),
+                    uv_rect: None,
+                    corner_radius: 0.0,
+                    clip_mask: None,
+                    opacity: 1.0,
+                    tint: [255; 4],
+                },
+                self.vertex_viewport(),
+            );
+            let vertex_buffer = self
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("tgui-scene-present-vertices"),
+                    contents: bytemuck::cast_slice(&quad),
+                    usage: wgpu::BufferUsages::VERTEX,
+                });
+            let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("tgui-scene-present-bind-group"),
+                layout: &self.present_bind_group_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(
+                            self.offscreen_sampled_view(scene_target),
+                        ),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Sampler(&self.text_sampler),
+                    },
+                ],
+            });
+            PresentResources {
+                bind_group,
+                vertex_buffer,
+                vertex_count: quad.len() as u32,
+            }
+        });
+    }
+
     fn create_target(&self, label: &str, sample_count: u32) -> Result<OffscreenTarget, TguiError> {
         surface::create_offscreen_target(&self.device, &self.config, label, sample_count)
             .ok_or_else(|| TguiError::TextRender(format!("{label} unavailable")))
@@ -125,5 +176,6 @@ impl Renderer {
         self.blur_scratch_target = None;
         self.canvas_composite_targets.clear();
         self.canvas_composite_mask_targets.clear();
+        self.recreate_present_resources();
     }
 }

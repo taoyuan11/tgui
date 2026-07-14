@@ -23,13 +23,34 @@ pub struct BadgeStyle {
 
 impl BadgeStyle {
     pub fn default_for_theme(theme: &Theme, tone: BadgeTone) -> Self {
+        Self::default_for_density(theme, theme.density, tone)
+    }
+
+    pub fn default_for_density(theme: &Theme, density: Density, tone: BadgeTone) -> Self {
         let (background, foreground) = tone_colors(theme, tone);
+        let (dot_size, min_height, padding_x) = match density {
+            Density::Compact => (
+                theme.spacing.sm - theme.spacing.xxs,
+                theme.spacing.md,
+                theme.spacing.xs,
+            ),
+            Density::Comfortable => (
+                theme.spacing.sm,
+                theme.spacing.md + theme.spacing.xs,
+                theme.spacing.sm - theme.spacing.xxs,
+            ),
+            Density::Spacious => (
+                theme.spacing.sm + theme.spacing.xxs,
+                theme.spacing.lg,
+                theme.spacing.sm,
+            ),
+        };
         Self {
             background: Value::Static(background),
             foreground: Value::Static(foreground),
-            dot_size: theme.spacing.sm,
-            min_height: theme.spacing.md,
-            padding_x: theme.spacing.xs,
+            dot_size,
+            min_height,
+            padding_x,
             radius: theme.radius.full,
             text_style: theme.typography.label_small.clone(),
         }

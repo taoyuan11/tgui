@@ -2,26 +2,42 @@ use tgui::prelude::*;
 
 struct AppVm;
 
-fn card_style(ctx: &StyleContext<'_>) -> ContainerStyle {
+fn root_style(ctx: &StyleContext<'_>) -> ContainerStyle {
     let mut style = ContainerStyle::default_for_theme(ctx.theme);
-    style.surface.background = Some(Color::hexa(0x16233AFF).into());
-    style.surface.border_color = Some(Color::hexa(0x33507DFF).into());
-    style.surface.border_width = Some(dp(1.0).into());
-    style.surface.border_radius = Some(dp(20.0).into());
+    style.surface.background = Some(ctx.theme.colors.background.into());
+    style
+}
+
+fn starter_card_style(ctx: &StyleContext<'_>) -> CardStyle {
+    let mut style = CardStyle::default_for_theme(ctx.theme);
+    style.background = ctx.theme.colors.surface.into();
+    style.border = ctx.theme.colors.outline_muted.into();
+    style.border_width = ctx.theme.border.thin;
+    style.radius = ctx.theme.radius.xl;
+    style.shadow = ctx.theme.elevation.md.clone();
+    style.padding = Insets::all(ctx.theme.spacing.lg);
+    style.gap = ctx.theme.spacing.md;
     style
 }
 
 fn title_style(ctx: &StyleContext<'_>) -> TextWidgetStyle {
     let mut style = TextWidgetStyle::default_for_theme(ctx.theme);
-    style.typography.size = sp(28.0);
-    style.color = Color::hexa(0xF7FAFFFF).into();
+    style.typography = ctx.theme.typography.headline.clone();
+    style.color = ctx.theme.colors.on_surface.into();
     style
 }
 
-fn body_style(ctx: &StyleContext<'_>, size: Sp, color: Color) -> TextWidgetStyle {
+fn body_style(ctx: &StyleContext<'_>) -> TextWidgetStyle {
     let mut style = TextWidgetStyle::default_for_theme(ctx.theme);
-    style.typography.size = size;
-    style.color = color.into();
+    style.typography = ctx.theme.typography.body.clone();
+    style.color = ctx.theme.colors.on_surface_muted.into();
+    style
+}
+
+fn supporting_style(ctx: &StyleContext<'_>) -> TextWidgetStyle {
+    let mut style = TextWidgetStyle::default_for_theme(ctx.theme);
+    style.typography = ctx.theme.typography.body_small.clone();
+    style.color = ctx.theme.colors.on_surface_muted.into();
     style
 }
 
@@ -33,25 +49,36 @@ impl ViewModel for AppVm {
     fn view(&self) -> Element<Self> {
         Stack::new()
             .size(pct(100.0), pct(100.0))
-            .padding(Insets::all(dp(36.0)))
+            .padding(Insets::all(dp(32.0)))
             .center()
+            .style_full(root_style)
             .child(
-                Flex::new(Axis::Vertical)
+                Card::new()
                     .width(pct(100.0))
-                    .padding(Insets::all(dp(28.0)))
-                    .gap(dp(14.0))
-                    .style_full(card_style)
-                    .child(el![
-                        Text::new("Hello, tgui").style_full(title_style),
+                    .max_width(dp(640.0))
+                    .style_full(starter_card_style)
+                    .header(
+                        Flex::vertical()
+                            .gap(dp(8.0))
+                            .child(Badge::text("STARTER").tone(BadgeTone::Primary))
+                            .child(Text::new("Build your first tgui window").style_full(title_style)),
+                    )
+                    .body(
                         Text::new(
-                            "This example keeps things intentionally simple: one window, one card, and a small static widget tree.",
+                            "A focused MVVM starter with theme-aware components and responsive layout.",
                         )
-                        .style_full(|ctx| body_style(ctx, sp(16.0), Color::hexa(0xC2D3F1FF))),
-                        Text::new(
-                            "Use it as the smallest complete MVVM starting point before moving on to input, theming, and animation examples.",
-                        )
-                        .style_full(|ctx| body_style(ctx, sp(15.0), Color::hexa(0x9AB3D9FF))),
-                    ]),
+                        .width(pct(100.0))
+                        .style_full(body_style),
+                    )
+                    .footer(
+                        Flex::vertical()
+                            .gap(dp(12.0))
+                            .child(Divider::new())
+                            .child(
+                                Text::new("Rust · wgpu · MVVM")
+                                    .style_full(supporting_style),
+                            ),
+                    ),
             )
             .into()
     }
@@ -59,24 +86,16 @@ impl ViewModel for AppVm {
 
 fn main() -> Result<(), TguiError> {
     tgui::init_logging_from_cargo_toml!()?;
-
-    let mut theme = Theme::dark();
-    theme.colors.background = Color::hexa(0x0B1220FF);
-    theme.colors.surface = Color::hexa(0x111B2EFF);
-    theme.colors.surface_low = Color::hexa(0x1B2942FF);
-    theme.colors.primary = Color::hexa(0x4F9CF9FF);
-    let theme_set = ThemeSet::new(theme.clone(), theme);
-
     tgui_log(LogLevel::Info, "starting...");
 
     let result = Application::new()
         .title("tgui basic window")
         .window_size(dp(960.0), dp(640.0))
-        .theme_set(theme_set)
-        .theme_mode(ThemeMode::Dark)
+        .theme_mode(ThemeMode::System)
         .with_view_model(AppVm::new)
         .root_view(AppVm::view)
         .run();
+
     tgui_log(LogLevel::Info, "stopping...");
     result
 }

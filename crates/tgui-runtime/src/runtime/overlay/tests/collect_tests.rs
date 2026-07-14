@@ -10,7 +10,7 @@
 
 use crate::foundation::color::Color;
 use crate::media::TextureFrame;
-use crate::runtime::overlay::collect::emit_overlay;
+use crate::runtime::overlay::collect::{emit_overlay, finalize_portal_entries};
 use crate::runtime::overlay::{
     Anchor, AnchorKey, FlipPolicy, Overlay, OverlayContent, OverlayId, OverlayLayer,
     OverlayPrimitive, Placement,
@@ -18,7 +18,8 @@ use crate::runtime::overlay::{
 use crate::ui::unit::{dp, Dp};
 use crate::ui::widget::{
     ComputedScene, FocusScopeOptions, FocusScopeState, FocusTargetMeta, HitGeometry,
-    HitInteraction, HitRegion, Rect, RenderCommand, RenderPrimitive, TexturePrimitive, WidgetId,
+    HitInteraction, HitRegion, MeshPrimitive, MeshVertex, Point, Rect, RenderCommand,
+    RenderPrimitive, TexturePrimitive, WidgetId,
 };
 
 fn viewport() -> Rect {
@@ -254,6 +255,89 @@ fn nested_scene_overlay_command_sources_are_preserved() {
         scene.scene.overlay_command_sources(),
         &[Some(portal_source), Some(nested_overlay_source)]
     );
+}
+
+#[test]
+fn nested_mesh_translation_defers_parallel_copy_and_reuses_unique_buffers() {
+    let mut scene = ComputedScene::<()>::default();
+    let anchor = Rect::new(dp(100.0), dp(100.0), dp(40.0), dp(40.0));
+    let source = WidgetId::from_raw(402);
+
+    let vertices: std::sync::Arc<[MeshVertex]> = std::sync::Arc::from(vec![MeshVertex {
+        position: [1.0, 2.0],
+        local_position: [1.0, 2.0],
+        brush_meta: [0.0; 4],
+        gradient_data0: [0.0; 4],
+        gradient_data1: [0.0; 4],
+        stop_offsets0: [0.0; 4],
+        stop_offsets1: [0.0; 4],
+        stop_colors: [[0.0; 4]; 8],
+    }]);
+    let triangles: std::sync::Arc<[[Point; 3]]> = std::sync::Arc::from(vec![[
+        Point::new(dp(1.0), dp(2.0)),
+        Point::new(dp(3.0), dp(4.0)),
+        Point::new(dp(5.0), dp(6.0)),
+    ]]);
+    let original_vertices = vertices.as_ptr();
+    let original_triangles = triangles.as_ptr();
+
+    let mut nested = ComputedScene::<()>::default();
+    nested.scene.push_mesh(MeshPrimitive {
+        vertices,
+        triangles,
+        clip_rect: None,
+        clip_mask: None,
+    });
+
+    let overlay = Overlay::<()>::new(OverlayId::new(1), Anchor::Rect(anchor))
+        .source_widget(source)
+        .placement(Placement::bottom())
+        .offset(dp(8.0))
+        .layer(OverlayLayer::Menu);
+    let solved = emit_overlay(
+        &mut scene,
+        viewport(),
+        overlay,
+        (dp(20.0), dp(20.0)),
+        OverlayContent::Scene(Box::new(nested)),
+    );
+
+    finalize_portal_entries(&mut scene, viewport());
+    let bucket = &scene.overlay_layers[OverlayLayer::Menu.index()];
+    assert_eq!(bucket.commands.len(), 1);
+    assert_eq!(bucket.command_sources.as_slice(), &[Some(source)]);
+    assert!(
+        bucket.meshes.is_empty(),
+        "portal buckets should retain only the ordered command until final composition"
+    );
+
+    scene.finalize_overlay_layers();
+
+    assert_eq!(scene.scene.overlay_meshes.len(), 1);
+    assert_eq!(scene.scene.overlay_commands.len(), 1);
+    assert_eq!(scene.scene.overlay_command_sources(), &[Some(source)]);
+    let translated = &scene.scene.overlay_meshes[0];
+    assert_eq!(translated.vertices.as_ptr(), original_vertices);
+    assert_eq!(translated.triangles.as_ptr(), original_triangles);
+    assert_eq!(
+        translated.vertices[0].position[0],
+        solved.rect.x.get() + 1.0
+    );
+    assert_eq!(
+        translated.vertices[0].position[1],
+        solved.rect.y.get() + 2.0
+    );
+    assert_eq!(
+        translated.triangles[0][0],
+        Point::new(solved.rect.x + dp(1.0), solved.rect.y + dp(2.0))
+    );
+    match &scene.scene.overlay_commands[0] {
+        RenderCommand::Mesh(command) => {
+            assert_eq!(command.vertices.as_ptr(), original_vertices);
+            assert_eq!(command.triangles.as_ptr(), original_triangles);
+        }
+        _ => panic!("expected translated mesh command"),
+    }
 }
 
 #[test]

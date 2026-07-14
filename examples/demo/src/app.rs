@@ -244,7 +244,7 @@ impl ViewModel for App {
         });
 
         Self {
-            current_page: context.state(DemoPage::Basics),
+            current_page: context.state(DemoPage::Forms),
             expanded_code: context.state(Vec::new()),
             theme: context.state(ThemeMode::System),
             reduced_motion: context.state(false),

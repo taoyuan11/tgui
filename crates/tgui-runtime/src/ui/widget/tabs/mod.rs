@@ -1,6 +1,6 @@
 use crate::foundation::view_model::{Command, CommandContext, ValueCommand};
 use crate::theme::{StyleContext, WidgetState};
-use crate::ui::layout::{Align, Axis, Insets, LayoutStyle, Overflow, Value};
+use crate::ui::layout::{Align, Axis, Insets, LayoutStyle, Length, Overflow, Value};
 use crate::ui::widget::button::Button;
 use crate::ui::widget::common::{Point, TabPlacement, TabTriggerState, VisualStyle, WidgetId};
 use crate::ui::widget::container::{set_layout_inset, set_layout_length, set_layout_lengths};
@@ -326,7 +326,6 @@ fn build_tab_strip<VM: 'static>(
     } else {
         Axis::Vertical
     };
-    let layout_style = resolve_tabs_style_for_layout(style.as_ref());
     let specs: Vec<TabTriggerSpec> = items
         .iter()
         .enumerate()
@@ -338,8 +337,18 @@ fn build_tab_strip<VM: 'static>(
         })
         .collect();
 
+    let strip_style = style.clone();
     let list = Flex::new(axis)
-        .gap(layout_style.tab_gap)
+        .runtime_layout(move |_, container, context, style_sheet, visual| {
+            let resolved = resolve_tabs_style_with_sheet(
+                strip_style.as_ref(),
+                context,
+                style_sheet,
+                visual,
+                WidgetState::default(),
+            );
+            container.gap = Value::Static(Length::Px(resolved.tab_gap));
+        })
         .align(Align::Start);
     let list = list.child(build_triggers(
         group_id,
@@ -424,7 +433,6 @@ fn build_triggers<VM: 'static>(
     on_change: Option<ValueCommand<VM, (String, String)>>,
     on_reorder: Option<ValueCommand<VM, TabsReorderEvent>>,
 ) -> Vec<Element<VM>> {
-    let layout_style = resolve_tabs_style_for_layout(style.as_ref());
     let initial_selected = selected.resolve_untracked();
     let (visible_specs, overflow_specs) =
         split_tabs_for_overflow(specs, &initial_selected, overflow_mode);
@@ -432,10 +440,20 @@ fn build_triggers<VM: 'static>(
         Vec::with_capacity(visible_specs.len() + usize::from(!overflow_specs.is_empty()));
     for item in visible_specs {
         let active = tab_active_value(selected, &item.key);
+        let trigger_style = style.clone();
         let mut button = Button::new(item.label.clone())
             .ghost()
             .disable(item.disabled.clone())
-            .min_width(layout_style.tab_min_width)
+            .runtime_layout(move |layout, context, style_sheet, visual| {
+                let resolved = resolve_tabs_style_with_sheet(
+                    trigger_style.as_ref(),
+                    context,
+                    style_sheet,
+                    visual,
+                    WidgetState::default(),
+                );
+                layout.min_width = Some(Value::Static(Length::Px(resolved.tab_min_width)));
+            })
             .style_full_with_style_sheet({
                 let style = style.clone();
                 let active = active.clone();
@@ -534,7 +552,6 @@ fn build_more_trigger<VM: 'static>(
     style: Option<StyleResolver<TabsStyle>>,
     on_change: Option<ValueCommand<VM, (String, String)>>,
 ) -> Element<VM> {
-    let layout_style = resolve_tabs_style_for_layout(style.as_ref());
     let active = any_tab_active_value(
         selected,
         overflow_specs
@@ -557,9 +574,19 @@ fn build_more_trigger<VM: 'static>(
         more_items.push(menu_item);
     }
 
+    let trigger_style = style.clone();
     let trigger = Button::new("More")
         .ghost()
-        .min_width(layout_style.tab_min_width)
+        .runtime_layout(move |layout, context, style_sheet, visual| {
+            let resolved = resolve_tabs_style_with_sheet(
+                trigger_style.as_ref(),
+                context,
+                style_sheet,
+                visual,
+                WidgetState::default(),
+            );
+            layout.min_width = Some(Value::Static(Length::Px(resolved.tab_min_width)));
+        })
         .style_full_with_style_sheet({
             let style = style.clone();
             let active = active.clone();
@@ -592,12 +619,21 @@ fn build_panel<VM: 'static>(
     selected: Value<String>,
     style: Option<StyleResolver<TabsStyle>>,
 ) -> Element<VM> {
-    let layout_style = resolve_tabs_style_for_layout(style.as_ref());
     let panel_keys: Vec<String> = items.iter().map(|item| item.key.clone()).collect();
     let initial_selected = selected.resolve_untracked();
+    let panel_layout_style = style.clone();
     let mut panel = Flex::vertical()
         .grow(1.0)
-        .padding(layout_style.panel_padding)
+        .runtime_layout(move |_, container, context, style_sheet, visual| {
+            let resolved = resolve_tabs_style_with_sheet(
+                panel_layout_style.as_ref(),
+                context,
+                style_sheet,
+                visual,
+                WidgetState::default(),
+            );
+            container.padding = Some(Value::Static(resolved.panel_padding));
+        })
         .overflow(Overflow::Hidden)
         .style_full_with_style_sheet({
             let style = style.clone();
@@ -691,21 +727,6 @@ fn panel_offset_for_active(active: bool) -> Point {
     }
 }
 
-fn resolve_tabs_style(
-    style: Option<&StyleResolver<TabsStyle>>,
-    context: &StyleContext<'_>,
-) -> TabsStyle {
-    let style_sheet = StyleSheet::default();
-    let visual = VisualStyle::default();
-    resolve_tabs_style_with_sheet(
-        style,
-        context,
-        &style_sheet,
-        &visual,
-        WidgetState::default(),
-    )
-}
-
 fn resolve_tabs_style_with_sheet(
     style: Option<&StyleResolver<TabsStyle>>,
     context: &StyleContext<'_>,
@@ -713,19 +734,13 @@ fn resolve_tabs_style_with_sheet(
     visual: &VisualStyle,
     state: WidgetState,
 ) -> TabsStyle {
-    let mut base = TabsStyle::default_for_theme(context.theme);
+    let mut base = TabsStyle::default_for_density(context.theme, context.density);
     context.theme.components.tabs.apply(&mut base, context);
     style_sheet.apply_tabs(&mut base, context, visual);
     style_sheet.apply_tabs_state(&mut base, context, visual, state);
     style
         .map(|resolver| resolver.resolve_from(base.clone(), context))
         .unwrap_or(base)
-}
-
-fn resolve_tabs_style_for_layout(style: Option<&StyleResolver<TabsStyle>>) -> TabsStyle {
-    let theme = crate::ui::theme::Theme::default();
-    let context = StyleContext::from_theme(&theme);
-    resolve_tabs_style(style, &context)
 }
 
 fn tab_button_style(

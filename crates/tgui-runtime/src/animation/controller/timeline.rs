@@ -2,51 +2,77 @@ use super::*;
 
 #[derive(Clone, Default)]
 pub(crate) struct AnimationCoordinator {
-    controllers: Arc<Mutex<Vec<Weak<Mutex<AnimationControllerState>>>>>,
+    active_controllers: Arc<Mutex<Vec<Weak<Mutex<AnimationControllerState>>>>>,
+}
+
+pub(crate) struct AnimationCoordinatorFrame {
+    pub(crate) changed: bool,
+    pub(crate) next_deadline: Option<Instant>,
+    #[cfg(test)]
+    pub(crate) visited_controllers: usize,
 }
 
 impl AnimationCoordinator {
-    pub(super) fn register(&self, controller: &Arc<Mutex<AnimationControllerState>>) {
-        self.controllers
+    pub(super) fn enqueue(&self, controller: &Arc<Mutex<AnimationControllerState>>) {
+        self.active_controllers
             .lock()
             .expect("animation coordinator lock poisoned")
             .push(Arc::downgrade(controller));
     }
 
-    pub(crate) fn refresh(&self, now: Instant) -> bool {
+    /// Tick controllers and determine whether another frame is needed in one traversal. Runtime
+    /// scheduling previously upgraded and locked every controller once for `refresh` and again for
+    /// `next_frame_deadline` on every event-loop wake.
+    pub(crate) fn refresh_and_next_frame_deadline(
+        &self,
+        now: Instant,
+        tick: bool,
+    ) -> AnimationCoordinatorFrame {
         let mut controllers = self
-            .controllers
+            .active_controllers
             .lock()
             .expect("animation coordinator lock poisoned");
         let mut changed = false;
+        let mut active = false;
+        #[cfg(test)]
+        let mut visited_controllers = 0;
         controllers.retain(|weak| {
             let Some(controller) = weak.upgrade() else {
                 return false;
             };
-            changed |= controller
+            #[cfg(test)]
+            {
+                visited_controllers += 1;
+            }
+            let mut controller = controller
                 .lock()
-                .expect("animation controller lock poisoned")
-                .tick(now);
-            true
+                .expect("animation controller lock poisoned");
+            if !controller.is_running() {
+                controller.queued_in_coordinator = false;
+                return false;
+            }
+            if tick {
+                changed |= controller.tick(now);
+            }
+            let running = controller.is_running();
+            if !running {
+                controller.queued_in_coordinator = false;
+            }
+            active |= running;
+            running
         });
-        changed
+
+        AnimationCoordinatorFrame {
+            changed,
+            next_deadline: active.then_some(now + FRAME_INTERVAL),
+            #[cfg(test)]
+            visited_controllers,
+        }
     }
 
     pub(crate) fn next_frame_deadline(&self, now: Instant) -> Option<Instant> {
-        let controllers = self
-            .controllers
-            .lock()
-            .expect("animation coordinator lock poisoned");
-        controllers
-            .iter()
-            .filter_map(|weak| weak.upgrade())
-            .any(|controller| {
-                controller
-                    .lock()
-                    .expect("animation controller lock poisoned")
-                    .is_running()
-            })
-            .then_some(now + FRAME_INTERVAL)
+        self.refresh_and_next_frame_deadline(now, false)
+            .next_deadline
     }
 }
 

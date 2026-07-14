@@ -74,6 +74,7 @@ impl<VM> Element<VM> {
                 layout,
                 children,
                 style,
+                runtime_layout,
             } => WidgetKind::Container {
                 layout,
                 children: children
@@ -81,6 +82,7 @@ impl<VM> Element<VM> {
                     .map(|child| child.scope(selector.clone()))
                     .collect(),
                 style,
+                runtime_layout,
             },
             WidgetKind::Virtual {
                 arrangement,
@@ -90,6 +92,7 @@ impl<VM> Element<VM> {
                 overflow_x,
                 overflow_y,
                 style,
+                runtime_layout,
                 runtime_state,
             } => WidgetKind::Virtual {
                 arrangement,
@@ -99,6 +102,7 @@ impl<VM> Element<VM> {
                 overflow_x,
                 overflow_y,
                 style,
+                runtime_layout,
                 runtime_state,
             },
             WidgetKind::Text { text } => WidgetKind::Text { text },
@@ -122,11 +126,13 @@ impl<VM> Element<VM> {
                 disabled,
                 variant,
                 style,
+                runtime_layout,
             } => WidgetKind::Button {
                 label,
                 disabled,
                 variant,
                 style,
+                runtime_layout,
             },
             WidgetKind::Checkbox {
                 checked,
@@ -243,6 +249,7 @@ impl<VM> Element<VM> {
                 disabled,
                 validation,
                 style,
+                runtime_layout,
             } => WidgetKind::Slider {
                 value,
                 min,
@@ -258,6 +265,7 @@ impl<VM> Element<VM> {
                 disabled,
                 validation,
                 style,
+                runtime_layout,
             },
             WidgetKind::ProgressBar {
                 value,
@@ -312,6 +320,7 @@ impl<VM> Element<VM> {
                 show_scrollbar,
                 auto_wrap,
                 validation,
+                runtime_layout,
             } => WidgetKind::TextEditor {
                 controller,
                 placeholder,
@@ -324,6 +333,7 @@ impl<VM> Element<VM> {
                 show_scrollbar,
                 auto_wrap,
                 validation,
+                runtime_layout,
             },
             WidgetKind::Portal {
                 content,
@@ -354,6 +364,7 @@ impl<VM> Element<VM> {
                 layout: ContainerLayout::flow(),
                 children: Vec::new(),
                 style: None,
+                runtime_layout: None,
             },
         };
 

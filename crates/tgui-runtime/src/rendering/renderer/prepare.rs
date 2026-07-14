@@ -7,11 +7,14 @@ use crate::ui::widget::{
     BrushPrimitiveData, CanvasCompositePrimitive, DirtyDrawRange, Rect, RenderCommand,
     RenderPrimitive, SceneDrawStream, TransformChain, TransformRecord, WidgetId,
 };
+use smallvec::SmallVec;
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use super::{
     physical_mesh_clip_mask_data, BrushVertex, BrushVertexSpec, CompositeQuadSpec, CompositeVertex,
-    MeshVertex, RectVertex, Renderer, TextQuadSpec, TextTransformSpec, TextVertex, VertexViewport,
+    MeshClipBindGroup, MeshClipBindGroupId, MeshClipMaskUniformData, MeshVertex, RectVertex,
+    Renderer, SpriteBindGroup, TextQuadSpec, TextTransformSpec, TextVertex, VertexViewport,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -96,6 +99,7 @@ impl DrawStream {
     }
 }
 
+#[cfg(test)]
 fn compute_scroll_translate(
     gpu_scroll_container: Option<WidgetId>,
     scroll_regions: &[crate::ui::widget::ScrollRegion],
@@ -114,6 +118,133 @@ fn compute_scroll_translate(
         },
         viewport,
     )
+}
+
+/// Per-frame memoization for GPU-scroll draw translations.
+///
+/// A retained scroll subtree can contain thousands of draw commands tagged with the same
+/// container id. Looking that id up with `scroll_regions.iter().rev().find(...)` for every draw
+/// turns prepare into `O(draws * regions)`. Scroll offsets are immutable for the duration of one
+/// render call, so each distinct id only needs one scan; main and overlay streams share this cache.
+#[derive(Default)]
+pub(super) struct ScrollTranslateCache {
+    // The GPU-scroll fast path currently admits a single container. Keep a few entries inline so
+    // the common repeated lookup is one integer comparison and performs no heap allocation; the
+    // small vector still preserves correct behavior if that eligibility expands later.
+    translations: SmallVec<[(WidgetId, Option<super::PushTranslate>); 4]>,
+    #[cfg(test)]
+    region_visits: usize,
+}
+
+impl ScrollTranslateCache {
+    pub(super) fn begin_frame(&mut self) {
+        self.translations.clear();
+        #[cfg(test)]
+        {
+            self.region_visits = 0;
+        }
+    }
+
+    fn resolve(
+        &mut self,
+        gpu_scroll_container: Option<WidgetId>,
+        scroll_regions: &[crate::ui::widget::ScrollRegion],
+        viewport: VertexViewport,
+    ) -> Option<super::PushTranslate> {
+        let gpu_scroll_container = gpu_scroll_container?;
+        if let Some((_, translate)) = self
+            .translations
+            .iter()
+            .find(|(id, _)| *id == gpu_scroll_container)
+        {
+            return *translate;
+        }
+
+        let mut matched = None;
+        for region in scroll_regions.iter().rev() {
+            #[cfg(test)]
+            {
+                self.region_visits += 1;
+            }
+            if region.id == gpu_scroll_container {
+                matched = translate_from_logical_movement(
+                    crate::ui::widget::Point {
+                        x: region.gpu_base_scroll_offset.x - region.scroll_offset.x,
+                        y: region.gpu_base_scroll_offset.y - region.scroll_offset.y,
+                    },
+                    viewport,
+                );
+                break;
+            }
+        }
+        self.translations.push((gpu_scroll_container, matched));
+        matched
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+struct MeshClipKey([u32; 8]);
+
+fn mesh_clip_key(data: MeshClipMaskUniformData) -> MeshClipKey {
+    MeshClipKey(bytemuck::cast(data))
+}
+
+#[derive(Default)]
+pub(super) struct MeshClipBindGroupCache {
+    bindings: HashMap<MeshClipKey, MeshClipBindGroup>,
+    next_id: u64,
+    #[cfg(test)]
+    creations: usize,
+}
+
+impl MeshClipBindGroupCache {
+    pub(super) fn begin_frame(&mut self) {
+        self.bindings.clear();
+        #[cfg(test)]
+        {
+            self.creations = 0;
+        }
+    }
+
+    fn binding_for(
+        &mut self,
+        device: &wgpu::Device,
+        layout: &wgpu::BindGroupLayout,
+        data: MeshClipMaskUniformData,
+    ) -> MeshClipBindGroup {
+        let key = mesh_clip_key(data);
+        if let Some(binding) = self.bindings.get(&key) {
+            return binding.clone();
+        }
+
+        let clip_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("tgui-mesh-clip-uniform"),
+            contents: bytemuck::bytes_of(&data),
+            usage: wgpu::BufferUsages::UNIFORM,
+        });
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("tgui-mesh-clip-bind-group"),
+            layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: clip_buffer.as_entire_binding(),
+            }],
+        });
+        let binding = MeshClipBindGroup {
+            id: MeshClipBindGroupId(self.next_id),
+            bind_group,
+        };
+        self.next_id = self
+            .next_id
+            .checked_add(1)
+            .expect("tgui exhausted mesh clip bind-group identities");
+        #[cfg(test)]
+        {
+            self.creations += 1;
+        }
+        self.bindings.insert(key, binding.clone());
+        binding
+    }
 }
 
 fn compute_transform_translate(
@@ -179,6 +310,7 @@ fn texture_quad_vertices(
     corner_radius: f32,
     clip_mask: Option<crate::ui::widget::ClipMask>,
     opacity: f32,
+    tint: [u8; 4],
     viewport: VertexViewport,
 ) -> [TextVertex; 6] {
     match quad {
@@ -190,6 +322,7 @@ fn texture_quad_vertices(
                 corner_radius,
                 clip_mask,
                 opacity,
+                tint,
             },
             viewport,
         ),
@@ -200,6 +333,7 @@ fn texture_quad_vertices(
                 corner_radius,
                 clip_mask,
                 opacity,
+                tint,
             },
             viewport,
         ),
@@ -219,6 +353,12 @@ fn retained_prepare_cacheable(command: &RenderCommand) -> bool {
         #[cfg(feature = "video")]
         RenderCommand::VideoTexture(_) => false,
     }
+}
+
+fn should_prepare_shape(primitive: &RenderPrimitive, skip_transparent: bool) -> bool {
+    primitive.rect.width > Dp::ZERO
+        && primitive.rect.height > Dp::ZERO
+        && (!skip_transparent || primitive.color.a != 0)
 }
 
 pub(super) struct PreparedRect {
@@ -241,7 +381,7 @@ pub(super) struct PreparedBrush {
 pub(super) struct PreparedMesh {
     pub(super) draw_id: DrawId,
     pub(super) clip_rect: Option<Rect>,
-    pub(super) clip_bind_group: wgpu::BindGroup,
+    pub(super) clip_binding: MeshClipBindGroup,
     pub(super) vertex_offset: u64,
     pub(super) vertex_count: u32,
     pub(super) scroll_translate: Option<super::PushTranslate>,
@@ -249,7 +389,7 @@ pub(super) struct PreparedMesh {
 
 pub(super) struct PreparedSprite {
     pub(super) draw_id: DrawId,
-    pub(super) bind_group: wgpu::BindGroup,
+    pub(super) binding: SpriteBindGroup,
     pub(super) clip_rect: Option<Rect>,
     pub(super) vertex_offset: u64,
     pub(super) vertex_count: u32,
@@ -267,7 +407,7 @@ pub(super) struct PreparedBackdropBlur {
 
 pub(super) struct PreparedCanvasComposite {
     pub(super) draw_id: DrawId,
-    pub(super) primitive: CanvasCompositePrimitive,
+    pub(super) primitive: Arc<CanvasCompositePrimitive>,
     pub(super) composite_offset: u64,
     pub(super) composite_vertex_count: u32,
 }
@@ -294,7 +434,94 @@ impl PreparedCommand {
     }
 }
 
-pub(super) struct PreparedCommands(pub(super) Vec<PreparedCommand>);
+pub(super) struct PreparedCommands {
+    pub(super) stream: DrawStream,
+    pub(super) commands: Vec<PreparedCommand>,
+}
+
+/// Reusable output storage for the two top-level scene streams.
+///
+/// Retained prepare avoids rebuilding vertex templates, but the prepared command list is still
+/// materialized every frame because it carries frame-local vertex offsets and translations. A
+/// large retained scene therefore used to allocate and free a correspondingly large `Vec` on
+/// every stable frame. Main and overlay cannot be recursively re-entered while their output is in
+/// use, so one retained buffer per stream removes that allocator traffic without retaining rare
+/// canvas-composite peak storage.
+#[derive(Default)]
+pub(super) struct PreparedCommandScratch {
+    main: Vec<PreparedCommand>,
+    overlay: Vec<PreparedCommand>,
+    #[cfg(test)]
+    storage_growths: usize,
+}
+
+impl PreparedCommandScratch {
+    fn acquire(&mut self, stream: DrawStream, command_count: usize) -> Vec<PreparedCommand> {
+        let mut commands = match stream {
+            DrawStream::Main => std::mem::take(&mut self.main),
+            DrawStream::Overlay => std::mem::take(&mut self.overlay),
+            DrawStream::CompositeContent { .. } | DrawStream::CompositeMask { .. } => {
+                return Vec::with_capacity(command_count);
+            }
+        };
+        commands.clear();
+        if commands.capacity() < command_count {
+            #[cfg(test)]
+            {
+                self.storage_growths += 1;
+            }
+            commands.reserve(command_count);
+        }
+        commands
+    }
+
+    fn recycle(&mut self, stream: DrawStream, mut commands: Vec<PreparedCommand>) {
+        commands.clear();
+        match stream {
+            DrawStream::Main => self.main = commands,
+            DrawStream::Overlay => self.overlay = commands,
+            DrawStream::CompositeContent { .. } | DrawStream::CompositeMask { .. } => {}
+        }
+    }
+}
+
+#[cfg(test)]
+pub(super) fn prepared_command_scratch_storage_probe(
+    peak_commands: usize,
+    stable_frames: usize,
+) -> (usize, usize, usize, bool) {
+    let mut scratch = PreparedCommandScratch::default();
+    let mut first_storage = None;
+    let mut same_storage = true;
+
+    for _ in 0..stable_frames {
+        let mut commands = scratch.acquire(DrawStream::Main, peak_commands);
+        let storage = commands.as_ptr();
+        if let Some(first_storage) = first_storage {
+            same_storage &= storage == first_storage;
+        } else {
+            first_storage = Some(storage);
+        }
+        for command_index in 0..peak_commands {
+            commands.push(PreparedCommand::Rect(PreparedRect {
+                draw_id: DrawId::new(DrawStream::Main, command_index),
+                clip_rect: None,
+                vertex_offset: 0,
+                vertex_count: 0,
+                scroll_translate: None,
+            }));
+        }
+        scratch.recycle(DrawStream::Main, commands);
+    }
+
+    let capacity = scratch.main.capacity();
+    (
+        scratch.storage_growths,
+        capacity,
+        capacity * std::mem::size_of::<PreparedCommand>(),
+        same_storage,
+    )
+}
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct PrepareStreamSignature {
@@ -323,18 +550,18 @@ enum PreparedCommandTemplate {
         vertex_count: u32,
     },
     CanvasComposite {
-        primitive: CanvasCompositePrimitive,
+        primitive: Arc<CanvasCompositePrimitive>,
         vertices: Vec<u8>,
         vertex_count: u32,
     },
     Mesh {
         clip_rect: Option<Rect>,
-        clip_bind_group: wgpu::BindGroup,
+        clip_binding: MeshClipBindGroup,
         vertices: Vec<u8>,
         vertex_count: u32,
     },
     Sprite {
-        bind_group: wgpu::BindGroup,
+        binding: SpriteBindGroup,
         clip_rect: Option<Rect>,
         vertices: Vec<u8>,
         vertex_count: u32,
@@ -370,7 +597,8 @@ impl PreparedCommandTemplate {
             } => PreparedCommand::Rect(PreparedRect {
                 draw_id,
                 clip_rect: *clip_rect,
-                vertex_offset: vertex_pool.allocate(vertices),
+                vertex_offset: vertex_pool
+                    .allocate_aligned(vertices, std::mem::size_of::<RectVertex>() as u64),
                 vertex_count: *vertex_count,
                 scroll_translate,
             }),
@@ -381,7 +609,8 @@ impl PreparedCommandTemplate {
             } => PreparedCommand::Brush(PreparedBrush {
                 draw_id,
                 clip_rect: *clip_rect,
-                vertex_offset: vertex_pool.allocate(vertices),
+                vertex_offset: vertex_pool
+                    .allocate_aligned(vertices, std::mem::size_of::<BrushVertex>() as u64),
                 vertex_count: *vertex_count,
                 scroll_translate,
             }),
@@ -391,33 +620,35 @@ impl PreparedCommandTemplate {
                 vertex_count,
             } => PreparedCommand::CanvasComposite(PreparedCanvasComposite {
                 draw_id,
-                primitive: primitive.clone(),
+                primitive: Arc::clone(primitive),
                 composite_offset: vertex_pool.allocate(vertices),
                 composite_vertex_count: *vertex_count,
             }),
             Self::Mesh {
                 clip_rect,
-                clip_bind_group,
+                clip_binding,
                 vertices,
                 vertex_count,
             } => PreparedCommand::Mesh(PreparedMesh {
                 draw_id,
                 clip_rect: *clip_rect,
-                clip_bind_group: clip_bind_group.clone(),
-                vertex_offset: vertex_pool.allocate(vertices),
+                clip_binding: clip_binding.clone(),
+                vertex_offset: vertex_pool
+                    .allocate_aligned(vertices, std::mem::size_of::<MeshVertex>() as u64),
                 vertex_count: *vertex_count,
                 scroll_translate,
             }),
             Self::Sprite {
-                bind_group,
+                binding,
                 clip_rect,
                 vertices,
                 vertex_count,
             } => PreparedCommand::Sprite(PreparedSprite {
                 draw_id,
-                bind_group: bind_group.clone(),
+                binding: binding.clone(),
                 clip_rect: *clip_rect,
-                vertex_offset: vertex_pool.allocate(vertices),
+                vertex_offset: vertex_pool
+                    .allocate_aligned(vertices, std::mem::size_of::<TextVertex>() as u64),
                 vertex_count: *vertex_count,
                 scroll_translate,
             }),
@@ -450,6 +681,10 @@ pub(super) struct RetainedPrepareCache {
 }
 
 impl RetainedPrepareCache {
+    pub(super) fn clear(&mut self) {
+        self.streams.clear();
+    }
+
     fn stream_reusable(&self, stream: DrawStream, signature: PrepareStreamSignature) -> bool {
         self.streams
             .get(&stream)
@@ -495,6 +730,37 @@ impl RetainedPrepareCache {
     }
 }
 
+#[cfg(test)]
+pub(super) fn retained_cache_lookup_storage_probe(payload_bytes: usize) -> (bool, usize) {
+    let stream = DrawStream::Main;
+    let signature = PrepareStreamSignature {
+        scene_serial: 7,
+        viewport: VertexViewport::new(100.0, 100.0, 100.0, 100.0, 1.0),
+        command_count: 1,
+    };
+    let mut cache = RetainedPrepareCache::default();
+    cache.ensure_stream(stream, signature);
+    cache.store_template(
+        stream,
+        0,
+        Some(PreparedCommandTemplate::Rect {
+            clip_rect: None,
+            vertices: vec![1; payload_bytes],
+            vertex_count: 1,
+        }),
+    );
+
+    let first = match cache.template(stream, 0) {
+        Some(PreparedCommandTemplate::Rect { vertices, .. }) => vertices.as_ptr(),
+        _ => return (false, 0),
+    };
+    let (second, stored_bytes) = match cache.template(stream, 0) {
+        Some(PreparedCommandTemplate::Rect { vertices, .. }) => (vertices.as_ptr(), vertices.len()),
+        _ => return (false, 0),
+    };
+    (first == second, stored_bytes)
+}
+
 impl Renderer {
     pub(super) fn prepare_commands(
         &mut self,
@@ -534,7 +800,9 @@ impl Renderer {
             rebuild: 0,
             reuse: 0,
         };
-        let mut prepared = Vec::with_capacity(commands.len());
+        let mut prepared = self
+            .prepared_command_scratch
+            .acquire(stream, commands.len());
 
         for (command_index, command) in commands.iter().enumerate() {
             let draw_id = DrawId::new(stream, command_index);
@@ -543,7 +811,8 @@ impl Renderer {
                 .copied()
                 .flatten();
             let draw_translate = combine_translates(
-                compute_scroll_translate(gpu_scroll_container, scroll_regions, viewport),
+                self.scroll_translate_cache
+                    .resolve(gpu_scroll_container, scroll_regions, viewport),
                 compute_transform_translate(
                     command_transform_chains.get(command_index),
                     transform_records,
@@ -555,19 +824,29 @@ impl Renderer {
                 && !dirty_commands.get(command_index).copied().unwrap_or(true)
                 && retained_prepare_cacheable(command)
             {
-                if let Some(template) = self
-                    .retained_prepare_cache
-                    .template(stream, command_index)
-                    .cloned()
-                {
+                let reused = {
+                    let cache = &self.retained_prepare_cache;
+                    let vertex_pool = &mut self.vertex_pool;
+                    cache
+                        .template(stream, command_index)
+                        .map(|template| template.prepare(draw_id, vertex_pool, draw_translate))
+                };
+                if let Some(command) = reused {
                     stats.reuse += 1;
-                    prepared.push(template.prepare(draw_id, &mut self.vertex_pool, draw_translate));
+                    prepared.push(command);
                     continue;
                 }
             }
 
             stats.rebuild += 1;
-            let Some(build) = self.build_prepared_template(command, font_manager, viewport)? else {
+            let build = match self.build_prepared_template(command, font_manager, viewport) {
+                Ok(build) => build,
+                Err(error) => {
+                    self.prepared_command_scratch.recycle(stream, prepared);
+                    return Err(error);
+                }
+            };
+            let Some(build) = build else {
                 if signature.is_some() {
                     self.retained_prepare_cache
                         .store_template(stream, command_index, None);
@@ -589,7 +868,15 @@ impl Renderer {
         }
 
         self.last_prepare_stats.insert(stream, stats);
-        Ok(PreparedCommands(prepared))
+        Ok(PreparedCommands {
+            stream,
+            commands: prepared,
+        })
+    }
+
+    pub(super) fn recycle_prepared_commands(&mut self, prepared: PreparedCommands) {
+        self.prepared_command_scratch
+            .recycle(prepared.stream, prepared.commands);
     }
 
     fn build_prepared_template(
@@ -618,6 +905,7 @@ impl Renderer {
                         corner_radius: 0.0,
                         clip_mask: None,
                         opacity: 1.0,
+                        tint: [255; 4],
                     },
                     viewport,
                 );
@@ -680,7 +968,7 @@ impl Renderer {
                 );
                 PreparedTemplateBuild {
                     template: PreparedCommandTemplate::CanvasComposite {
-                        primitive: (**primitive).clone(),
+                        primitive: Arc::new((**primitive).clone()),
                         vertices: bytemuck::cast_slice(&vertices).to_vec(),
                         vertex_count: vertices.len() as u32,
                     },
@@ -688,7 +976,7 @@ impl Renderer {
                 }
             }
             RenderCommand::Shape(primitive) => {
-                if primitive.rect.width <= Dp::ZERO || primitive.rect.height <= Dp::ZERO {
+                if !should_prepare_shape(primitive, self.transparent_shape_skip_enabled()) {
                     return Ok(None);
                 }
                 let vertices = RectVertex::from_primitive(*primitive, viewport);
@@ -742,28 +1030,15 @@ impl Renderer {
                     .copied()
                     .map(|vertex| MeshVertex::from_scene_vertex(vertex, viewport))
                     .collect();
-                let clip_buffer =
-                    self.device
-                        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                            label: Some("tgui-mesh-clip-uniform"),
-                            contents: bytemuck::bytes_of(&physical_mesh_clip_mask_data(
-                                primitive.clip_mask,
-                                viewport.scale_factor,
-                            )),
-                            usage: wgpu::BufferUsages::UNIFORM,
-                        });
-                let clip_bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("tgui-mesh-clip-bind-group"),
-                    layout: &self.mesh_clip_bind_group_layout,
-                    entries: &[wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: clip_buffer.as_entire_binding(),
-                    }],
-                });
+                let clip_binding = self.mesh_clip_bind_group_cache.binding_for(
+                    &self.device,
+                    &self.mesh_clip_bind_group_layout,
+                    physical_mesh_clip_mask_data(primitive.clip_mask, viewport.scale_factor),
+                );
                 PreparedTemplateBuild {
                     template: PreparedCommandTemplate::Mesh {
                         clip_rect: primitive.clip_rect,
-                        clip_bind_group,
+                        clip_binding,
                         vertices: bytemuck::cast_slice(&vertices).to_vec(),
                         vertex_count: vertices.len() as u32,
                     },
@@ -771,7 +1046,7 @@ impl Renderer {
                 }
             }
             RenderCommand::Texture(texture) => {
-                let Some(bind_group) = self.texture_bind_group_for(&texture.texture)? else {
+                let Some(binding) = self.texture_bind_group_for(&texture.texture)? else {
                     return Ok(None);
                 };
                 let vertices = texture_quad_vertices(
@@ -781,11 +1056,12 @@ impl Renderer {
                     texture.corner_radius,
                     texture.clip_mask,
                     texture.opacity,
+                    [255; 4],
                     viewport,
                 );
                 PreparedTemplateBuild {
                     template: PreparedCommandTemplate::Sprite {
-                        bind_group,
+                        binding,
                         clip_rect: texture.clip_rect,
                         vertices: bytemuck::cast_slice(&vertices).to_vec(),
                         vertex_count: vertices.len() as u32,
@@ -798,7 +1074,7 @@ impl Renderer {
                 let Some(frame_texture) = texture.controller.current_frame() else {
                     return Ok(None);
                 };
-                let Some(bind_group) = self.texture_bind_group_for(&frame_texture)? else {
+                let Some(binding) = self.texture_bind_group_for(&frame_texture)? else {
                     return Ok(None);
                 };
                 let vertices = texture_quad_vertices(
@@ -808,11 +1084,12 @@ impl Renderer {
                     texture.corner_radius,
                     texture.clip_mask,
                     texture.opacity,
+                    [255; 4],
                     viewport,
                 );
                 PreparedTemplateBuild {
                     template: PreparedCommandTemplate::Sprite {
-                        bind_group,
+                        binding,
                         clip_rect: texture.clip_rect,
                         vertices: bytemuck::cast_slice(&vertices).to_vec(),
                         vertex_count: vertices.len() as u32,
@@ -825,22 +1102,31 @@ impl Renderer {
                 if opacity <= 0.0 {
                     return Ok(None);
                 }
-                let Some(bind_group) = self.text_bind_group_for(text, font_manager)? else {
+                let Some(draw) = self.text_bind_group_for(text, font_manager)? else {
                     return Ok(None);
                 };
                 let snapped_frame = self.snap_text_rect(text.frame);
                 let vertices = texture_quad_vertices(
                     snapped_frame,
                     text.quad,
-                    None,
+                    draw.uv_rect,
                     0.0,
                     text.clip_mask,
                     opacity,
+                    if draw.tintable_mask {
+                        let [red, green, blue, _] = text.color.to_rgba8();
+                        // Tint alpha is otherwise redundant with the dedicated opacity
+                        // attribute, so zero encodes an R8 coverage sample without growing
+                        // TextVertex or selecting a second render pipeline.
+                        [red, green, blue, if draw.r8_coverage { 0 } else { 255 }]
+                    } else {
+                        [255; 4]
+                    },
                     viewport,
                 );
                 PreparedTemplateBuild {
                     template: PreparedCommandTemplate::Sprite {
-                        bind_group,
+                        binding: draw.binding,
                         clip_rect: text.clip_rect,
                         vertices: bytemuck::cast_slice(&vertices).to_vec(),
                         vertex_count: vertices.len() as u32,
@@ -904,6 +1190,7 @@ impl Renderer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::foundation::color::Color;
     use crate::ui::layout::Overflow;
     use crate::ui::widget::{Point, Rect, ScrollRegion, TransformRecord, WidgetId};
 
@@ -939,6 +1226,42 @@ mod tests {
             vertical_track: None,
             vertical_thumb: None,
         }
+    }
+
+    #[test]
+    fn fully_transparent_shapes_have_no_prepared_pixels() {
+        let mut shape = RenderPrimitive {
+            rect: Rect::new(0.0, 0.0, 20.0, 20.0),
+            color: Color::rgba(20, 40, 60, 0),
+            corner_radius: 8.0,
+            stroke_width: 2.0,
+            clip_rect: Some(Rect::new(0.0, 0.0, 20.0, 20.0)),
+            clip_mask: None,
+        };
+        assert!(!should_prepare_shape(&shape, true));
+        assert!(should_prepare_shape(&shape, false));
+
+        shape.color.a = 1;
+        assert!(should_prepare_shape(&shape, true));
+        shape.rect.width = Dp::ZERO;
+        assert!(!should_prepare_shape(&shape, true));
+        assert!(!should_prepare_shape(&shape, false));
+    }
+
+    #[test]
+    fn mesh_clip_key_tracks_canonical_physical_uniform_data() {
+        let clip = crate::ui::widget::ClipMask {
+            rect: Rect::new(10.0, 20.0, 80.0, 40.0),
+            corner_radius: 12.0,
+        };
+        let first = mesh_clip_key(physical_mesh_clip_mask_data(Some(clip), 2.0));
+        let same = mesh_clip_key(physical_mesh_clip_mask_data(Some(clip), 2.0));
+        let different_scale = mesh_clip_key(physical_mesh_clip_mask_data(Some(clip), 1.0));
+        let no_clip = mesh_clip_key(physical_mesh_clip_mask_data(None, 2.0));
+
+        assert_eq!(first, same);
+        assert_ne!(first, different_scale);
+        assert_ne!(first, no_clip);
     }
 
     #[test]
@@ -1051,6 +1374,73 @@ mod tests {
             compute_scroll_translate(Some(WidgetId::from_raw(2)), &scroll_regions, viewport)
                 .is_none()
         );
+    }
+
+    #[test]
+    fn scroll_translate_cache_scans_each_container_once_per_frame() {
+        let viewport = make_viewport(800.0, 600.0, 2.0);
+        let mut scroll_regions = Vec::with_capacity(100);
+        // Put the requested id first so the reverse lookup must inspect all 100 regions on a
+        // cache miss. Ten thousand tagged draws must still perform only that single scan.
+        scroll_regions.push(make_scroll_region(
+            0,
+            Rect::new(0.0, 0.0, 800.0, 600.0),
+            Point::ZERO,
+            Point::new(Dp::new(50.0), Dp::new(30.0)),
+        ));
+        for id in 1..100 {
+            scroll_regions.push(make_scroll_region(
+                id,
+                Rect::new(0.0, 0.0, 800.0, 600.0),
+                Point::ZERO,
+                Point::ZERO,
+            ));
+        }
+
+        let mut cache = ScrollTranslateCache::default();
+        cache.begin_frame();
+        for _ in 0..10_000 {
+            assert!(cache
+                .resolve(Some(WidgetId::from_raw(0)), &scroll_regions, viewport)
+                .is_some());
+        }
+
+        assert_eq!(cache.region_visits, 100);
+        assert_eq!(cache.translations.len(), 1);
+        assert!(
+            !cache.translations.spilled(),
+            "the single-container fast path should not allocate"
+        );
+    }
+
+    #[test]
+    fn scroll_translate_cache_refreshes_offsets_at_frame_boundary() {
+        let viewport = make_viewport(800.0, 600.0, 2.0);
+        let mut scroll_regions = [make_scroll_region(
+            1,
+            Rect::new(0.0, 0.0, 800.0, 600.0),
+            Point::ZERO,
+            Point::new(Dp::new(10.0), Dp::ZERO),
+        )];
+        let mut cache = ScrollTranslateCache::default();
+        cache.begin_frame();
+        let before = cache
+            .resolve(Some(WidgetId::from_raw(1)), &scroll_regions, viewport)
+            .expect("first frame should translate");
+
+        scroll_regions[0].scroll_offset.x = Dp::new(40.0);
+        // Within a frame, offsets are intentionally stable and reuse the cached value.
+        let same_frame = cache
+            .resolve(Some(WidgetId::from_raw(1)), &scroll_regions, viewport)
+            .expect("same frame should reuse translation");
+        assert_eq!(before.offset_physical, same_frame.offset_physical);
+
+        cache.begin_frame();
+        let next_frame = cache
+            .resolve(Some(WidgetId::from_raw(1)), &scroll_regions, viewport)
+            .expect("next frame should refresh translation");
+        assert_ne!(before.offset_physical, next_frame.offset_physical);
+        assert_eq!(cache.region_visits, 1);
     }
 
     #[test]

@@ -1,14 +1,16 @@
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use crate::foundation::color::Color;
 use crate::foundation::view_model::{Command, ValueCommand};
 use crate::theme::StyleContext;
 use crate::ui::layout::{Align, Insets, LayoutStyle, Value};
+use crate::ui::theme::Density;
 use crate::ui::unit::{dp, Dp};
 
 use super::common::{
     CursorStyle, FocusScopeOptions, InteractionHandlers, LifecycleEventHandlers, ListItemState,
-    MediaEventHandlers, VisualStyle, WidgetId, WidgetKey,
+    ListSelectionMetadata, MediaEventHandlers, VisualStyle, WidgetId, WidgetKey,
 };
 use super::container::{set_layout_inset, set_layout_length, set_layout_lengths, IntoLengthValue};
 use super::core::Element;
@@ -188,14 +190,31 @@ pub struct ListStyle {
 impl ListStyle {
     pub fn default_for_theme(theme: &crate::ui::theme::Theme) -> Self {
         let palette = palette_from_theme(theme);
+        let (item_height, item_padding, item_radius) = match theme.density {
+            Density::Compact => (
+                dp(32.0),
+                Insets::symmetric(theme.spacing.sm, theme.spacing.xs),
+                theme.radius.md,
+            ),
+            Density::Comfortable => (
+                dp(40.0),
+                Insets::symmetric(theme.spacing.sm + theme.spacing.xs, theme.spacing.sm),
+                theme.radius.lg,
+            ),
+            Density::Spacious => (
+                dp(48.0),
+                Insets::symmetric(theme.spacing.md, theme.spacing.sm + theme.spacing.xs),
+                theme.radius.xl,
+            ),
+        };
         Self {
             surface: super::style::WidgetSurfaceStyle::default(),
-            item_height: theme.spacing.xl + theme.spacing.md,
-            item_padding: Insets::symmetric(theme.spacing.md, theme.spacing.xs + theme.spacing.xxs),
-            item_radius: theme.radius.md,
+            item_height,
+            item_padding,
+            item_radius,
             item_background: Value::Static(Color::TRANSPARENT),
-            item_hover_background: Value::Static(theme.colors.surface_low),
-            item_selected_background: Value::Static(theme.colors.primary_container),
+            item_hover_background: Value::Static(palette.on_surface.with_alpha_factor(0.06)),
+            item_selected_background: Value::Static(palette.primary.with_alpha_factor(0.12)),
             item_disabled_background: Value::Static(Color::TRANSPARENT),
             group_header_background: Value::Static(Color::TRANSPARENT),
             group_header_text: Value::Static(palette.on_surface_muted),
@@ -619,7 +638,19 @@ where
         let row_visual = self.visual.clone();
         let root_style_resolver = self.style.clone();
         let root_visual = self.visual.clone();
-        let selected_keys = self.selected_keys.clone();
+        let (selected_keys, selected_key_membership) = match self.selected_keys {
+            Value::Static(keys) => {
+                let shared: Arc<[WidgetKey]> = keys.into();
+                let membership = Arc::new(shared.iter().cloned().collect::<HashSet<_>>());
+                (Value::Static(shared), Value::Static(membership))
+            }
+            Value::Signal(signal) => {
+                let shared = signal.map_memo(|keys| Arc::<[WidgetKey]>::from(keys));
+                let membership =
+                    shared.map_memo(|keys| Arc::new(keys.iter().cloned().collect::<HashSet<_>>()));
+                (Value::Signal(shared), Value::Signal(membership))
+            }
+        };
         let row_keys: Arc<[WidgetKey]> = self
             .rows
             .iter()
@@ -629,6 +660,15 @@ where
             })
             .collect::<Vec<_>>()
             .into();
+        let sibling_index_by_key = Arc::new(row_keys.iter().cloned().enumerate().fold(
+            HashMap::with_capacity(row_keys.len()),
+            |mut indexes, (index, key)| {
+                // Preserve the former `.position()` semantics for malformed
+                // sources with duplicate keys: range selection uses the first.
+                indexes.entry(key).or_insert(index);
+                indexes
+            },
+        ));
         let row_disabled: Arc<[bool]> = self
             .rows
             .iter()
@@ -649,6 +689,13 @@ where
         let render = self.render.clone();
         let context_menu = Arc::new(self.context_menu);
         let item_layout = self.item_layout;
+        let selection = Arc::new(ListSelectionMetadata {
+            selected_keys,
+            selected_key_membership,
+            sibling_keys: row_keys,
+            sibling_index_by_key,
+            sibling_disabled: row_disabled,
+        });
         let mut list: Element<VM> = VirtualList::new_with_style_context(
             source,
             move |_visible, row, context, style_sheet| {
@@ -666,7 +713,9 @@ where
                         value,
                         disabled,
                     } => {
-                        let selected = selected_keys.resolve().contains(key);
+                        let selected = selection
+                            .selected_key_membership
+                            .resolve_ref(|membership| membership.contains(key));
                         let disabled_now = disabled.resolve();
                         let context = ListItemContext {
                             index: *source_index,
@@ -704,7 +753,7 @@ where
                             row_index: _visible,
                             item_index: *source_index,
                             key: key.clone(),
-                            selected_keys: selected_keys.clone(),
+                            selection: selection.clone(),
                             selection_mode,
                             disabled: disabled.clone(),
                             item_extent,
@@ -715,8 +764,6 @@ where
                             item_disabled_background: row_style.item_disabled_background.clone(),
                             on_selection_change: on_selection_change.clone(),
                             on_item_action: on_item_action.clone(),
-                            sibling_keys: row_keys.clone(),
-                            sibling_disabled: row_disabled.clone(),
                         });
                         if !context_menu.is_empty() {
                             let on_show = ValueCommand::new(|_: &mut VM, _: LongPressEvent| {});

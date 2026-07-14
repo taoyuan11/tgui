@@ -30,6 +30,100 @@ fn should_skip_fully_clipped_child<VM: 'static>(
     frame.fully_outside(clip_rect)
 }
 
+fn build_monotonic_child_cull_index<VM: 'static>(
+    layout: &ContainerLayout,
+    children: &[ResolvedElement<VM>],
+    layout_node: &LayoutNode,
+    context: &CollectContext<'_, '_>,
+) -> Option<common::ChildCullIndex> {
+    const MIN_INDEXED_CHILDREN: usize = 16;
+    let axis = match &layout.kind {
+        ContainerKind::Flow => common::ChildCullAxis::Vertical,
+        ContainerKind::Flex {
+            direction: Axis::Horizontal,
+            wrap: Wrap::NoWrap,
+        } => common::ChildCullAxis::Horizontal,
+        ContainerKind::Flex {
+            direction: Axis::Vertical,
+            wrap: Wrap::NoWrap,
+        } => common::ChildCullAxis::Vertical,
+        ContainerKind::Flex {
+            wrap: Wrap::Wrap, ..
+        }
+        | ContainerKind::Grid { .. }
+        | ContainerKind::Stack => return None,
+    };
+    if children.len() < MIN_INDEXED_CHILDREN || children.len() != layout_node.children.len() {
+        return None;
+    }
+    if children.iter().any(|child| {
+        child.layout.position_type != PositionType::Relative || !child.can_skip_when_fully_clipped()
+    }) {
+        return None;
+    }
+
+    let mut intervals = Vec::with_capacity(children.len());
+    let mut previous_start = None;
+    let mut previous_end = None;
+    for child_layout in &layout_node.children {
+        let layout = context.taffy.layout(child_layout.node).ok()?;
+        let (start, extent) = match axis {
+            common::ChildCullAxis::Horizontal => (layout.location.x, layout.size.width),
+            common::ChildCullAxis::Vertical => (layout.location.y, layout.size.height),
+        };
+        let end = start + extent;
+        if !start.is_finite() || !end.is_finite() || extent < 0.0 {
+            return None;
+        }
+        let start = Dp::new(start);
+        let end = Dp::new(end);
+        if previous_start.is_some_and(|previous| start < previous)
+            || previous_end.is_some_and(|previous| end < previous)
+        {
+            return None;
+        }
+        intervals.push(common::ChildCullInterval { start, end });
+        previous_start = Some(start);
+        previous_end = Some(end);
+    }
+
+    Some(common::ChildCullIndex { axis, intervals })
+}
+
+fn monotonic_visible_child_range<VM: 'static>(
+    layout: &ContainerLayout,
+    children: &[ResolvedElement<VM>],
+    layout_node: &LayoutNode,
+    child_origin: Point,
+    clip_rect: Rect,
+    context: &CollectContext<'_, '_>,
+) -> Option<std::ops::Range<usize>> {
+    // GPU scroll retains clipped commands for later translation, so CPU-side omission is
+    // forbidden both for an inherited tagged subtree and while building a new tagged subtree.
+    if context.gpu_scroll_container.is_some() || context.gpu_scroll_enabled {
+        return None;
+    }
+
+    let index = layout_node
+        .cached_child_cull_index
+        .get_or_init(|| build_monotonic_child_cull_index(layout, children, layout_node, context));
+    let index = index.as_ref()?;
+    let (origin, clip_start, clip_end) = match index.axis {
+        common::ChildCullAxis::Horizontal => (child_origin.x, clip_rect.x, clip_rect.right()),
+        common::ChildCullAxis::Vertical => (child_origin.y, clip_rect.y, clip_rect.bottom()),
+    };
+    let margin = Dp::new(common::CLIP_CULL_MARGIN);
+    let visible_start = clip_start - origin - margin;
+    let visible_end = clip_end - origin + margin;
+    let first = index
+        .intervals
+        .partition_point(|interval| interval.end < visible_start);
+    let end = index
+        .intervals
+        .partition_point(|interval| interval.start <= visible_end);
+    Some(first..end.max(first))
+}
+
 impl<VM: 'static> ResolvedElement<VM> {
     pub(super) fn collect_layout_media_kind(
         &self,
@@ -125,16 +219,29 @@ impl<VM: 'static> ResolvedElement<VM> {
                     vertical_track: scrollbar_geometry.vertical_track,
                     vertical_thumb: scrollbar_geometry.vertical_thumb,
                 });
-                let before_children = computed.clone();
+                let before_children_cursor = super::ScenePrefixSnapshot::capture(computed);
                 let child_origin = Point {
                     x: visual.frame.x - scroll_offset.x,
                     y: visual.frame.y - scroll_offset.y,
                 };
+                let fast_child_range = monotonic_visible_child_range(
+                    layout,
+                    children,
+                    layout_node,
+                    child_origin,
+                    child_clip_rect,
+                    context,
+                );
+                let used_fast_child_range = fast_child_range.is_some();
+                let child_range =
+                    fast_child_range.unwrap_or(0..children.len().min(layout_node.children.len()));
                 let previous_gpu_scroll_container = context.gpu_scroll_container;
                 if context.gpu_scroll_enabled {
                     context.gpu_scroll_container = Some(self.id);
                 }
-                for (child, child_layout) in children.iter().zip(layout_node.children.iter()) {
+                for child_index in child_range {
+                    let child = &children[child_index];
+                    let child_layout = &layout_node.children[child_index];
                     if should_skip_fully_clipped_child(
                         child,
                         child_layout,
@@ -163,18 +270,21 @@ impl<VM: 'static> ResolvedElement<VM> {
                         computed.extend(child_chunk);
                     }
                 }
-                push_splitter_handle_hit_regions(
-                    children,
-                    layout_node,
-                    visual.frame,
-                    scroll_offset,
-                    child_clip_rect,
-                    context,
-                    computed,
-                );
+                if !used_fast_child_range {
+                    push_splitter_handle_hit_regions(
+                        children,
+                        layout_node,
+                        visual.frame,
+                        scroll_offset,
+                        child_clip_rect,
+                        context,
+                        computed,
+                    );
+                }
                 {
                     context.gpu_scroll_container = previous_gpu_scroll_container;
                 }
+                let before_children = before_children_cursor.materialize(computed);
                 // `after_children` 仅承载子树收集之后追加的内容(滚动条),它本身就等价于
                 // `computed.delta_since(子树之后的快照)` —— 因此无需克隆整份累积场景再做 delta。
                 // 对长列表滚动容器,这次克隆会拷贝其全部子节点的图元(每帧一次),代价高昂。
@@ -307,7 +417,7 @@ impl<VM: 'static> ResolvedElement<VM> {
                     vertical_track: scrollbar_geometry.vertical_track,
                     vertical_thumb: scrollbar_geometry.vertical_thumb,
                 });
-                let before_children = computed.clone();
+                let before_children_cursor = super::ScenePrefixSnapshot::capture(computed);
                 let mut measured_extents = Vec::new();
                 let mut widget_ids_by_key = Vec::new();
                 let mut invalidate_layout = false;
@@ -365,9 +475,8 @@ impl<VM: 'static> ResolvedElement<VM> {
                         }
                         .max(Dp::ZERO);
                         let measured_changed = runtime_state
-                            .measured_extents
-                            .get(&meta.item_index)
-                            .copied()
+                            .measurements
+                            .measured_extent(meta.item_index)
                             .map(|previous| {
                                 (previous - measured_extent).abs()
                                     > crate::ui::widget::MEASURED_EXTENT_INVALIDATION_EPSILON
@@ -388,6 +497,7 @@ impl<VM: 'static> ResolvedElement<VM> {
                 {
                     context.gpu_scroll_container = previous_gpu_scroll_container;
                 }
+                let before_children = before_children_cursor.materialize(computed);
                 // `after_children` 收集子树之后追加的所有内容(虚拟状态更新 + 滚动条),
                 // 直接构建即可,无需克隆整份累积场景再 `delta_since`。虚拟状态更新此前推入
                 // `computed` 且位于快照之后,因此原本就被 delta 纳入 `after_children`;这里
@@ -401,6 +511,7 @@ impl<VM: 'static> ResolvedElement<VM> {
                             height: visual.background_frame.height,
                         },
                         measured_extents,
+                        measurement_signature: runtime_state.measurements.signature(),
                         widget_ids_by_key,
                         invalidate_layout,
                     },
@@ -550,7 +661,6 @@ impl<VM: 'static> ResolvedElement<VM> {
                 item_interactions,
                 ..
             } => {
-                let scene = scene.resolve();
                 let padding = self
                     .layout
                     .padding
@@ -587,78 +697,83 @@ impl<VM: 'static> ResolvedElement<VM> {
                     && !visual_context.clip_rect.is_empty()
                     && canvas_visible
                 {
-                    for rendered in tessellate_canvas_scene_items(
-                        &scene,
-                        canvas_origin,
-                        visual.opacity,
-                        canvas_clip,
-                        canvas_clip_mask,
-                        context.font_manager,
-                        context.media,
-                        context.units,
-                    ) {
-                        let meshes = rendered.output.meshes;
-                        for command in rendered.output.commands {
-                            computed.scene.push_render_command(command);
-                        }
-                        for texture in rendered.output.textures {
-                            computed.scene.push_texture(texture);
-                        }
-                        for text in rendered.output.texts {
-                            computed.scene.push_text(text);
-                        }
-                        for mesh in &meshes {
-                            computed.scene.push_mesh(mesh.clone());
-                        }
+                    let collect_hit_metadata = item_interactions.has_any();
+                    scene.resolve_ref(|scene| {
+                        for rendered in tessellate_canvas_scene_items(
+                            scene,
+                            canvas_origin,
+                            visual.opacity,
+                            canvas_clip,
+                            canvas_clip_mask,
+                            collect_hit_metadata,
+                            context.font_manager,
+                            context.media,
+                            context.units,
+                        ) {
+                            for command in rendered.output.commands {
+                                computed.scene.push_render_command(command);
+                            }
+                            for texture in rendered.output.textures {
+                                computed.scene.push_texture(texture);
+                            }
+                            for text in rendered.output.texts {
+                                computed.scene.push_text(text);
+                            }
+                            for mesh in rendered.output.meshes {
+                                computed.scene.push_mesh(mesh);
+                            }
 
-                        if item_interactions.has_any() {
-                            if let Some(bounds) = rendered.hit_bounds {
-                                let geometry = match rendered.hit_geometry.clone() {
-                                    Some(CanvasHitGeometry::Quad(quad)) => HitGeometry::Quad(quad),
-                                    Some(CanvasHitGeometry::Triangles(triangles)) => {
-                                        HitGeometry::Triangles(triangles)
-                                    }
-                                    None => HitGeometry::Rect,
-                                };
-                                computed.hit_regions.push(HitRegion {
-                                    rect: Rect::new(
-                                        canvas_frame.x + bounds.min_x,
-                                        canvas_frame.y + bounds.min_y,
-                                        bounds.width(),
-                                        bounds.height(),
-                                    ),
-                                    clip_rect: canvas_clip,
-                                    geometry,
-                                    transform_chain: context.transform_stack.clone(),
-                                    scope_path: context.focus_scope_path(),
-                                    focus: None,
-                                    interaction: HitInteraction::CanvasItem {
-                                        id: self.id,
-                                        item_id: rendered.item_id,
-                                        item_interactions: item_interactions.clone(),
-                                        cursor_style: rendered.cursor,
-                                        canvas_origin,
-                                        item_origin: Point::new(
-                                            canvas_origin.x + rendered.local_origin.x,
-                                            canvas_origin.y + rendered.local_origin.y,
+                            if collect_hit_metadata {
+                                if let Some(bounds) = rendered.hit_bounds {
+                                    let geometry = match rendered.hit_geometry {
+                                        Some(CanvasHitGeometry::Quad(quad)) => {
+                                            HitGeometry::Quad(quad)
+                                        }
+                                        Some(CanvasHitGeometry::Triangles(triangles)) => {
+                                            HitGeometry::Triangles(triangles)
+                                        }
+                                        None => HitGeometry::Rect,
+                                    };
+                                    computed.hit_regions.push(HitRegion {
+                                        rect: Rect::new(
+                                            canvas_frame.x + bounds.min_x,
+                                            canvas_frame.y + bounds.min_y,
+                                            bounds.width(),
+                                            bounds.height(),
                                         ),
-                                        inverse_transform: rendered.inverse_transform.matrix,
-                                        text_hits: rendered
-                                            .text_hits
-                                            .iter()
-                                            .cloned()
-                                            .map(|entry| common::CanvasTextHitRegion {
-                                                hit: entry.hit,
-                                                quad: entry.quad,
-                                            })
-                                            .collect::<Vec<_>>()
-                                            .into(),
-                                    },
-                                    gpu_scroll_container: context.gpu_scroll_container,
-                                });
+                                        clip_rect: canvas_clip,
+                                        geometry,
+                                        transform_chain: context.transform_stack.clone(),
+                                        scope_path: context.focus_scope_path(),
+                                        focus: None,
+                                        interaction: HitInteraction::CanvasItem {
+                                            id: self.id,
+                                            item_id: rendered.item_id,
+                                            item_interactions: item_interactions.clone(),
+                                            cursor_style: rendered.cursor,
+                                            canvas_origin,
+                                            item_origin: Point::new(
+                                                canvas_origin.x + rendered.local_origin.x,
+                                                canvas_origin.y + rendered.local_origin.y,
+                                            ),
+                                            inverse_transform: rendered.inverse_transform.matrix,
+                                            text_hits: rendered
+                                                .text_hits
+                                                .iter()
+                                                .cloned()
+                                                .map(|entry| common::CanvasTextHitRegion {
+                                                    hit: entry.hit,
+                                                    quad: entry.quad,
+                                                })
+                                                .collect::<Vec<_>>()
+                                                .into(),
+                                        },
+                                        gpu_scroll_container: context.gpu_scroll_container,
+                                    });
+                                }
                             }
                         }
-                    }
+                    });
                 }
                 true
             }

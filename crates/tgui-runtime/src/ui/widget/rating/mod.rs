@@ -1,8 +1,8 @@
 use crate::foundation::color::Color;
 use crate::foundation::view_model::ValueCommand;
 use crate::theme::{StyleContext, WidgetState};
-use crate::ui::layout::{pct, Align, LayoutStyle, Value};
-use crate::ui::theme::{StateValue, Theme};
+use crate::ui::layout::{pct, Align, LayoutStyle, Length, Value};
+use crate::ui::theme::StateValue;
 
 use super::common::VisualStyle;
 use super::core::Element;
@@ -94,7 +94,6 @@ impl<VM> Rating<VM> {
 
 impl<VM: 'static> From<Rating<VM>> for Element<VM> {
     fn from(rating: Rating<VM>) -> Self {
-        let layout_style = resolve_rating_style_for_layout(rating.style.as_ref());
         let value = rating.value.resolve().clamp(0.0, rating.max as f32);
         let read_only = rating.read_only.resolve();
         let visual_identity = rating.visual.clone();
@@ -129,9 +128,23 @@ impl<VM: 'static> From<Rating<VM>> for Element<VM> {
             );
             stars.push(icon_element);
         }
+        let runtime_style = rating.style.clone();
         let star_row: Element<VM> = Flex::horizontal()
             .align(Align::Center)
-            .gap(layout_style.gap)
+            .runtime_layout(move |_layout, container, context, style_sheet, visual| {
+                // Rating is composed from a Flex row, but its spacing is a
+                // component token rather than user-authored container layout.
+                // Resolve it at runtime so a retained tree follows density and
+                // light/dark theme changes without rebuilding wrappers.
+                let resolved = resolve_rating_style_with_sheet(
+                    runtime_style.as_ref(),
+                    context,
+                    style_sheet,
+                    visual,
+                    WidgetState::default(),
+                );
+                container.gap = Value::Static(Length::Px(resolved.gap));
+            })
             .child(stars)
             .into();
         let mut root: Element<VM> = if !read_only {
@@ -245,10 +258,4 @@ fn resolve_rating_style_with_sheet(
             sheet.apply_rating_state(base, context, visual, state)
         },
     )
-}
-
-fn resolve_rating_style_for_layout(style: Option<&StyleResolver<RatingStyle>>) -> RatingStyle {
-    let theme = Theme::default();
-    let context = StyleContext::from_theme(&theme);
-    resolve_rating_style(style, &context)
 }

@@ -1,4 +1,5 @@
 use geo::{BooleanOps, MultiPolygon};
+use lyon::geom::{Box2D, CubicBezierSegment, QuadraticBezierSegment};
 use lyon::math::point;
 use lyon::path::iterator::PathIterator;
 use lyon::path::{Path, PathEvent};
@@ -239,6 +240,67 @@ impl PathBuilder {
     }
 
     pub(crate) fn control_bounds(&self) -> Option<lyon::geom::Box2D<f32>> {
+        let mut bounds = None;
+        let mut current = None;
+        let mut subpath_start = None;
+
+        for command in &self.commands {
+            match *command {
+                PathCommand::MoveTo(point_value) => {
+                    let at = point(point_value.x.get(), point_value.y.get());
+                    extend_control_bounds(&mut bounds, Box2D::new(at, at));
+                    current = Some(at);
+                    subpath_start = Some(at);
+                }
+                PathCommand::LineTo(point_value) => {
+                    let Some(_) = current else {
+                        return self.control_bounds_via_lyon();
+                    };
+                    let to = point(point_value.x.get(), point_value.y.get());
+                    extend_control_bounds(&mut bounds, Box2D::new(to, to));
+                    current = Some(to);
+                }
+                PathCommand::QuadTo { ctrl, to } => {
+                    let Some(from) = current else {
+                        return self.control_bounds_via_lyon();
+                    };
+                    let to = point(to.x.get(), to.y.get());
+                    let segment = QuadraticBezierSegment {
+                        from,
+                        ctrl: point(ctrl.x.get(), ctrl.y.get()),
+                        to,
+                    };
+                    extend_control_bounds(&mut bounds, segment.bounding_box());
+                    current = Some(to);
+                }
+                PathCommand::CubicTo { ctrl1, ctrl2, to } => {
+                    let Some(from) = current else {
+                        return self.control_bounds_via_lyon();
+                    };
+                    let to = point(to.x.get(), to.y.get());
+                    let segment = CubicBezierSegment {
+                        from,
+                        ctrl1: point(ctrl1.x.get(), ctrl1.y.get()),
+                        ctrl2: point(ctrl2.x.get(), ctrl2.y.get()),
+                        to,
+                    };
+                    extend_control_bounds(&mut bounds, segment.bounding_box());
+                    current = Some(to);
+                }
+                PathCommand::Close => {
+                    let Some(start) = subpath_start else {
+                        return self.control_bounds_via_lyon();
+                    };
+                    current = Some(start);
+                    subpath_start = None;
+                }
+            }
+        }
+
+        bounds
+    }
+
+    pub(crate) fn control_bounds_via_lyon(&self) -> Option<Box2D<f32>> {
         let path = self.to_lyon_path();
         (path.iter().next().is_some()).then(|| lyon::algorithms::aabb::bounding_box(path.iter()))
     }
@@ -306,6 +368,16 @@ impl PathBuilder {
         }
         builder
     }
+}
+
+fn extend_control_bounds(bounds: &mut Option<Box2D<f32>>, next: Box2D<f32>) {
+    *bounds = Some(match *bounds {
+        Some(current) => Box2D::new(
+            lyon::math::Point::min(current.min, next.min),
+            lyon::math::Point::max(current.max, next.max),
+        ),
+        None => next,
+    });
 }
 
 impl Default for PathBuilder {

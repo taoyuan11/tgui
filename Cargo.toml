@@ -67,6 +67,7 @@ crossbeam-channel = "0.5.15"
 dpi = "0.1.2"
 ffmpeg-next = { version = "8.1.0", default-features = false, features = ["codec", "format", "software-resampling", "software-scaling"] }
 geo = "0.33.1"
+hashbrown = "0.16.1"
 image = { version = "0.25.10", default-features = true, features = ["jpeg", "png", "gif", "webp", "bmp"] }
 lyon = "1.0.19"
 mimalloc = "0.1.52"

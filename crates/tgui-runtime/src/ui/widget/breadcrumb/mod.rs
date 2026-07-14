@@ -1,7 +1,6 @@
 use crate::foundation::view_model::Command;
 use crate::theme::{StyleContext, WidgetState};
-use crate::ui::layout::{Align, LayoutStyle, Value, Wrap};
-use crate::ui::theme::Theme;
+use crate::ui::layout::{Align, LayoutStyle, Length, Value, Wrap};
 
 use super::common::VisualStyle;
 use super::core::Element;
@@ -96,7 +95,6 @@ impl<VM> Breadcrumb<VM> {
 
 impl<VM: 'static> From<Breadcrumb<VM>> for Element<VM> {
     fn from(breadcrumb: Breadcrumb<VM>) -> Self {
-        let layout_style = resolve_breadcrumb_style_for_layout(breadcrumb.style.as_ref());
         let total = breadcrumb.items.len();
         let visible = if total > breadcrumb.max_visible {
             let tail = breadcrumb.max_visible.saturating_sub(2).max(1);
@@ -179,10 +177,20 @@ impl<VM: 'static> From<Breadcrumb<VM>> for Element<VM> {
                 }
             }
         }
+        let layout_style = breadcrumb.style.clone();
         let mut root: Element<VM> = Flex::horizontal()
+            .runtime_layout(move |_layout, container, context, style_sheet, visual| {
+                let resolved = resolve_breadcrumb_style_with_sheet(
+                    layout_style.as_ref(),
+                    context,
+                    style_sheet,
+                    visual,
+                    WidgetState::default(),
+                );
+                container.gap = Value::Static(Length::Px(resolved.gap));
+            })
             .wrap(Wrap::Wrap)
             .align(Align::Center)
-            .gap(layout_style.gap)
             .child(children)
             .into();
         root.key = breadcrumb.key;
@@ -246,20 +254,6 @@ fn separator_text_style(
     }
 }
 
-fn resolve_breadcrumb_style(
-    style: Option<&StyleResolver<BreadcrumbStyle>>,
-    context: &StyleContext<'_>,
-) -> BreadcrumbStyle {
-    let style_sheet = StyleSheet::default();
-    resolve_breadcrumb_style_with_sheet(
-        style,
-        context,
-        &style_sheet,
-        &VisualStyle::default(),
-        WidgetState::default(),
-    )
-}
-
 fn resolve_breadcrumb_style_with_sheet(
     style: Option<&StyleResolver<BreadcrumbStyle>>,
     context: &StyleContext<'_>,
@@ -280,12 +274,4 @@ fn resolve_breadcrumb_style_with_sheet(
             sheet.apply_breadcrumb_state(base, context, visual, state)
         },
     )
-}
-
-fn resolve_breadcrumb_style_for_layout(
-    style: Option<&StyleResolver<BreadcrumbStyle>>,
-) -> BreadcrumbStyle {
-    let theme = Theme::default();
-    let context = StyleContext::from_theme(&theme);
-    resolve_breadcrumb_style(style, &context)
 }

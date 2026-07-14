@@ -5,6 +5,8 @@ use self::patch::{
     collect_indexes, collect_resolved_widget_ids, layout_at_path, patch_layout_at_path,
     patch_resolved_at_path, resolved_at_path, resolved_at_path_mut,
 };
+#[cfg(test)]
+pub(crate) use self::patch::{reset_layout_patch_stats, take_layout_patch_stats, LayoutPatchStats};
 use super::scene::ActiveTooltipState;
 use super::*;
 use crate::ui::widget::r#virtual::{resolve_virtual_window_plan, VirtualViewportHint};
@@ -22,6 +24,20 @@ pub(crate) struct ResolvedSceneLayout<VM> {
     pub(super) paths: HashMap<WidgetId, Vec<usize>>,
     pub(super) parents: HashMap<WidgetId, Option<WidgetId>>,
     pub(super) depths: HashMap<WidgetId, usize>,
+    /// Sparse set of Virtual nodes used to answer subtree membership without
+    /// recursively walking every resolved child on each layout invalidation.
+    pub(super) virtual_widgets: HashSet<WidgetId>,
+    /// Sparse controller metadata collected alongside the structural indexes. Runtime scene
+    /// binding rebuilds can test a `ScrollRegion` id directly instead of resolving and walking
+    /// every container path in large trees.
+    pub(super) scroll_view_controllers:
+        HashMap<WidgetId, crate::foundation::binding::ScrollViewController>,
+    /// Number of resolved widgets in each widget's subtree, including itself.
+    ///
+    /// Scene collection uses this to reserve its per-widget caches without first
+    /// walking the same subtree solely to count it. The map is rebuilt alongside
+    /// the other structural indexes after every layout-tree patch.
+    pub(super) subtree_sizes: HashMap<WidgetId, usize>,
 }
 
 impl<VM: 'static> ResolvedSceneLayout<VM> {
@@ -38,8 +54,13 @@ impl<VM: 'static> ResolvedSceneLayout<VM> {
     }
 
     pub(crate) fn subtree_contains_virtual(&self, widget_id: WidgetId) -> bool {
-        self.resolved_widget(widget_id)
-            .is_some_and(ResolvedElement::contains_virtual)
+        let Some(root_path) = self.path_for(widget_id) else {
+            return false;
+        };
+        self.virtual_widgets.iter().any(|virtual_id| {
+            self.path_for(*virtual_id)
+                .is_some_and(|virtual_path| virtual_path.starts_with(root_path))
+        })
     }
 
     pub(crate) fn is_virtual_widget(&self, widget_id: WidgetId) -> bool {
@@ -73,7 +94,7 @@ impl<VM: 'static> ResolvedSceneLayout<VM> {
             let mut next_state = runtime_state.clone();
             if let Some(cache) = virtual_states.get(root_id) {
                 next_state.viewport_hint = cache.viewport_hint.clone();
-                next_state.measured_extents = cache.measured_extents.clone();
+                next_state.measurements = cache.measurements.clone();
                 next_state.widget_ids_by_key = cache.widget_ids_by_key.clone();
                 next_state.bootstrap = next_state.viewport_hint.is_none();
             }
@@ -99,7 +120,8 @@ impl<VM: 'static> ResolvedSceneLayout<VM> {
                 next_state.fallback_viewport_hint.clone(),
                 content_cross_extent.as_ref().map(|value| value.resolve()),
             );
-            if next_plan.total_main_extent != window_plan.total_main_extent
+            if next_plan.measurement_revision != window_plan.measurement_revision
+                || next_plan.total_main_extent != window_plan.total_main_extent
                 || next_plan.visible_range != window_plan.visible_range
                 || next_plan.placements.len() != window_plan.placements.len()
                 || next_plan
@@ -137,6 +159,10 @@ impl<VM: 'static> ResolvedSceneLayout<VM> {
 
     pub(crate) fn depth_of(&self, widget_id: WidgetId) -> usize {
         self.depths.get(&widget_id).copied().unwrap_or_default()
+    }
+
+    pub(crate) fn subtree_size(&self, widget_id: WidgetId) -> usize {
+        self.subtree_sizes.get(&widget_id).copied().unwrap_or(1)
     }
 
     pub(crate) fn subtree_widget_ids(&self, widget_id: WidgetId) -> Vec<WidgetId> {
@@ -178,6 +204,13 @@ impl<VM: 'static> ResolvedSceneLayout<VM> {
     /// 所有 widget id 的迭代器，用于全局扫描（例如全局快捷键派发）。
     pub(crate) fn all_widget_ids(&self) -> impl Iterator<Item = WidgetId> + '_ {
         self.paths.keys().copied()
+    }
+
+    pub(crate) fn scroll_view_controller(
+        &self,
+        widget_id: WidgetId,
+    ) -> Option<&crate::foundation::binding::ScrollViewController> {
+        self.scroll_view_controllers.get(&widget_id)
     }
 
     pub(crate) fn can_patch_layout_dependency_as_scene(&self, widget_id: WidgetId) -> bool {
@@ -283,9 +316,9 @@ impl<VM: 'static> ResolvedSceneLayout<VM> {
         let ResolvedWidgetKind::Canvas { scene, .. } = &node.kind else {
             return Vec::new();
         };
-        scene
-            .resolve()
-            .query_point_all_with_runtime_context(font_manager, units, scene_position)
+        scene.resolve_ref(|scene| {
+            scene.query_point_all_with_runtime_context(font_manager, units, scene_position)
+        })
     }
 
     pub(crate) fn rebuild_indexes(&mut self) {
@@ -294,6 +327,9 @@ impl<VM: 'static> ResolvedSceneLayout<VM> {
         let mut paths = HashMap::new();
         let mut parents = HashMap::new();
         let mut depths = HashMap::new();
+        let mut subtree_sizes = HashMap::new();
+        let mut scroll_view_controllers = HashMap::new();
+        let mut virtual_widgets = HashSet::new();
         collect_indexes(
             &self.resolved_root,
             None,
@@ -302,10 +338,16 @@ impl<VM: 'static> ResolvedSceneLayout<VM> {
             &mut paths,
             &mut parents,
             &mut depths,
+            &mut subtree_sizes,
+            &mut scroll_view_controllers,
+            &mut virtual_widgets,
         );
         self.paths = paths;
         self.parents = parents;
         self.depths = depths;
+        self.subtree_sizes = subtree_sizes;
+        self.scroll_view_controllers = scroll_view_controllers;
+        self.virtual_widgets = virtual_widgets;
     }
 
     fn resolved_at_path(&self, path: &[usize]) -> &ResolvedElement<VM> {
@@ -370,6 +412,8 @@ impl<VM: 'static> ResolvedSceneLayout<VM> {
                 self.taffy.set_style(node, style)?;
             }
 
+            self.layout_root.clear_cached_layout_metadata();
+
             compute_taffy_layout_with_measure(
                 &mut self.taffy,
                 self.layout_root.node,
@@ -433,7 +477,7 @@ impl<VM: 'static> ResolvedSceneLayout<VM> {
             DependencyGraph,
         ) = with_widget_stack(|| {
             with_dependency_collection(|| {
-                let cap = self.resolved_at_path(path).estimated_node_count();
+                let cap = self.subtree_size(widget_id);
                 let mut lifecycle_states = HashMap::with_capacity(cap / 4);
                 let mut chunks = HashMap::with_capacity(cap);
                 let mut chunk_parts = HashMap::with_capacity(cap / 2);
@@ -753,13 +797,55 @@ impl<VM: 'static> ResolvedSceneLayout<VM> {
         let path = self.path_for(widget_id)?;
         let node = self.resolved_at_path(path);
         let parts = chunk_parts.get(&widget_id)?;
+        let children = match &node.kind {
+            ResolvedWidgetKind::Container { children, .. }
+            | ResolvedWidgetKind::Virtual { children, .. } => children.as_slice(),
+            _ => &[],
+        };
+
+        // Validate all inputs before moving the old materialized chunk out. A missing child keeps
+        // the exact legacy failure semantics and, importantly, leaves the cache untouched so the
+        // caller can cleanly fall back to a full recollect.
+        if children.iter().any(|child| !chunks.contains_key(&child.id)) {
+            return None;
+        }
+
+        // Reuse the previous flat ancestor allocation. This removes the per-ancestor
+        // `before_children.clone()` allocation/growth cycle while retaining the flat scene needed
+        // by reactive/media slot writes and direct splice. No references into the old chunk escape
+        // this function, so clearing it before reading child chunks is safe.
+        let mut composed = chunks.remove(&widget_id).unwrap_or_default();
+        composed.clear_for_recompose(&parts.before_children);
+        composed.extend(&parts.before_children);
+        for child in children {
+            // Prevalidated above; `widget_id` cannot be its own resolved child.
+            let child_chunk = chunks
+                .get(&child.id)
+                .expect("prevalidated scene child chunk must remain available");
+            composed.extend(child_chunk);
+        }
+        composed.extend(&parts.after_children);
+        chunks.insert(widget_id, composed);
+        Some(())
+    }
+
+    /// Clone-based control retained only for benchmark A/B and equivalence tests.
+    #[cfg(feature = "bench-support")]
+    pub(crate) fn recompose_scene_chunk_legacy(
+        &self,
+        widget_id: WidgetId,
+        chunk_parts: &HashMap<WidgetId, SceneChunkParts<VM>>,
+        chunks: &mut HashMap<WidgetId, ComputedScene<VM>>,
+    ) -> Option<()> {
+        let path = self.path_for(widget_id)?;
+        let node = self.resolved_at_path(path);
+        let parts = chunk_parts.get(&widget_id)?;
         let mut composed = parts.before_children.clone();
         if let ResolvedWidgetKind::Container { children, .. }
         | ResolvedWidgetKind::Virtual { children, .. } = &node.kind
         {
             for child in children {
-                let child_chunk = chunks.get(&child.id)?;
-                composed.extend(&child_chunk);
+                composed.extend(chunks.get(&child.id)?);
             }
         }
         composed.extend(&parts.after_children);
@@ -777,77 +863,28 @@ impl<VM: 'static> ResolvedSceneLayout<VM> {
         viewport: Rect,
         now: std::time::Instant,
     ) -> Result<HashSet<WidgetId>, taffy::TaffyError> {
-        let units = self.units;
-        let (result, dependencies) = with_dependency_collection(
-            || -> Result<(HashSet<WidgetId>, HashSet<u64>), taffy::TaffyError> {
-                super::tree::with_widget_stack(|| {
-                    let mut removed_ids = HashSet::new();
-                    let mut touched_owner_ids = HashSet::new();
-
-                    for root_id in roots {
-                        let Some(path) = self.path_for(*root_id).map(|path| path.to_vec()) else {
-                            continue;
-                        };
-
-                        let previous_ids = self.subtree_widget_ids(*root_id);
-                        touched_owner_ids.extend(previous_ids.iter().map(|id| id.raw()));
-
-                        let Some(next) = resolve_subtree_from_source_path(
-                            &self.source_root,
-                            Some(&self.resolved_root),
-                            theme,
-                            &path,
-                        ) else {
-                            continue;
-                        };
-                        let next_ids = {
-                            let mut ids = Vec::new();
-                            collect_resolved_widget_ids(&next, &mut ids);
-                            ids
-                        };
-                        let next_id_set: HashSet<_> = next_ids.into_iter().collect();
-                        removed_ids.extend(
-                            previous_ids
-                                .into_iter()
-                                .filter(|id| !next_id_set.contains(id)),
-                        );
-
-                        patch_layout_at_path(
-                            &mut self.resolved_root,
-                            &mut self.layout_root,
-                            &path,
-                            next,
-                            &mut self.taffy,
-                            animations,
-                            theme,
-                            units,
-                            viewport,
-                            now,
-                            None,
-                            true,
-                        )?;
-                        self.rebuild_indexes();
-                    }
-
-                    compute_taffy_layout_with_measure(
-                        &mut self.taffy,
-                        self.layout_root.node,
-                        viewport,
-                        font_manager,
-                        theme,
-                        media,
-                        units,
-                    )?;
-
-                    Ok((removed_ids, touched_owner_ids))
-                })
-            },
-        );
-        let (removed_ids, touched_owner_ids) = result?;
-        self.dependencies.remove_widget_owners(&touched_owner_ids);
-        self.dependencies.merge_from(&dependencies);
-        self.rebuild_indexes();
-        Ok(removed_ids)
+        // Keep the convenience path semantically identical to a full layout
+        // rebuild with no retained runtime state. In particular, Virtual must
+        // still receive the real window viewport as its fallback hint. The old
+        // `resolve_with_previous` path supplied a zero-sized hint, so a layout
+        // patch rebuilt only the overscan rows while a full rebuild materialized
+        // the complete visible window.
+        let scroll_offsets = HashMap::new();
+        let virtual_states = HashMap::new();
+        let style_sheet = crate::ui::widget::StyleSheet::default();
+        self.patch_layout_roots_with_runtime_state(
+            roots,
+            font_manager,
+            theme,
+            media,
+            animations,
+            &scroll_offsets,
+            &virtual_states,
+            viewport,
+            now,
+            false,
+            &style_sheet,
+        )
     }
 
     pub(crate) fn patch_layout_roots_with_runtime_state(
@@ -927,6 +964,8 @@ impl<VM: 'static> ResolvedSceneLayout<VM> {
                         )?;
                         self.rebuild_indexes();
                     }
+
+                    self.layout_root.clear_cached_layout_metadata();
 
                     compute_taffy_layout_with_measure(
                         &mut self.taffy,

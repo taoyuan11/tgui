@@ -1,5 +1,37 @@
 use ropey::Rope;
-use unicode_segmentation::UnicodeSegmentation;
+use unicode_segmentation::GraphemeCursor;
+
+fn clamp_str_byte_boundary(text: &str, byte_index: usize) -> usize {
+    let mut byte_index = byte_index.min(text.len());
+    while byte_index > 0 && !text.is_char_boundary(byte_index) {
+        byte_index -= 1;
+    }
+    byte_index
+}
+
+pub(crate) fn prev_grapheme_boundary_byte(text: &str, byte_index: usize, is_ascii: bool) -> usize {
+    if is_ascii {
+        return byte_index.min(text.len()).saturating_sub(1);
+    }
+    let byte_index = clamp_str_byte_boundary(text, byte_index);
+    let mut cursor = GraphemeCursor::new(byte_index, text.len(), true);
+    cursor
+        .prev_boundary(text, 0)
+        .expect("the complete text always supplies grapheme cursor context")
+        .unwrap_or(0)
+}
+
+pub(crate) fn next_grapheme_boundary_byte(text: &str, byte_index: usize, is_ascii: bool) -> usize {
+    if is_ascii {
+        return (byte_index.min(text.len()) + 1).min(text.len());
+    }
+    let byte_index = clamp_str_byte_boundary(text, byte_index);
+    let mut cursor = GraphemeCursor::new(byte_index, text.len(), true);
+    cursor
+        .next_boundary(text, 0)
+        .expect("the complete text always supplies grapheme cursor context")
+        .unwrap_or(text.len())
+}
 
 #[derive(Clone, Debug)]
 pub(crate) struct RopeBuffer {
@@ -17,8 +49,7 @@ impl RopeBuffer {
         }
     }
 
-    pub(crate) fn from_parts(rope: Rope, snapshot: String) -> Self {
-        let is_ascii = snapshot.is_ascii();
+    pub(crate) fn from_parts(rope: Rope, snapshot: String, is_ascii: bool) -> Self {
         Self {
             rope,
             snapshot,
@@ -34,11 +65,7 @@ impl RopeBuffer {
         if self.is_ascii {
             return byte_index.min(self.snapshot.len());
         }
-        let mut byte_index = byte_index.min(self.snapshot.len());
-        while byte_index > 0 && !self.snapshot.is_char_boundary(byte_index) {
-            byte_index -= 1;
-        }
-        byte_index
+        clamp_str_byte_boundary(&self.snapshot, byte_index)
     }
 
     pub(crate) fn byte_to_char(&self, byte_index: usize) -> usize {
@@ -92,34 +119,14 @@ impl RopeBuffer {
         if self.is_ascii {
             return self.prev_char_boundary_byte(byte_index);
         }
-
-        let byte_index = self.clamp_byte_boundary(byte_index);
-        let mut previous = 0;
-        for (index, _) in self.snapshot.grapheme_indices(true) {
-            if index >= byte_index {
-                break;
-            }
-            previous = index;
-        }
-        previous
+        prev_grapheme_boundary_byte(&self.snapshot, byte_index, self.is_ascii)
     }
 
     pub(crate) fn next_grapheme_boundary_byte(&self, byte_index: usize) -> usize {
         if self.is_ascii {
             return self.next_char_boundary_byte(byte_index);
         }
-
-        let byte_index = self.clamp_byte_boundary(byte_index);
-        if byte_index >= self.snapshot.len() {
-            return self.snapshot.len();
-        }
-
-        for (index, _) in self.snapshot.grapheme_indices(true) {
-            if index > byte_index {
-                return index;
-            }
-        }
-        self.snapshot.len()
+        next_grapheme_boundary_byte(&self.snapshot, byte_index, self.is_ascii)
     }
 
     pub(crate) fn replace_byte_range(
@@ -142,11 +149,15 @@ impl RopeBuffer {
         if !replacement.is_empty() {
             self.rope.insert(start_char, replacement);
         }
-        if self.is_ascii && !replacement.is_ascii() {
-            self.is_ascii = false;
-        }
+        let removed_non_ascii = !self.snapshot[start_byte..end_byte].is_ascii();
+        let replacement_is_ascii = replacement.is_ascii();
         self.snapshot
             .replace_range(start_byte..end_byte, replacement);
+        if self.is_ascii {
+            self.is_ascii = replacement_is_ascii;
+        } else if removed_non_ascii && replacement_is_ascii {
+            self.is_ascii = self.snapshot.is_ascii();
+        }
     }
 
     pub(crate) fn slice_byte_range_to_string(&self, start_byte: usize, end_byte: usize) -> String {
@@ -162,14 +173,44 @@ impl RopeBuffer {
         self.snapshot.clone()
     }
 
-    pub(crate) fn into_parts(self) -> (Rope, String) {
-        (self.rope, self.snapshot)
+    pub(crate) fn into_parts(self) -> (Rope, String, bool) {
+        (self.rope, self.snapshot, self.is_ascii)
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::RopeBuffer;
+    use super::{next_grapheme_boundary_byte, prev_grapheme_boundary_byte, RopeBuffer};
+    use unicode_segmentation::UnicodeSegmentation;
+
+    fn reference_prev_grapheme_boundary(text: &str, byte_index: usize) -> usize {
+        if text.is_ascii() {
+            return byte_index.min(text.len()).saturating_sub(1);
+        }
+        let mut byte_index = byte_index.min(text.len());
+        while byte_index > 0 && !text.is_char_boundary(byte_index) {
+            byte_index -= 1;
+        }
+        text.grapheme_indices(true)
+            .map(|(index, _)| index)
+            .take_while(|index| *index < byte_index)
+            .last()
+            .unwrap_or(0)
+    }
+
+    fn reference_next_grapheme_boundary(text: &str, byte_index: usize) -> usize {
+        if text.is_ascii() {
+            return (byte_index.min(text.len()) + 1).min(text.len());
+        }
+        let mut byte_index = byte_index.min(text.len());
+        while byte_index > 0 && !text.is_char_boundary(byte_index) {
+            byte_index -= 1;
+        }
+        text.grapheme_indices(true)
+            .map(|(index, _)| index)
+            .find(|index| *index > byte_index)
+            .unwrap_or(text.len())
+    }
 
     #[test]
     fn clamp_byte_boundary_moves_to_previous_utf8_boundary() {
@@ -251,6 +292,37 @@ mod tests {
     }
 
     #[test]
+    fn grapheme_cursor_matches_full_scan_for_utf8_and_context_sensitive_clusters() {
+        let regional_indicators = "🇺🇸🇨🇳🇯🇵🇩🇪🇫🇷";
+        let samples = [
+            "",
+            "plain ascii\r\nnext",
+            "a\u{0301}e\u{0308}\u{0323}",
+            "👨‍👩‍👧‍👦👩🏽‍💻🧑‍🚀",
+            regional_indicators,
+            "\u{0600}a\u{0601}ב",
+            "क्\u{200d}ष नमस्ते",
+            "각한글",
+            "中🙂a\u{0301}👩🏽‍💻🇺🇸\r\n終",
+        ];
+
+        for text in samples {
+            for byte_index in 0..=text.len() {
+                assert_eq!(
+                    prev_grapheme_boundary_byte(text, byte_index, text.is_ascii()),
+                    reference_prev_grapheme_boundary(text, byte_index),
+                    "previous boundary mismatch for {text:?} at byte {byte_index}",
+                );
+                assert_eq!(
+                    next_grapheme_boundary_byte(text, byte_index, text.is_ascii()),
+                    reference_next_grapheme_boundary(text, byte_index),
+                    "next boundary mismatch for {text:?} at byte {byte_index}",
+                );
+            }
+        }
+    }
+
+    #[test]
     fn ascii_buffer_exits_fast_path_after_non_ascii_insert() {
         let mut buffer = RopeBuffer::from_str("hello world");
         let insert_at = "hello".len();
@@ -265,6 +337,16 @@ mod tests {
             buffer.next_char_boundary_byte("hello".len()),
             "hello中".len()
         );
+    }
+
+    #[test]
+    fn deleting_last_non_ascii_text_restores_ascii_fast_path_state() {
+        let mut buffer = RopeBuffer::from_str("a中b");
+        buffer.replace_byte_range("a".len(), "a中".len(), "");
+
+        let (_rope, snapshot, is_ascii) = buffer.into_parts();
+        assert_eq!(snapshot, "ab");
+        assert!(is_ascii);
     }
 
     #[test]

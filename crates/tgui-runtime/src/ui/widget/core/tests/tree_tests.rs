@@ -14,6 +14,116 @@ fn sample_nodes() -> Vec<TreeNode<&'static str>> {
     ]
 }
 
+#[test]
+fn tree_default_style_follows_theme_density() {
+    let expected = [
+        (
+            crate::ui::theme::Density::Compact,
+            dp(32.0),
+            dp(6.0),
+            dp(4.0),
+            dp(6.0),
+            dp(16.0),
+            dp(20.0),
+            sp(16.0),
+        ),
+        (
+            crate::ui::theme::Density::Comfortable,
+            dp(40.0),
+            dp(8.0),
+            dp(8.0),
+            dp(8.0),
+            dp(20.0),
+            dp(24.0),
+            sp(18.0),
+        ),
+        (
+            crate::ui::theme::Density::Spacious,
+            dp(48.0),
+            dp(12.0),
+            dp(12.0),
+            dp(12.0),
+            dp(24.0),
+            dp(28.0),
+            sp(20.0),
+        ),
+    ];
+
+    for (density, height, padding_x, padding_y, radius, indent, chrome, icon) in expected {
+        let mut theme = Theme::light();
+        theme.density = density;
+        let style = TreeStyle::default_for_theme(&theme);
+
+        assert_eq!(style.item_height, height);
+        assert_eq!(style.item_padding.left, padding_x);
+        assert_eq!(style.item_padding.top, padding_y);
+        assert_eq!(style.item_radius, radius);
+        assert_eq!(style.indent_width, indent);
+        assert_eq!(style.disclosure_width, chrome);
+        assert_eq!(style.checkbox_width, chrome);
+        assert_eq!(style.disclosure_icon_size, icon);
+        assert_eq!(style.checkbox_icon_size, icon);
+    }
+}
+
+#[test]
+fn compact_tree_selected_scene_uses_density_geometry() {
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let mut theme = Theme::light();
+    theme.density = crate::ui::theme::Density::Compact;
+    let mut animations = AnimationEngine::default();
+    let tree: WidgetTree<()> = WidgetTree::new(
+        Tree::<&'static str, ()>::new(vec![TreeNode::keyed("root", "Root")], |ctx| {
+            Text::new(ctx.item).into()
+        })
+        .selected_keys(vec![WidgetKey::from("root")])
+        .item_layout(ItemLayout::Fixed {
+            item_extent: dp(32.0),
+            spacing: Dp::ZERO,
+            overscan: 0,
+        })
+        .size(dp(240.0), dp(64.0)),
+    );
+
+    let rendered = tree.render_output(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        None,
+        None,
+        &HashMap::new(),
+        Rect::new(0.0, 0.0, 240.0, 64.0),
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+    let style = TreeStyle::default_for_theme(&theme);
+    let selected = style.item_selected_background.resolve();
+    let state_layer = rendered
+        .primitives
+        .shapes
+        .iter()
+        .find(|shape| shape.color == selected)
+        .expect("selected Tree row should emit its state layer");
+    let label = rendered
+        .primitives
+        .texts
+        .iter()
+        .find(|text| text.content.as_ref() == "Root")
+        .expect("Tree node label should render");
+
+    assert_eq!(state_layer.rect.height, style.item_height);
+    assert_eq!(state_layer.corner_radius, style.item_radius.get());
+    assert_eq!(
+        label.frame.x - state_layer.rect.x,
+        style.item_padding.left + style.disclosure_width
+    );
+}
+
 fn tree_layout(tree: WidgetTree<()>, viewport: Rect) -> crate::ui::widget::ResolvedSceneLayout<()> {
     let font_manager = FontManager::new(&FontCatalog::default());
     let media = test_media();

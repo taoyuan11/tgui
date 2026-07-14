@@ -1,4 +1,5 @@
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use chrono::{Datelike, Duration, NaiveDate, NaiveTime, Timelike};
 
@@ -7,8 +8,8 @@ use crate::foundation::binding::{TextChangeSet, TextController};
 use crate::foundation::color::Color;
 use crate::foundation::form::ValidationVisualState;
 use crate::foundation::view_model::{Command, ValueCommand};
-use crate::theme::{FontWeight, ResolvedThemeMode, StyleContext, Theme};
-use crate::ui::layout::{fr, Align, Insets, Justify, Value, Wrap};
+use crate::theme::{Density, FontWeight, ResolvedThemeMode, StyleContext, Theme, WidgetState};
+use crate::ui::layout::{fr, pct, Align, Insets, Justify, Length, Value, Wrap};
 use crate::ui::theme::{StateValue, TextStyle};
 use crate::ui::unit::{dp, sp, Dp};
 
@@ -38,8 +39,6 @@ const MONTHS: [&str; 12] = [
     "November",
     "December",
 ];
-const FIELD_HEIGHT: Dp = dp(40.0);
-const PANEL_PADDING: Dp = dp(12.0);
 const ICON_CALENDAR: SvgIconId = SvgIconId::Calendar;
 const ICON_TIME: SvgIconId = SvgIconId::Clock;
 const ICON_COLOR: SvgIconId = SvgIconId::Palette;
@@ -56,6 +55,118 @@ const ICON_FILE: SvgIconId = SvgIconId::File;
 const ICON_DONE: SvgIconId = SvgIconId::Success;
 const ICON_ERROR: SvgIconId = SvgIconId::Error;
 const ICON_PENDING: SvgIconId = SvgIconId::Pending;
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct AdvancedInputMetrics {
+    control_height: Dp,
+    control_gap: Dp,
+    upload_drop_min_height: Dp,
+    upload_drop_padding: Dp,
+    upload_section_gap: Dp,
+    upload_row_padding: Dp,
+    upload_row_gap: Dp,
+    upload_badge_size: Dp,
+    upload_file_badge_size: Dp,
+    upload_action_size: Dp,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct PickerContentMetrics {
+    panel_padding: Dp,
+    section_gap: Dp,
+    inline_gap: Dp,
+    header_height: Dp,
+    action_size: Dp,
+    button_height: Dp,
+    weekday_height: Dp,
+    time_option_height: Dp,
+    time_selected_height: Dp,
+    color_preview_size: Dp,
+}
+
+type InputControlWidthResolver = Arc<dyn Fn(&StyleContext<'_>) -> Dp + Send + Sync>;
+
+fn advanced_input_metrics(theme: &Theme) -> AdvancedInputMetrics {
+    match theme.density {
+        Density::Compact => AdvancedInputMetrics {
+            control_height: dp(32.0),
+            control_gap: theme.spacing.xs,
+            upload_drop_min_height: dp(112.0),
+            upload_drop_padding: theme.spacing.md - theme.spacing.xs,
+            upload_section_gap: theme.spacing.sm,
+            upload_row_padding: theme.spacing.sm,
+            upload_row_gap: theme.spacing.sm - theme.spacing.xxs,
+            upload_badge_size: dp(36.0),
+            upload_file_badge_size: dp(28.0),
+            upload_action_size: dp(28.0),
+        },
+        Density::Comfortable => AdvancedInputMetrics {
+            control_height: dp(40.0),
+            control_gap: theme.spacing.sm - theme.spacing.xxs,
+            upload_drop_min_height: dp(136.0),
+            upload_drop_padding: theme.spacing.md + theme.spacing.xxs,
+            upload_section_gap: theme.spacing.sm + theme.spacing.xxs,
+            upload_row_padding: theme.spacing.md - theme.spacing.xs,
+            upload_row_gap: theme.spacing.sm,
+            upload_badge_size: dp(44.0),
+            upload_file_badge_size: dp(34.0),
+            upload_action_size: dp(32.0),
+        },
+        Density::Spacious => AdvancedInputMetrics {
+            control_height: dp(48.0),
+            control_gap: theme.spacing.sm,
+            upload_drop_min_height: dp(160.0),
+            upload_drop_padding: theme.spacing.lg,
+            upload_section_gap: theme.spacing.md - theme.spacing.xs,
+            upload_row_padding: theme.spacing.md,
+            upload_row_gap: theme.spacing.sm + theme.spacing.xs,
+            upload_badge_size: dp(52.0),
+            upload_file_badge_size: dp(40.0),
+            upload_action_size: dp(40.0),
+        },
+    }
+}
+
+fn picker_content_metrics(theme: &Theme) -> PickerContentMetrics {
+    match theme.density {
+        Density::Compact => PickerContentMetrics {
+            panel_padding: dp(8.0),
+            section_gap: dp(8.0),
+            inline_gap: dp(6.0),
+            header_height: dp(32.0),
+            action_size: dp(28.0),
+            button_height: dp(30.0),
+            weekday_height: dp(20.0),
+            time_option_height: dp(30.0),
+            time_selected_height: dp(38.0),
+            color_preview_size: dp(40.0),
+        },
+        Density::Comfortable => PickerContentMetrics {
+            panel_padding: dp(12.0),
+            section_gap: dp(10.0),
+            inline_gap: dp(8.0),
+            header_height: dp(36.0),
+            action_size: dp(32.0),
+            button_height: dp(34.0),
+            weekday_height: dp(22.0),
+            time_option_height: dp(34.0),
+            time_selected_height: dp(44.0),
+            color_preview_size: dp(44.0),
+        },
+        Density::Spacious => PickerContentMetrics {
+            panel_padding: dp(16.0),
+            section_gap: dp(12.0),
+            inline_gap: dp(10.0),
+            header_height: dp(40.0),
+            action_size: dp(36.0),
+            button_height: dp(38.0),
+            weekday_height: dp(24.0),
+            time_option_height: dp(38.0),
+            time_selected_height: dp(48.0),
+            color_preview_size: dp(48.0),
+        },
+    }
+}
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct CalendarStyle {
@@ -112,9 +223,10 @@ pub struct NumberInputStyle {
 
 impl NumberInputStyle {
     pub(crate) fn default_for_theme(theme: &Theme) -> Self {
+        let metrics = advanced_input_metrics(theme);
         Self {
             width: dp(180.0),
-            button_width: theme.spacing.xxl,
+            button_width: metrics.control_height,
         }
     }
 }
@@ -140,20 +252,25 @@ pub struct UploadStyle {
 }
 
 impl UploadStyle {
-    pub(crate) fn default_for_theme(_: &Theme) -> Self {
-        Self { width: dp(460.0) }
+    pub(crate) fn default_for_theme(theme: &Theme) -> Self {
+        Self {
+            width: match theme.density {
+                Density::Compact => dp(420.0),
+                Density::Comfortable => dp(460.0),
+                Density::Spacious => dp(500.0),
+            },
+        }
     }
 }
 
-fn resolve_input_control_style<T: Clone>(
+fn resolve_input_control_style_for_context<T: Clone>(
     style: Option<&StyleResolver<T>>,
+    context: &StyleContext<'_>,
     default: impl Fn(&Theme) -> T,
 ) -> T {
-    let theme = Theme::default();
-    let context = StyleContext::from_theme(&theme);
-    let base = default(&theme);
+    let base = default(context.theme);
     style
-        .map(|resolver| resolver.resolve_from(base.clone(), &context))
+        .map(|resolver| resolver.resolve_from(base.clone(), context))
         .unwrap_or(base)
 }
 
@@ -368,36 +485,24 @@ impl<VM> Calendar<VM> {
 impl<VM: 'static> From<Calendar<VM>> for Element<VM> {
     fn from(calendar: Calendar<VM>) -> Self {
         match calendar.display_month {
-            Value::Static(month) => {
-                let style = resolve_input_control_style(
-                    calendar.style.as_ref(),
-                    CalendarStyle::default_for_theme,
-                );
-                calendar_element(
-                    month,
-                    calendar.selected.resolve(),
-                    calendar.today,
-                    calendar.disabled.resolve(),
-                    calendar.on_change,
-                    style,
-                    calendar.framed,
-                )
-            }
-            Value::Signal(month) => {
-                let style = resolve_input_control_style(
-                    calendar.style.as_ref(),
-                    CalendarStyle::default_for_theme,
-                );
-                calendar_element(
-                    month.get_untracked(),
-                    calendar.selected.resolve_untracked(),
-                    calendar.today,
-                    calendar.disabled.resolve_untracked(),
-                    calendar.on_change,
-                    style,
-                    calendar.framed,
-                )
-            }
+            Value::Static(month) => calendar_element(
+                month,
+                calendar.selected.resolve(),
+                calendar.today,
+                calendar.disabled.resolve(),
+                calendar.on_change,
+                calendar.style,
+                calendar.framed,
+            ),
+            Value::Signal(month) => calendar_element(
+                month.get_untracked(),
+                calendar.selected.resolve_untracked(),
+                calendar.today,
+                calendar.disabled.resolve_untracked(),
+                calendar.on_change,
+                calendar.style,
+                calendar.framed,
+            ),
         }
     }
 }
@@ -507,7 +612,7 @@ impl<VM: 'static> From<DatePicker<VM>> for Element<VM> {
             on_open_change,
             style,
         } = picker;
-        let style = resolve_input_control_style(style.as_ref(), DatePickerStyle::default_for_theme);
+        let trigger_style = style.clone();
 
         let parse_controller = controller.clone();
         let typed_change = on_change.clone().map(|command| {
@@ -529,7 +634,14 @@ impl<VM: 'static> From<DatePicker<VM>> for Element<VM> {
             placeholder,
             validation,
             disabled.clone(),
-            style.width,
+            Arc::new(move |context| {
+                resolve_input_control_style_for_context(
+                    trigger_style.as_ref(),
+                    context,
+                    DatePickerStyle::default_for_theme,
+                )
+                .width
+            }),
             ICON_CALENDAR,
             open.clone(),
             on_open_change.clone(),
@@ -569,8 +681,16 @@ impl<VM: 'static> From<DatePicker<VM>> for Element<VM> {
             })
         };
 
+        let content_style = style.clone();
         let content = Calendar::new(display_month, selected)
-            .style_full(move |_| style.calendar.clone())
+            .style_full(move |context| {
+                resolve_input_control_style_for_context(
+                    content_style.as_ref(),
+                    context,
+                    DatePickerStyle::default_for_theme,
+                )
+                .calendar
+            })
             .disable(disabled.clone())
             .on_change(calendar_command)
             .unframed();
@@ -687,7 +807,7 @@ impl<VM: 'static> From<TimePicker<VM>> for Element<VM> {
             on_open_change,
             style,
         } = picker;
-        let style = resolve_input_control_style(style.as_ref(), TimePickerStyle::default_for_theme);
+        let trigger_style = style.clone();
 
         let parse_controller = controller.clone();
         let typed_change = on_change.clone().map(|command| {
@@ -709,7 +829,14 @@ impl<VM: 'static> From<TimePicker<VM>> for Element<VM> {
             placeholder,
             validation,
             disabled.clone(),
-            style.width,
+            Arc::new(move |context| {
+                resolve_input_control_style_for_context(
+                    trigger_style.as_ref(),
+                    context,
+                    TimePickerStyle::default_for_theme,
+                )
+                .width
+            }),
             ICON_TIME,
             open.clone(),
             on_open_change.clone(),
@@ -848,9 +975,6 @@ impl<VM: 'static> From<NumberInput<VM>> for Element<VM> {
             on_change,
             style,
         } = input;
-        let style =
-            resolve_input_control_style(style.as_ref(), NumberInputStyle::default_for_theme);
-
         let text_controller = controller.clone();
         let typed_change = on_change.clone().map(|command| {
             ValueCommand::new_with_context(move |vm, _: TextChangeSet, ctx| {
@@ -867,15 +991,24 @@ impl<VM: 'static> From<NumberInput<VM>> for Element<VM> {
             })
         });
 
+        let field_style = style.clone();
         let mut field = Input::new(controller.clone())
-            .width(style.width)
+            .runtime_layout(move |layout, context, _, _| {
+                let resolved = resolve_input_control_style_for_context(
+                    field_style.as_ref(),
+                    context,
+                    NumberInputStyle::default_for_theme,
+                );
+                if layout.width.is_none() {
+                    layout.width = Some(Value::Static(Length::Px(resolved.width)));
+                }
+            })
             .placeholder(placeholder)
             .validation(validation)
             .disable(disabled.clone());
         if let Some(command) = typed_change {
             field = field.on_change_set(command);
         }
-
         let minus = number_step_button(
             ICON_REMOVE,
             NumberInputChangeTrigger::StepDown,
@@ -886,7 +1019,7 @@ impl<VM: 'static> From<NumberInput<VM>> for Element<VM> {
             max,
             disabled.clone(),
             on_change.clone(),
-            style.button_width,
+            style.clone(),
         );
         let plus = number_step_button(
             ICON_ADD,
@@ -898,12 +1031,24 @@ impl<VM: 'static> From<NumberInput<VM>> for Element<VM> {
             max,
             disabled.clone(),
             on_change,
-            style.button_width,
+            style.clone(),
         );
 
         Flex::horizontal()
             .align(Align::Center)
-            .gap(dp(6.0))
+            .runtime_layout(move |layout, container, context, _, _| {
+                let resolved = resolve_input_control_style_for_context(
+                    style.as_ref(),
+                    context,
+                    NumberInputStyle::default_for_theme,
+                );
+                let metrics = advanced_input_metrics(context.theme);
+                layout.width = Some(Value::Static(Length::Px(
+                    resolved.width + resolved.button_width * 2.0 + metrics.control_gap * 2.0,
+                )));
+                layout.height = Some(Value::Static(Length::Px(metrics.control_height)));
+                container.gap = Value::Static(Length::Px(metrics.control_gap));
+            })
             .child(minus)
             .child(field)
             .child(plus)
@@ -990,14 +1135,20 @@ impl<VM: 'static> From<ColorPicker<VM>> for Element<VM> {
             swatches,
             style,
         } = picker;
-        let style =
-            resolve_input_control_style(style.as_ref(), ColorPickerStyle::default_for_theme);
+        let trigger_style = style.clone();
         let trigger = color_picker_trigger(
             color.clone(),
             disabled.clone(),
             open.clone(),
             on_open_change.clone(),
-            style.clone(),
+            Arc::new(move |context| {
+                resolve_input_control_style_for_context(
+                    trigger_style.as_ref(),
+                    context,
+                    ColorPickerStyle::default_for_theme,
+                )
+                .width
+            }),
         );
         let content = picker_popover_content(color_picker_content(
             color,
@@ -1124,8 +1275,6 @@ impl<VM: 'static> From<Upload<VM>> for Element<VM> {
             on_remove,
             style,
         } = upload;
-        let style = resolve_input_control_style(style.as_ref(), UploadStyle::default_for_theme);
-
         let disabled_for_click = disabled.clone();
         let dialog_command = {
             let accept_extensions = accept_extensions.clone();
@@ -1202,13 +1351,26 @@ impl<VM: 'static> From<Upload<VM>> for Element<VM> {
             })
         });
 
+        let drop_zone_style = style.clone();
+        let disabled_for_surface = disabled.clone();
         let mut drop_zone = Flex::vertical()
-            .width(style.width)
-            .min_height(dp(136.0))
-            .padding(Insets::all(dp(18.0)))
-            .gap(dp(8.0))
             .center()
-            .style_full(input_panel_style)
+            .runtime_layout(move |layout, container, context, _, _| {
+                let resolved = resolve_input_control_style_for_context(
+                    drop_zone_style.as_ref(),
+                    context,
+                    UploadStyle::default_for_theme,
+                );
+                let metrics = advanced_input_metrics(context.theme);
+                layout.width = Some(Value::Static(Length::Px(resolved.width)));
+                layout.min_height = Some(Value::Static(Length::Px(metrics.upload_drop_min_height)));
+                container.padding = Some(Value::Static(Insets::all(metrics.upload_drop_padding)));
+                container.gap = Value::Static(Length::Px(metrics.upload_row_gap));
+            })
+            .style_full_with_style_sheet(move |context, _, _, mut state| {
+                state.disabled = disabled_for_surface.resolve();
+                upload_drop_zone_style(context, state)
+            })
             .cursor(CursorStyle::Pointer)
             .on_click(dialog_command.clone())
             .child(upload_badge::<VM>())
@@ -1232,8 +1394,16 @@ impl<VM: 'static> From<Upload<VM>> for Element<VM> {
         );
 
         Flex::vertical()
-            .width(style.width)
-            .gap(dp(10.0))
+            .runtime_layout(move |layout, container, context, _, _| {
+                let resolved = resolve_input_control_style_for_context(
+                    style.as_ref(),
+                    context,
+                    UploadStyle::default_for_theme,
+                );
+                let metrics = advanced_input_metrics(context.theme);
+                layout.width = Some(Value::Static(Length::Px(resolved.width)));
+                container.gap = Value::Static(Length::Px(metrics.upload_section_gap));
+            })
             .child(drop_zone)
             .child(list)
             .into()
@@ -1245,18 +1415,27 @@ fn picker_input_trigger<VM: 'static>(
     placeholder: Value<String>,
     validation: Value<ValidationVisualState>,
     disabled: Value<bool>,
-    width: Dp,
+    width: InputControlWidthResolver,
     icon: SvgIconId,
     open: Value<bool>,
     on_open_change: Option<ValueCommand<VM, bool>>,
     on_change_set: Option<ValueCommand<VM, TextChangeSet>>,
 ) -> Element<VM> {
     let toggle = open_toggle_command(open, disabled.clone(), on_open_change);
-    let gap = dp(6.0);
-    let input_width = (width - FIELD_HEIGHT - gap).max(dp(120.0));
+    let input_width = width.clone();
     let mut input = Input::new(controller)
-        .width(input_width)
-        .height(FIELD_HEIGHT)
+        .runtime_layout(move |layout, context, _, _| {
+            let metrics = advanced_input_metrics(context.theme);
+            let width = input_width(context);
+            if layout.width.is_none() {
+                layout.width = Some(Value::Static(Length::Px(
+                    (width - metrics.control_height - metrics.control_gap).max(dp(120.0)),
+                )));
+            }
+            if layout.height.is_none() {
+                layout.height = Some(Value::Static(Length::Px(metrics.control_height)));
+            }
+        })
         .placeholder(placeholder)
         .validation(validation)
         .disable(disabled.clone());
@@ -1268,11 +1447,15 @@ fn picker_input_trigger<VM: 'static>(
     }
 
     let icon: Element<VM> = if let Some(command) = toggle {
-        secondary_icon_button(icon, FIELD_HEIGHT, FIELD_HEIGHT, disabled, command)
+        secondary_icon_button(icon, disabled, command)
     } else {
         Stack::new()
-            .size(FIELD_HEIGHT, FIELD_HEIGHT)
             .center()
+            .runtime_layout(move |layout, _, context, _, _| {
+                let size = advanced_input_metrics(context.theme).control_height;
+                layout.width = Some(Value::Static(Length::Px(size)));
+                layout.height = Some(Value::Static(Length::Px(size)));
+            })
             .style_full(input_icon_surface_style)
             .opacity(disabled_opacity(disabled))
             .child(styled_icon(icon, dp(20.0), |context| {
@@ -1283,10 +1466,13 @@ fn picker_input_trigger<VM: 'static>(
     };
 
     Flex::horizontal()
-        .width(width)
-        .height(FIELD_HEIGHT)
         .align(Align::Center)
-        .gap(gap)
+        .runtime_layout(move |layout, container, context, _, _| {
+            let metrics = advanced_input_metrics(context.theme);
+            layout.width = Some(Value::Static(Length::Px(width(context))));
+            layout.height = Some(Value::Static(Length::Px(metrics.control_height)));
+            container.gap = Value::Static(Length::Px(metrics.control_gap));
+        })
         .child(input)
         .child(icon)
         .into()
@@ -1297,12 +1483,12 @@ fn color_picker_trigger<VM: 'static>(
     disabled: Value<bool>,
     open: Value<bool>,
     on_open_change: Option<ValueCommand<VM, bool>>,
-    style: ColorPickerStyle,
+    width: InputControlWidthResolver,
 ) -> Element<VM> {
     let toggle = open_toggle_command(open, disabled.clone(), on_open_change);
     let mut button = Button::new(color_label(color.clone()))
-        .width(style.width)
-        .height(FIELD_HEIGHT)
+        .width(pct(100.0))
+        .height(pct(100.0))
         .style_full(color_trigger_accessible_button_style)
         .disable(disabled.clone());
     if let Some(command) = toggle.clone() {
@@ -1310,11 +1496,15 @@ fn color_picker_trigger<VM: 'static>(
     }
 
     let mut overlay = Flex::horizontal()
-        .width(style.width)
-        .height(FIELD_HEIGHT)
-        .padding(Insets::symmetric(dp(12.0), dp(0.0)))
+        .width(pct(100.0))
+        .height(pct(100.0))
         .align(Align::Center)
-        .gap(dp(10.0))
+        .runtime_layout(move |_layout, container, context, _, _| {
+            let metrics = advanced_input_metrics(context.theme);
+            let input = InputStyle::default_for_theme(context.theme);
+            container.padding = Some(Value::Static(Insets::symmetric(input.padding_x, Dp::ZERO)));
+            container.gap = Value::Static(Length::Px(metrics.control_gap));
+        })
         .style_full(input_control_shell_style)
         .cursor(if disabled.resolve() {
             CursorStyle::NotAllowed
@@ -1335,8 +1525,11 @@ fn color_picker_trigger<VM: 'static>(
     }
 
     Stack::new()
-        .width(style.width)
-        .height(FIELD_HEIGHT)
+        .runtime_layout(move |layout, _, context, _, _| {
+            let metrics = advanced_input_metrics(context.theme);
+            layout.width = Some(Value::Static(Length::Px(width(context))));
+            layout.height = Some(Value::Static(Length::Px(metrics.control_height)));
+        })
         .child(button)
         .child(overlay)
         .into()
@@ -1405,18 +1598,52 @@ fn ghost_icon_button<VM: 'static>(
         .into()
 }
 
+fn upload_action_button<VM: 'static>(
+    icon: SvgIconId,
+    disabled: Value<bool>,
+    command: Command<VM>,
+) -> Element<VM> {
+    let disabled_for_style = disabled.clone();
+    let disabled_for_click = disabled.clone();
+    Stack::new()
+        .center()
+        .runtime_layout(move |layout, _, context, _, _| {
+            let size = advanced_input_metrics(context.theme).upload_action_size;
+            layout.width = Some(Value::Static(Length::Px(size)));
+            layout.height = Some(Value::Static(Length::Px(size)));
+        })
+        .style_full_with_style_sheet(move |context, _, _, mut state| {
+            state.disabled = disabled_for_style.resolve();
+            ghost_action_surface_style(context, state)
+        })
+        .opacity(disabled_opacity(disabled.clone()))
+        .cursor(if disabled.resolve() {
+            CursorStyle::NotAllowed
+        } else {
+            CursorStyle::Pointer
+        })
+        .focusable(true)
+        .child(styled_icon(icon, dp(18.0), |context| {
+            let (_, _, _, muted, _, _, _) = mode_colors(context);
+            muted
+        }))
+        .on_click(guard_disabled_command(disabled_for_click, command))
+        .into()
+}
+
 fn secondary_icon_button<VM: 'static>(
     icon: SvgIconId,
-    width: Dp,
-    height: Dp,
     disabled: impl Into<Value<bool>>,
     command: Command<VM>,
 ) -> Element<VM> {
     let disabled = disabled.into();
     Stack::new()
-        .width(width)
-        .height(height)
         .center()
+        .runtime_layout(move |layout, _, context, _, _| {
+            let size = advanced_input_metrics(context.theme).control_height;
+            layout.width = Some(Value::Static(Length::Px(size)));
+            layout.height = Some(Value::Static(Length::Px(size)));
+        })
         .style_full(input_icon_surface_style)
         .opacity(disabled_opacity(disabled.clone()))
         .cursor(if disabled.resolve() {
@@ -1447,12 +1674,27 @@ fn color_preview_box<VM: 'static>(color: Value<Color>, size: Dp) -> Element<VM> 
         .into()
 }
 
-fn upload_badge<VM: 'static>() -> Element<VM> {
-    let icon_box = dp(30.0);
+fn picker_color_preview_box<VM: 'static>(color: Value<Color>) -> Element<VM> {
     Flex::vertical()
-        .size(dp(44.0), dp(44.0))
+        .runtime_layout(move |layout, _, context, _, _| {
+            let size = picker_content_metrics(context.theme).color_preview_size;
+            layout.width = Some(Value::Static(Length::Px(size)));
+            layout.height = Some(Value::Static(Length::Px(size)));
+        })
+        .style_full(move |context| color_preview_value_style(context, color.clone()))
+        .into()
+}
+
+fn upload_badge<VM: 'static>() -> Element<VM> {
+    let icon_box = dp(24.0);
+    Flex::vertical()
         .shrink(0.0)
         .center()
+        .runtime_layout(move |layout, _, context, _, _| {
+            let size = advanced_input_metrics(context.theme).upload_badge_size;
+            layout.width = Some(Value::Static(Length::Px(size)));
+            layout.height = Some(Value::Static(Length::Px(size)));
+        })
         .style_full(accent_badge_style)
         .child(
             Icon::internal(ICON_UPLOAD)
@@ -1468,10 +1710,14 @@ fn upload_badge<VM: 'static>() -> Element<VM> {
 
 fn file_badge<VM: 'static>() -> Element<VM> {
     Flex::vertical()
-        .size(dp(34.0), dp(34.0))
         .center()
+        .runtime_layout(move |layout, _, context, _, _| {
+            let size = advanced_input_metrics(context.theme).upload_file_badge_size;
+            layout.width = Some(Value::Static(Length::Px(size)));
+            layout.height = Some(Value::Static(Length::Px(size)));
+        })
         .style_full(subtle_badge_style)
-        .child(themed_icon(ICON_FILE, dp(20.0)))
+        .child(themed_icon(ICON_FILE, dp(18.0)))
         .into()
 }
 
@@ -1490,20 +1736,35 @@ fn calendar_element<VM: 'static>(
     today: Option<NaiveDate>,
     disabled: bool,
     on_change: Option<ValueCommand<VM, CalendarSelectionChange>>,
-    style: CalendarStyle,
+    style: Option<StyleResolver<CalendarStyle>>,
     framed: bool,
 ) -> Element<VM> {
     let month = month_start(display_month);
-    let mut root = Flex::vertical().width(style.panel_width).gap(dp(10.0));
+    let root_style = style.clone();
+    let mut root = Flex::vertical().runtime_layout(move |layout, container, context, _, _| {
+        let resolved = resolve_input_control_style_for_context(
+            root_style.as_ref(),
+            context,
+            CalendarStyle::default_for_theme,
+        );
+        let metrics = picker_content_metrics(context.theme);
+        layout.width = Some(Value::Static(Length::Px(resolved.panel_width)));
+        container.gap = Value::Static(Length::Px(metrics.section_gap));
+        if framed {
+            container.padding = Some(Value::Static(Insets::all(metrics.panel_padding)));
+        }
+    });
     if framed {
-        root = root
-            .padding(Insets::all(PANEL_PADDING))
-            .style_full(panel_style);
+        root = root.style_full(panel_style);
     }
 
     root = root.child(
         Flex::horizontal()
-            .height(dp(36.0))
+            .runtime_layout(move |layout, _, context, _, _| {
+                layout.height = Some(Value::Static(Length::Px(
+                    picker_content_metrics(context.theme).header_height,
+                )));
+            })
             .align(Align::Center)
             .justify(Justify::SpaceBetween)
             .child(calendar_nav_button(
@@ -1530,6 +1791,7 @@ fn calendar_element<VM: 'static>(
             )),
     );
 
+    let weekday_style = style.clone();
     let mut weekday_row = Grid::columns([
         fr(1.0),
         fr(1.0),
@@ -1539,17 +1801,36 @@ fn calendar_element<VM: 'static>(
         fr(1.0),
         fr(1.0),
     ])
-    .gap(style.gap);
+    .runtime_layout(move |_, container, context, _, _| {
+        let resolved = resolve_input_control_style_for_context(
+            weekday_style.as_ref(),
+            context,
+            CalendarStyle::default_for_theme,
+        );
+        container.gap = Value::Static(Length::Px(resolved.gap));
+    });
     for label in WEEKDAYS {
+        let cell_style = style.clone();
         weekday_row = weekday_row.child(
             Flex::<VM>::vertical()
-                .size(style.day_size, dp(22.0))
+                .runtime_layout(move |layout, _, context, _, _| {
+                    let resolved = resolve_input_control_style_for_context(
+                        cell_style.as_ref(),
+                        context,
+                        CalendarStyle::default_for_theme,
+                    );
+                    layout.width = Some(Value::Static(Length::Px(resolved.day_size)));
+                    layout.height = Some(Value::Static(Length::Px(
+                        picker_content_metrics(context.theme).weekday_height,
+                    )));
+                })
                 .center()
                 .child(Text::new(label).style_full(calendar_weekday_text_style)),
         );
     }
     root = root.child(weekday_row);
 
+    let days_style = style.clone();
     let mut days = Grid::columns([
         fr(1.0),
         fr(1.0),
@@ -1559,13 +1840,29 @@ fn calendar_element<VM: 'static>(
         fr(1.0),
         fr(1.0),
     ])
-    .gap(style.gap);
+    .runtime_layout(move |_, container, context, _, _| {
+        let resolved = resolve_input_control_style_for_context(
+            days_style.as_ref(),
+            context,
+            CalendarStyle::default_for_theme,
+        );
+        container.gap = Value::Static(Length::Px(resolved.gap));
+    });
     for date in calendar_days(month) {
         let same_month = date.month() == month.month();
         let is_selected = selected == Some(date);
         let is_today = today == Some(date);
+        let button_style = style.clone();
         let button = Button::new(date.day().to_string())
-            .size(style.day_size, style.day_size)
+            .runtime_layout(move |layout, context, _, _| {
+                let resolved = resolve_input_control_style_for_context(
+                    button_style.as_ref(),
+                    context,
+                    CalendarStyle::default_for_theme,
+                );
+                layout.width = Some(Value::Static(Length::Px(resolved.day_size)));
+                layout.height = Some(Value::Static(Length::Px(resolved.day_size)));
+            })
             .style_full(move |context| {
                 calendar_day_button_style(context, is_selected, is_today, same_month)
             })
@@ -1590,7 +1887,11 @@ fn calendar_element<VM: 'static>(
         root = root.child(
             Button::new("Today")
                 .secondary()
-                .height(dp(32.0))
+                .runtime_layout(move |layout, context, _, _| {
+                    layout.height = Some(Value::Static(Length::Px(
+                        picker_content_metrics(context.theme).button_height,
+                    )));
+                })
                 .style_full(today_button_style)
                 .disable(disabled)
                 .on_click(Command::new_with_context(move |vm, ctx| {
@@ -1645,7 +1946,7 @@ fn time_picker_content<VM: 'static>(
     disabled: bool,
     on_change: Option<ValueCommand<VM, TimePickerChange>>,
     on_open_change: Option<ValueCommand<VM, bool>>,
-    style: TimePickerStyle,
+    style: Option<StyleResolver<TimePickerStyle>>,
 ) -> Element<VM> {
     let current = selected
         .or_else(|| parse_time(&controller.text()))
@@ -1656,7 +1957,6 @@ fn time_picker_content<VM: 'static>(
     let minute_index = value_index(&minute_values, current.minute());
     let hour = hour_values[hour_index];
     let minute = minute_values[minute_index];
-    let column_width = style.option_width.max(dp(96.0));
     let hour_column = time_wheel_column(
         "Hour",
         TimePickerUnit::Hour,
@@ -1667,7 +1967,7 @@ fn time_picker_content<VM: 'static>(
         controller.clone(),
         disabled,
         on_change.clone(),
-        column_width,
+        style.clone(),
     );
     let minute_column = time_wheel_column(
         "Minute",
@@ -1679,13 +1979,23 @@ fn time_picker_content<VM: 'static>(
         controller,
         disabled,
         on_change,
-        column_width,
+        style.clone(),
     );
 
+    let done_style = style.clone();
     let mut done_button = Button::new("Done")
         .primary()
-        .width(style.width)
-        .height(dp(36.0))
+        .runtime_layout(move |layout, context, _, _| {
+            let resolved = resolve_input_control_style_for_context(
+                done_style.as_ref(),
+                context,
+                TimePickerStyle::default_for_theme,
+            );
+            layout.width = Some(Value::Static(Length::Px(resolved.width)));
+            layout.height = Some(Value::Static(Length::Px(
+                picker_content_metrics(context.theme).button_height,
+            )));
+        })
         .disable(disabled || on_open_change.is_none());
     if let Some(command) = on_open_change {
         done_button = done_button.on_click(Command::new_with_context(move |vm, ctx| {
@@ -1693,22 +2003,45 @@ fn time_picker_content<VM: 'static>(
         }));
     }
 
+    let root_style = style.clone();
+    let row_style = style;
     Flex::vertical()
-        .width(style.width)
-        .gap(dp(10.0))
+        .runtime_layout(move |layout, container, context, _, _| {
+            let resolved = resolve_input_control_style_for_context(
+                root_style.as_ref(),
+                context,
+                TimePickerStyle::default_for_theme,
+            );
+            layout.width = Some(Value::Static(Length::Px(resolved.width)));
+            container.gap = Value::Static(Length::Px(
+                picker_content_metrics(context.theme).section_gap,
+            ));
+        })
         .child(
             Flex::horizontal()
                 .align(Align::Center)
-                .gap(dp(8.0))
+                .runtime_layout(move |_, container, context, _, _| {
+                    container.gap =
+                        Value::Static(Length::Px(picker_content_metrics(context.theme).inline_gap));
+                })
                 .child(themed_icon(ICON_TIME, dp(18.0)))
                 .child(Text::new("Select time").style_full(label_text_style)),
         )
         .child(
             Flex::horizontal()
-                .width(style.width)
                 .align(Align::Center)
                 .justify(Justify::Center)
-                .gap(dp(12.0))
+                .runtime_layout(move |layout, container, context, _, _| {
+                    let resolved = resolve_input_control_style_for_context(
+                        row_style.as_ref(),
+                        context,
+                        TimePickerStyle::default_for_theme,
+                    );
+                    layout.width = Some(Value::Static(Length::Px(resolved.width)));
+                    container.gap = Value::Static(Length::Px(
+                        picker_content_metrics(context.theme).section_gap,
+                    ));
+                })
                 .child(hour_column)
                 .child(Text::new(":").style_full(time_wheel_separator_style))
                 .child(minute_column),
@@ -1733,17 +2066,28 @@ fn time_wheel_column<VM: 'static>(
     controller: TextController,
     disabled: bool,
     on_change: Option<ValueCommand<VM, TimePickerChange>>,
-    width: Dp,
+    style: Option<StyleResolver<TimePickerStyle>>,
 ) -> Element<VM> {
     let previous_index = previous_index(selected_index, values.len());
     let next_index = next_index(selected_index, values.len());
     let previous = values[previous_index];
     let selected = values[selected_index];
     let next = values[next_index];
+    let column_style = style.clone();
     Flex::vertical()
-        .width(width)
+        .runtime_layout(move |layout, container, context, _, _| {
+            let resolved = resolve_input_control_style_for_context(
+                column_style.as_ref(),
+                context,
+                TimePickerStyle::default_for_theme,
+            );
+            layout.width = Some(Value::Static(Length::Px(
+                resolved.option_width.max(dp(96.0)),
+            )));
+            container.gap =
+                Value::Static(Length::Px(picker_content_metrics(context.theme).inline_gap));
+        })
         .align(Align::Center)
-        .gap(dp(6.0))
         .child(Text::new(label).style_full(muted_text_style))
         .child(ghost_icon_button(
             ICON_UP,
@@ -1762,7 +2106,7 @@ fn time_wheel_column<VM: 'static>(
         .child(time_wheel_value_button(
             previous,
             false,
-            width,
+            style.clone(),
             disabled,
             time_wheel_select_command(
                 unit,
@@ -1777,7 +2121,7 @@ fn time_wheel_column<VM: 'static>(
         .child(time_wheel_value_button(
             selected,
             true,
-            width,
+            style.clone(),
             disabled,
             time_wheel_select_command(
                 unit,
@@ -1792,7 +2136,7 @@ fn time_wheel_column<VM: 'static>(
         .child(time_wheel_value_button(
             next,
             false,
-            width,
+            style,
             disabled,
             time_wheel_select_command(
                 unit,
@@ -1824,13 +2168,27 @@ fn time_wheel_column<VM: 'static>(
 fn time_wheel_value_button<VM: 'static>(
     value: u32,
     selected: bool,
-    width: Dp,
+    style: Option<StyleResolver<TimePickerStyle>>,
     disabled: bool,
     command: Command<VM>,
 ) -> Button<VM> {
     let button = Button::new(format!("{value:02}"))
-        .width(width)
-        .height(if selected { dp(44.0) } else { dp(34.0) })
+        .runtime_layout(move |layout, context, _, _| {
+            let resolved = resolve_input_control_style_for_context(
+                style.as_ref(),
+                context,
+                TimePickerStyle::default_for_theme,
+            );
+            let metrics = picker_content_metrics(context.theme);
+            layout.width = Some(Value::Static(Length::Px(
+                resolved.option_width.max(dp(96.0)),
+            )));
+            layout.height = Some(Value::Static(Length::Px(if selected {
+                metrics.time_selected_height
+            } else {
+                metrics.time_option_height
+            })));
+        })
         .disable(disabled)
         .on_click(command);
     if selected {
@@ -1928,33 +2286,60 @@ fn number_step_button<VM: 'static>(
     max: Option<f64>,
     disabled: Value<bool>,
     on_change: Option<ValueCommand<VM, NumberInputChange>>,
-    width: Dp,
+    style: Option<StyleResolver<NumberInputStyle>>,
 ) -> Element<VM> {
-    secondary_icon_button(
-        icon,
-        width,
-        FIELD_HEIGHT,
-        disabled,
-        Command::new_with_context(move |vm, ctx| {
-            let current = parse_number(&controller.text(), min, max)
-                .or_else(|| value.resolve())
-                .unwrap_or(0.0);
-            let next = clamp_number(current + delta, min, max);
-            let text = format_number(next);
-            controller.set_text(text.clone());
-            if let Some(command) = on_change.as_ref() {
-                command.execute_with_context(
-                    vm,
-                    NumberInputChange {
-                        value: Some(next),
-                        text,
-                        trigger,
-                    },
-                    ctx,
-                );
-            }
-        }),
-    )
+    let disabled_for_style = disabled.clone();
+    let disabled_for_click = disabled.clone();
+    Stack::new()
+        .center()
+        .runtime_layout(move |layout, _, context, _, _| {
+            let resolved = resolve_input_control_style_for_context(
+                style.as_ref(),
+                context,
+                NumberInputStyle::default_for_theme,
+            );
+            let metrics = advanced_input_metrics(context.theme);
+            layout.width = Some(Value::Static(Length::Px(resolved.button_width)));
+            layout.height = Some(Value::Static(Length::Px(metrics.control_height)));
+        })
+        .style_full_with_style_sheet(move |context, _, _, mut state| {
+            state.disabled = disabled_for_style.resolve();
+            number_stepper_surface_style(context, state)
+        })
+        .opacity(disabled_opacity(disabled.clone()))
+        .cursor(if disabled.resolve() {
+            CursorStyle::NotAllowed
+        } else {
+            CursorStyle::Pointer
+        })
+        .focusable(true)
+        .child(styled_icon(icon, dp(18.0), |context| {
+            let (_, _, _, muted, _, _, _) = mode_colors(context);
+            muted
+        }))
+        .on_click(guard_disabled_command(
+            disabled_for_click,
+            Command::new_with_context(move |vm, ctx| {
+                let current = parse_number(&controller.text(), min, max)
+                    .or_else(|| value.resolve())
+                    .unwrap_or(0.0);
+                let next = clamp_number(current + delta, min, max);
+                let text = format_number(next);
+                controller.set_text(text.clone());
+                if let Some(command) = on_change.as_ref() {
+                    command.execute_with_context(
+                        vm,
+                        NumberInputChange {
+                            value: Some(next),
+                            text,
+                            trigger,
+                        },
+                        ctx,
+                    );
+                }
+            }),
+        ))
+        .into()
 }
 
 fn color_picker_content<VM: 'static>(
@@ -1962,14 +2347,29 @@ fn color_picker_content<VM: 'static>(
     disabled: bool,
     on_change: Option<ValueCommand<VM, ColorPickerChange>>,
     swatches: Vec<Color>,
-    style: ColorPickerStyle,
+    style: Option<StyleResolver<ColorPickerStyle>>,
 ) -> Element<VM> {
-    let mut root = Flex::vertical().width(style.width).gap(dp(12.0));
+    let root_style = style.clone();
+    let mut root = Flex::vertical().runtime_layout(move |layout, container, context, _, _| {
+        let resolved = resolve_input_control_style_for_context(
+            root_style.as_ref(),
+            context,
+            ColorPickerStyle::default_for_theme,
+        );
+        layout.width = Some(Value::Static(Length::Px(resolved.width)));
+        container.gap = Value::Static(Length::Px(
+            picker_content_metrics(context.theme).section_gap,
+        ));
+    });
     root = root.child(
         Flex::horizontal()
             .align(Align::Center)
-            .gap(dp(10.0))
-            .child(color_preview_box::<VM>(color.clone(), dp(44.0)))
+            .runtime_layout(move |_, container, context, _, _| {
+                container.gap = Value::Static(Length::Px(
+                    picker_content_metrics(context.theme).section_gap,
+                ));
+            })
+            .child(picker_color_preview_box::<VM>(color.clone()))
             .child(
                 Flex::vertical()
                     .gap(dp(2.0))
@@ -1978,12 +2378,27 @@ fn color_picker_content<VM: 'static>(
             ),
     );
 
-    let mut swatch_row = Flex::horizontal().wrap(Wrap::Wrap).gap(dp(8.0));
+    let mut swatch_row =
+        Flex::horizontal()
+            .wrap(Wrap::Wrap)
+            .runtime_layout(move |_, container, context, _, _| {
+                container.gap =
+                    Value::Static(Length::Px(picker_content_metrics(context.theme).inline_gap));
+            });
     for swatch in swatches {
         let command = on_change.clone();
+        let swatch_style = style.clone();
         swatch_row = swatch_row.child(
             Flex::<VM>::vertical()
-                .size(style.swatch_size, style.swatch_size)
+                .runtime_layout(move |layout, _, context, _, _| {
+                    let resolved = resolve_input_control_style_for_context(
+                        swatch_style.as_ref(),
+                        context,
+                        ColorPickerStyle::default_for_theme,
+                    );
+                    layout.width = Some(Value::Static(Length::Px(resolved.swatch_size)));
+                    layout.height = Some(Value::Static(Length::Px(resolved.swatch_size)));
+                })
                 .style_full(move |context| color_swatch_style(context, swatch))
                 .cursor(if disabled {
                     CursorStyle::NotAllowed
@@ -2049,7 +2464,10 @@ fn color_slider<VM: 'static>(
     let color_for_change = color.clone();
     Flex::horizontal()
         .align(Align::Center)
-        .gap(dp(8.0))
+        .runtime_layout(move |_, container, context, _, _| {
+            container.gap =
+                Value::Static(Length::Px(picker_content_metrics(context.theme).inline_gap));
+        })
         .child(
             Text::new(label)
                 .width(dp(18.0))
@@ -2058,7 +2476,7 @@ fn color_slider<VM: 'static>(
         .child(
             Slider::new(value, 0.0, 255.0)
                 .step(1.0)
-                .width(dp(196.0))
+                .grow(1.0)
                 .disable(disabled)
                 .on_change(ValueCommand::new_with_context(move |vm, next: f32, ctx| {
                     if let Some(command) = on_change.as_ref() {
@@ -2102,9 +2520,19 @@ fn build_upload_list<VM: 'static>(
     files: Vec<UploadFile>,
     on_remove: Option<ValueCommand<VM, UploadRemove>>,
     disabled: Value<bool>,
-    style: UploadStyle,
+    style: Option<StyleResolver<UploadStyle>>,
 ) -> Element<VM> {
-    let mut list = Flex::vertical().width(style.width).gap(dp(8.0));
+    let list_style = style.clone();
+    let mut list = Flex::vertical().runtime_layout(move |layout, container, context, _, _| {
+        let resolved = resolve_input_control_style_for_context(
+            list_style.as_ref(),
+            context,
+            UploadStyle::default_for_theme,
+        );
+        let metrics = advanced_input_metrics(context.theme);
+        layout.width = Some(Value::Static(Length::Px(resolved.width)));
+        container.gap = Value::Static(Length::Px(metrics.upload_row_gap));
+    });
     for file in files {
         list = list.child(upload_row(
             file,
@@ -2120,7 +2548,7 @@ fn upload_row<VM: 'static>(
     file: UploadFile,
     on_remove: Option<ValueCommand<VM, UploadRemove>>,
     disabled: Value<bool>,
-    style: UploadStyle,
+    style: Option<StyleResolver<UploadStyle>>,
 ) -> Element<VM> {
     let id = file.id.clone();
     let remove = on_remove.map(|command| {
@@ -2141,12 +2569,21 @@ fn upload_row<VM: 'static>(
                 .child(Text::new(status).style_full(muted_text_style)),
         );
     if let Some(command) = remove {
-        footer = footer.child(ghost_icon_button(ICON_DELETE, dp(32.0), disabled, command));
+        footer = footer.child(upload_action_button(ICON_DELETE, disabled, command));
     }
+    let row_style = style.clone();
     Flex::vertical()
-        .width(style.width)
-        .padding(Insets::all(dp(12.0)))
-        .gap(dp(8.0))
+        .runtime_layout(move |layout, container, context, _, _| {
+            let resolved = resolve_input_control_style_for_context(
+                row_style.as_ref(),
+                context,
+                UploadStyle::default_for_theme,
+            );
+            let metrics = advanced_input_metrics(context.theme);
+            layout.width = Some(Value::Static(Length::Px(resolved.width)));
+            container.padding = Some(Value::Static(Insets::all(metrics.upload_row_padding)));
+            container.gap = Value::Static(Length::Px(metrics.upload_row_gap));
+        })
         .style_full(input_panel_style)
         .child(
             Flex::horizontal()
@@ -2434,6 +2871,31 @@ fn input_panel_style(context: &StyleContext<'_>) -> ContainerStyle {
     style
 }
 
+fn upload_drop_zone_style(context: &StyleContext<'_>, state: WidgetState) -> ContainerStyle {
+    let input = InputStyle::default_for_theme(context.theme);
+    let background = if state.disabled {
+        context.theme.colors.disabled
+    } else if state.pressed {
+        context.theme.colors.primary_container.darken(0.04)
+    } else if state.hovered {
+        context.theme.colors.primary_container
+    } else {
+        input.background.normal.resolve()
+    };
+    let border = if state.hovered || state.pressed {
+        context.theme.colors.primary.with_alpha_factor(0.64)
+    } else {
+        input.border.normal.resolve()
+    };
+    let mut style = ContainerStyle::default_for_theme(context.theme);
+    style.surface.background = Some(Value::Static(background));
+    style.surface.border_color = Some(Value::Static(border));
+    style.surface.border_width = Some(input.border_width);
+    style.surface.border_radius = Some(Value::Static(context.theme.radius.xl));
+    style.surface.shadow = None;
+    style
+}
+
 fn icon_surface_style(context: &StyleContext<'_>) -> ContainerStyle {
     let button = icon_button_style(context);
     let mut style = ContainerStyle::default_for_theme(context.theme);
@@ -2456,6 +2918,29 @@ fn input_icon_surface_style(context: &StyleContext<'_>) -> ContainerStyle {
     style
 }
 
+fn number_stepper_surface_style(context: &StyleContext<'_>, state: WidgetState) -> ContainerStyle {
+    let button = ButtonStyle::default_for_theme(context.theme, ButtonVariantKind::Secondary);
+    let input = InputStyle::default_for_theme(context.theme);
+    let mut style = ContainerStyle::default_for_theme(context.theme);
+    style.surface.background = Some(button.background.resolve(state));
+    style.surface.border_color = Some(button.border.resolve(state));
+    style.surface.border_width = Some(button.border_width);
+    style.surface.border_radius = Some(input.radius);
+    style.surface.shadow = None;
+    style
+}
+
+fn ghost_action_surface_style(context: &StyleContext<'_>, state: WidgetState) -> ContainerStyle {
+    let button = ButtonStyle::default_for_theme(context.theme, ButtonVariantKind::Ghost);
+    let mut style = ContainerStyle::default_for_theme(context.theme);
+    style.surface.background = Some(button.background.resolve(state));
+    style.surface.border_color = Some(button.border.resolve(state));
+    style.surface.border_width = Some(button.border_width);
+    style.surface.border_radius = Some(Value::Static(context.theme.radius.lg));
+    style.surface.shadow = None;
+    style
+}
+
 fn color_trigger_accessible_button_style(context: &StyleContext<'_>) -> ButtonStyle {
     let mut style = ButtonStyle::default_for_theme(context.theme, ButtonVariantKind::Secondary);
     style.foreground = value_color(
@@ -2466,7 +2951,7 @@ fn color_trigger_accessible_button_style(context: &StyleContext<'_>) -> ButtonSt
     );
     style.padding_x = dp(0.0);
     style.padding_y = dp(0.0);
-    style.min_height = FIELD_HEIGHT;
+    style.min_height = advanced_input_metrics(context.theme).control_height;
     style
 }
 
@@ -2493,7 +2978,7 @@ fn input_icon_button_style(context: &StyleContext<'_>) -> ButtonStyle {
     style.radius = InputStyle::default_for_theme(context.theme).radius;
     style.padding_x = dp(0.0);
     style.padding_y = dp(0.0);
-    style.min_height = FIELD_HEIGHT;
+    style.min_height = advanced_input_metrics(context.theme).control_height;
     style
 }
 
@@ -2676,7 +3161,7 @@ fn accent_badge_style(context: &StyleContext<'_>) -> ContainerStyle {
     style.surface.background = Some(Value::Static(primary.with_alpha_factor(0.12)));
     style.surface.border_color = Some(Value::Static(primary.with_alpha_factor(0.24)));
     style.surface.border_width = Some(Value::Static(dp(1.0)));
-    style.surface.border_radius = Some(Value::Static(dp(8.0)));
+    style.surface.border_radius = Some(Value::Static(context.theme.radius.lg));
     style.surface.shadow = None;
     style
 }
@@ -2687,7 +3172,7 @@ fn subtle_badge_style(context: &StyleContext<'_>) -> ContainerStyle {
     style.surface.background = Some(Value::Static(surface_low));
     style.surface.border_color = Some(Value::Static(outline));
     style.surface.border_width = Some(Value::Static(dp(1.0)));
-    style.surface.border_radius = Some(Value::Static(dp(8.0)));
+    style.surface.border_radius = Some(Value::Static(context.theme.radius.lg));
     style.surface.shadow = None;
     style
 }

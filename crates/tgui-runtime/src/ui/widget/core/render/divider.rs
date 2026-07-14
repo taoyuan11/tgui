@@ -104,7 +104,8 @@ pub(crate) fn push_divider_primitives(
             // 标签在 frame 内水平 + 垂直居中（push_text_primitives 的 center_horizontally）。
             // 线分成左右两段，给标签留出 lw + 两侧 label_gap 的空隙。
             let label_text = text_with_typography(label.clone(), &style.text_style);
-            let (label_width, _) = measure_text_content(&label_text, font_manager, theme, units);
+            let (label_width, _) =
+                measure_text_content_with_layout(&label_text, font_manager, theme, units);
             let center = x + w * 0.5;
             let left_end = center - label_width * 0.5 - label_gap;
             let right_start = center + label_width * 0.5 + label_gap;

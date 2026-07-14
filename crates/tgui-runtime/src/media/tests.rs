@@ -12,6 +12,7 @@ use crate::foundation::binding::InvalidationSignal;
 use crate::ui::widget::Rect;
 
 use super::loader::{fetch_http_bytes, load_media_document, SVG_EXTERNAL_IMAGE_MAX_BODY_BYTES};
+use super::manager::DocumentContent;
 use super::types::{AnimationClock, ImageSnapshot};
 use super::{MediaManager, MediaSource, MediaTextureKey, RasterRequest, TextureFrame};
 
@@ -367,6 +368,31 @@ fn embedded_raster_bytes_are_available_without_background_loader_delay() {
 }
 
 #[test]
+fn source_hot_cache_observes_async_loader_completion() {
+    let temp_dir = unique_temp_dir();
+    fs::create_dir_all(&temp_dir).expect("temporary directory should exist");
+    let image_path = temp_dir.join("pixel.gif");
+    fs::write(&image_path, ONE_BY_ONE_GIF).expect("image fixture should be written");
+    let source = MediaSource::path(&image_path);
+    let media = MediaManager::new(InvalidationSignal::new());
+
+    let _ = media.image_snapshot(&source, None);
+    media.reset_image_lookup_stats();
+    let completed = wait_for_snapshot(&media, &source, None);
+
+    assert!(!completed.loading);
+    assert!(completed.error.is_none());
+    let (hash_lookups, hot_hits, _) = media.image_lookup_stats();
+    assert_eq!(hash_lookups, 0);
+    assert!(hot_hits >= 1);
+    assert!(media.drain_completions().iter().any(|completion| {
+        matches!(completion, super::MediaCompletion::SourceLoaded { source: loaded } if loaded == &source)
+    }));
+
+    let _ = fs::remove_dir_all(temp_dir);
+}
+
+#[test]
 fn media_manager_evicts_old_image_sources_from_budget() {
     let media = MediaManager::with_budget(
         InvalidationSignal::new(),
@@ -417,6 +443,175 @@ fn raster_document_rasterizes_requested_size_and_reuses_cached_texture() {
 }
 
 #[test]
+fn stable_same_source_snapshots_bypass_source_hashing() {
+    let media = MediaManager::new(InvalidationSignal::new());
+    let source = MediaSource::bytes(SIMPLE_SVG);
+    let _ = media.image_snapshot(&source, None);
+    media.reset_image_lookup_stats();
+
+    for _ in 0..10_000 {
+        let snapshot = media.image_snapshot(&source, None);
+        assert_eq!(snapshot.intrinsic_size.width, 10.0);
+    }
+
+    let (hash_lookups, hot_hits, entry_requests) = media.image_lookup_stats();
+    assert_eq!(hash_lookups, 0);
+    assert_eq!(hot_hits, 10_000);
+    assert_eq!(entry_requests, 10_000);
+}
+
+#[test]
+fn resolved_layout_snapshot_uses_one_entry_request() {
+    let media = MediaManager::new(InvalidationSignal::new());
+    let source = MediaSource::bytes(SIMPLE_SVG);
+    let _ = media.image_snapshot(&source, None);
+    let layout = super::MediaTextureLayout::new(
+        Rect::new(0.0, 0.0, 100.0, 100.0),
+        super::ContentFit::Contain,
+        2.0,
+    );
+    media.reset_image_lookup_stats();
+
+    let (snapshot, target_frame, request) = media.image_snapshot_for_layout(&source, layout);
+
+    assert!(snapshot.texture.is_some());
+    assert_eq!(target_frame, Rect::new(25.0, 0.0, 50.0, 100.0));
+    assert_eq!(request, Some(RasterRequest::new_clamped(100, 200)));
+    assert_eq!(media.image_lookup_stats(), (0, 1, 1));
+}
+
+#[test]
+fn svg_exact_raster_hot_cache_avoids_stable_linear_scans() {
+    let mut document =
+        load_media_document(&MediaSource::bytes(SIMPLE_SVG)).expect("SVG should decode");
+    let request = RasterRequest::new_clamped(40, 80);
+    let invalidation = InvalidationSignal::new();
+    let budget = ResourceBudget::DEFAULT;
+    let completions = Arc::new(Mutex::new(Vec::new()));
+    document
+        .texture_for(
+            request,
+            AnimationClock {
+                now: Instant::now(),
+            },
+            &invalidation,
+            &budget,
+            &completions,
+        )
+        .expect("SVG should rasterize");
+    let DocumentContent::Svg(svg) = &mut document.content else {
+        panic!("fixture should decode as SVG");
+    };
+    svg.reset_exact_lookup_stats();
+
+    for _ in 0..1_024 {
+        document
+            .texture_for(
+                request,
+                AnimationClock {
+                    now: Instant::now(),
+                },
+                &invalidation,
+                &budget,
+                &completions,
+            )
+            .expect("cached SVG should remain available");
+    }
+
+    let DocumentContent::Svg(svg) = &document.content else {
+        unreachable!();
+    };
+    assert_eq!(svg.exact_lookup_stats(), (0, 1_024));
+}
+
+#[test]
+fn raster_exact_raster_hot_cache_avoids_stable_linear_scans() {
+    let mut document = load_media_document(&MediaSource::bytes(ONE_BY_ONE_GIF))
+        .expect("raster fixture should decode");
+    let request = RasterRequest::new_clamped(32, 32);
+    let invalidation = InvalidationSignal::new();
+    let budget = ResourceBudget::DEFAULT;
+    let completions = Arc::new(Mutex::new(Vec::new()));
+    for _ in 0..150 {
+        if document
+            .texture_for(
+                request,
+                AnimationClock {
+                    now: Instant::now(),
+                },
+                &invalidation,
+                &budget,
+                &completions,
+            )
+            .expect("raster decode should succeed")
+            .is_some()
+        {
+            break;
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
+    let DocumentContent::Raster(raster) = &mut document.content else {
+        panic!("fixture should decode as raster");
+    };
+    raster.reset_exact_lookup_stats();
+
+    for _ in 0..1_024 {
+        assert!(document
+            .texture_for(
+                request,
+                AnimationClock {
+                    now: Instant::now(),
+                },
+                &invalidation,
+                &budget,
+                &completions,
+            )
+            .expect("cached raster should remain available")
+            .is_some());
+    }
+
+    let DocumentContent::Raster(raster) = &document.content else {
+        unreachable!();
+    };
+    assert_eq!(raster.exact_lookup_stats(), (0, 1_024));
+}
+
+#[test]
+fn source_hot_cache_does_not_resurrect_evicted_image_entry() {
+    let media = MediaManager::with_budget(
+        InvalidationSignal::new(),
+        ResourceBudget {
+            canvas_shadow_cache_entries: 1,
+            widget_shadow_cache_entries: 1,
+            image_raster_cache_entries: 1,
+            svg_raster_cache_entries: 1,
+        },
+    );
+    let source = MediaSource::bytes(SIMPLE_SVG);
+    let request = RasterRequest::new_clamped(20, 40);
+    let first = media
+        .image_snapshot(&source, Some(request))
+        .texture
+        .expect("first SVG texture should rasterize");
+
+    for index in 0..8 {
+        let unique_svg = format!(
+            r##"<svg xmlns="http://www.w3.org/2000/svg" width="10" height="20"><rect width="10" height="20" fill="#{index:02x}c55e"/></svg>"##
+        );
+        let other = MediaSource::bytes(unique_svg.into_bytes());
+        let snapshot = media.image_snapshot(&other, None);
+        assert!(snapshot.error.is_none());
+    }
+    assert!(!media.is_image_cached(&source));
+
+    let second = media
+        .image_snapshot(&source, Some(request))
+        .texture
+        .expect("evicted SVG should be decoded again");
+    assert_ne!(first.id(), second.id());
+}
+
+#[test]
 fn raster_document_keeps_previous_texture_while_new_size_is_loading() {
     let media = MediaManager::new(InvalidationSignal::new());
     let source = MediaSource::bytes(ONE_BY_ONE_GIF);
@@ -461,6 +656,7 @@ fn animated_gif_advances_frames_with_stable_texture_id() {
     let first_revision = first_texture.revision();
     let first_pixels = first_texture.pixels().to_vec();
     let key = MediaTextureKey::new(source.clone(), request);
+    media.reset_image_lookup_stats();
 
     let deadline = media
         .next_animation_deadline_for_keys([&key])
@@ -471,6 +667,9 @@ fn animated_gif_advances_frames_with_stable_texture_id() {
     assert_eq!(advanced.id(), first_id);
     assert_eq!(advanced.revision(), first_revision + 1);
     assert_ne!(advanced.pixels(), first_pixels.as_slice());
+    let (hash_lookups, hot_hits, _) = media.image_lookup_stats();
+    assert_eq!(hash_lookups, 0);
+    assert!(hot_hits >= 3);
 }
 
 fn wait_for_snapshot(

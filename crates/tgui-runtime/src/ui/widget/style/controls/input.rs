@@ -20,7 +20,12 @@ pub struct InputStyle {
 
 impl InputStyle {
     pub fn default_for_theme(theme: &Theme) -> Self {
+        Self::default_for_density(theme, theme.density)
+    }
+
+    pub(crate) fn default_for_density(theme: &Theme, density: Density) -> Self {
         let palette = palette_from_theme(theme);
+        let metrics = control_density_metrics(theme, density);
         Self {
             surface: WidgetSurfaceStyle::default(),
             background: stateful_colors(
@@ -50,10 +55,10 @@ impl InputStyle {
             selection: Some(Value::Static(theme.colors.selection)),
             caret: Some(Value::Static(theme.colors.primary)),
             border_width: Value::Static(theme.border.thin),
-            radius: Value::Static(theme.radius.md),
-            padding_x: theme.spacing.md - theme.spacing.xs,
-            padding_y: theme.spacing.sm,
-            min_height: dp(40.0),
+            radius: Value::Static(theme.radius.lg),
+            padding_x: metrics.input_padding_x,
+            padding_y: metrics.input_padding_y,
+            min_height: metrics.control_height,
             text_style: theme.typography.body.clone(),
         }
     }
@@ -79,7 +84,11 @@ pub struct TextareaStyle {
 
 impl TextareaStyle {
     pub fn default_for_theme(theme: &Theme) -> Self {
-        let mut style = InputStyle::default_for_theme(theme);
+        Self::default_for_density(theme, theme.density)
+    }
+
+    pub(crate) fn default_for_density(theme: &Theme, density: Density) -> Self {
+        let mut style = InputStyle::default_for_density(theme, density);
         style.min_height = dp(96.0);
         Self {
             surface: style.surface,

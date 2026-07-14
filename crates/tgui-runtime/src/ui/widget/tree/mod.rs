@@ -5,6 +5,7 @@ use crate::foundation::color::Color;
 use crate::foundation::view_model::{Command, ValueCommand};
 use crate::theme::StyleContext;
 use crate::ui::layout::{pct, Align, Insets, LayoutStyle, Value};
+use crate::ui::theme::Density;
 use crate::ui::unit::{dp, sp, Dp, Sp};
 
 use super::common::{
@@ -194,32 +195,64 @@ pub struct TreeStyle {
 impl TreeStyle {
     pub fn default_for_theme(theme: &crate::ui::theme::Theme) -> Self {
         let palette = palette_from_theme(theme);
+        let (item_height, item_padding, item_radius, indent_width, chrome_width, chrome_icon_size) =
+            match theme.density {
+                Density::Compact => (
+                    dp(32.0),
+                    Insets::symmetric(theme.spacing.xs + theme.spacing.xxs, theme.spacing.xs),
+                    theme.radius.md,
+                    dp(16.0),
+                    dp(20.0),
+                    sp(16.0),
+                ),
+                Density::Comfortable => (
+                    dp(40.0),
+                    Insets::symmetric(theme.spacing.sm, theme.spacing.sm),
+                    theme.radius.lg,
+                    dp(20.0),
+                    dp(24.0),
+                    sp(18.0),
+                ),
+                Density::Spacious => (
+                    dp(48.0),
+                    Insets::symmetric(
+                        theme.spacing.sm + theme.spacing.xs,
+                        theme.spacing.sm + theme.spacing.xs,
+                    ),
+                    theme.radius.xl,
+                    dp(24.0),
+                    dp(28.0),
+                    sp(20.0),
+                ),
+            };
         Self {
             surface: WidgetSurfaceStyle {
                 background: Some(Value::Static(theme.colors.surface)),
-                border_color: Some(Value::Static(theme.colors.outline_muted)),
+                border_color: Some(Value::Static(
+                    theme.colors.outline_muted.with_alpha_factor(0.72),
+                )),
                 border_width: Some(Value::Static(theme.border.thin)),
                 border_radius: Some(Value::Static(theme.radius.lg)),
                 ..WidgetSurfaceStyle::default()
             },
-            item_height: theme.spacing.xl + theme.spacing.md,
-            item_padding: Insets::symmetric(theme.spacing.sm, theme.spacing.xs),
-            item_radius: theme.radius.md,
-            indent_width: theme.spacing.xl + theme.spacing.xs,
-            disclosure_width: theme.spacing.xl,
-            checkbox_width: theme.spacing.xl,
-            disclosure_icon_size: sp(20.0),
-            checkbox_icon_size: sp(20.0),
-            indent_line_color: Value::Static(theme.colors.outline_muted.with_alpha_factor(0.6)),
+            item_height,
+            item_padding,
+            item_radius,
+            indent_width,
+            disclosure_width: chrome_width,
+            checkbox_width: chrome_width,
+            disclosure_icon_size: chrome_icon_size,
+            checkbox_icon_size: chrome_icon_size,
+            indent_line_color: Value::Static(theme.colors.outline_muted.with_alpha_factor(0.44)),
             disclosure_icon_color: Value::Static(palette.on_surface_muted),
-            disclosure_hover_background: Value::Static(theme.colors.surface_low),
+            disclosure_hover_background: Value::Static(palette.on_surface.with_alpha_factor(0.08)),
             checkbox_unchecked_color: Value::Static(theme.colors.outline),
             checkbox_checked_color: Value::Static(theme.colors.primary),
             checkbox_indeterminate_color: Value::Static(theme.colors.primary.lighten(0.08)),
             checkbox_disabled_color: Value::Static(theme.colors.on_disabled),
             item_background: Value::Static(Color::TRANSPARENT),
-            item_hover_background: Value::Static(theme.colors.surface_low),
-            item_selected_background: Value::Static(theme.colors.primary_container),
+            item_hover_background: Value::Static(palette.on_surface.with_alpha_factor(0.06)),
+            item_selected_background: Value::Static(palette.primary.with_alpha_factor(0.12)),
             item_disabled_background: Value::Static(Color::TRANSPARENT),
         }
     }

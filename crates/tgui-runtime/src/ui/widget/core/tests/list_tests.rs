@@ -1,9 +1,130 @@
 use super::*;
 
+use crate::theme::WidgetState;
 use crate::ui::widget::{
     ItemLayout, List, ListItem, ListSection, ListSelectionMode, ListStyle, VirtualCacheState,
     WidgetKey,
 };
+
+#[test]
+fn list_default_style_follows_theme_density() {
+    let expected = [
+        (
+            crate::ui::theme::Density::Compact,
+            dp(32.0),
+            dp(8.0),
+            dp(4.0),
+            dp(6.0),
+        ),
+        (
+            crate::ui::theme::Density::Comfortable,
+            dp(40.0),
+            dp(12.0),
+            dp(8.0),
+            dp(8.0),
+        ),
+        (
+            crate::ui::theme::Density::Spacious,
+            dp(48.0),
+            dp(16.0),
+            dp(12.0),
+            dp(12.0),
+        ),
+    ];
+
+    for (density, height, padding_x, padding_y, radius) in expected {
+        let mut theme = Theme::light();
+        theme.density = density;
+        let style = ListStyle::default_for_theme(&theme);
+
+        assert_eq!(style.item_height, height);
+        assert_eq!(style.item_padding.left, padding_x);
+        assert_eq!(style.item_padding.top, padding_y);
+        assert_eq!(style.item_radius, radius);
+    }
+}
+
+#[test]
+fn compact_list_hover_scene_uses_rounded_inset_state_layer() {
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let mut theme = Theme::light();
+    theme.density = crate::ui::theme::Density::Compact;
+    let mut animations = AnimationEngine::default();
+    let tree: WidgetTree<()> = WidgetTree::new(
+        List::<&'static str, ()>::new(vec![ListItem::keyed("a", "Alpha")], |ctx| {
+            Text::new(ctx.item).into()
+        })
+        .item_layout(ItemLayout::Fixed {
+            item_extent: dp(32.0),
+            spacing: Dp::ZERO,
+            overscan: 0,
+        })
+        .size(dp(240.0), dp(64.0)),
+    );
+    let layout = tree.build_scene_layout(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        UnitContext::default(),
+        &HashMap::new(),
+        &HashMap::new(),
+        Rect::new(0.0, 0.0, 240.0, 64.0),
+    );
+    let ResolvedWidgetKind::Virtual { children, .. } = &layout.resolved_root.kind else {
+        panic!("List should resolve to a virtual widget");
+    };
+    let row_id = children[0].id;
+    let mut states = WidgetStateMap::default();
+    states.set(
+        row_id,
+        WidgetState {
+            hovered: true,
+            ..WidgetState::default()
+        },
+    );
+
+    let rendered = tree
+        .collect_scene_from_layout(
+            &font_manager,
+            &layout,
+            &theme,
+            &media,
+            &mut animations,
+            false,
+            None,
+            None,
+            &states,
+            &HashMap::new(),
+            &HashMap::new(),
+            Rect::new(0.0, 0.0, 240.0, 64.0),
+            None,
+            None,
+            None,
+            None,
+            false,
+        )
+        .rendered();
+    let style = ListStyle::default_for_theme(&theme);
+    let hover = style.item_hover_background.resolve();
+    let state_layer = rendered
+        .primitives
+        .shapes
+        .iter()
+        .find(|shape| shape.color == hover)
+        .expect("hovered List row should emit its state layer");
+    let label = rendered
+        .primitives
+        .texts
+        .iter()
+        .find(|text| text.content.as_ref() == "Alpha")
+        .expect("List row label should render");
+
+    assert_eq!(state_layer.rect.height, style.item_height);
+    assert_eq!(state_layer.corner_radius, style.item_radius.get());
+    assert_eq!(label.frame.x - state_layer.rect.x, style.item_padding.left);
+}
 
 #[test]
 fn list_loading_slot_takes_priority_over_empty_slot() {
@@ -126,6 +247,79 @@ fn list_virtualizes_rows_and_keeps_selection_wrapper_inside_window() {
     assert!(children.len() < 12);
     assert_eq!(children.len(), window_plan.placements.len());
     assert!(children.iter().all(|child| child.list_item.is_some()));
+}
+
+#[test]
+fn large_list_selection_snapshot_is_shared_and_membership_stays_equivalent() {
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let theme = Theme::default();
+    let mut animations = AnimationEngine::default();
+    let items = (0..100_000)
+        .map(|index| ListItem::keyed(index, index))
+        .collect::<Vec<_>>();
+    let selected = (0..100_000)
+        .step_by(2)
+        .map(WidgetKey::from)
+        .collect::<Vec<_>>();
+    let tree = WidgetTree::new(
+        List::<usize, ()>::new(items, |ctx| Text::new(ctx.item.to_string()).into())
+            .selected_keys(selected)
+            .selection_mode(ListSelectionMode::Multiple)
+            .item_layout(ItemLayout::Fixed {
+                item_extent: dp(40.0),
+                spacing: Dp::ZERO,
+                overscan: 0,
+            })
+            .size(dp(240.0), dp(160.0)),
+    );
+    let layout = tree.build_scene_layout(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        UnitContext::default(),
+        &HashMap::new(),
+        &HashMap::new(),
+        Rect::new(0.0, 0.0, 240.0, 160.0),
+    );
+    let ResolvedWidgetKind::Virtual { children, .. } = &layout.resolved_root.kind else {
+        panic!("List should resolve to a virtual widget");
+    };
+    let states = children
+        .iter()
+        .map(|child| child.list_item.as_ref().expect("visible row state"))
+        .collect::<Vec<_>>();
+    let shared_keys = states[0].selection.selected_keys.resolve();
+    let shared_membership = states[0].selection.selected_key_membership.resolve();
+    for state in states {
+        let keys = state.selection.selected_keys.resolve();
+        let membership = state.selection.selected_key_membership.resolve();
+        assert!(Arc::ptr_eq(&shared_keys, &keys));
+        assert!(Arc::ptr_eq(&shared_membership, &membership));
+        assert_eq!(
+            membership.contains(&state.key),
+            keys.contains(&state.key),
+            "membership snapshot must preserve controlled selection semantics"
+        );
+        assert_eq!(
+            state
+                .selection
+                .sibling_index_by_key
+                .get(&state.key)
+                .copied(),
+            Some(state.item_index)
+        );
+    }
+}
+
+#[test]
+#[cfg(target_pointer_width = "64")]
+fn list_selection_metadata_stays_out_of_line() {
+    assert!(
+        std::mem::size_of::<crate::ui::widget::common::ListItemState<()>>() <= 960,
+        "selection lookup tables must remain behind Arc so recursive Element/ResolvedElement values do not grow"
+    );
 }
 
 #[test]

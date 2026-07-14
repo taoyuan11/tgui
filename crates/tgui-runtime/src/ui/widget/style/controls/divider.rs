@@ -24,16 +24,29 @@ pub struct DividerStyle {
 
 impl DividerStyle {
     pub fn default_for_theme(theme: &Theme) -> Self {
+        Self::default_for_density(theme, theme.density)
+    }
+
+    pub fn default_for_density(theme: &Theme, density: Density) -> Self {
         let palette = palette_from_theme(theme);
+        let (dash_length, dash_gap, label_gap) = match density {
+            Density::Compact => (dp(3.0), dp(3.0), theme.spacing.sm - theme.spacing.xxs),
+            Density::Comfortable => (theme.spacing.xs, theme.spacing.xs, theme.spacing.sm),
+            Density::Spacious => (
+                theme.spacing.sm - theme.spacing.xxs,
+                theme.spacing.sm - theme.spacing.xxs,
+                theme.spacing.sm + theme.spacing.xs,
+            ),
+        };
         Self {
             surface: WidgetSurfaceStyle::default(),
             color: Value::Static(palette.outline_muted),
             thickness: Value::Static(theme.border.thin),
-            dash_length: theme.spacing.xs,
-            dash_gap: theme.spacing.xs,
+            dash_length,
+            dash_gap,
             inset: Value::Static(Dp::ZERO),
             label_color: Value::Static(palette.on_surface_muted),
-            label_gap: theme.spacing.sm,
+            label_gap,
             text_style: theme.typography.label.clone(),
         }
     }

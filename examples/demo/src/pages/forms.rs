@@ -1,5 +1,6 @@
 use crate::app::App;
 use crate::demo_section::{self, UsageDemo};
+use crate::styles;
 use tgui::prelude::*;
 
 const CODE_INPUT_BASIC: &str = r#"Input::new(app.input_text.clone())
@@ -174,9 +175,12 @@ fn input_component(app: &App) -> Element<App> {
                 "input/basic",
                 "受控输入",
                 "此输入框也会被媒体页面的音频示例复用。",
-                Input::new(app.input_text.clone())
-                    .width(dp(320.0))
-                    .placeholder("输入音频路径或 URL"),
+                Flex::vertical().gap(dp(6.0)).child(el![
+                    Text::new("媒体来源").style_full(styles::field_label_style),
+                    Input::new(app.input_text.clone())
+                        .width(dp(320.0))
+                        .placeholder("输入音频路径或 URL"),
+                ]),
                 CODE_INPUT_BASIC,
             ),
             UsageDemo::new(
@@ -184,6 +188,7 @@ fn input_component(app: &App) -> Element<App> {
                 "校验态输入",
                 "Form 字段的验证状态可以直接驱动 Input 视觉反馈。",
                 Flex::vertical().gap(dp(6.0)).child(el![
+                    Text::new("工作邮箱").style_full(styles::field_label_style),
                     Input::new(app.profile_email.controller())
                         .width(dp(320.0))
                         .placeholder("name@example.com")
@@ -192,7 +197,8 @@ fn input_component(app: &App) -> Element<App> {
                         app.profile_email
                             .first_error()
                             .map(|v| v.unwrap_or_default())
-                    ),
+                    )
+                    .style_full(styles::error_text_style),
                 ]),
                 CODE_INPUT_VALIDATION,
             ),
@@ -225,7 +231,7 @@ fn textarea_component(app: &App) -> Element<App> {
                         .on_change(Command::new(|app: &mut App| {
                             app.profile_status.set("Textarea 已更新".to_string());
                         })),
-                    Text::new(app.profile_status.signal()),
+                    Text::new(app.profile_status.signal()).style_full(styles::status_style),
                 ]),
                 CODE_TEXTAREA_STATUS,
             ),
@@ -297,7 +303,8 @@ fn checkbox_component(app: &App) -> Element<App> {
                         app.profile_newsletter
                             .first_error()
                             .map(|v| v.unwrap_or_default())
-                    ),
+                    )
+                    .style_full(styles::error_text_style),
                 ]),
                 CODE_CHECKBOX_VALIDATION,
             ),
@@ -380,7 +387,8 @@ fn select_component(app: &App) -> Element<App> {
                     )),
                     Text::new(app.select_action.signal().map(|value| {
                         format!("当前选择: {}", value.unwrap_or_else(|| "无".to_string()))
-                    })),
+                    }))
+                    .style_full(styles::status_style),
                 ]),
                 CODE_SELECT_BASIC,
             ),
@@ -419,7 +427,7 @@ fn combobox_component(app: &App) -> Element<App> {
                                 .set(format!("Combobox: {}", change.text));
                         }
                     )),
-                Text::new(app.component_status.signal()),
+                Text::new(app.component_status.signal()).style_full(styles::status_style),
             ]),
             CODE_COMBOBOX_BASIC,
         )],
@@ -512,7 +520,7 @@ fn rating_component(app: &App) -> Element<App> {
                         app.component_status
                             .set(format!("评分: {:.1}", change.value));
                     },)),
-                Text::new(app.component_status.signal()),
+                Text::new(app.component_status.signal()).style_full(styles::status_style),
             ]),
             CODE_RATING_BASIC,
         )],
@@ -538,7 +546,7 @@ fn date_picker_component(app: &App) -> Element<App> {
                 .on_open_change(ValueCommand::new(App::set_demo_date_open))
                 .on_month_change(ValueCommand::new(App::set_demo_date_month))
                 .on_change(ValueCommand::new(App::set_demo_date)),
-                Text::new(app.profile_status.signal()),
+                Text::new(app.profile_status.signal()).style_full(styles::status_style),
             ]),
             CODE_DATE_PICKER,
         )],
@@ -559,7 +567,7 @@ fn time_picker_component(app: &App) -> Element<App> {
                     .open(app.demo_time_open.signal())
                     .on_open_change(ValueCommand::new(App::set_demo_time_open))
                     .on_change(ValueCommand::new(App::set_demo_time)),
-                Text::new(app.profile_status.signal()),
+                Text::new(app.profile_status.signal()).style_full(styles::status_style),
             ]),
             CODE_TIME_PICKER,
         )],
@@ -580,7 +588,7 @@ fn number_input_component(app: &App) -> Element<App> {
                     .range(0.0, 99.0)
                     .step(1.0)
                     .on_change(ValueCommand::new(App::set_demo_number)),
-                Text::new(app.profile_status.signal()),
+                Text::new(app.profile_status.signal()).style_full(styles::status_style),
             ]),
             CODE_NUMBER_INPUT,
         )],
@@ -601,7 +609,7 @@ fn color_picker_component(app: &App) -> Element<App> {
                     .open(app.demo_color_open.signal())
                     .on_open_change(ValueCommand::new(App::set_demo_color_open))
                     .on_change(ValueCommand::new(App::set_demo_color)),
-                Text::new(app.profile_status.signal()),
+                Text::new(app.profile_status.signal()).style_full(styles::status_style),
             ]),
             CODE_COLOR_PICKER,
         )],
@@ -627,7 +635,7 @@ fn upload_component(app: &App) -> Element<App> {
                     Button::new("推进进度")
                         .secondary()
                         .on_click(Command::new(App::advance_uploads)),
-                    Text::new(app.upload_status.signal()),
+                    Text::new(app.upload_status.signal()).style_full(styles::status_style),
                 ]),
             ]),
             CODE_UPLOAD,
@@ -650,6 +658,7 @@ fn form_component(app: &App) -> Element<App> {
                 "字段和校验态",
                 "字段错误会直接反馈到对应控件。",
                 Flex::vertical().gap(dp(8.0)).child(el![
+                    Text::new("名称").style_full(styles::field_label_style),
                     Input::new(app.profile_name.controller())
                         .placeholder("请输入名称")
                         .width(dp(300.0))
@@ -658,7 +667,9 @@ fn form_component(app: &App) -> Element<App> {
                         app.profile_name
                             .first_error()
                             .map(|v| v.unwrap_or_default())
-                    ),
+                    )
+                    .style_full(styles::error_text_style),
+                    Text::new("邮箱").style_full(styles::field_label_style),
                     Input::new(app.profile_email.controller())
                         .placeholder("name@example.com")
                         .width(dp(300.0))
@@ -667,7 +678,8 @@ fn form_component(app: &App) -> Element<App> {
                         app.profile_email
                             .first_error()
                             .map(|v| v.unwrap_or_default())
-                    ),
+                    )
+                    .style_full(styles::error_text_style),
                     Checkbox::new(app.profile_newsletter.signal())
                         .label("订阅每周邮件")
                         .validation(newsletter_validation)
@@ -714,7 +726,8 @@ fn form_component(app: &App) -> Element<App> {
                             "validating={}, submitting={}",
                             status.validating, status.submitting
                         )
-                    })),
+                    }))
+                    .style_full(styles::status_style),
                     Text::new(app.profile_form.is_valid().map(|valid| {
                         if valid {
                             "表单当前无错误"
@@ -722,8 +735,9 @@ fn form_component(app: &App) -> Element<App> {
                             "表单当前存在错误"
                         }
                         .to_string()
-                    })),
-                    Text::new(app.profile_status.signal()),
+                    }))
+                    .style_full(styles::status_style),
+                    Text::new(app.profile_status.signal()).style_full(styles::status_style),
                 ]),
                 CODE_FORM_SUBMIT,
             ),

@@ -27,8 +27,14 @@ pub(crate) struct InvalidationSignal {
     dirty_dependencies: Arc<Mutex<DirtyDependencyLog>>,
     dependency_revisions: Arc<Mutex<HashMap<DependencyId, u64>>>,
     media_revisions: Arc<Mutex<Vec<u64>>>,
-    redraw_requested: Arc<std::sync::atomic::AtomicBool>,
+    wake_flags: Arc<InvalidationWakeFlags>,
     reactive_graph: ReactiveGraph,
+}
+
+#[derive(Default)]
+struct InvalidationWakeFlags {
+    redraw_requested: std::sync::atomic::AtomicBool,
+    wake_queued: std::sync::atomic::AtomicBool,
 }
 
 impl InvalidationSignal {
@@ -39,7 +45,7 @@ impl InvalidationSignal {
             dirty_dependencies: Arc::new(Mutex::new(DirtyDependencyLog::default())),
             dependency_revisions: Arc::new(Mutex::new(HashMap::new())),
             media_revisions: Arc::new(Mutex::new(Vec::new())),
-            redraw_requested: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            wake_flags: Arc::new(InvalidationWakeFlags::default()),
             reactive_graph: ReactiveGraph::default(),
         }
     }
@@ -71,7 +77,9 @@ impl InvalidationSignal {
     }
 
     pub(crate) fn request_redraw(&self) {
-        self.redraw_requested.store(true, Ordering::SeqCst);
+        self.wake_flags
+            .redraw_requested
+            .store(true, Ordering::SeqCst);
         if self.should_wake_now() {
             self.wake_proxy();
         }
@@ -92,8 +100,45 @@ impl InvalidationSignal {
 
     fn wake_proxy(&self) {
         if let Some(proxy) = self.proxy.lock().as_ref().cloned() {
-            proxy.wake_up();
+            self.try_send_wake(|| proxy.wake_up());
         }
+    }
+
+    /// Coalesce invalidation bursts into one pending user event. The event-loop callback
+    /// acknowledges the permit before processing work, so an update racing with that callback
+    /// can enqueue the next wake instead of being lost.
+    fn try_send_wake(&self, send: impl FnOnce() -> bool) -> bool {
+        if self
+            .wake_flags
+            .wake_queued
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .is_err()
+        {
+            return false;
+        }
+
+        if send() {
+            true
+        } else {
+            // A closed/replaced event loop did not consume the permit. Roll it back so a
+            // subsequently installed proxy can receive a fresh wake.
+            self.wake_flags.wake_queued.store(false, Ordering::Release);
+            false
+        }
+    }
+
+    pub(crate) fn acknowledge_wake(&self) {
+        self.wake_flags.wake_queued.store(false, Ordering::Release);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn debug_try_send_wake(&self, send: impl FnOnce() -> bool) -> bool {
+        self.try_send_wake(send)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn debug_wake_queued(&self) -> bool {
+        self.wake_flags.wake_queued.load(Ordering::Acquire)
     }
 
     fn should_wake_now(&self) -> bool {
@@ -154,7 +199,9 @@ impl InvalidationSignal {
     }
 
     pub(crate) fn take_redraw_request(&self) -> bool {
-        self.redraw_requested.swap(false, Ordering::SeqCst)
+        self.wake_flags
+            .redraw_requested
+            .swap(false, Ordering::SeqCst)
     }
 
     pub(crate) fn reactive_graph(&self) -> ReactiveGraph {

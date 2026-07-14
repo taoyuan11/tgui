@@ -116,34 +116,52 @@ pub(super) fn compute_container_content_bounds<VM>(
         ResolvedWidgetKind::Virtual { .. } => Insets::ZERO,
         _ => Insets::ZERO,
     };
-    let mut bounds: Option<Rect> = None;
+    let cached_bounds = layout_node.cached_child_content_bounds.get().copied();
+    let local_bounds = cached_bounds.unwrap_or_else(|| {
+        let mut bounds: Option<Rect> = None;
+        let mut cacheable = true;
 
-    for (child, child_layout) in children.iter().zip(layout_node.children.iter()) {
-        let child_layout = context
-            .taffy
-            .layout(child_layout.node)
-            .expect("child layout node should exist");
-        let offset = track_property_scope(PropertySlot::Offset, || {
-            child.visual.offset.resolve_widget(
-                context.animations,
-                child.id,
-                WidgetProperty::Offset,
-                context.now,
+        for (child, child_layout) in children.iter().zip(layout_node.children.iter()) {
+            let child_layout = context
+                .taffy
+                .layout(child_layout.node)
+                .expect("child layout node should exist");
+            cacheable &= matches!(child.visual.offset, Value::Static(_));
+            let offset = track_property_scope(PropertySlot::Offset, || {
+                child.visual.offset.resolve_widget(
+                    context.animations,
+                    child.id,
+                    WidgetProperty::Offset,
+                    context.now,
+                )
+            });
+            let child_frame = Rect::new(
+                Dp::new(child_layout.location.x) + offset.x,
+                Dp::new(child_layout.location.y) + offset.y,
+                child_layout.size.width,
+                child_layout.size.height,
+            );
+            bounds = Some(match bounds {
+                Some(existing) => existing.union(child_frame),
+                None => child_frame,
+            });
+        }
+
+        if cacheable {
+            let _ = layout_node.cached_child_content_bounds.set(bounds);
+        }
+        bounds
+    });
+
+    local_bounds
+        .map(|bounds| {
+            Rect::new(
+                frame.x + bounds.x,
+                frame.y + bounds.y,
+                bounds.width,
+                bounds.height,
             )
-        });
-        let child_frame = Rect::new(
-            frame.x + child_layout.location.x + offset.x,
-            frame.y + child_layout.location.y + offset.y,
-            child_layout.size.width,
-            child_layout.size.height,
-        );
-        bounds = Some(match bounds {
-            Some(existing) => existing.union(child_frame),
-            None => child_frame,
-        });
-    }
-
-    bounds
+        })
         .map(|bounds| {
             Rect::new(
                 bounds.x,
@@ -384,9 +402,11 @@ fn measure_node_tracked(
                 snapshot.intrinsic_size,
             )
         }
-        Some(MeasureContext::Canvas { scene, .. }) => canvas_scene_bounds(&scene.resolve())
-            .map(|bounds| (bounds.width(), bounds.height()))
-            .unwrap_or((0.0, 0.0)),
+        Some(MeasureContext::Canvas { scene, .. }) => scene.resolve_ref(|scene| {
+            canvas_scene_bounds(scene)
+                .map(|bounds| (bounds.width(), bounds.height()))
+                .unwrap_or((0.0, 0.0))
+        }),
         #[cfg(feature = "video")]
         Some(MeasureContext::VideoSurface { video, .. }) => {
             let snapshot = video.controller.surface_metadata();
@@ -399,7 +419,8 @@ fn measure_node_tracked(
         Some(MeasureContext::Button { label, style, .. }) => {
             let button_style = resolve_button_style(style, Default::default(), theme);
             let label_text = text_with_typography(label.clone(), &style.text_style);
-            let text_size = measure_text_content(&label_text, font_manager, theme, units);
+            let text_size =
+                measure_text_content_with_layout(&label_text, font_manager, theme, units);
             let horizontal = units.resolve_dp(button_style.padding_x) * 2.0;
             let vertical = units.resolve_dp(button_style.padding_y) * 2.0;
             (
@@ -509,7 +530,8 @@ fn measure_node_tracked(
                 // cross（高度）= 线宽，带标签时取标签高度与线宽的较大者。
                 let cross = if let Some(label) = label {
                     let label_text = text_with_typography(label.clone(), &style.text_style);
-                    let label_size = measure_text_content(&label_text, font_manager, theme, units);
+                    let label_size =
+                        measure_text_content_with_layout(&label_text, font_manager, theme, units);
                     thickness.max(label_size.1)
                 } else {
                     thickness
@@ -542,7 +564,7 @@ fn measure_node_tracked(
                     value
                 };
                 let text = text_with_typography(Value::Static(content.clone()), &style.text_style);
-                measure_text_content(&text, font_manager, theme, units)
+                measure_text_content_with_layout(&text, font_manager, theme, units)
             };
             let horizontal = units.resolve_dp(style.padding_x) * 2.0;
             let vertical = units.resolve_dp(style.padding_y) * 2.0;

@@ -6,25 +6,53 @@ pub(crate) fn measure_text_content(
     theme: &Theme,
     units: UnitContext,
 ) -> (f32, f32) {
+    measure_text_content_with_mode(text, font_manager, theme, units, false)
+}
+
+pub(crate) fn measure_text_content_with_layout(
+    text: &Text,
+    font_manager: &FontManager,
+    theme: &Theme,
+    units: UnitContext,
+) -> (f32, f32) {
+    measure_text_content_with_mode(text, font_manager, theme, units, true)
+}
+
+fn measure_text_content_with_mode(
+    text: &Text,
+    font_manager: &FontManager,
+    theme: &Theme,
+    units: UnitContext,
+    force_layout: bool,
+) -> (f32, f32) {
     let default_style = &theme.typography.body;
     let (font_size, line_height, letter_spacing) = resolved_text_metrics(text, theme, units);
     let content =
         crate::foundation::binding::track_property_scope(PropertySlot::TextContent, || {
             text.content.resolve()
         });
-    font_manager.measure_text(
-        &content,
-        TextFontRequest {
-            preferred_font: text
-                .font_family
-                .as_deref()
-                .or(default_style.font_family.as_deref()),
-            weight: text.font_weight.unwrap_or(default_style.weight),
-        },
-        font_size,
-        line_height,
-        letter_spacing,
-    )
+    let request = TextFontRequest {
+        preferred_font: text
+            .font_family
+            .as_deref()
+            .or(default_style.font_family.as_deref()),
+        weight: text.font_weight.unwrap_or(default_style.weight),
+    };
+
+    // Selectable and multiline Text can request caret/line geometry during the
+    // scene pass. Preserve the old full-layout warm-up for those paths; only an
+    // ordinary single-line display label is a true width/height-only leaf.
+    if force_layout || text.user_select || content.contains('\n') {
+        return font_manager.measure_text_with_layout(
+            &content,
+            request,
+            font_size,
+            line_height,
+            letter_spacing,
+        );
+    }
+
+    font_manager.measure_text(&content, request, font_size, line_height, letter_spacing)
 }
 
 pub(crate) fn text_from_content(content: impl IntoTextContent) -> Text {

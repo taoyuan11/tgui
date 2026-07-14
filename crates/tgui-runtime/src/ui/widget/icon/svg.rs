@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::foundation::color::Color;
-use crate::media::{resolve_media_rect, ContentFit, MediaBytes, MediaSource, RasterRequest};
+use crate::media::{ContentFit, MediaBytes, MediaSource};
 use crate::ui::unit::UnitContext;
 
 use super::super::common::{ClipMask, Point, Rect, ScenePrimitives, TexturePrimitive};
@@ -190,12 +190,12 @@ pub(crate) fn push_svg_icon_texture(
         return;
     }
     let source = svg_icon_source(icon, color);
-    let metadata = media.image_snapshot(&source, None);
-    let target_frame = resolve_media_rect(frame, metadata.intrinsic_size, ContentFit::Contain);
-    let Some(raster_request) = RasterRequest::from_frame(target_frame, units.scale_factor()) else {
+    let layout =
+        crate::media::MediaTextureLayout::new(frame, ContentFit::Contain, units.scale_factor());
+    let (snapshot, target_frame, raster_request) = media.image_snapshot_for_layout(&source, layout);
+    let Some(_raster_request) = raster_request else {
         return;
     };
-    let snapshot = media.image_snapshot(&source, Some(raster_request));
     let Some(texture) = snapshot.texture.as_ref() else {
         return;
     };

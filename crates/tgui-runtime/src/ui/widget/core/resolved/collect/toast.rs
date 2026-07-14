@@ -720,6 +720,15 @@ fn build_toast_card<VM: 'static>(
     let body_text_style = style.body_text_style.clone();
     let action_style = style.action_button.clone();
     let close_style = style.close_button.clone();
+    let card_padding = style.padding;
+    let card_gap = style.gap;
+    let row_gap = style.gap * 0.75;
+    let content_gap = style.gap * 0.375;
+    let icon_size = style.icon_size;
+    let icon_radius = icon_size * 0.5;
+    let icon_glyph_size = sp((icon_size.get() * (2.0 / 3.0)).max(10.0));
+    let close_size = close_style.min_height;
+    let close_icon_size = (icon_size * 0.75).max(dp(12.0));
     let foreground = style.foreground.resolve();
     let background = style.background.resolve();
 
@@ -732,19 +741,19 @@ fn build_toast_card<VM: 'static>(
 
     // 顶部行：图标圆圈 + 类型文字 + spacer + 关闭按钮
     let icon_circle = Stack::<VM>::new()
-        .size(dp(18.0), dp(18.0))
+        .size(icon_size, icon_size)
         .center()
         .style_full(move |context| {
             let mut container = ContainerStyle::default_for_theme(context.theme);
             container.surface.background = Some(Value::Static(icon_bg));
-            container.surface.border_radius = Some(Value::Static(dp(9.0)));
+            container.surface.border_radius = Some(Value::Static(icon_radius));
             container
         })
         .child(Text::new(kind_glyph(kind)).style_full(move |context| {
             let mut text_style = TextWidgetStyle::default_for_theme(context.theme);
             text_style.color = Value::Static(icon_fg);
-            text_style.typography.size = sp(12.0);
-            text_style.typography.line_height = Some(sp(12.0));
+            text_style.typography.size = icon_glyph_size;
+            text_style.typography.line_height = Some(icon_glyph_size);
             text_style
         }));
 
@@ -760,7 +769,7 @@ fn build_toast_card<VM: 'static>(
         let dismiss_queue = queue.clone();
         let close_fg = foreground.with_alpha_factor(0.6);
         Stack::new()
-            .size(dp(32.0), dp(32.0))
+            .size(close_size, close_size)
             .center()
             .style_full(move |context| {
                 let button_style = close_style.clone();
@@ -772,12 +781,14 @@ fn build_toast_card<VM: 'static>(
                 container.surface.shadow = button_style.surface.shadow;
                 container
             })
-            .child(Icon::internal(SvgIconId::Close).size(dp(14.0)).style(
-                move |icon_style: &mut IconStyle, _context| {
-                    icon_style.color = Value::Static(close_fg);
-                    icon_style.size = dp(14.0);
-                },
-            ))
+            .child(
+                Icon::internal(SvgIconId::Close)
+                    .size(close_icon_size)
+                    .style(move |icon_style: &mut IconStyle, _context| {
+                        icon_style.color = Value::Static(close_fg);
+                        icon_style.size = close_icon_size;
+                    }),
+            )
             .on_click(Command::new(move |_vm| {
                 dismiss_queue.dismiss(id);
             }))
@@ -788,7 +799,7 @@ fn build_toast_card<VM: 'static>(
 
     let top_row = Flex::<VM>::new(Axis::Horizontal)
         .width(pct(100.0))
-        .gap(dp(6.0))
+        .gap(row_gap)
         .align(crate::ui::layout::Align::Center)
         .child(icon_circle)
         .child(kind_label)
@@ -801,7 +812,7 @@ fn build_toast_card<VM: 'static>(
     let body_style_for_content_else = body_text_style.clone();
     let content_area = if let Some(title_text) = title {
         Flex::<VM>::new(Axis::Vertical)
-            .gap(dp(3.0))
+            .gap(content_gap)
             .child(Text::new(title_text).style_full(move |context| {
                 let mut text_style = TextWidgetStyle::default_for_theme(context.theme);
                 text_style.color = Value::Static(foreground);
@@ -826,7 +837,7 @@ fn build_toast_card<VM: 'static>(
     // 底部按钮区（如果有 action）
     let bottom_buttons: Element<VM> = if let Some(action) = action {
         Flex::<VM>::new(Axis::Horizontal)
-            .gap(dp(6.0))
+            .gap(row_gap)
             .child(
                 Button::new(action.label)
                     .ghost()
@@ -852,8 +863,8 @@ fn build_toast_card<VM: 'static>(
         .child(
             Flex::<VM>::new(Axis::Vertical)
                 .width(pct(100.0))
-                .padding(style.padding)
-                .gap(dp(8.0))
+                .padding(card_padding)
+                .gap(card_gap)
                 .child(top_row)
                 .child(content_area)
                 .child(bottom_buttons),

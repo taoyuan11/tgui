@@ -118,10 +118,14 @@ pub use common::{
 pub use container::{Flex, Grid, IntoLengthValue, Stack};
 #[cfg(feature = "bench-support")]
 pub use core::bench_support::{
-    default_bench_viewport, WidgetBenchmarkContext, WidgetBenchmarkStats,
+    default_bench_viewport, GpuBenchmarkAdapterInfo, GpuDrawStats, GpuGlyphRasterCacheStats,
+    GpuTextCacheActivityStats, GpuTextCacheStats, GpuTextureSceneStats, TextMeasureActivityStats,
+    WidgetBenchmarkContext, WidgetBenchmarkStats,
 };
 #[cfg(feature = "bench-support")]
 pub use core::bench_support_ext;
+#[cfg(test)]
+pub(crate) use core::media_event_walk_probe;
 pub(crate) use core::LifecycleSnapshot;
 #[cfg(feature = "audio")]
 pub(crate) use core::LifecycleWidgetKind;

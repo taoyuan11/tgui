@@ -268,7 +268,9 @@ pub mod prelude {
     };
     #[cfg(feature = "bench-support")]
     pub use crate::ui::widget::{
-        default_bench_viewport, WidgetBenchmarkContext, WidgetBenchmarkStats,
+        default_bench_viewport, GpuDrawStats, GpuGlyphRasterCacheStats, GpuTextCacheActivityStats,
+        GpuTextCacheStats, GpuTextureSceneStats, TextMeasureActivityStats, WidgetBenchmarkContext,
+        WidgetBenchmarkStats,
     };
     #[cfg(feature = "video")]
     pub use crate::video::{
@@ -346,7 +348,10 @@ pub mod widgets {
     };
     #[cfg(feature = "bench-support")]
     pub use crate::ui::widget::{
-        bench_support_ext, default_bench_viewport, WidgetBenchmarkContext, WidgetBenchmarkStats,
+        bench_support_ext, default_bench_viewport, GpuBenchmarkAdapterInfo, GpuDrawStats,
+        GpuGlyphRasterCacheStats, GpuTextCacheActivityStats, GpuTextCacheStats,
+        GpuTextureSceneStats, TextMeasureActivityStats, WidgetBenchmarkContext,
+        WidgetBenchmarkStats,
     };
     pub use crate::ui::widget::{
         rect, BackgroundBrush, BackgroundGradientStop, BackgroundImage, BackgroundLinearGradient,

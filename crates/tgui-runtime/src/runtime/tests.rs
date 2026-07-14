@@ -196,6 +196,76 @@ fn test_handler_with_config<VM: crate::foundation::view_model::ViewModel>(
     )
 }
 
+#[test]
+fn media_dispatch_skips_static_tree_without_handlers() {
+    const CHILDREN: usize = 10_000;
+    let children = (0..CHILDREN)
+        .map(|index| -> Element<TestVm> { Text::new(index.to_string()).into() })
+        .collect::<Vec<_>>();
+    let tree = WidgetTree::new(Stack::<TestVm>::new().child(children));
+    assert!(!tree.may_have_media_event_handlers());
+
+    let invalidation = InvalidationSignal::new();
+    let mut handler = test_handler(Some(tree), invalidation);
+
+    crate::ui::widget::media_event_walk_probe::reset();
+    let baseline = handler
+        .widget_tree
+        .as_ref()
+        .expect("widget tree should exist")
+        .media_event_states(&handler.media_manager, &handler.theme);
+    assert!(baseline.is_empty());
+    assert_eq!(
+        crate::ui::widget::media_event_walk_probe::visits(),
+        CHILDREN + 1,
+        "the old path resolves and visits the root plus every child"
+    );
+
+    crate::ui::widget::media_event_walk_probe::reset();
+    handler.dispatch_media_events();
+    assert_eq!(
+        crate::ui::widget::media_event_walk_probe::visits(),
+        0,
+        "the capability fast path must avoid the entire media-event walk"
+    );
+}
+
+#[test]
+fn media_dispatch_tracks_handlers_added_and_removed_by_dynamic_revision() {
+    let invalidation = InvalidationSignal::new();
+    let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+    let visible = context.state(false);
+    let tree = WidgetTree::new_legacy(Stack::<TestVm>::new().dynamic_child(
+        visible.signal().map_unchecked(|visible| {
+            let element: Element<TestVm> = if visible {
+                crate::ui::widget::Image::new(crate::media::MediaSource::bytes(
+                    br#"<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"/>"#,
+                ))
+                .on_loading(Command::new(|_vm: &mut TestVm| {}))
+            } else {
+                Stack::<TestVm>::new().into()
+            };
+            element
+        }),
+    ));
+    assert!(
+        tree.may_have_media_event_handlers(),
+        "dynamic sources must never cache a negative handler capability"
+    );
+    let mut handler = test_handler(Some(tree), invalidation);
+
+    handler.dispatch_media_events();
+    assert!(handler.media_event_states.is_empty());
+
+    visible.set(true);
+    handler.dispatch_media_events();
+    assert_eq!(handler.media_event_states.len(), 1);
+
+    visible.set(false);
+    handler.dispatch_media_events();
+    assert!(handler.media_event_states.is_empty());
+}
+
 fn pressed_key_event(physical_key: PhysicalKey) -> KeyEvent {
     KeyEvent {
         physical_key,
@@ -317,6 +387,7 @@ fn cached_scene_shell<VM: crate::foundation::view_model::ViewModel>(
         text_scale_bits: units.font_scale().to_bits(),
         animation_epoch: 0,
         layout_animation_epoch: 0,
+        accessibility_animation_epoch: 0,
         scroll_epoch: 0,
         hover_epoch: 0,
         text_input_epoch: 0,
@@ -338,6 +409,7 @@ fn cached_scene_shell<VM: crate::foundation::view_model::ViewModel>(
         media_texture_binding_index: Default::default(),
         caret_decoration: None,
         text_input_slot_bindings: Default::default(),
+        scroll_view_controller_bindings: Default::default(),
         dependencies: DependencyGraph::default(),
         strict_capability_report: None,
     }

@@ -176,3 +176,86 @@ fn canvas_recorder_shortcuts_match_manual_paths() {
         canvas_scene_bounds(&manual).expect("manual bounds")
     );
 }
+
+#[test]
+fn command_bounds_match_lyon_reference_for_curves_and_subpaths() {
+    let paths = [
+        PathBuilder::new()
+            .move_to(-10.0, 2.0)
+            .line_to(8.0, 15.0)
+            .quad_to(30.0, -40.0, 50.0, 4.0)
+            .cubic_to(75.0, 90.0, 110.0, -70.0, 140.0, 12.0)
+            .close(),
+        PathBuilder::new()
+            .move_to(2.0, 3.0)
+            .cubic_to(-100.0, 50.0, 80.0, 120.0, 20.0, -15.0)
+            .move_to(200.0, 100.0)
+            .quad_to(260.0, -30.0, 320.0, 40.0)
+            .line_to(280.0, 180.0),
+        PathBuilder::new().move_to(5.0, 7.0),
+    ];
+
+    for path in paths {
+        assert_eq!(path.control_bounds(), path.control_bounds_via_lyon());
+    }
+}
+
+#[test]
+fn disabling_canvas_hit_metadata_preserves_render_geometry() {
+    let scene = CanvasRecorder::build(|canvas| {
+        canvas.set_fill(Color::rgb(40, 120, 220)).draw_path(
+            PathBuilder::new()
+                .move_to(4.0, 8.0)
+                .cubic_to(24.0, -6.0, 48.0, 42.0, 72.0, 12.0)
+                .line_to(50.0, 60.0)
+                .close(),
+        );
+    });
+    let media = test_media();
+    let with_hits = rendered_items_with_context(&scene, true, &media);
+    let without_hits = rendered_items_with_context(&scene, false, &media);
+
+    assert_eq!(with_hits.len(), without_hits.len());
+    assert!(with_hits[0].hit_bounds.is_some());
+    assert!(matches!(
+        with_hits[0].hit_geometry,
+        Some(super::super::CanvasHitGeometry::Triangles(_))
+    ));
+    assert!(without_hits[0].hit_bounds.is_none());
+    assert!(without_hits[0].hit_geometry.is_none());
+    assert!(without_hits[0].text_hits.is_empty());
+
+    let with_mesh = &with_hits[0].output.meshes[0];
+    let without_mesh = &without_hits[0].output.meshes[0];
+    assert_eq!(&*with_mesh.vertices, &*without_mesh.vertices);
+    assert_eq!(&*with_mesh.triangles, &*without_mesh.triangles);
+    assert_eq!(with_mesh.clip_rect, without_mesh.clip_rect);
+    assert_eq!(with_mesh.clip_mask, without_mesh.clip_mask);
+}
+
+#[test]
+fn borrowed_canvas_scene_collection_reuses_shadow_cache() {
+    let scene = CanvasRecorder::build(|canvas| {
+        canvas
+            .set_fill(Color::WHITE)
+            .set_shadow(CanvasShadow::new(
+                Color::BLACK,
+                Point::new(3.0, 5.0),
+                dp(4.0),
+            ))
+            .begin_path()
+            .move_to(0.0, 0.0)
+            .quad_to(24.0, -12.0, 48.0, 10.0)
+            .line_to(36.0, 42.0)
+            .close_path()
+            .fill();
+    });
+    let media = test_media();
+    let first = rendered_items_with_context(&scene, false, &media);
+    let second = rendered_items_with_context(&scene, false, &media);
+
+    let first_shadow = &first[0].output.textures[0].texture;
+    let second_shadow = &second[0].output.textures[0].texture;
+    assert_eq!(first_shadow.id(), second_shadow.id());
+    assert_eq!(first_shadow.size(), second_shadow.size());
+}

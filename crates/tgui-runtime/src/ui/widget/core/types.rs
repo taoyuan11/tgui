@@ -113,22 +113,6 @@ impl<VM> ResolvedElement<VM> {
             _ => false,
         }
     }
-
-    /// 递归估算子树中的节点总数。
-    /// 在 `collect_scene_cache` 开始时调用，用于预分配 HashMap 容量，
-    /// 避免 `HashMap::new()` 的多次 reallocation。
-    pub(crate) fn estimated_node_count(&self) -> usize {
-        match &self.kind {
-            ResolvedWidgetKind::Container { children, .. }
-            | ResolvedWidgetKind::Virtual { children, .. } => {
-                1 + children
-                    .iter()
-                    .map(|c| c.estimated_node_count())
-                    .sum::<usize>()
-            }
-            _ => 1,
-        }
-    }
 }
 
 pub(crate) enum ResolvedWidgetKind<VM> {

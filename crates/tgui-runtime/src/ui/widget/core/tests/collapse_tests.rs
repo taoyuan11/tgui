@@ -4,7 +4,10 @@ use std::time::Duration;
 
 use crate::animation::Transition;
 use crate::ui::layout::{Length, Value};
-use crate::ui::widget::{Accordion, AccordionItem, Collapse, ResolvedElement, ResolvedSceneLayout};
+use crate::ui::theme::Density;
+use crate::ui::widget::{
+    Accordion, AccordionItem, Collapse, CollapseStyle, ResolvedElement, ResolvedSceneLayout,
+};
 
 fn resolved_children<VM>(element: &ResolvedElement<VM>) -> &[ResolvedElement<VM>] {
     match &element.kind {
@@ -47,6 +50,199 @@ fn collapse_layout(expanded: bool) -> ResolvedSceneLayout<()> {
         &HashMap::new(),
         Rect::new(0.0, 0.0, 320.0, 200.0),
     )
+}
+
+#[test]
+fn collapse_runtime_layout_tracks_real_theme_density_on_the_same_tree() {
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let tree: WidgetTree<()> =
+        WidgetTree::new(Collapse::new("Runtime notes", Text::new("Panel content")).expanded(true));
+
+    for (density, expected_height, expected_padding) in [
+        (
+            Density::Compact,
+            dp(32.0),
+            Insets::symmetric(dp(8.0), dp(4.0)),
+        ),
+        (
+            Density::Comfortable,
+            dp(40.0),
+            Insets::symmetric(dp(12.0), dp(8.0)),
+        ),
+        (
+            Density::Spacious,
+            dp(48.0),
+            Insets::symmetric(dp(16.0), dp(12.0)),
+        ),
+    ] {
+        let mut theme = Theme::light();
+        theme.density = density;
+        let mut animations = AnimationEngine::default();
+        let layout = tree.build_scene_layout(
+            &font_manager,
+            &theme,
+            &media,
+            &mut animations,
+            UnitContext::default(),
+            &HashMap::new(),
+            &HashMap::new(),
+            Rect::new(0.0, 0.0, 320.0, 200.0),
+        );
+        let header = &resolved_children(&layout.resolved_root)[0];
+        let header_bounds = layout
+            .widget_bounds(header.id)
+            .expect("collapse header should have bounds");
+        assert_eq!(header_bounds.height, expected_height);
+        let ResolvedWidgetKind::Container {
+            layout: header_layout,
+            ..
+        } = &header.kind
+        else {
+            panic!("collapse header should resolve to a container");
+        };
+        assert_eq!(
+            header_layout.padding,
+            Some(Value::Static(expected_padding)),
+            "header padding should be resolved from the active theme density"
+        );
+    }
+}
+
+#[test]
+fn collapse_light_and_dark_themes_reach_real_scene_surfaces() {
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let tree: WidgetTree<()> =
+        WidgetTree::new(Collapse::new("Runtime notes", Text::new("Panel content")).expanded(true));
+
+    for theme in [Theme::light(), Theme::dark()] {
+        let mut animations = AnimationEngine::default();
+        let rendered = tree.render_output(
+            &font_manager,
+            &theme,
+            &media,
+            &mut animations,
+            None,
+            None,
+            &HashMap::new(),
+            Rect::new(0.0, 0.0, 320.0, 200.0),
+            None,
+            None,
+            None,
+            None,
+            false,
+        );
+        let style = CollapseStyle::default_for_theme(&theme);
+        assert!(
+            rendered
+                .primitives
+                .shapes
+                .iter()
+                .any(|shape| shape.color == style.panel_background.resolve()),
+            "panel surface should use the active {} theme",
+            theme.name
+        );
+        assert!(
+            rendered.primitives.shapes.iter().any(|shape| {
+                shape.color == style.border.resolve()
+                    && (shape.stroke_width - style.border_width.get()).abs() < f32::EPSILON
+            }),
+            "collapse border should use the active {} theme",
+            theme.name
+        );
+    }
+}
+
+#[test]
+fn accordion_gap_and_item_geometry_resolve_from_runtime_density() {
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let tree: WidgetTree<()> = WidgetTree::new(Accordion::new(
+        vec![
+            AccordionItem::new("usage", "Usage", Text::new("Usage panel")),
+            AccordionItem::new("theme", "Theme", Text::new("Theme panel")),
+        ],
+        Some("usage".to_string()),
+    ));
+    let mut theme = Theme::dark();
+    theme.density = Density::Spacious;
+    let mut animations = AnimationEngine::default();
+    let layout = tree.build_scene_layout(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        UnitContext::default(),
+        &HashMap::new(),
+        &HashMap::new(),
+        Rect::new(0.0, 0.0, 320.0, 280.0),
+    );
+    let ResolvedWidgetKind::Container {
+        layout: accordion_layout,
+        children,
+        ..
+    } = &layout.resolved_root.kind
+    else {
+        panic!("accordion root should resolve to a container");
+    };
+    let expected = CollapseStyle::default_for_theme(&theme);
+    assert_eq!(
+        accordion_layout.gap,
+        Value::Static(Length::Px(expected.gap))
+    );
+    let first_header = &resolved_children(&children[0])[0];
+    assert_eq!(
+        layout
+            .widget_bounds(first_header.id)
+            .expect("accordion header should have bounds")
+            .height,
+        dp(48.0)
+    );
+}
+
+#[test]
+fn collapse_component_theme_geometry_is_resolved_at_runtime() {
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let tree: WidgetTree<()> =
+        WidgetTree::new(Collapse::new("Runtime notes", Text::new("Panel content")).expanded(true));
+    let mut theme = Theme::light();
+    theme.components = crate::ui::theme::ComponentThemes::default().collapse(|style, _| {
+        style.header_min_height = dp(44.0);
+        style.padding = Insets::symmetric(dp(18.0), dp(10.0));
+        style.gap = dp(14.0);
+    });
+    let mut animations = AnimationEngine::default();
+    let layout = tree.build_scene_layout(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        UnitContext::default(),
+        &HashMap::new(),
+        &HashMap::new(),
+        Rect::new(0.0, 0.0, 320.0, 220.0),
+    );
+    let children = resolved_children(&layout.resolved_root);
+    assert_eq!(
+        layout
+            .widget_bounds(children[0].id)
+            .expect("collapse header should have bounds")
+            .height,
+        dp(44.0)
+    );
+    let ResolvedWidgetKind::Container {
+        layout: panel_layout,
+        ..
+    } = &children[1].kind
+    else {
+        panic!("collapse panel should resolve to a container");
+    };
+    assert_eq!(
+        panel_layout.padding,
+        Some(Value::Static(Insets::symmetric(dp(18.0), dp(10.0))))
+    );
 }
 
 #[test]

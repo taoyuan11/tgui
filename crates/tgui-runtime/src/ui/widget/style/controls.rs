@@ -21,7 +21,7 @@ mod video;
 use crate::foundation::color::Color;
 use crate::theme::{FontWeight, ResolvedThemeMode};
 use crate::ui::layout::{Insets, Value};
-use crate::ui::theme::{Shadow, StateValue, TextStyle, Theme};
+use crate::ui::theme::{Density, Shadow, StateValue, TextStyle, Theme};
 use crate::ui::unit::{dp, Dp};
 
 use super::super::common::ButtonVariantKind;
@@ -51,6 +51,89 @@ pub use self::spinner::SpinnerStyle;
 pub use self::splitter::SplitterStyle;
 pub use self::video::VideoStyle;
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct ControlDensityMetrics {
+    pub(crate) control_height: Dp,
+    pub(crate) button_padding_x: Dp,
+    pub(crate) button_padding_y: Dp,
+    pub(crate) input_padding_x: Dp,
+    pub(crate) input_padding_y: Dp,
+    pub(crate) select_padding_x: Dp,
+    pub(crate) selection_size: Dp,
+    pub(crate) selection_gap: Dp,
+    pub(crate) switch_padding: Dp,
+    pub(crate) switch_width: Dp,
+    pub(crate) switch_height: Dp,
+    pub(crate) slider_track_height: Dp,
+    pub(crate) slider_thumb_size: Dp,
+    pub(crate) slider_tick_size: Dp,
+    pub(crate) slider_label_gap: Dp,
+    pub(crate) slider_min_width: Dp,
+    pub(crate) slider_min_height: Dp,
+}
+
+pub(crate) fn control_density_metrics(theme: &Theme, density: Density) -> ControlDensityMetrics {
+    match density {
+        Density::Compact => ControlDensityMetrics {
+            control_height: dp(32.0),
+            button_padding_x: theme.spacing.sm,
+            button_padding_y: theme.spacing.xxs,
+            input_padding_x: theme.spacing.sm + theme.spacing.xxs,
+            input_padding_y: theme.spacing.xs,
+            select_padding_x: theme.spacing.sm + theme.spacing.xs,
+            selection_size: dp(16.0),
+            selection_gap: theme.spacing.sm - theme.spacing.xxs,
+            switch_padding: dp(3.0),
+            switch_width: dp(36.0),
+            switch_height: dp(20.0),
+            slider_track_height: dp(3.0),
+            slider_thumb_size: theme.spacing.md,
+            slider_tick_size: dp(3.0),
+            slider_label_gap: theme.spacing.sm - theme.spacing.xxs,
+            slider_min_width: dp(144.0),
+            slider_min_height: dp(28.0),
+        },
+        Density::Comfortable => ControlDensityMetrics {
+            control_height: dp(40.0),
+            button_padding_x: theme.spacing.sm + theme.spacing.xs,
+            button_padding_y: theme.spacing.xs,
+            input_padding_x: theme.spacing.md - theme.spacing.xs,
+            input_padding_y: theme.spacing.sm,
+            select_padding_x: theme.spacing.md,
+            selection_size: dp(18.0),
+            selection_gap: theme.spacing.sm,
+            switch_padding: theme.spacing.xs,
+            switch_width: dp(40.0),
+            switch_height: dp(24.0),
+            slider_track_height: dp(4.0),
+            slider_thumb_size: theme.spacing.md + theme.spacing.xs,
+            slider_tick_size: theme.spacing.xs,
+            slider_label_gap: theme.spacing.sm,
+            slider_min_width: dp(160.0),
+            slider_min_height: dp(32.0),
+        },
+        Density::Spacious => ControlDensityMetrics {
+            control_height: dp(48.0),
+            button_padding_x: theme.spacing.md,
+            button_padding_y: theme.spacing.sm,
+            input_padding_x: theme.spacing.md,
+            input_padding_y: theme.spacing.sm + theme.spacing.xxs,
+            select_padding_x: theme.spacing.md + theme.spacing.xs,
+            selection_size: dp(20.0),
+            selection_gap: theme.spacing.sm + theme.spacing.xxs,
+            switch_padding: theme.spacing.xs,
+            switch_width: dp(48.0),
+            switch_height: dp(28.0),
+            slider_track_height: dp(5.0),
+            slider_thumb_size: theme.spacing.lg,
+            slider_tick_size: dp(5.0),
+            slider_label_gap: theme.spacing.sm + theme.spacing.xxs,
+            slider_min_width: dp(184.0),
+            slider_min_height: dp(40.0),
+        },
+    }
+}
+
 /// 按钮 widget 的样式定义。
 #[derive(Clone, Debug, PartialEq)]
 pub struct ButtonStyle {
@@ -69,14 +152,23 @@ pub struct ButtonStyle {
 
 impl ButtonStyle {
     pub fn default_for_theme(theme: &Theme, variant: ButtonVariantKind) -> Self {
+        Self::default_for_density(theme, theme.density, variant)
+    }
+
+    pub(crate) fn default_for_density(
+        theme: &Theme,
+        density: Density,
+        variant: ButtonVariantKind,
+    ) -> Self {
         let palette = palette_from_theme(theme);
+        let metrics = control_density_metrics(theme, density);
         Self::from_palette(
             palette,
             variant,
-            theme.radius.md,
-            theme.spacing.sm,
-            theme.spacing.xs,
-            dp(32.0),
+            theme.radius.lg,
+            metrics.button_padding_x,
+            metrics.button_padding_y,
+            metrics.control_height,
             theme.typography.label.clone(),
         )
     }
@@ -213,25 +305,30 @@ pub struct CheckboxStyle {
 
 impl CheckboxStyle {
     pub fn default_for_theme(theme: &Theme) -> Self {
+        Self::default_for_density(theme, theme.density)
+    }
+
+    pub(crate) fn default_for_density(theme: &Theme, density: Density) -> Self {
         let palette = palette_from_theme(theme);
+        let metrics = control_density_metrics(theme, density);
         Self {
             surface: WidgetSurfaceStyle::default(),
-            background: stateful_single(
+            background: stateful_colors(
                 palette.surface_low,
                 palette.surface_high,
-                palette.surface_high,
+                palette.surface_low.darken(surface_hover_lighten()),
                 palette.disabled_surface,
             ),
-            background_checked: stateful_single(
+            background_checked: stateful_colors(
                 palette.primary,
-                palette.primary,
-                palette.primary,
+                palette.primary.lighten(hover_lighten()),
+                palette.primary.darken(hover_lighten()),
                 palette.disabled_surface,
             ),
-            border: stateful_single(
+            border: stateful_colors(
                 palette.outline_muted,
-                palette.primary,
-                palette.primary,
+                palette.outline.lighten(border_hover_lighten()),
+                palette.outline.darken(border_hover_lighten()),
                 palette.disabled_surface,
             ),
             border_checked: stateful_single(
@@ -255,8 +352,8 @@ impl CheckboxStyle {
             ),
             border_width: Value::Static(theme.border.thin),
             radius: Value::Static(theme.radius.sm),
-            size: theme.spacing.md,
-            label_gap: theme.spacing.sm,
+            size: metrics.selection_size,
+            label_gap: metrics.selection_gap,
             text_style: theme.typography.label.clone(),
         }
     }
@@ -282,7 +379,12 @@ pub struct RadioStyle {
 
 impl RadioStyle {
     pub fn default_for_theme(theme: &Theme) -> Self {
+        Self::default_for_density(theme, theme.density)
+    }
+
+    pub(crate) fn default_for_density(theme: &Theme, density: Density) -> Self {
         let palette = palette_from_theme(theme);
+        let metrics = control_density_metrics(theme, density);
         Self {
             surface: WidgetSurfaceStyle::default(),
             background: stateful_colors(
@@ -324,8 +426,8 @@ impl RadioStyle {
             ),
             border_width: Value::Static(theme.border.thin),
             radius: Value::Static(theme.radius.full),
-            size: theme.spacing.md,
-            label_gap: theme.spacing.sm,
+            size: metrics.selection_size,
+            label_gap: metrics.selection_gap,
             text_style: theme.typography.label.clone(),
         }
     }
@@ -351,13 +453,18 @@ pub struct SwitchStyle {
 
 impl SwitchStyle {
     pub fn default_for_theme(theme: &Theme) -> Self {
+        Self::default_for_density(theme, theme.density)
+    }
+
+    pub(crate) fn default_for_density(theme: &Theme, density: Density) -> Self {
         let palette = palette_from_theme(theme);
+        let metrics = control_density_metrics(theme, density);
         Self {
             surface: WidgetSurfaceStyle::default(),
-            track: stateful_single(
+            track: stateful_colors(
                 palette.switch_track,
-                palette.switch_track,
-                palette.switch_track,
+                palette.switch_track.lighten(surface_hover_lighten()),
+                palette.switch_track.darken(surface_hover_lighten()),
                 palette.disabled_surface,
             ),
             track_checked: stateful_single(
@@ -393,9 +500,9 @@ impl SwitchStyle {
             focus_ring: None,
             border_width: Value::Static(theme.border.none),
             radius: Value::Static(theme.radius.full),
-            padding: Insets::all(theme.spacing.xs),
-            width: dp(40.0),
-            height: dp(24.0),
+            padding: Insets::all(metrics.switch_padding),
+            width: metrics.switch_width,
+            height: metrics.switch_height,
         }
     }
 }
@@ -425,7 +532,12 @@ pub struct SelectStyle {
 
 impl SelectStyle {
     pub fn default_for_theme(theme: &Theme) -> Self {
+        Self::default_for_density(theme, theme.density)
+    }
+
+    pub(crate) fn default_for_density(theme: &Theme, density: Density) -> Self {
         let palette = palette_from_theme(theme);
+        let metrics = control_density_metrics(theme, density);
         Self {
             surface: WidgetSurfaceStyle::default(),
             background: stateful_colors(
@@ -468,11 +580,11 @@ impl SelectStyle {
             ),
             selected_option_background: Value::Static(theme.colors.primary_container),
             border_width: Value::Static(theme.border.thin),
-            radius: Value::Static(theme.radius.md),
-            padding_x: theme.spacing.md,
+            radius: Value::Static(theme.radius.lg),
+            padding_x: metrics.select_padding_x,
             padding_y: Dp::ZERO,
-            min_height: dp(40.0),
-            option_height: dp(40.0),
+            min_height: metrics.control_height,
+            option_height: metrics.control_height,
             menu_gap: theme.spacing.xxs,
             text_style: theme.typography.body.clone(),
         }
@@ -539,7 +651,26 @@ pub struct PopoverStyle {
 
 impl PopoverStyle {
     pub fn default_for_theme(theme: &Theme) -> Self {
-        let menu = MenuStyle::default_for_theme(theme);
+        Self::default_for_density(theme, theme.density)
+    }
+
+    pub(crate) fn default_for_density(theme: &Theme, density: Density) -> Self {
+        let menu = MenuStyle::default_for_density(theme, density);
+        let (padding, min_width, max_width, offset) = match density {
+            Density::Compact => (
+                theme.spacing.sm + theme.spacing.xs,
+                dp(200.0),
+                dp(360.0),
+                theme.spacing.sm - theme.spacing.xxs,
+            ),
+            Density::Comfortable => (theme.spacing.md, dp(220.0), dp(420.0), theme.spacing.sm),
+            Density::Spacious => (
+                theme.spacing.md + theme.spacing.xs,
+                dp(240.0),
+                dp(480.0),
+                theme.spacing.sm + theme.spacing.xs,
+            ),
+        };
         Self {
             surface: menu.surface,
             background: menu.background,
@@ -547,10 +678,10 @@ impl PopoverStyle {
             border_width: menu.border_width,
             radius: menu.radius,
             shadow: theme.elevation.lg.clone(),
-            padding: Insets::all(theme.spacing.md),
-            min_width: dp(220.0),
-            max_width: dp(420.0),
-            offset: theme.spacing.sm,
+            padding: Insets::all(padding),
+            min_width,
+            max_width,
+            offset,
             pointer_size: None,
             pointer_inset: theme.spacing.lg,
         }
@@ -595,7 +726,44 @@ pub struct MenuStyle {
 
 impl MenuStyle {
     pub fn default_for_theme(theme: &Theme) -> Self {
+        Self::default_for_density(theme, theme.density)
+    }
+
+    pub(crate) fn default_for_density(theme: &Theme, density: Density) -> Self {
         let palette = palette_from_theme(theme);
+        let (min_width, max_width, padding, item_padding, item_min_height, icon_size, icon_gap) =
+            match density {
+                Density::Compact => (
+                    dp(144.0),
+                    dp(320.0),
+                    Insets::all(theme.spacing.xxs),
+                    Insets::symmetric(theme.spacing.sm, theme.spacing.xxs),
+                    dp(28.0),
+                    dp(14.0),
+                    theme.spacing.sm - theme.spacing.xxs,
+                ),
+                Density::Comfortable => (
+                    dp(160.0),
+                    dp(360.0),
+                    Insets::all(theme.spacing.xs),
+                    Insets::symmetric(theme.spacing.sm + theme.spacing.xxs, theme.spacing.xs),
+                    dp(32.0),
+                    theme.spacing.md,
+                    theme.spacing.sm,
+                ),
+                Density::Spacious => (
+                    dp(176.0),
+                    dp(400.0),
+                    Insets::all(theme.spacing.sm - theme.spacing.xxs),
+                    Insets::symmetric(
+                        theme.spacing.sm + theme.spacing.xs,
+                        theme.spacing.sm - theme.spacing.xxs,
+                    ),
+                    dp(40.0),
+                    theme.spacing.md + theme.spacing.xxs,
+                    theme.spacing.sm + theme.spacing.xxs,
+                ),
+            };
         Self {
             surface: WidgetSurfaceStyle::default(),
             background: Value::Static(theme.colors.surface_overlay),
@@ -603,11 +771,11 @@ impl MenuStyle {
             border_width: Value::Static(theme.border.thin),
             radius: Value::Static(theme.radius.xl),
             shadow: theme.elevation.md.clone(),
-            min_width: dp(160.0),
-            max_width: dp(360.0),
-            padding: Insets::symmetric(Dp::ZERO, theme.spacing.xs),
-            item_padding: Insets::symmetric(theme.spacing.md, theme.spacing.xs + theme.spacing.xxs),
-            item_min_height: theme.spacing.xl,
+            min_width,
+            max_width,
+            padding,
+            item_padding,
+            item_min_height,
             item_background: stateful_colors(
                 Color::TRANSPARENT,
                 palette.primary_container.with_alpha_factor(0.42),
@@ -620,8 +788,8 @@ impl MenuStyle {
                 palette.on_surface,
                 palette.disabled_content,
             ),
-            item_icon_size: theme.spacing.md,
-            item_icon_gap: theme.spacing.sm,
+            item_icon_size: icon_size,
+            item_icon_gap: icon_gap,
             shortcut_color: Value::Static(palette.on_surface_muted),
             shortcut_gap: theme.spacing.lg,
             checked_indicator_color: Value::Static(theme.colors.primary),
@@ -723,7 +891,17 @@ pub struct TabsStyle {
 
 impl TabsStyle {
     pub fn default_for_theme(theme: &Theme) -> Self {
+        Self::default_for_density(theme, theme.density)
+    }
+
+    pub(crate) fn default_for_density(theme: &Theme, density: Density) -> Self {
         let palette = palette_from_theme(theme);
+        let control_metrics = control_density_metrics(theme, density);
+        let (tab_min_width, tab_gap, panel_padding) = match density {
+            Density::Compact => (dp(64.0), theme.spacing.xxs, theme.spacing.sm),
+            Density::Comfortable => (dp(72.0), theme.spacing.xs, theme.spacing.md),
+            Density::Spacious => (dp(80.0), theme.spacing.sm, theme.spacing.lg),
+        };
         Self {
             surface: WidgetSurfaceStyle::default(),
             tab_bar_background: Value::Static(theme.colors.surface_low),
@@ -744,14 +922,19 @@ impl TabsStyle {
             active_tab_foreground: Value::Static(theme.colors.primary),
             indicator_color: Value::Static(theme.colors.primary),
             border: Value::Static(theme.colors.outline_muted),
-            border_width: Value::Static(theme.border.thin),
+            // The selected tab already has a restrained accent outline. Keeping
+            // the strip and panel borderless avoids the old nested-card look.
+            border_width: Value::Static(theme.border.none),
             radius: Value::Static(theme.radius.lg),
-            tab_padding: Insets::symmetric(theme.spacing.md, theme.spacing.xs + theme.spacing.xxs),
-            tab_min_height: theme.spacing.xl + theme.spacing.xs,
-            tab_min_width: dp(72.0),
-            tab_gap: theme.spacing.xs,
-            panel_padding: Insets::all(theme.spacing.md),
-            indicator_thickness: theme.border.normal,
+            tab_padding: Insets::symmetric(
+                control_metrics.button_padding_x,
+                control_metrics.button_padding_y,
+            ),
+            tab_min_height: control_metrics.control_height,
+            tab_min_width,
+            tab_gap,
+            panel_padding: Insets::all(panel_padding),
+            indicator_thickness: theme.border.thin,
             text_style: theme.typography.label.clone(),
         }
     }
@@ -799,6 +982,51 @@ pub struct ModalStyle {
 
 impl ModalStyle {
     pub fn default_for_theme(theme: &Theme) -> Self {
+        Self::default_for_density(theme, theme.density)
+    }
+
+    pub(crate) fn default_for_density(theme: &Theme, density: Density) -> Self {
+        let (
+            min_width,
+            max_width,
+            max_height,
+            margin,
+            title_padding,
+            content_padding,
+            actions_gap,
+            actions_padding,
+        ) = match density {
+            Density::Compact => (
+                dp(272.0),
+                dp(480.0),
+                dp(560.0),
+                theme.spacing.md,
+                Insets::symmetric(theme.spacing.md, theme.spacing.sm + theme.spacing.xxs),
+                Insets::symmetric(theme.spacing.md, theme.spacing.sm),
+                theme.spacing.sm,
+                Insets::symmetric(theme.spacing.md, theme.spacing.sm + theme.spacing.xxs),
+            ),
+            Density::Comfortable => (
+                dp(320.0),
+                dp(560.0),
+                dp(640.0),
+                theme.spacing.lg,
+                Insets::symmetric(theme.spacing.lg, theme.spacing.md),
+                Insets::symmetric(theme.spacing.lg, theme.spacing.sm),
+                theme.spacing.sm,
+                Insets::symmetric(theme.spacing.lg, theme.spacing.md),
+            ),
+            Density::Spacious => (
+                dp(360.0),
+                dp(640.0),
+                dp(720.0),
+                theme.spacing.xl,
+                Insets::symmetric(theme.spacing.xl, theme.spacing.lg),
+                Insets::symmetric(theme.spacing.xl, theme.spacing.md),
+                theme.spacing.sm + theme.spacing.xs,
+                Insets::symmetric(theme.spacing.xl, theme.spacing.lg),
+            ),
+        };
         Self {
             backdrop_color: Value::Static(theme.colors.scrim),
             surface: WidgetSurfaceStyle::default(),
@@ -807,20 +1035,20 @@ impl ModalStyle {
             border_width: Value::Static(theme.border.thin),
             radius: Value::Static(theme.radius.xl),
             shadow: theme.elevation.xl.clone(),
-            min_width: dp(280.0),
-            max_width: dp(560.0),
-            max_height: dp(640.0),
-            margin: Insets::all(theme.spacing.lg),
+            min_width,
+            max_width,
+            max_height,
+            margin: Insets::all(margin),
             padding: Insets::all(Dp::ZERO),
             title_text_style: {
                 let mut style = theme.typography.label.clone();
                 style.size = crate::ui::unit::sp(18.0);
                 style
             },
-            title_padding: Insets::symmetric(theme.spacing.lg, theme.spacing.md),
-            content_padding: Insets::symmetric(theme.spacing.lg, theme.spacing.sm),
-            actions_gap: theme.spacing.sm,
-            actions_padding: Insets::symmetric(theme.spacing.lg, theme.spacing.md),
+            title_padding,
+            content_padding,
+            actions_gap,
+            actions_padding,
             enter_scale: 0.96,
         }
     }
@@ -859,58 +1087,107 @@ pub struct ToastStyle {
 
 impl ToastStyle {
     pub fn default_for_theme(theme: &Theme) -> Self {
+        Self::default_for_density(theme, theme.density)
+    }
+
+    pub(crate) fn default_for_density(theme: &Theme, density: Density) -> Self {
         let palette = palette_from_theme(theme);
+        let (
+            padding,
+            gap,
+            icon_size,
+            min_width,
+            max_width,
+            margin,
+            stack_gap,
+            action_height,
+            close_size,
+        ) = match density {
+            Density::Compact => (
+                Insets::symmetric(theme.spacing.sm + theme.spacing.xs, theme.spacing.sm),
+                theme.spacing.sm - theme.spacing.xxs,
+                dp(16.0),
+                dp(240.0),
+                dp(280.0),
+                theme.spacing.sm + theme.spacing.xs,
+                theme.spacing.sm,
+                dp(28.0),
+                dp(28.0),
+            ),
+            Density::Comfortable => (
+                Insets::symmetric(theme.spacing.md, theme.spacing.sm + theme.spacing.xs),
+                theme.spacing.sm,
+                dp(18.0),
+                dp(280.0),
+                dp(320.0),
+                theme.spacing.md,
+                theme.spacing.sm + theme.spacing.xs,
+                dp(32.0),
+                dp(32.0),
+            ),
+            Density::Spacious => (
+                Insets::symmetric(theme.spacing.lg, theme.spacing.md),
+                theme.spacing.sm + theme.spacing.xs,
+                dp(20.0),
+                dp(320.0),
+                dp(360.0),
+                theme.spacing.lg,
+                theme.spacing.md,
+                dp(40.0),
+                dp(36.0),
+            ),
+        };
         let mut action_button = ButtonStyle::default_for_theme(
             theme,
             crate::ui::widget::common::ButtonVariantKind::Ghost,
         );
-        action_button.min_height = theme.spacing.lg;
+        action_button.min_height = action_height;
         action_button.padding_x = theme.spacing.xs;
         action_button.padding_y = theme.spacing.xxs;
         action_button.radius = Value::Static(theme.radius.sm);
         action_button.foreground = stateful_single(
-            theme.colors.surface,
-            theme.colors.surface,
-            theme.colors.surface,
-            theme.colors.surface.with_alpha_factor(0.52),
+            palette.primary,
+            palette.primary.lighten(hover_lighten()),
+            palette.primary.darken(hover_lighten()),
+            palette.disabled_content,
         );
 
         let mut close_button = ButtonStyle::default_for_theme(
             theme,
             crate::ui::widget::common::ButtonVariantKind::Ghost,
         );
-        close_button.min_height = theme.spacing.md + theme.spacing.xs;
+        close_button.min_height = close_size;
         close_button.padding_x = theme.spacing.xxs;
         close_button.padding_y = theme.spacing.xxs;
         close_button.radius = Value::Static(theme.radius.full);
         close_button.foreground = stateful_single(
-            theme.colors.surface,
-            theme.colors.surface,
-            theme.colors.surface,
-            theme.colors.surface.with_alpha_factor(0.52),
+            palette.on_surface_muted,
+            palette.on_surface,
+            palette.on_surface,
+            palette.disabled_content,
         );
 
         Self {
             surface: WidgetSurfaceStyle::default(),
-            background: Value::Static(theme.colors.on_surface),
-            foreground: Value::Static(theme.colors.surface),
-            border: Value::Static(Color::TRANSPARENT),
-            border_width: Value::Static(theme.border.none),
+            background: Value::Static(theme.colors.surface_overlay),
+            foreground: Value::Static(theme.colors.on_surface),
+            border: Value::Static(theme.colors.outline_muted),
+            border_width: Value::Static(theme.border.thin),
             radius: Value::Static(theme.radius.lg),
-            shadow: theme.elevation.md.clone(),
-            padding: Insets::symmetric(theme.spacing.md, theme.spacing.sm),
-            gap: theme.spacing.sm,
+            shadow: theme.elevation.lg.clone(),
+            padding,
+            gap,
             title_text_style: {
                 let mut style = theme.typography.label.clone();
                 style.weight = FontWeight::Medium;
                 style
             },
             body_text_style: theme.typography.label.clone(),
-            icon_size: theme.spacing.md,
-            min_width: dp(200.0),
-            max_width: dp(280.0),
-            margin: theme.spacing.md,
-            stack_gap: theme.spacing.sm,
+            icon_size,
+            min_width,
+            max_width,
+            margin,
+            stack_gap,
             action_button,
             close_button,
             success_icon_background: Value::Static(theme.colors.success),
@@ -947,17 +1224,28 @@ pub struct DrawerStyle {
 
 impl DrawerStyle {
     pub fn default_for_theme(theme: &Theme) -> Self {
+        Self::default_for_density(theme, theme.density)
+    }
+
+    pub(crate) fn default_for_density(theme: &Theme, density: Density) -> Self {
+        let (width, height, padding) = match density {
+            Density::Compact => (dp(264.0), dp(208.0), theme.spacing.md),
+            Density::Comfortable => (dp(288.0), dp(240.0), theme.spacing.lg),
+            Density::Spacious => (dp(320.0), dp(280.0), theme.spacing.xl),
+        };
         Self {
             backdrop_color: Value::Static(theme.colors.scrim),
             surface: WidgetSurfaceStyle::default(),
             background: Value::Static(theme.colors.surface_overlay),
             border: Value::Static(theme.colors.outline_muted),
             border_width: Value::Static(theme.border.thin),
-            radius: Value::Static(theme.radius.xl),
+            // Drawers are viewport-attached sheets. A uniform radius rounds the
+            // attached edge too, leaving transparent notches in viewport corners.
+            radius: Value::Static(theme.radius.none),
             shadow: theme.elevation.xl.clone(),
-            width: dp(280.0),
-            height: dp(240.0),
-            padding: Insets::all(theme.spacing.lg),
+            width,
+            height,
+            padding: Insets::all(padding),
         }
     }
 }
@@ -966,20 +1254,23 @@ impl DrawerStyle {
 mod tests {
     use super::*;
     use crate::foundation::color::Color;
+    use crate::ui::theme::WidgetState;
     use crate::ui::unit::sp;
 
     #[test]
     fn button_default_for_theme_uses_theme_tokens() {
         let mut theme = Theme::light();
         theme.colors.primary = Color::hexa(0xCC3366FF);
-        theme.radius.md = dp(6.0);
+        theme.radius.lg = dp(10.0);
         theme.typography.label.size = sp(13.0);
 
         let style = ButtonStyle::default_for_theme(&theme, ButtonVariantKind::Primary);
 
         assert_eq!(style.background.normal.resolve(), theme.colors.primary);
         assert_eq!(style.border.normal.resolve(), theme.colors.primary);
-        assert_eq!(style.radius.resolve(), theme.radius.md);
+        assert_eq!(style.radius.resolve(), theme.radius.lg);
+        assert_eq!(style.padding_x, dp(12.0));
+        assert_eq!(style.min_height, dp(40.0));
         assert_eq!(style.text_style.size, theme.typography.label.size);
     }
 
@@ -989,7 +1280,7 @@ mod tests {
         theme.colors.surface = Color::hexa(0x102030FF);
         theme.colors.primary = Color::hexa(0x44DD99FF);
         theme.colors.selection = Color::hexa(0x44DD9966);
-        theme.radius.md = dp(10.0);
+        theme.radius.lg = dp(10.0);
 
         let input = InputStyle::default_for_theme(&theme);
         assert_eq!(input.background.normal.resolve(), theme.colors.surface);
@@ -1001,7 +1292,8 @@ mod tests {
             input.selection.as_ref().map(Value::resolve),
             Some(theme.colors.selection)
         );
-        assert_eq!(input.radius.resolve(), theme.radius.md);
+        assert_eq!(input.radius.resolve(), theme.radius.lg);
+        assert_eq!(input.min_height, dp(40.0));
 
         let select = SelectStyle::default_for_theme(&theme);
         assert_eq!(select.background.normal.resolve(), theme.colors.surface);
@@ -1009,6 +1301,235 @@ mod tests {
             select.selected_option_background.resolve(),
             theme.colors.primary_container
         );
-        assert_eq!(select.radius.resolve(), theme.radius.md);
+        assert_eq!(select.radius.resolve(), theme.radius.lg);
+        assert_eq!(select.min_height, dp(40.0));
+    }
+
+    #[test]
+    fn light_and_dark_control_geometry_matches_each_density() {
+        let expected = [
+            (
+                Density::Compact,
+                ControlDensityMetrics {
+                    control_height: dp(32.0),
+                    button_padding_x: dp(8.0),
+                    button_padding_y: dp(2.0),
+                    input_padding_x: dp(10.0),
+                    input_padding_y: dp(4.0),
+                    select_padding_x: dp(12.0),
+                    selection_size: dp(16.0),
+                    selection_gap: dp(6.0),
+                    switch_padding: dp(3.0),
+                    switch_width: dp(36.0),
+                    switch_height: dp(20.0),
+                    slider_track_height: dp(3.0),
+                    slider_thumb_size: dp(16.0),
+                    slider_tick_size: dp(3.0),
+                    slider_label_gap: dp(6.0),
+                    slider_min_width: dp(144.0),
+                    slider_min_height: dp(28.0),
+                },
+            ),
+            (
+                Density::Comfortable,
+                ControlDensityMetrics {
+                    control_height: dp(40.0),
+                    button_padding_x: dp(12.0),
+                    button_padding_y: dp(4.0),
+                    input_padding_x: dp(12.0),
+                    input_padding_y: dp(8.0),
+                    select_padding_x: dp(16.0),
+                    selection_size: dp(18.0),
+                    selection_gap: dp(8.0),
+                    switch_padding: dp(4.0),
+                    switch_width: dp(40.0),
+                    switch_height: dp(24.0),
+                    slider_track_height: dp(4.0),
+                    slider_thumb_size: dp(20.0),
+                    slider_tick_size: dp(4.0),
+                    slider_label_gap: dp(8.0),
+                    slider_min_width: dp(160.0),
+                    slider_min_height: dp(32.0),
+                },
+            ),
+            (
+                Density::Spacious,
+                ControlDensityMetrics {
+                    control_height: dp(48.0),
+                    button_padding_x: dp(16.0),
+                    button_padding_y: dp(8.0),
+                    input_padding_x: dp(16.0),
+                    input_padding_y: dp(10.0),
+                    select_padding_x: dp(20.0),
+                    selection_size: dp(20.0),
+                    selection_gap: dp(10.0),
+                    switch_padding: dp(4.0),
+                    switch_width: dp(48.0),
+                    switch_height: dp(28.0),
+                    slider_track_height: dp(5.0),
+                    slider_thumb_size: dp(24.0),
+                    slider_tick_size: dp(5.0),
+                    slider_label_gap: dp(10.0),
+                    slider_min_width: dp(184.0),
+                    slider_min_height: dp(40.0),
+                },
+            ),
+        ];
+
+        for mut theme in [Theme::light(), Theme::dark()] {
+            for &(density, metrics) in &expected {
+                assert_eq!(control_density_metrics(&theme, density), metrics);
+                theme.density = density;
+
+                let button = ButtonStyle::default_for_theme(&theme, ButtonVariantKind::Primary);
+                assert_eq!(button.min_height, metrics.control_height);
+                assert_eq!(button.padding_x, metrics.button_padding_x);
+                assert_eq!(button.padding_y, metrics.button_padding_y);
+
+                let input = InputStyle::default_for_theme(&theme);
+                assert_eq!(input.min_height, metrics.control_height);
+                assert_eq!(input.padding_x, metrics.input_padding_x);
+                assert_eq!(input.padding_y, metrics.input_padding_y);
+
+                let select = SelectStyle::default_for_theme(&theme);
+                assert_eq!(select.min_height, metrics.control_height);
+                assert_eq!(select.option_height, metrics.control_height);
+                assert_eq!(select.padding_x, metrics.select_padding_x);
+
+                let checkbox = CheckboxStyle::default_for_theme(&theme);
+                let radio = RadioStyle::default_for_theme(&theme);
+                assert_eq!(checkbox.size, metrics.selection_size);
+                assert_eq!(radio.size, metrics.selection_size);
+                assert_eq!(checkbox.label_gap, metrics.selection_gap);
+                assert_eq!(radio.label_gap, metrics.selection_gap);
+
+                let switch = SwitchStyle::default_for_theme(&theme);
+                assert_eq!(switch.padding, Insets::all(metrics.switch_padding));
+                assert_eq!(switch.width, metrics.switch_width);
+                assert_eq!(switch.height, metrics.switch_height);
+
+                let slider = SliderStyle::default_for_theme(&theme);
+                assert_eq!(slider.track_height, metrics.slider_track_height);
+                assert_eq!(slider.thumb_size, metrics.slider_thumb_size);
+                assert_eq!(slider.tick_size, metrics.slider_tick_size);
+                assert_eq!(slider.label_gap, metrics.slider_label_gap);
+                assert_eq!(slider.min_width, metrics.slider_min_width);
+                assert_eq!(slider.min_height, metrics.slider_min_height);
+            }
+        }
+    }
+
+    #[test]
+    fn theme_default_remains_dark_and_comfortable() {
+        let theme = Theme::default();
+        assert_eq!(theme, Theme::dark());
+        assert_eq!(theme.density, Density::Comfortable);
+    }
+
+    #[test]
+    fn floating_surfaces_follow_theme_density() {
+        let mut theme = Theme::light();
+        let expected = [
+            (Density::Compact, dp(28.0), dp(144.0), dp(200.0), dp(12.0)),
+            (
+                Density::Comfortable,
+                dp(32.0),
+                dp(160.0),
+                dp(220.0),
+                dp(16.0),
+            ),
+            (Density::Spacious, dp(40.0), dp(176.0), dp(240.0), dp(20.0)),
+        ];
+
+        for (density, row_height, menu_width, popover_width, popover_padding) in expected {
+            theme.density = density;
+            let menu = MenuStyle::default_for_theme(&theme);
+            let popover = PopoverStyle::default_for_theme(&theme);
+            assert_eq!(menu.item_min_height, row_height);
+            assert_eq!(menu.min_width, menu_width);
+            assert_eq!(popover.min_width, popover_width);
+            assert_eq!(popover.padding, Insets::all(popover_padding));
+            assert_eq!(popover.radius, menu.radius);
+            assert_eq!(popover.background, menu.background);
+        }
+    }
+
+    #[test]
+    fn blocking_and_transient_layers_follow_theme_density() {
+        let mut theme = Theme::light();
+        let expected = [
+            (Density::Compact, dp(272.0), dp(264.0), dp(280.0), dp(16.0)),
+            (
+                Density::Comfortable,
+                dp(320.0),
+                dp(288.0),
+                dp(320.0),
+                dp(18.0),
+            ),
+            (Density::Spacious, dp(360.0), dp(320.0), dp(360.0), dp(20.0)),
+        ];
+
+        for (density, modal_width, drawer_width, toast_width, toast_icon_size) in expected {
+            theme.density = density;
+            let modal = ModalStyle::default_for_theme(&theme);
+            let drawer = DrawerStyle::default_for_theme(&theme);
+            let toast = ToastStyle::default_for_theme(&theme);
+
+            assert_eq!(modal.min_width, modal_width);
+            assert_eq!(drawer.width, drawer_width);
+            assert_eq!(drawer.radius.resolve(), theme.radius.none);
+            assert_eq!(toast.max_width, toast_width);
+            assert_eq!(toast.icon_size, toast_icon_size);
+            assert_eq!(toast.background.resolve(), theme.colors.surface_overlay);
+            assert_eq!(toast.foreground.resolve(), theme.colors.on_surface);
+            assert_eq!(toast.border_width.resolve(), theme.border.thin);
+        }
+    }
+
+    #[test]
+    fn selection_controls_share_modern_geometry_and_interaction_states() {
+        let theme = Theme::light();
+        let palette = palette_from_theme(&theme);
+        let hovered = WidgetState {
+            hovered: true,
+            ..WidgetState::default()
+        };
+        let pressed = WidgetState {
+            pressed: true,
+            ..WidgetState::default()
+        };
+
+        let checkbox = CheckboxStyle::default_for_theme(&theme);
+        let radio = RadioStyle::default_for_theme(&theme);
+        assert_eq!(checkbox.size, dp(18.0));
+        assert_eq!(radio.size, dp(18.0));
+        assert_eq!(checkbox.radius.resolve(), theme.radius.sm);
+        assert_eq!(radio.radius.resolve(), theme.radius.full);
+        assert_eq!(
+            checkbox.background.resolve(hovered).resolve(),
+            palette.surface_high
+        );
+        assert_eq!(
+            radio.background.resolve(hovered).resolve(),
+            palette.surface_high
+        );
+        assert_eq!(
+            checkbox.background.resolve(pressed).resolve(),
+            radio.background.resolve(pressed).resolve()
+        );
+        assert_eq!(
+            checkbox.border.resolve(hovered).resolve(),
+            radio.border.resolve(hovered).resolve()
+        );
+
+        let switch = SwitchStyle::default_for_theme(&theme);
+        assert_ne!(
+            switch.track.resolve(hovered).resolve(),
+            switch.track.normal.resolve()
+        );
+        assert_ne!(
+            switch.track.resolve(pressed).resolve(),
+            switch.track.normal.resolve()
+        );
     }
 }
