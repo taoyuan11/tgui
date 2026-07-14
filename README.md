@@ -757,6 +757,13 @@ let source = tgui::audio::AudioSource::url("https://example.com/demo.mp3")
 controller.load(source)?;
 ```
 
+音频也支持内存 bytes 来源，适合从应用资源、缓存或数据库中加载完整媒体负载；可选扩展名只作为 FFmpeg 探测格式的提示：
+
+```rust
+let source = tgui::audio::AudioSource::bytes_with_extension(bytes, "mp3");
+controller.load(source)?;
+```
+
 ### 视频
 
 启用 `video` feature 后可使用：
@@ -767,8 +774,11 @@ controller.load(source)?;
 - `video::VideoSource`
 - `video::VideoPlaybackState`
 - `video::VideoMetrics`
+- `video::VideoAudioTrack` / `video::VideoAudioTrackSelection`
+- `video::VideoSubtitleTrack` / `video::VideoSubtitleTrackSelection`
+- `video::VideoSubtitleCue` / `video::VideoSubtitleBitmapCue`
 
-`Video` 是浏览器式内置控制栏播放器，组合了画面、底部 SVG 图标控制栏、播放/暂停、seek、缓冲、时间、音量/静音和状态文本；`VideoSurface` 是更低层的画面 surface，适合自定义控制栏。
+`Video` 是浏览器式内置控制栏播放器，组合了画面、底部 SVG 图标控制栏、播放/暂停、seek、缓冲、时间、音量/静音、状态文本、音轨选择、字幕选择和字幕覆盖层；`VideoSurface` 是更低层的画面 surface，适合自定义控制栏。循环按钮和倍速选择器默认隐藏，可按播放器密度需要开启。
 
 网络视频如果需要自定义请求头，可以把 header 直接挂在 `VideoSource` 上：
 
@@ -782,6 +792,37 @@ let source = tgui::video::VideoSource::url("https://example.com/demo.mp4")
 
 controller.load(source)?;
 ```
+
+视频同样支持完整内存 bytes 来源：
+
+```rust
+let source = tgui::video::VideoSource::bytes_with_extension(bytes, "mp4");
+controller.load(source)?;
+```
+
+播放器控件可以按需开启或隐藏：
+
+```rust
+Video::new(controller.clone())
+    .show_looping(true)
+    .show_playback_rate(true)
+    .show_audio_tracks(true)
+    .show_subtitle_tracks(true)
+    .show_subtitles(true);
+```
+
+也可以直接在 `VideoController` 上控制播放策略与轨道选择：
+
+```rust
+controller.set_looping(true);
+controller.set_playback_rate(1.25);
+controller.set_audio_track_selection(tgui::video::VideoAudioTrackSelection::Auto);
+controller.set_subtitle_track_selection(
+    tgui::video::VideoSubtitleTrackSelection::Disabled,
+);
+```
+
+字幕轨道会在后端打开媒体后通过 `subtitle_tracks()` 暴露。文本字幕通过 `current_subtitle()` 暴露给自定义 UI，内置 `Video` 会渲染基础文本字幕、常见 ASS/SSA 对齐与整体样式，以及 bitmap 字幕覆盖层；它不是完整 ASS 富文本排版引擎。
 
 ## 多窗口与平台支持
 

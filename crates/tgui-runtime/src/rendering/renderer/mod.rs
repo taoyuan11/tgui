@@ -11,6 +11,11 @@ mod types;
 mod vertex;
 mod vertex_pool;
 
+#[cfg(feature = "bench-support")]
+pub use texture::{
+    renderer_texture_diagnostics, reset_renderer_texture_diagnostics, RendererTextureDiagnostics,
+};
+
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
@@ -115,12 +120,13 @@ fn collect_active_texture_keys(scene: &ScenePrimitives, keys: &mut HashSet<u64>)
 
     #[cfg(feature = "video")]
     {
-        keys.extend(
-            scene
-                .video_textures
-                .iter()
-                .filter_map(|texture| texture.controller.current_frame().map(|frame| frame.id())),
-        );
+        keys.extend(scene.video_textures.iter().filter_map(|texture| {
+            texture
+                .controller
+                .current_render_frame()
+                .and_then(|frame| frame.as_rgba_texture())
+                .map(|frame| frame.id())
+        }));
     }
     collect_texture_keys_from_commands(&scene.commands, keys);
     collect_texture_keys_from_commands(&scene.overlay_commands, keys);
@@ -132,6 +138,49 @@ fn cache_liveness_needs_refresh(
     has_dirty_draws: bool,
 ) -> bool {
     last_scene_serial != Some(scene_serial) || has_dirty_draws
+}
+
+#[cfg(feature = "video")]
+fn active_video_yuv_keys(scene: &ScenePrimitives) -> HashSet<u64> {
+    let mut keys: HashSet<_> = scene
+        .video_textures
+        .iter()
+        .filter_map(|texture| match texture.controller.current_render_frame()? {
+            crate::video::backend::VideoRenderFrame::Yuv(frame) => Some(frame.id()),
+            crate::video::backend::VideoRenderFrame::Rgba(_) => None,
+        })
+        .collect();
+    collect_video_yuv_keys_from_commands(&scene.commands, &mut keys);
+    collect_video_yuv_keys_from_commands(&scene.overlay_commands, &mut keys);
+    keys
+}
+
+#[cfg(feature = "video")]
+fn collect_video_yuv_keys_from_commands(commands: &[RenderCommand], keys: &mut HashSet<u64>) {
+    for command in commands {
+        match command {
+            RenderCommand::CanvasComposite(composite) => {
+                collect_video_yuv_keys_from_commands(&composite.content_commands, keys);
+                if let Some(mask_commands) = composite.mask_commands.as_ref() {
+                    collect_video_yuv_keys_from_commands(mask_commands, keys);
+                }
+            }
+            RenderCommand::VideoTexture(texture) => {
+                if let Some(crate::video::backend::VideoRenderFrame::Yuv(frame)) =
+                    texture.controller.current_render_frame()
+                {
+                    keys.insert(frame.id());
+                }
+            }
+            RenderCommand::BackdropBlur(_)
+            | RenderCommand::Brush(_)
+            | RenderCommand::Shape(_)
+            | RenderCommand::TextDecoration(_)
+            | RenderCommand::Text(_)
+            | RenderCommand::Texture(_)
+            | RenderCommand::Mesh(_) => {}
+        }
+    }
 }
 
 fn collect_texture_keys_from_commands(commands: &[RenderCommand], keys: &mut HashSet<u64>) {
@@ -154,7 +203,11 @@ fn collect_texture_keys_from_commands(commands: &[RenderCommand], keys: &mut Has
             | RenderCommand::Mesh(_) => {}
             #[cfg(feature = "video")]
             RenderCommand::VideoTexture(texture) => {
-                if let Some(frame) = texture.controller.current_frame() {
+                if let Some(frame) = texture
+                    .controller
+                    .current_render_frame()
+                    .and_then(|frame| frame.as_rgba_texture())
+                {
                     keys.insert(frame.id());
                 }
             }
@@ -172,11 +225,15 @@ pub struct Renderer {
     brush_pipeline: wgpu::RenderPipeline,
     mesh_pipeline: wgpu::RenderPipeline,
     scene_text_pipeline: wgpu::RenderPipeline,
+    #[cfg(feature = "video")]
+    video_yuv_pipeline: wgpu::RenderPipeline,
     text_pipeline: wgpu::RenderPipeline,
     backdrop_blur_pipeline: wgpu::RenderPipeline,
     backdrop_composite_pipeline: wgpu::RenderPipeline,
     canvas_composite_pipeline: wgpu::RenderPipeline,
     text_bind_group_layout: wgpu::BindGroupLayout,
+    #[cfg(feature = "video")]
+    video_yuv_bind_group_layout: wgpu::BindGroupLayout,
     present_bind_group_layout: wgpu::BindGroupLayout,
     mesh_clip_bind_group_layout: wgpu::BindGroupLayout,
     backdrop_blur_bind_group_layout: wgpu::BindGroupLayout,
@@ -218,6 +275,8 @@ pub struct Renderer {
     /// draw ranges deliberately bypass this shortcut because direct scene splices
     /// keep the serial stable while replacing commands.
     cache_liveness_scene_serial: Option<u64>,
+    #[cfg(feature = "video")]
+    video_yuv_texture_cache: HashMap<u64, VideoYuvTextureCacheEntry>,
     vertex_pool: self::vertex_pool::VertexBufferPool,
     retained_prepare_cache: prepare::RetainedPrepareCache,
     /// Reuses the large frame-local prepared command arrays for retained main/overlay scenes.
@@ -265,6 +324,151 @@ pub struct Renderer {
     /// adapter 不支持时为 false——此时 GPU 平移变体运行时降级,滚动回退到
     /// CPU 子树重收集。
     push_constants_supported: bool,
+}
+
+#[cfg(all(test, feature = "video"))]
+mod video_yuv_key_tests {
+    use super::*;
+    use crate::animation::AnimationCoordinator;
+    use crate::foundation::binding::{InvalidationSignal, ViewModelContext};
+    use crate::media::{IntrinsicSize, RasterRequest, TextureFrame};
+    use crate::ui::widget::{Rect, VideoTexturePrimitive};
+    use crate::video::backend::{
+        BackendSharedState, VideoBackend, VideoRenderFrame, VideoYuvColorSpace, VideoYuvFormat,
+        VideoYuvFrame, VideoYuvPlane, VideoYuvPlaneFormat, DEFAULT_VIDEO_BUFFER_MEMORY_LIMIT_BYTES,
+    };
+    use crate::video::{
+        VideoAudioTrackSelection, VideoController, VideoMetrics, VideoPlaybackState, VideoSize,
+        VideoSource, VideoSubtitleTrackSelection, VideoSurfaceSnapshot,
+    };
+    use std::sync::Arc;
+
+    struct StaticFrameBackend {
+        frame: VideoRenderFrame,
+    }
+
+    impl VideoBackend for StaticFrameBackend {
+        fn load(&self, _source: VideoSource) -> Result<(), TguiError> {
+            Ok(())
+        }
+
+        fn play(&self) {}
+        fn pause(&self) {}
+        fn stop(&self) {}
+        fn seek(&self, _position: std::time::Duration) {}
+        fn set_volume(&self, _volume: f32) {}
+        fn set_muted(&self, _muted: bool) {}
+        fn set_looping(&self, _looping: bool) {}
+        fn set_playback_rate(&self, _rate: f32) {}
+        fn set_audio_track_selection(&self, _selection: VideoAudioTrackSelection) {}
+        fn set_subtitle_track_selection(&self, _selection: VideoSubtitleTrackSelection) {}
+        fn set_buffer_memory_limit_bytes(&self, _bytes: u64) {}
+        fn set_target_raster(&self, _raster: Option<RasterRequest>) {}
+        fn current_render_frame(&self) -> Option<VideoRenderFrame> {
+            Some(self.frame.clone())
+        }
+        fn shutdown(&self) {}
+    }
+
+    fn test_context() -> ViewModelContext {
+        ViewModelContext::new(InvalidationSignal::new(), AnimationCoordinator::default())
+    }
+
+    fn shared_state(ctx: &ViewModelContext) -> BackendSharedState {
+        BackendSharedState {
+            playback_state: ctx.state(VideoPlaybackState::Ready),
+            metrics: ctx.state(VideoMetrics::default()),
+            volume: ctx.state(1.0),
+            muted: ctx.state(false),
+            looping: ctx.state(false),
+            playback_rate: ctx.state(1.0),
+            audio_tracks: ctx.state(Vec::new()),
+            audio_track_selection: ctx.state(VideoAudioTrackSelection::Auto),
+            subtitle_tracks: ctx.state(Vec::new()),
+            subtitle_track_selection: ctx.state(VideoSubtitleTrackSelection::Disabled),
+            current_subtitle: ctx.state(None),
+            current_subtitle_placement: ctx.state(None),
+            current_subtitle_style: ctx.state(None),
+            current_subtitle_bitmap: ctx.state(None),
+            metrics_observed: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            buffer_memory_limit_bytes: ctx.state(DEFAULT_VIDEO_BUFFER_MEMORY_LIMIT_BYTES),
+            video_size: ctx.state(VideoSize::default()),
+            error: ctx.state(None),
+            surface: ctx.state(VideoSurfaceSnapshot {
+                intrinsic_size: IntrinsicSize::from_pixels(2, 2),
+                texture: None,
+                loading: false,
+                error: None,
+            }),
+        }
+    }
+
+    fn controller_for_frame(frame: VideoRenderFrame) -> VideoController {
+        let ctx = test_context();
+        VideoController::from_parts(shared_state(&ctx), Arc::new(StaticFrameBackend { frame }))
+    }
+
+    fn video_primitive(controller: VideoController) -> VideoTexturePrimitive {
+        VideoTexturePrimitive {
+            controller,
+            frame: Rect::new(0.0, 0.0, 2.0, 2.0),
+            quad: None,
+            uv_rect: None,
+            corner_radius: 0.0,
+            opacity: 1.0,
+            clip_rect: None,
+            clip_mask: None,
+        }
+    }
+
+    fn yuv_render_frame(id: u64) -> VideoRenderFrame {
+        let y = VideoYuvPlane::new(VideoYuvPlaneFormat::R8, 2, 2, 2, Arc::from(vec![16_u8; 4]))
+            .expect("valid y plane");
+        let uv = VideoYuvPlane::new(
+            VideoYuvPlaneFormat::Rg8,
+            1,
+            1,
+            2,
+            Arc::from(vec![128_u8; 2]),
+        )
+        .expect("valid uv plane");
+        let frame = VideoYuvFrame::with_id_revision_and_planes(
+            id,
+            1,
+            2,
+            2,
+            VideoYuvFormat::Nv12,
+            VideoYuvColorSpace::default(),
+            Arc::from(vec![y, uv]),
+        )
+        .expect("valid yuv frame");
+        VideoRenderFrame::yuv(Arc::new(frame))
+    }
+
+    #[test]
+    fn active_video_keys_split_rgba_and_yuv_caches() {
+        let rgba = Arc::new(TextureFrame::with_id_and_revision(
+            10,
+            1,
+            1,
+            1,
+            vec![255; 4],
+        ));
+        let rgba_controller = controller_for_frame(VideoRenderFrame::rgba(rgba));
+        let yuv_controller = controller_for_frame(yuv_render_frame(20));
+        let mut scene = ScenePrimitives::default();
+        scene.push_video_texture(video_primitive(rgba_controller));
+        scene.push_video_texture(video_primitive(yuv_controller));
+
+        let mut rgba_keys = HashSet::new();
+        collect_active_texture_keys(&scene, &mut rgba_keys);
+        let yuv_keys = active_video_yuv_keys(&scene);
+
+        assert!(rgba_keys.contains(&10));
+        assert!(!rgba_keys.contains(&20));
+        assert!(yuv_keys.contains(&20));
+        assert!(!yuv_keys.contains(&10));
+    }
 }
 
 impl Renderer {
@@ -436,6 +640,13 @@ impl Renderer {
             self.texture_cache
                 .retain(|key, _| active_texture_keys.contains(key));
             self.active_texture_keys_scratch = active_texture_keys;
+
+            #[cfg(feature = "video")]
+            {
+                let active_video_yuv_keys = active_video_yuv_keys(scene);
+                self.video_yuv_texture_cache
+                    .retain(|key, _| active_video_yuv_keys.contains(key));
+            }
         }
         if refresh_static_liveness {
             self.retain_active_text_cache(scene);

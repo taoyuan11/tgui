@@ -3,7 +3,7 @@ mod effects;
 use crate::foundation::error::TguiError;
 use crate::text::font::FontManager;
 
-use super::prepare::PreparedCommand;
+use super::prepare::{PreparedCommand, PreparedSpritePipeline};
 use super::surface::surface_clear_color;
 use super::{
     BrushVertex, MeshVertex, OffscreenTarget, PushTranslate, RectVertex, Renderer,
@@ -15,7 +15,7 @@ pub(super) enum DrawPipeline {
     Rect,
     Brush,
     Mesh,
-    Sprite,
+    Sprite(PreparedSpritePipeline),
 }
 
 fn select_state<T: Copy + Eq>(current: &mut Option<T>, next: T) -> bool {
@@ -671,8 +671,19 @@ impl Renderer {
                             batch.clip_rect,
                             &mut active_scissor,
                         ) {
-                            if select_state(&mut active_pipeline, DrawPipeline::Sprite) {
-                                pass.set_pipeline(&self.scene_text_pipeline);
+                            if select_state(
+                                &mut active_pipeline,
+                                DrawPipeline::Sprite(batch.pipeline),
+                            ) {
+                                match batch.pipeline {
+                                    PreparedSpritePipeline::Rgba => {
+                                        pass.set_pipeline(&self.scene_text_pipeline)
+                                    }
+                                    #[cfg(feature = "video")]
+                                    PreparedSpritePipeline::VideoYuv => {
+                                        pass.set_pipeline(&self.video_yuv_pipeline)
+                                    }
+                                }
                             }
                             self.set_scroll_translate(&mut pass, batch.scroll_translate);
                             if select_state(&mut active_sprite_bind_group, batch.binding.id) {

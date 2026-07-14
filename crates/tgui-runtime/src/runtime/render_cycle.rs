@@ -186,6 +186,8 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 self.renderer = Some(renderer);
                 self.last_synced_clear_color = Some(clear_color);
                 self.initialize_accessibility_adapter();
+                #[cfg(feature = "video")]
+                self.notify_video_surface_restored();
             }
             Err(error) => {
                 self.fail(event_loop, error);
@@ -197,11 +199,20 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             return;
         }
 
+        #[cfg(feature = "video")]
+        self.notify_video_app_foreground();
+
         window.request_redraw();
         window.set_visible(true);
     }
 
     pub(in crate::runtime) fn suspend(&mut self) {
+        #[cfg(feature = "video")]
+        {
+            self.notify_video_app_background();
+            self.notify_video_surface_lost();
+        }
+
         self.renderer = None;
         self.gpu_scroll_supported = false;
         self.cached_scene = None;

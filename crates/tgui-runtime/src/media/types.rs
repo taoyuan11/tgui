@@ -73,6 +73,166 @@ impl From<MediaBytes> for MediaSource {
     }
 }
 
+/// Shared source builder for encoded audio/video playback.
+///
+/// Unlike [`MediaSource`], URL sources can carry HTTP headers and bytes sources
+/// can carry a container extension hint. The audio and video controllers accept
+/// this type through their `load` methods when the corresponding feature is
+/// enabled.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum MediaPlaybackSource {
+    File(PathBuf),
+    Url {
+        url: String,
+        headers: Vec<(String, String)>,
+    },
+    Bytes {
+        bytes: MediaBytes,
+        extension: Option<Arc<str>>,
+    },
+}
+
+impl MediaPlaybackSource {
+    /// Creates a local file playback source.
+    pub fn file(path: impl Into<PathBuf>) -> Self {
+        Self::File(path.into())
+    }
+
+    /// Creates a URL playback source without extra headers.
+    pub fn url(url: impl Into<String>) -> Self {
+        Self::Url {
+            url: url.into(),
+            headers: Vec::new(),
+        }
+    }
+
+    /// Creates an in-memory playback source.
+    pub fn bytes(bytes: impl Into<MediaBytes>) -> Self {
+        Self::Bytes {
+            bytes: bytes.into(),
+            extension: None,
+        }
+    }
+
+    /// Creates an in-memory playback source with a container extension hint.
+    pub fn bytes_with_extension(
+        bytes: impl Into<MediaBytes>,
+        extension: impl Into<String>,
+    ) -> Self {
+        Self::bytes(bytes).with_extension(extension)
+    }
+
+    /// Appends one HTTP header to a URL source.
+    pub fn with_header(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
+        if let Self::Url { headers, .. } = &mut self {
+            headers.push((name.into(), value.into()));
+        }
+        self
+    }
+
+    /// Appends multiple HTTP headers to a URL source.
+    pub fn with_headers<I, K, V>(mut self, headers: I) -> Self
+    where
+        I: IntoIterator<Item = (K, V)>,
+        K: Into<String>,
+        V: Into<String>,
+    {
+        if let Self::Url {
+            headers: source_headers,
+            ..
+        } = &mut self
+        {
+            source_headers.extend(
+                headers
+                    .into_iter()
+                    .map(|(name, value)| (name.into(), value.into())),
+            );
+        }
+        self
+    }
+
+    /// Sets a container extension hint on an in-memory source.
+    pub fn with_extension(mut self, extension: impl Into<String>) -> Self {
+        if let Self::Bytes {
+            extension: source_extension,
+            ..
+        } = &mut self
+        {
+            *source_extension = normalize_media_extension_hint(extension);
+        }
+        self
+    }
+}
+
+impl From<MediaSource> for MediaPlaybackSource {
+    fn from(value: MediaSource) -> Self {
+        match value {
+            MediaSource::Path(path) => Self::File(path),
+            MediaSource::Url(url) => Self::url(url),
+            MediaSource::Bytes(bytes) => Self::bytes(bytes),
+        }
+    }
+}
+
+impl From<PathBuf> for MediaPlaybackSource {
+    fn from(value: PathBuf) -> Self {
+        Self::File(value)
+    }
+}
+
+impl From<&Path> for MediaPlaybackSource {
+    fn from(value: &Path) -> Self {
+        Self::File(value.to_path_buf())
+    }
+}
+
+impl From<String> for MediaPlaybackSource {
+    fn from(value: String) -> Self {
+        Self::url(value)
+    }
+}
+
+impl From<&str> for MediaPlaybackSource {
+    fn from(value: &str) -> Self {
+        Self::url(value)
+    }
+}
+
+impl From<MediaBytes> for MediaPlaybackSource {
+    fn from(value: MediaBytes) -> Self {
+        Self::bytes(value)
+    }
+}
+
+#[cfg(test)]
+mod media_playback_source_tests {
+    use super::{MediaBytes, MediaPlaybackSource};
+
+    #[test]
+    fn playback_source_preserves_headers_and_extension_hint() {
+        assert_eq!(
+            MediaPlaybackSource::url("https://example.com/demo.mp4")
+                .with_headers([("Authorization", "Bearer token"), ("X-Test", "value")]),
+            MediaPlaybackSource::Url {
+                url: "https://example.com/demo.mp4".to_string(),
+                headers: vec![
+                    ("Authorization".to_string(), "Bearer token".to_string()),
+                    ("X-Test".to_string(), "value".to_string()),
+                ],
+            }
+        );
+
+        match MediaPlaybackSource::bytes_with_extension(MediaBytes::from_static(&[1, 2, 3]), ".mp4")
+        {
+            MediaPlaybackSource::Bytes { bytes, extension } => {
+                assert_eq!(bytes.as_slice(), &[1, 2, 3]);
+                assert_eq!(extension.as_deref(), Some("mp4"));
+            }
+            _ => panic!("expected bytes source"),
+        }
+    }
+}
+
 /// 表示一段可复用的媒体字节数据。
 ///
 /// 该类型同时支持静态字节切片和共享引用计数缓冲区。
@@ -156,6 +316,14 @@ impl MediaBytes {
             },
         }
     }
+
+    #[cfg(any(feature = "audio", feature = "video"))]
+    pub(crate) fn into_shared_bytes(self) -> Arc<[u8]> {
+        match self.storage {
+            MediaBytesStorage::Static(bytes) => Arc::from(bytes),
+            MediaBytesStorage::Shared(bytes) => bytes,
+        }
+    }
 }
 
 impl fmt::Debug for MediaBytes {
@@ -210,6 +378,12 @@ impl<const N: usize> From<&'static [u8; N]> for MediaBytes {
     }
 }
 
+pub(crate) fn normalize_media_extension_hint(extension: impl Into<String>) -> Option<Arc<str>> {
+    let extension = extension.into();
+    let extension = extension.trim().trim_start_matches('.').trim();
+    (!extension.is_empty()).then(|| Arc::<str>::from(extension))
+}
+
 /// 指定媒体内容在目标区域中的适配方式。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
 pub enum ContentFit {
@@ -257,6 +431,7 @@ pub(crate) struct TextureFrame {
     width: u32,
     height: u32,
     pixels: Arc<[u8]>,
+    retain_upload_snapshot: bool,
 }
 
 impl PartialEq for TextureFrame {
@@ -290,6 +465,7 @@ impl TextureFrame {
             width,
             height,
             pixels: Arc::from(normalize_rgba_pixels(width, height, pixels)),
+            retain_upload_snapshot: false,
         }
     }
 
@@ -306,6 +482,25 @@ impl TextureFrame {
             width,
             height,
             pixels: Arc::from(normalize_rgba_pixels(width, height, pixels)),
+            retain_upload_snapshot: true,
+        }
+    }
+
+    #[cfg(any(feature = "video", test))]
+    pub(crate) fn with_id_revision_and_pixels(
+        id: u64,
+        revision: u64,
+        width: u32,
+        height: u32,
+        pixels: Arc<[u8]>,
+    ) -> Self {
+        Self {
+            id,
+            revision: revision.max(1),
+            width,
+            height,
+            pixels: normalize_rgba_pixel_arc(width, height, pixels),
+            retain_upload_snapshot: true,
         }
     }
 
@@ -323,6 +518,10 @@ impl TextureFrame {
 
     pub(crate) fn pixels(&self) -> &[u8] {
         &self.pixels
+    }
+
+    pub(crate) fn retain_upload_snapshot(&self) -> bool {
+        self.retain_upload_snapshot
     }
 
     pub(crate) fn expected_rgba_len(&self) -> Option<usize> {
@@ -347,6 +546,19 @@ fn normalize_rgba_pixels(width: u32, height: u32, mut pixels: Vec<u8>) -> Vec<u8
     };
     pixels.resize(expected_len, 0);
     pixels
+}
+
+#[cfg(any(feature = "video", test))]
+fn normalize_rgba_pixel_arc(width: u32, height: u32, pixels: Arc<[u8]>) -> Arc<[u8]> {
+    match expected_rgba_len(width, height) {
+        Some(expected_len) if pixels.len() == expected_len => pixels,
+        Some(expected_len) => {
+            let mut normalized = pixels.to_vec();
+            normalized.resize(expected_len, 0);
+            Arc::from(normalized)
+        }
+        None => Arc::from(Vec::<u8>::new()),
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -503,6 +715,7 @@ pub(super) fn clamp_raster_request(width: u32, height: u32) -> RasterRequest {
 #[cfg(test)]
 mod texture_frame_tests {
     use super::TextureFrame;
+    use std::sync::Arc;
 
     #[test]
     fn texture_frame_pads_short_rgba_buffers() {
@@ -510,6 +723,7 @@ mod texture_frame_tests {
 
         assert_eq!(frame.pixels(), &[255, 0, 0, 255, 0, 0, 0, 0]);
         assert!(frame.has_valid_rgba_len());
+        assert!(!frame.retain_upload_snapshot());
     }
 
     #[test]
@@ -517,6 +731,38 @@ mod texture_frame_tests {
         let frame = TextureFrame::new(1, 1, vec![1, 2, 3, 4, 5, 6, 7, 8]);
 
         assert_eq!(frame.pixels(), &[1, 2, 3, 4]);
+        assert!(frame.has_valid_rgba_len());
+    }
+
+    #[test]
+    fn texture_frame_reuses_exact_rgba_arc() {
+        let pixels: Arc<[u8]> = Arc::from(vec![1, 2, 3, 4]);
+        let original_ptr = Arc::as_ptr(&pixels);
+
+        let frame = TextureFrame::with_id_revision_and_pixels(7, 9, 1, 1, pixels);
+
+        assert_eq!(frame.id(), 7);
+        assert_eq!(frame.revision(), 9);
+        assert_eq!(frame.pixels(), &[1, 2, 3, 4]);
+        assert_eq!(Arc::as_ptr(&frame.pixels), original_ptr);
+        assert!(frame.retain_upload_snapshot());
+    }
+
+    #[test]
+    fn revised_texture_frames_retain_upload_snapshots() {
+        let frame = TextureFrame::with_id_and_revision(7, 9, 1, 1, vec![1, 2, 3, 4]);
+
+        assert_eq!(frame.id(), 7);
+        assert_eq!(frame.revision(), 9);
+        assert!(frame.retain_upload_snapshot());
+    }
+
+    #[test]
+    fn texture_frame_normalizes_short_rgba_arc() {
+        let frame =
+            TextureFrame::with_id_revision_and_pixels(7, 9, 2, 1, Arc::from(vec![1, 2, 3, 4]));
+
+        assert_eq!(frame.pixels(), &[1, 2, 3, 4, 0, 0, 0, 0]);
         assert!(frame.has_valid_rgba_len());
     }
 }

@@ -1,13 +1,14 @@
 use std::thread;
 use std::time::{Duration, Instant};
 
-use crossbeam_channel::{Receiver, TryRecvError};
+use crossbeam_channel::{after, select, Receiver};
 
 use crate::audio::{AudioMetrics, AudioPlaybackState, AudioSource};
 
 use super::super::BackendSharedState;
 use super::session::{AudioSession, SessionStep};
-use super::{BackendCommand, METRICS_SYNC_INTERVAL, STEP_IDLE_SLEEP};
+use super::{BackendCommand, COMMAND_POLL_INTERVAL, METRICS_SYNC_INTERVAL, STEP_IDLE_SLEEP};
+use crate::audio::backend::shared::normalize_playback_rate;
 
 mod commands;
 
@@ -23,11 +24,11 @@ pub(super) struct AudioWorker {
     pub(super) current_duration: Option<Duration>,
     pub(super) should_play: bool,
     pub(super) looping: bool,
+    pub(super) playback_rate: f32,
     pub(super) volume: f32,
     pub(super) muted: bool,
     pub(super) buffer_memory_limit_bytes: u64,
     pub(super) session: Option<AudioSession>,
-    pub(super) session_dormant: bool,
     pub(super) last_metrics_sync_at: Option<Instant>,
 }
 
@@ -36,6 +37,7 @@ impl AudioWorker {
         Self {
             command_rx,
             looping: shared.looping.get(),
+            playback_rate: normalize_playback_rate(shared.playback_rate.get()),
             volume: shared.volume.get(),
             muted: shared.muted.get(),
             buffer_memory_limit_bytes: shared.buffer_memory_limit_bytes.get(),
@@ -44,7 +46,6 @@ impl AudioWorker {
             current_duration: None,
             should_play: false,
             session: None,
-            session_dormant: false,
             last_metrics_sync_at: None,
         }
     }
@@ -53,23 +54,24 @@ impl AudioWorker {
         loop {
             self.sync_metrics_if_due();
 
-            let command = if self.session.is_some() && !self.session_dormant {
-                match self.command_rx.try_recv() {
-                    Ok(command) => Some(command),
-                    Err(TryRecvError::Empty) => None,
-                    Err(TryRecvError::Disconnected) => break,
-                }
+            let timeout = after(if self.session.is_some() {
+                COMMAND_POLL_INTERVAL
             } else {
-                match self.command_rx.recv() {
-                    Ok(command) => Some(command),
-                    Err(_) => break,
-                }
-            };
+                Duration::from_millis(50)
+            });
 
-            if let Some(command) = command {
-                if !self.handle_command(command) {
-                    break;
+            select! {
+                recv(self.command_rx) -> message => {
+                    match message {
+                        Ok(command) => {
+                            if !self.handle_command(command) {
+                                break;
+                            }
+                        }
+                        Err(_) => break,
+                    }
                 }
+                recv(timeout) -> _ => {}
             }
 
             let outcome = if let Some(session) = self.session.as_mut() {
@@ -90,17 +92,12 @@ impl AudioWorker {
                         self.reopen_current_source(Duration::ZERO, should_play);
                     } else {
                         self.should_play = false;
-                        self.session_dormant = true;
-                        if let Some(session) = self.session.as_ref() {
-                            session.set_playing(false);
-                        }
                         self.sync_metrics(true);
                         self.shared.playback_state.set(AudioPlaybackState::Ended);
                     }
                 }
                 Err(error) => {
                     self.session = None;
-                    self.session_dormant = false;
                     self.last_metrics_sync_at = None;
                     self.shared.set_error(error.to_string());
                 }

@@ -396,6 +396,17 @@ impl<VM: 'static> WidgetTree<VM> {
         })
     }
 
+    #[cfg(feature = "video")]
+    pub(crate) fn video_controllers(&self, theme: &Theme) -> Vec<crate::video::VideoController> {
+        with_widget_stack(|| {
+            let mut controllers = Vec::new();
+            self.root
+                .resolve(theme)
+                .collect_video_controllers(&mut controllers);
+            controllers
+        })
+    }
+
     #[allow(dead_code)]
     pub(crate) fn query_canvas_scene_at_widget(
         &self,

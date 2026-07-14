@@ -5,15 +5,17 @@ pub(super) struct QueuedVideoFrame {
     pub(super) generation: u64,
     pub(super) position: Duration,
     pub(super) end_position: Duration,
-    pub(super) texture: Arc<TextureFrame>,
-    pub(super) decoded_bytes: u64,
+    pub(super) frame: VideoRenderFrame,
     pub(super) compressed_bytes: u64,
+    pub(super) decoded_bytes: u64,
 }
 
 #[derive(Default)]
 pub(super) struct VideoQueueState {
     pub(super) frames: VecDeque<QueuedVideoFrame>,
-    /// `frames` 中 RGBA 像素缓冲的总字节数，避免每次询问时再做线性扫描。
+    /// `frames` 中的总 compressed bytes 之和，保留为吞吐和估算指标。
+    pub(super) total_compressed_bytes: u64,
+    /// `frames` 中实际持有的 decoded RGBA bytes 之和，用于内存上限。
     pub(super) total_decoded_bytes: u64,
     /// `frames` 队尾帧的 end_position 缓存。frames 为空时为 `None`。
     pub(super) tail_end_position: Option<Duration>,
@@ -33,12 +35,8 @@ impl SharedVideoQueue {
     }
 
     pub(super) fn replace_generation(&self, generation: u64) {
-        let previous = self
-            .accepted_generation
-            .fetch_max(generation, Ordering::AcqRel);
-        if generation < previous {
-            return;
-        }
+        self.accepted_generation
+            .store(generation, Ordering::Release);
         self.clear_all();
     }
 
@@ -49,6 +47,7 @@ impl SharedVideoQueue {
     pub(super) fn clear_all(&self) {
         let mut state = self.state.lock();
         state.frames.clear();
+        state.total_compressed_bytes = 0;
         state.total_decoded_bytes = 0;
         state.tail_end_position = None;
     }
@@ -70,6 +69,9 @@ impl SharedVideoQueue {
             if frame.generation != accepted_generation {
                 continue;
             }
+            state.total_compressed_bytes = state
+                .total_compressed_bytes
+                .saturating_add(frame.compressed_bytes);
             state.total_decoded_bytes = state
                 .total_decoded_bytes
                 .saturating_add(frame.decoded_bytes);
@@ -81,26 +83,29 @@ impl SharedVideoQueue {
     pub(super) fn pop_front_matching(&self, generation: u64) -> Option<QueuedVideoFrame> {
         let mut state = self.state.lock();
         match state.frames.front() {
-            Some(frame) if frame.generation == generation => {
-                let popped = state.frames.pop_front();
-                if let Some(frame) = popped.as_ref() {
-                    state.total_decoded_bytes = state
-                        .total_decoded_bytes
-                        .saturating_sub(frame.decoded_bytes);
-                    if state.frames.is_empty() {
-                        state.tail_end_position = None;
-                    }
-                }
-                popped
+            Some(frame) if frame.generation == generation => pop_front_frame(&mut state),
+            _ => None,
+        }
+    }
+
+    pub(super) fn pop_front_due(
+        &self,
+        generation: u64,
+        due_position: Duration,
+    ) -> Option<QueuedVideoFrame> {
+        let mut state = self.state.lock();
+        match state.frames.front() {
+            Some(frame) if frame.generation == generation && frame.position <= due_position => {
+                pop_front_frame(&mut state)
             }
             _ => None,
         }
     }
 
-    pub(super) fn front(&self, generation: u64) -> Option<QueuedVideoFrame> {
+    pub(super) fn front_position(&self, generation: u64) -> Option<Duration> {
         let state = self.state.lock();
         match state.frames.front() {
-            Some(frame) if frame.generation == generation => Some(frame.clone()),
+            Some(frame) if frame.generation == generation => Some(frame.position),
             _ => None,
         }
     }
@@ -154,6 +159,22 @@ impl SharedVideoQueue {
     }
 }
 
+fn pop_front_frame(state: &mut VideoQueueState) -> Option<QueuedVideoFrame> {
+    let popped = state.frames.pop_front();
+    if let Some(frame) = popped.as_ref() {
+        state.total_compressed_bytes = state
+            .total_compressed_bytes
+            .saturating_sub(frame.compressed_bytes);
+        state.total_decoded_bytes = state
+            .total_decoded_bytes
+            .saturating_sub(frame.decoded_bytes);
+        if state.frames.is_empty() {
+            state.tail_end_position = None;
+        }
+    }
+    popped
+}
+
 #[derive(Clone, Default)]
 pub(super) struct SharedPlaybackClock {
     position_ns: Arc<AtomicU64>,
@@ -170,6 +191,6 @@ impl SharedPlaybackClock {
     }
 }
 
-pub(super) fn clear_latest_frame(latest_frame: &Arc<Mutex<Option<Arc<TextureFrame>>>>) {
+pub(super) fn clear_latest_frame(latest_frame: &Arc<Mutex<Option<VideoRenderFrame>>>) {
     *latest_frame.lock() = None;
 }

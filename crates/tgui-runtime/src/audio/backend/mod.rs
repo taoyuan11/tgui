@@ -18,6 +18,7 @@ pub(crate) struct BackendSharedState {
     pub volume: State<f32>,
     pub muted: State<bool>,
     pub looping: State<bool>,
+    pub playback_rate: State<f32>,
     pub metrics_observed: Arc<AtomicBool>,
     pub buffer_memory_limit_bytes: State<u64>,
     pub error: State<Option<String>>,
@@ -79,6 +80,7 @@ pub(crate) trait AudioBackend: Send + Sync {
     fn set_volume(&self, volume: f32);
     fn set_muted(&self, muted: bool);
     fn set_looping(&self, looping: bool);
+    fn set_playback_rate(&self, rate: f32);
     fn set_buffer_memory_limit_bytes(&self, bytes: u64);
     fn shutdown(&self);
 }

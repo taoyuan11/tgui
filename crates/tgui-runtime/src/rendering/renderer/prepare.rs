@@ -389,11 +389,19 @@ pub(super) struct PreparedMesh {
 
 pub(super) struct PreparedSprite {
     pub(super) draw_id: DrawId,
+    pub(super) pipeline: PreparedSpritePipeline,
     pub(super) binding: SpriteBindGroup,
     pub(super) clip_rect: Option<Rect>,
     pub(super) vertex_offset: u64,
     pub(super) vertex_count: u32,
     pub(super) scroll_translate: Option<super::PushTranslate>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum PreparedSpritePipeline {
+    Rgba,
+    #[cfg(feature = "video")]
+    VideoYuv,
 }
 
 pub(super) struct PreparedBackdropBlur {
@@ -561,6 +569,7 @@ enum PreparedCommandTemplate {
         vertex_count: u32,
     },
     Sprite {
+        pipeline: PreparedSpritePipeline,
         binding: SpriteBindGroup,
         clip_rect: Option<Rect>,
         vertices: Vec<u8>,
@@ -639,12 +648,14 @@ impl PreparedCommandTemplate {
                 scroll_translate,
             }),
             Self::Sprite {
+                pipeline,
                 binding,
                 clip_rect,
                 vertices,
                 vertex_count,
             } => PreparedCommand::Sprite(PreparedSprite {
                 draw_id,
+                pipeline: *pipeline,
                 binding: binding.clone(),
                 clip_rect: *clip_rect,
                 vertex_offset: vertex_pool
@@ -1061,6 +1072,7 @@ impl Renderer {
                 );
                 PreparedTemplateBuild {
                     template: PreparedCommandTemplate::Sprite {
+                        pipeline: PreparedSpritePipeline::Rgba,
                         binding,
                         clip_rect: texture.clip_rect,
                         vertices: bytemuck::cast_slice(&vertices).to_vec(),
@@ -1071,11 +1083,22 @@ impl Renderer {
             }
             #[cfg(feature = "video")]
             RenderCommand::VideoTexture(texture) => {
-                let Some(frame_texture) = texture.controller.current_frame() else {
+                let Some(render_frame) = texture.controller.current_render_frame() else {
                     return Ok(None);
                 };
-                let Some(binding) = self.texture_bind_group_for(&frame_texture)? else {
-                    return Ok(None);
+                let (pipeline, binding) = match render_frame {
+                    crate::video::backend::VideoRenderFrame::Rgba(frame_texture) => {
+                        let Some(binding) = self.texture_bind_group_for(&frame_texture)? else {
+                            return Ok(None);
+                        };
+                        (PreparedSpritePipeline::Rgba, binding)
+                    }
+                    crate::video::backend::VideoRenderFrame::Yuv(frame) => {
+                        let Some(binding) = self.video_yuv_bind_group_for(&frame)? else {
+                            return Ok(None);
+                        };
+                        (PreparedSpritePipeline::VideoYuv, binding)
+                    }
                 };
                 let vertices = texture_quad_vertices(
                     texture.frame,
@@ -1089,6 +1112,7 @@ impl Renderer {
                 );
                 PreparedTemplateBuild {
                     template: PreparedCommandTemplate::Sprite {
+                        pipeline,
                         binding,
                         clip_rect: texture.clip_rect,
                         vertices: bytemuck::cast_slice(&vertices).to_vec(),
@@ -1126,6 +1150,7 @@ impl Renderer {
                 );
                 PreparedTemplateBuild {
                     template: PreparedCommandTemplate::Sprite {
+                        pipeline: PreparedSpritePipeline::Rgba,
                         binding: draw.binding,
                         clip_rect: text.clip_rect,
                         vertices: bytemuck::cast_slice(&vertices).to_vec(),

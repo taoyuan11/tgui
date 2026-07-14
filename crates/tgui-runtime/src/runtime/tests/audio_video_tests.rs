@@ -1,6 +1,8 @@
 use super::*;
 #[cfg(feature = "video")]
 use crate::media::RasterRequest;
+#[cfg(feature = "video")]
+use crate::video::backend::VideoRenderFrame;
 
 #[test]
 fn clicking_disabled_checkbox_does_not_dispatch_toggled_value() {
@@ -137,6 +139,8 @@ impl AudioBackend for MockAudioBackend {
             .push(looping);
     }
 
+    fn set_playback_rate(&self, _rate: f32) {}
+
     fn set_buffer_memory_limit_bytes(&self, _bytes: u64) {}
 
     fn shutdown(&self) {}
@@ -156,6 +160,7 @@ fn test_audio_controller() -> (
         volume: ctx.state(1.0),
         muted: ctx.state(false),
         looping: ctx.state(false),
+        playback_rate: ctx.state(1.0),
         metrics_observed: Arc::new(AtomicBool::new(false)),
         buffer_memory_limit_bytes: ctx.state(DEFAULT_AUDIO_BUFFER_MEMORY_LIMIT_BYTES),
         error: ctx.state(None),
@@ -345,15 +350,205 @@ impl VideoBackend for MockVideoBackend {
 
     fn set_muted(&self, _muted: bool) {}
 
+    fn set_looping(&self, _looping: bool) {}
+
+    fn set_playback_rate(&self, _rate: f32) {}
+
+    fn set_audio_track_selection(&self, _selection: VideoAudioTrackSelection) {}
+
+    fn set_subtitle_track_selection(&self, _selection: VideoSubtitleTrackSelection) {}
+
     fn set_buffer_memory_limit_bytes(&self, _bytes: u64) {}
 
     fn set_target_raster(&self, _raster: Option<RasterRequest>) {}
 
-    fn current_frame(&self) -> Option<Arc<TextureFrame>> {
+    fn current_render_frame(&self) -> Option<VideoRenderFrame> {
         None
     }
 
     fn shutdown(&self) {}
+}
+
+#[cfg(feature = "video")]
+struct RecordingVideoBackend {
+    events: Arc<Mutex<Vec<&'static str>>>,
+}
+
+#[cfg(feature = "video")]
+impl VideoBackend for RecordingVideoBackend {
+    fn load(&self, _source: VideoSource) -> Result<(), crate::foundation::error::TguiError> {
+        Ok(())
+    }
+
+    fn play(&self) {}
+
+    fn pause(&self) {}
+
+    fn stop(&self) {}
+
+    fn seek(&self, _position: Duration) {}
+
+    fn set_volume(&self, _volume: f32) {}
+
+    fn set_muted(&self, _muted: bool) {}
+
+    fn set_looping(&self, _looping: bool) {}
+
+    fn set_playback_rate(&self, _rate: f32) {}
+
+    fn set_audio_track_selection(&self, _selection: VideoAudioTrackSelection) {}
+
+    fn set_subtitle_track_selection(&self, _selection: VideoSubtitleTrackSelection) {}
+
+    fn set_buffer_memory_limit_bytes(&self, _bytes: u64) {}
+
+    fn set_target_raster(&self, _raster: Option<RasterRequest>) {}
+
+    fn current_render_frame(&self) -> Option<VideoRenderFrame> {
+        None
+    }
+
+    fn shutdown(&self) {}
+
+    fn on_surface_lost(&self) {
+        self.events
+            .lock()
+            .expect("events lock poisoned")
+            .push("surface_lost");
+    }
+
+    fn on_surface_restored(&self) {
+        self.events
+            .lock()
+            .expect("events lock poisoned")
+            .push("surface_restored");
+    }
+
+    fn on_app_background(&self) {
+        self.events
+            .lock()
+            .expect("events lock poisoned")
+            .push("app_background");
+    }
+
+    fn on_app_foreground(&self) {
+        self.events
+            .lock()
+            .expect("events lock poisoned")
+            .push("app_foreground");
+    }
+}
+
+#[cfg(feature = "video")]
+#[test]
+fn video_lifecycle_notifications_deduplicate_active_controllers() {
+    let invalidation = InvalidationSignal::new();
+    let animations = AnimationCoordinator::default();
+    let ctx = ViewModelContext::new(invalidation.clone(), animations);
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let shared = BackendSharedState {
+        playback_state: ctx.state(VideoPlaybackState::Ready),
+        metrics: ctx.state(VideoMetrics::default()),
+        volume: ctx.state(1.0),
+        muted: ctx.state(false),
+        looping: ctx.state(false),
+        playback_rate: ctx.state(1.0),
+        audio_tracks: ctx.state(Vec::new()),
+        audio_track_selection: ctx.state(VideoAudioTrackSelection::Auto),
+        subtitle_tracks: ctx.state(Vec::new()),
+        subtitle_track_selection: ctx.state(VideoSubtitleTrackSelection::Disabled),
+        current_subtitle: ctx.state(None),
+        current_subtitle_placement: ctx.state(None),
+        current_subtitle_style: ctx.state(None),
+        current_subtitle_bitmap: ctx.state(None),
+        metrics_observed: Arc::new(AtomicBool::new(false)),
+        buffer_memory_limit_bytes: ctx.state(DEFAULT_VIDEO_BUFFER_MEMORY_LIMIT_BYTES),
+        video_size: ctx.state(VideoSize {
+            width: 160,
+            height: 90,
+        }),
+        error: ctx.state(None),
+        surface: ctx.state(VideoSurfaceSnapshot::default()),
+    };
+    let controller = VideoController::from_parts(
+        shared,
+        Arc::new(RecordingVideoBackend {
+            events: events.clone(),
+        }),
+    );
+    let tree: WidgetTree<TestVm> = WidgetTree::new(
+        Stack::new()
+            .child(VideoSurface::new(controller.clone()).size(dp(160.0), dp(90.0)))
+            .child(VideoSurface::new(controller).size(dp(160.0), dp(90.0))),
+    );
+    let handler = test_handler(Some(tree), invalidation);
+
+    handler.notify_video_app_background();
+    handler.notify_video_surface_lost();
+    handler.notify_video_surface_restored();
+    handler.notify_video_app_foreground();
+
+    assert_eq!(
+        *events.lock().expect("events lock poisoned"),
+        vec![
+            "app_background",
+            "surface_lost",
+            "surface_restored",
+            "app_foreground"
+        ]
+    );
+}
+
+#[cfg(feature = "video")]
+#[test]
+fn video_lifecycle_notifications_follow_suspend_order() {
+    let invalidation = InvalidationSignal::new();
+    let animations = AnimationCoordinator::default();
+    let ctx = ViewModelContext::new(invalidation.clone(), animations);
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let shared = BackendSharedState {
+        playback_state: ctx.state(VideoPlaybackState::Ready),
+        metrics: ctx.state(VideoMetrics::default()),
+        volume: ctx.state(1.0),
+        muted: ctx.state(false),
+        looping: ctx.state(false),
+        playback_rate: ctx.state(1.0),
+        audio_tracks: ctx.state(Vec::new()),
+        audio_track_selection: ctx.state(VideoAudioTrackSelection::Auto),
+        subtitle_tracks: ctx.state(Vec::new()),
+        subtitle_track_selection: ctx.state(VideoSubtitleTrackSelection::Disabled),
+        current_subtitle: ctx.state(None),
+        current_subtitle_placement: ctx.state(None),
+        current_subtitle_style: ctx.state(None),
+        current_subtitle_bitmap: ctx.state(None),
+        metrics_observed: Arc::new(AtomicBool::new(false)),
+        buffer_memory_limit_bytes: ctx.state(DEFAULT_VIDEO_BUFFER_MEMORY_LIMIT_BYTES),
+        video_size: ctx.state(VideoSize {
+            width: 160,
+            height: 90,
+        }),
+        error: ctx.state(None),
+        surface: ctx.state(VideoSurfaceSnapshot::default()),
+    };
+    let controller = VideoController::from_parts(
+        shared,
+        Arc::new(RecordingVideoBackend {
+            events: events.clone(),
+        }),
+    );
+    let tree: WidgetTree<TestVm> = WidgetTree::new(
+        Stack::new()
+            .child(VideoSurface::new(controller.clone()).size(dp(160.0), dp(90.0)))
+            .child(VideoSurface::new(controller).size(dp(160.0), dp(90.0))),
+    );
+    let mut handler = test_handler(Some(tree), invalidation);
+
+    handler.suspend();
+
+    assert_eq!(
+        *events.lock().expect("events lock poisoned"),
+        vec!["app_background", "surface_lost"]
+    );
 }
 
 #[cfg(feature = "video")]
@@ -367,6 +562,16 @@ fn hover_path_keeps_video_surface_hit_testing_when_scene_is_cached() {
         metrics: ctx.state(VideoMetrics::default()),
         volume: ctx.state(1.0),
         muted: ctx.state(false),
+        looping: ctx.state(false),
+        playback_rate: ctx.state(1.0),
+        audio_tracks: ctx.state(Vec::new()),
+        audio_track_selection: ctx.state(VideoAudioTrackSelection::Auto),
+        subtitle_tracks: ctx.state(Vec::new()),
+        subtitle_track_selection: ctx.state(VideoSubtitleTrackSelection::Disabled),
+        current_subtitle: ctx.state(None),
+        current_subtitle_placement: ctx.state(None),
+        current_subtitle_style: ctx.state(None),
+        current_subtitle_bitmap: ctx.state(None),
         metrics_observed: Arc::new(AtomicBool::new(false)),
         buffer_memory_limit_bytes: ctx.state(DEFAULT_VIDEO_BUFFER_MEMORY_LIMIT_BYTES),
         video_size: ctx.state(VideoSize {

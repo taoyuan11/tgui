@@ -80,6 +80,7 @@ fn scene_pass_collapses_redundant_pipeline_state_sets() {
         pipeline_state_set_count, scene_vertex_buffer_bind_count, scissor_state_set_count,
         sprite_bind_group_state_set_count, typed_vertex_draw_range, DrawPipeline,
     };
+    use super::prepare::PreparedSpritePipeline;
 
     let repeated_rects = vec![DrawPipeline::Rect; 1024];
     assert_eq!(pipeline_state_set_count(&repeated_rects), 1);
@@ -87,12 +88,22 @@ fn scene_pass_collapses_redundant_pipeline_state_sets() {
     let mixed = [
         DrawPipeline::Rect,
         DrawPipeline::Rect,
-        DrawPipeline::Sprite,
-        DrawPipeline::Sprite,
+        DrawPipeline::Sprite(PreparedSpritePipeline::Rgba),
+        DrawPipeline::Sprite(PreparedSpritePipeline::Rgba),
         DrawPipeline::Mesh,
         DrawPipeline::Rect,
     ];
     assert_eq!(pipeline_state_set_count(&mixed), 4);
+
+    #[cfg(feature = "video")]
+    assert_eq!(
+        pipeline_state_set_count(&[
+            DrawPipeline::Sprite(PreparedSpritePipeline::Rgba),
+            DrawPipeline::Sprite(PreparedSpritePipeline::VideoYuv),
+            DrawPipeline::Sprite(PreparedSpritePipeline::Rgba),
+        ]),
+        3
+    );
 
     let viewport = (0, 0, 1920, 1080);
     let clipped = (40, 40, 320, 240);

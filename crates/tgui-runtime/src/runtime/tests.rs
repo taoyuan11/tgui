@@ -51,8 +51,6 @@ use crate::audio::backend::{
 };
 #[cfg(feature = "audio")]
 use crate::audio::{Audio, AudioController, AudioMetrics, AudioPlaybackState, AudioSource};
-#[cfg(feature = "video")]
-use crate::media::TextureFrame;
 use crate::notification::async_notification_channel;
 #[cfg(feature = "video")]
 use crate::video::backend::{
@@ -60,8 +58,8 @@ use crate::video::backend::{
 };
 #[cfg(feature = "video")]
 use crate::video::{
-    VideoController, VideoMetrics, VideoPlaybackState, VideoSize, VideoSource, VideoSurface,
-    VideoSurfaceSnapshot,
+    VideoAudioTrackSelection, VideoController, VideoMetrics, VideoPlaybackState, VideoSize,
+    VideoSource, VideoSubtitleTrackSelection, VideoSurface, VideoSurfaceSnapshot,
 };
 #[derive(Default)]
 struct TestVm;

@@ -6,11 +6,15 @@ pub(super) struct RendererPipelines {
     pub(super) brush_pipeline: wgpu::RenderPipeline,
     pub(super) mesh_pipeline: wgpu::RenderPipeline,
     pub(super) scene_text_pipeline: wgpu::RenderPipeline,
+    #[cfg(feature = "video")]
+    pub(super) video_yuv_pipeline: wgpu::RenderPipeline,
     pub(super) text_pipeline: wgpu::RenderPipeline,
     pub(super) backdrop_blur_pipeline: wgpu::RenderPipeline,
     pub(super) backdrop_composite_pipeline: wgpu::RenderPipeline,
     pub(super) canvas_composite_pipeline: wgpu::RenderPipeline,
     pub(super) text_bind_group_layout: wgpu::BindGroupLayout,
+    #[cfg(feature = "video")]
+    pub(super) video_yuv_bind_group_layout: wgpu::BindGroupLayout,
     pub(super) present_bind_group_layout: wgpu::BindGroupLayout,
     pub(super) mesh_clip_bind_group_layout: wgpu::BindGroupLayout,
     pub(super) backdrop_blur_bind_group_layout: wgpu::BindGroupLayout,
@@ -193,6 +197,49 @@ pub(super) fn create_renderer_pipelines(
         cache: None,
     });
 
+    #[cfg(feature = "video")]
+    let video_yuv_pipeline_layout =
+        device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("tgui-video-yuv-pipeline-layout"),
+            bind_group_layouts: &[Some(&resources.video_yuv_bind_group_layout)],
+            immediate_size,
+        });
+
+    #[cfg(feature = "video")]
+    let video_yuv_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("tgui-video-yuv-pipeline"),
+        layout: Some(&video_yuv_pipeline_layout),
+        vertex: wgpu::VertexState {
+            module: &resources.video_yuv_shader,
+            entry_point: Some("vs_main"),
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            buffers: &[TextVertex::layout()],
+        },
+        primitive: wgpu::PrimitiveState {
+            topology: wgpu::PrimitiveTopology::TriangleList,
+            strip_index_format: None,
+            front_face: wgpu::FrontFace::Ccw,
+            cull_mode: None,
+            unclipped_depth: false,
+            polygon_mode: wgpu::PolygonMode::Fill,
+            conservative: false,
+        },
+        depth_stencil: None,
+        multisample: pipeline_multisample_state(msaa_sample_count),
+        fragment: Some(wgpu::FragmentState {
+            module: &resources.video_yuv_shader,
+            entry_point: Some("fs_main"),
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            targets: &[Some(wgpu::ColorTargetState {
+                format,
+                blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+        }),
+        multiview_mask: None,
+        cache: None,
+    });
+
     let text_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
         label: Some("tgui-text-pipeline"),
         layout: Some(
@@ -358,11 +405,15 @@ pub(super) fn create_renderer_pipelines(
         brush_pipeline,
         mesh_pipeline,
         scene_text_pipeline,
+        #[cfg(feature = "video")]
+        video_yuv_pipeline,
         text_pipeline,
         backdrop_blur_pipeline,
         backdrop_composite_pipeline,
         canvas_composite_pipeline,
         text_bind_group_layout: resources.text_bind_group_layout,
+        #[cfg(feature = "video")]
+        video_yuv_bind_group_layout: resources.video_yuv_bind_group_layout,
         present_bind_group_layout: resources.present_bind_group_layout,
         mesh_clip_bind_group_layout: resources.mesh_clip_bind_group_layout,
         backdrop_blur_bind_group_layout: resources.backdrop_blur_bind_group_layout,

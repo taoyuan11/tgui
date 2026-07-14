@@ -18,8 +18,6 @@ use crate::runtime::portal::PortalRegistry;
 use crate::ui::widget::WidgetTree;
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
-#[cfg(target_os = "windows")]
-use winit::platform::windows::WindowExtWindows;
 
 pub(super) struct ResolvedWindowSpec<VM> {
     key: String,

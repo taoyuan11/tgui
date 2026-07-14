@@ -22,6 +22,9 @@ pub struct VideoStyle {
     pub progress_active_color: Value<Color>,
     pub progress_thumb_color: Value<Color>,
     pub volume_width: Dp,
+    pub playback_rate_width: Dp,
+    pub audio_track_width: Dp,
+    pub subtitle_track_width: Dp,
     pub control_button_size: Dp,
     pub control_icon_size: Dp,
     pub control_icon_color: Value<Color>,
@@ -31,8 +34,13 @@ pub struct VideoStyle {
     pub status_text_color: Value<Color>,
     pub status_background: Value<Color>,
     pub status_padding: Insets,
+    pub subtitle_text_color: Value<Color>,
+    pub subtitle_background: Value<Color>,
+    pub subtitle_padding: Insets,
+    pub subtitle_bottom_offset: Dp,
     pub time_text_style: TextStyle,
     pub status_text_style: TextStyle,
+    pub subtitle_text_style: TextStyle,
 }
 
 impl VideoStyle {
@@ -58,6 +66,9 @@ impl VideoStyle {
             progress_active_color: Value::Static(Color::hexa(0xFFFFFFFF)),
             progress_thumb_color: Value::Static(Color::hexa(0xFFFFFFFF)),
             volume_width: dp(92.0),
+            playback_rate_width: dp(84.0),
+            audio_track_width: dp(136.0),
+            subtitle_track_width: dp(136.0),
             control_button_size: dp(32.0),
             control_icon_size: dp(20.0),
             control_icon_color: Value::Static(Color::hexa(0xFFFFFFFF)),
@@ -67,8 +78,13 @@ impl VideoStyle {
             status_text_color: Value::Static(Color::hexa(0xFFFFFFFF)),
             status_background: Value::Static(Color::hexa(0x0000008F)),
             status_padding: Insets::symmetric(theme.spacing.sm, theme.spacing.xs),
+            subtitle_text_color: Value::Static(Color::hexa(0xFFFFFFFF)),
+            subtitle_background: Value::Static(Color::hexa(0x000000B8)),
+            subtitle_padding: Insets::symmetric(theme.spacing.sm, theme.spacing.xs),
+            subtitle_bottom_offset: theme.spacing.md,
             time_text_style: theme.typography.label.clone(),
             status_text_style: theme.typography.label_small.clone(),
+            subtitle_text_style: theme.typography.body_small.clone(),
         }
     }
 }

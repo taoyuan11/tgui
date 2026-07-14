@@ -8,18 +8,20 @@ impl PresentWorker {
             return COMMAND_POLL_INTERVAL;
         }
 
-        let Some(next_frame) = self.shared_queue.front(self.current_generation) else {
+        let Some(next_frame_position) = self.shared_queue.front_position(self.current_generation)
+        else {
             return STEP_IDLE_SLEEP;
         };
         let playback = self.playback_position();
         let due_position = playback.saturating_add(VIDEO_PRESENT_TOLERANCE);
-        if due_position >= next_frame.position {
+        if due_position >= next_frame_position {
             return Duration::ZERO;
         }
-        next_frame
-            .position
-            .saturating_sub(due_position)
-            .min(COMMAND_POLL_INTERVAL)
+        media_delta_to_wall_time(
+            next_frame_position.saturating_sub(due_position),
+            self.playback_rate,
+        )
+        .min(COMMAND_POLL_INTERVAL)
     }
 
     pub(super) fn playback_position(&self) -> Duration {
@@ -30,9 +32,13 @@ impl PresentWorker {
         }
 
         match self.software_play_started_at {
-            Some(started_at) => self
-                .software_paused_position
-                .saturating_add(started_at.elapsed()),
+            Some(started_at) => {
+                self.software_paused_position
+                    .saturating_add(media_delta_from_wall_time(
+                        started_at.elapsed(),
+                        self.playback_rate,
+                    ))
+            }
             None => self.software_paused_position,
         }
     }
@@ -42,7 +48,7 @@ impl PresentWorker {
             .current_audio_clock
             .as_ref()
             .map(|clock| current_position.saturating_add(clock.buffered_duration()));
-        let video_buffer_end = self.video_buffered_position();
+        let video_buffer_end = self.shared_queue.tail_end_position(self.current_generation);
 
         match (audio_buffer_end, video_buffer_end) {
             (Some(a), Some(v)) => Some(a.min(v)),
@@ -54,13 +60,16 @@ impl PresentWorker {
 
     pub(super) fn present_due_frames(&mut self) {
         loop {
-            let Some(next_frame) = self.shared_queue.front(self.current_generation) else {
+            let Some(due_position) = self.due_playback_position() else {
                 break;
             };
-            if !self.is_frame_due(next_frame.position) {
+            let Some(frame) = self
+                .shared_queue
+                .pop_front_due(self.current_generation, due_position)
+            else {
                 break;
-            }
-            let _ = self.present_next_frame();
+            };
+            self.present_frame(frame);
         }
     }
 
@@ -68,9 +77,12 @@ impl PresentWorker {
         let frame = self
             .shared_queue
             .pop_front_matching(self.current_generation)?;
+        Some(self.present_frame(frame))
+    }
+
+    fn present_frame(&mut self, frame: QueuedVideoFrame) -> Duration {
         let position = frame.position;
-        let texture = frame.texture;
-        *self.latest_frame.lock() = Some(texture.clone());
+        *self.latest_frame.lock() = Some(frame.frame.clone());
         let surface = self.shared.surface.get();
         if surface.loading
             || surface.error.is_some()
@@ -83,8 +95,6 @@ impl PresentWorker {
                 error: None,
             });
         }
-        self.shared.publish_frame();
-
         self.last_presented_position = position;
         if self.current_audio_clock.is_none() {
             self.software_paused_position = position;
@@ -104,23 +114,26 @@ impl PresentWorker {
             metrics.video_height = self.current_video_size.height;
             self.shared.metrics.set(metrics);
         }
-        Some(position)
+        self.shared.publish_frame();
+        position
     }
 
-    pub(super) fn is_frame_due(&self, position: Duration) -> bool {
+    fn due_playback_position(&self) -> Option<Duration> {
         if let Some(audio_clock) = self.current_audio_clock.as_ref() {
             if !audio_clock.has_started_clock() {
-                return false;
+                return None;
             }
-            let playback = self
-                .current_start_position
-                .saturating_add(audio_clock.position());
-            return playback.saturating_add(VIDEO_PRESENT_TOLERANCE) >= position;
+            return Some(
+                self.current_start_position
+                    .saturating_add(audio_clock.position())
+                    .saturating_add(VIDEO_PRESENT_TOLERANCE),
+            );
         }
 
-        self.playback_position()
-            .saturating_add(VIDEO_PRESENT_TOLERANCE)
-            >= position
+        Some(
+            self.playback_position()
+                .saturating_add(VIDEO_PRESENT_TOLERANCE),
+        )
     }
 
     pub(super) fn evaluate_playback_state(&mut self) {
@@ -178,22 +191,10 @@ impl PresentWorker {
 
     pub(super) fn video_buffered_duration(&self) -> Duration {
         let baseline = self.last_presented_position.max(self.playback_position());
-        self.video_buffered_position()
+        self.shared_queue
+            .tail_end_position(self.current_generation)
             .map(|end| end.saturating_sub(baseline))
             .unwrap_or(Duration::ZERO)
-    }
-
-    fn video_buffered_position(&self) -> Option<Duration> {
-        let ready = self.shared_queue.tail_end_position(self.current_generation);
-        let demuxed = (self.buffer_snapshot.generation == self.current_generation)
-            .then_some(self.buffer_snapshot.video_buffered_position)
-            .flatten();
-        match (ready, demuxed) {
-            (Some(ready), Some(demuxed)) => Some(ready.max(demuxed)),
-            (Some(ready), None) => Some(ready),
-            (None, Some(demuxed)) => Some(demuxed),
-            (None, None) => None,
-        }
     }
 
     pub(super) fn can_start_playback(&self) -> bool {
@@ -203,7 +204,8 @@ impl PresentWorker {
             self.video_buffered_duration(),
             self.current_buffering_profile.video_start_buffer_target,
             self.remaining_duration(),
-            self.buffer_snapshot.video_packet_cap_reached,
+            self.shared_queue.ready_frame_count(self.current_generation)
+                >= self.current_buffering_profile.video_max_packet_count,
         );
         (audio_ok && video_ok)
             || startup_playback_blocked_by_memory_limit(
@@ -221,7 +223,8 @@ impl PresentWorker {
             self.video_buffered_duration(),
             self.current_buffering_profile.video_resume_buffer_target,
             self.remaining_duration(),
-            self.buffer_snapshot.video_packet_cap_reached,
+            self.shared_queue.ready_frame_count(self.current_generation)
+                >= self.current_buffering_profile.video_max_packet_count,
         );
         (audio_ok && video_ok)
             || startup_playback_blocked_by_memory_limit(
@@ -257,4 +260,12 @@ impl PresentWorker {
             && (self.shared_queue.has_frames(self.current_generation)
                 || !self.audio_buffered_duration().is_zero())
     }
+}
+
+fn media_delta_from_wall_time(wall_time: Duration, playback_rate: f32) -> Duration {
+    Duration::from_secs_f64(wall_time.as_secs_f64() * playback_rate.max(0.001) as f64)
+}
+
+fn media_delta_to_wall_time(media_delta: Duration, playback_rate: f32) -> Duration {
+    Duration::from_secs_f64(media_delta.as_secs_f64() / playback_rate.max(0.001) as f64)
 }

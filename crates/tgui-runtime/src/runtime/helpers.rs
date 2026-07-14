@@ -1,7 +1,9 @@
 use crate::foundation::window_control::WindowResizeDirection;
 use crate::platform::cursor::CursorIcon;
 use crate::platform::event::{MouseButton, MouseScrollDelta};
-use crate::platform::keyboard::{has_meta_modifier, ModifiersState};
+#[cfg(target_os = "macos")]
+use crate::platform::keyboard::has_meta_modifier;
+use crate::platform::keyboard::ModifiersState;
 use crate::platform::window::ResizeDirection;
 use crate::text::font::{FontManager, TextFontRequest, TextLayoutInfo};
 use crate::ui::theme::Theme;

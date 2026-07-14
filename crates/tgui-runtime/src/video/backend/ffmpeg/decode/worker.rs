@@ -18,6 +18,9 @@ struct DecodeWorker {
     playback_clock: SharedPlaybackClock,
     volume: f32,
     muted: bool,
+    playback_rate: f32,
+    audio_track_selection: VideoAudioTrackSelection,
+    subtitle_track_selection: VideoSubtitleTrackSelection,
     buffer_memory_limit_bytes: u64,
     target_raster: Option<RasterRequest>,
     session: Option<DecodeSession>,
@@ -37,6 +40,9 @@ impl DecodeWorker {
             playback_clock,
             volume: 1.0,
             muted: false,
+            playback_rate: 1.0,
+            audio_track_selection: VideoAudioTrackSelection::Auto,
+            subtitle_track_selection: VideoSubtitleTrackSelection::Disabled,
             buffer_memory_limit_bytes: DEFAULT_VIDEO_BUFFER_MEMORY_LIMIT_BYTES,
             target_raster: None,
             session: None,
@@ -45,34 +51,51 @@ impl DecodeWorker {
 
     fn run(&mut self) {
         loop {
-            let can_step = self
-                .session
-                .as_ref()
-                .is_some_and(|session| !session.eof_notified);
-            let command = if can_step {
+            let command_result = if self.session.is_some() {
                 match self.command_rx.try_recv() {
-                    Ok(command) => Some(command),
-                    Err(TryRecvError::Empty) => None,
-                    Err(TryRecvError::Disconnected) => break,
+                    Ok(command) => Ok(command),
+                    Err(TryRecvError::Empty) => Err(RecvTimeoutError::Timeout),
+                    Err(TryRecvError::Disconnected) => Err(RecvTimeoutError::Disconnected),
                 }
             } else {
-                match self.command_rx.recv() {
-                    Ok(command) => Some(command),
-                    Err(_) => break,
-                }
+                self.command_rx.recv_timeout(COMMAND_POLL_INTERVAL)
             };
 
-            if let Some(command) = command {
-                if !self.handle_command_batch(command) {
-                    break;
+            match command_result {
+                Ok(command) => {
+                    if !self.handle_command(command) {
+                        break;
+                    }
                 }
+                Err(RecvTimeoutError::Timeout) => {}
+                Err(RecvTimeoutError::Disconnected) => break,
             }
 
             let Some(session) = self.session.as_mut() else {
                 continue;
             };
 
-            match session.step() {
+            let step_result = session.step();
+            if step_result.is_ok() {
+                let generation = session.generation;
+                for cue in session.drain_subtitle_cues() {
+                    let _ = self
+                        .event_tx
+                        .send(DecodeEvent::SubtitleCue(SubtitleCueEvent {
+                            generation,
+                            cue: cue.cue,
+                            placement: cue.placement,
+                            style: cue.style,
+                        }));
+                }
+                for cue in session.drain_subtitle_bitmap_cues() {
+                    let _ = self.event_tx.send(DecodeEvent::SubtitleBitmapCue(
+                        SubtitleBitmapCueEvent { generation, cue },
+                    ));
+                }
+            }
+
+            match step_result {
                 Ok(DecodeStepOutcome::Continue { snapshot_changed }) => {
                     if snapshot_changed {
                         let _ = self
@@ -94,6 +117,7 @@ impl DecodeWorker {
                         .event_tx
                         .send(DecodeEvent::BufferSnapshot(session.snapshot()));
                     let _ = self.event_tx.send(DecodeEvent::EofDrained { generation });
+                    thread::sleep(STEP_IDLE_SLEEP);
                 }
                 Err(error) => {
                     let generation = session.generation;
@@ -107,39 +131,6 @@ impl DecodeWorker {
         }
     }
 
-    fn handle_command_batch(&mut self, first: DecodeCommand) -> bool {
-        let mut pending_open = None;
-        let mut next = Some(first);
-
-        loop {
-            if let Some(command) = next.take() {
-                match command {
-                    command @ (DecodeCommand::Load { .. }
-                    | DecodeCommand::Seek { .. }
-                    | DecodeCommand::Stop { .. }) => {
-                        pending_open = Some(command);
-                    }
-                    DecodeCommand::Shutdown => return false,
-                    command => {
-                        if !self.handle_command(command) {
-                            return false;
-                        }
-                    }
-                }
-            }
-
-            next = match self.command_rx.try_recv() {
-                Ok(command) => Some(command),
-                Err(TryRecvError::Empty) => break,
-                Err(TryRecvError::Disconnected) => return false,
-            };
-        }
-
-        pending_open
-            .map(|command| self.handle_command(command))
-            .unwrap_or(true)
-    }
-
     fn handle_command(&mut self, command: DecodeCommand) -> bool {
         match command {
             DecodeCommand::Load { generation, source } => {
@@ -150,7 +141,7 @@ impl DecodeWorker {
                 source,
                 position,
             } => {
-                self.seek_or_open_session(generation, source, position);
+                self.open_session(OpenReason::Seek, generation, source, position);
             }
             DecodeCommand::SetPlaying {
                 generation,
@@ -174,6 +165,18 @@ impl DecodeWorker {
                     session.set_muted(muted);
                 }
             }
+            DecodeCommand::SetPlaybackRate(rate) => {
+                self.playback_rate = normalize_playback_rate(rate);
+                if let Some(session) = self.session.as_mut() {
+                    session.set_playback_rate(self.playback_rate);
+                }
+            }
+            DecodeCommand::SetAudioTrackSelection(selection) => {
+                self.audio_track_selection = selection;
+            }
+            DecodeCommand::SetSubtitleTrackSelection(selection) => {
+                self.subtitle_track_selection = selection;
+            }
             DecodeCommand::SetBufferMemoryLimitBytes(bytes) => {
                 self.buffer_memory_limit_bytes = bytes;
                 if let Some(session) = self.session.as_mut() {
@@ -186,46 +189,15 @@ impl DecodeWorker {
                     session.set_target_raster(raster);
                 }
             }
-            DecodeCommand::Stop { generation } => {
-                if self.shared_queue.accepted_generation() == generation {
-                    self.session = None;
-                    self.playback_clock.set_position(Duration::ZERO);
-                }
+            DecodeCommand::Stop => {
+                self.session = None;
+                self.shared_queue.clear_all();
+                self.playback_clock.set_position(Duration::ZERO);
             }
             DecodeCommand::Shutdown => return false,
         }
 
         true
-    }
-
-    fn seek_or_open_session(
-        &mut self,
-        generation: u64,
-        source: VideoSource,
-        position: Duration,
-    ) {
-        if self.shared_queue.accepted_generation() != generation {
-            return;
-        }
-
-        let reuse_result = self
-            .session
-            .as_mut()
-            .filter(|session| session.source() == &source)
-            .map(|session| session.seek_in_place(generation, position));
-
-        if let Some(Ok((stream_opened, first_frame_position))) = reuse_result {
-            self.publish_opened_session(stream_opened, first_frame_position);
-            if let Some(session) = self.session.as_ref() {
-                let _ = self
-                    .event_tx
-                    .send(DecodeEvent::BufferSnapshot(session.snapshot()));
-            }
-            return;
-        }
-
-        self.session = None;
-        self.open_session(OpenReason::Seek, generation, source, position);
     }
 
     fn open_session(
@@ -235,11 +207,7 @@ impl DecodeWorker {
         source: VideoSource,
         position: Duration,
     ) {
-        if self.shared_queue.accepted_generation() != generation {
-            return;
-        }
-
-        self.session = None;
+        self.shared_queue.replace_generation(generation);
 
         match DecodeSession::open(
             reason,
@@ -248,13 +216,22 @@ impl DecodeWorker {
             position,
             self.volume,
             self.muted,
+            self.playback_rate,
+            self.audio_track_selection,
+            self.subtitle_track_selection,
             self.buffer_memory_limit_bytes,
             self.target_raster,
             self.shared_queue.clone(),
             self.playback_clock.clone(),
         ) {
             Ok((session, stream_opened, first_frame_position)) => {
-                self.publish_opened_session(stream_opened, first_frame_position);
+                let _ = self
+                    .event_tx
+                    .send(DecodeEvent::StreamOpened(stream_opened.clone()));
+                let _ = self.event_tx.send(DecodeEvent::FirstFrameReady {
+                    generation,
+                    _position: first_frame_position,
+                });
                 let _ = self
                     .event_tx
                     .send(DecodeEvent::BufferSnapshot(session.snapshot()));
@@ -269,19 +246,79 @@ impl DecodeWorker {
             }
         }
     }
+}
 
-    fn publish_opened_session(
-        &self,
-        stream_opened: StreamOpenedEvent,
-        first_frame_position: Duration,
-    ) {
-        let generation = stream_opened.generation;
-        let _ = self
-            .event_tx
-            .send(DecodeEvent::StreamOpened(stream_opened));
-        let _ = self.event_tx.send(DecodeEvent::FirstFrameReady {
-            generation,
-            _position: first_frame_position,
-        });
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    use crossbeam_channel::unbounded;
+
+    use super::*;
+
+    #[test]
+    fn stop_command_clears_queue_and_clock_without_exiting_worker() {
+        let (_command_tx, command_rx) = unbounded();
+        let (event_tx, _event_rx) = unbounded();
+        let shared_queue = Arc::new(SharedVideoQueue::new());
+        let playback_clock = SharedPlaybackClock::default();
+        let mut worker = DecodeWorker::new(
+            command_rx,
+            event_tx,
+            shared_queue.clone(),
+            playback_clock.clone(),
+        );
+
+        shared_queue.replace_generation(3);
+        shared_queue.push_frames(vec![QueuedVideoFrame {
+            generation: 3,
+            position: Duration::ZERO,
+            end_position: Duration::from_millis(33),
+            frame: VideoRenderFrame::rgba(Arc::new(TextureFrame::new(1, 1, vec![255; 4]))),
+            compressed_bytes: 4,
+            decoded_bytes: 4,
+        }]);
+        playback_clock.set_position(Duration::from_secs(2));
+
+        assert!(worker.handle_command(DecodeCommand::Stop));
+
+        assert_eq!(shared_queue.ready_frame_count(3), 0);
+        assert_eq!(playback_clock.position(), Duration::ZERO);
+    }
+
+    #[test]
+    fn set_playback_rate_updates_decode_worker_state() {
+        let (_command_tx, command_rx) = unbounded();
+        let (event_tx, _event_rx) = unbounded();
+        let shared_queue = Arc::new(SharedVideoQueue::new());
+        let playback_clock = SharedPlaybackClock::default();
+        let mut worker = DecodeWorker::new(command_rx, event_tx, shared_queue, playback_clock);
+
+        assert!(worker.handle_command(DecodeCommand::SetPlaybackRate(2.25)));
+        assert_eq!(worker.playback_rate, 2.25);
+
+        assert!(worker.handle_command(DecodeCommand::SetPlaybackRate(99.0)));
+        assert_eq!(worker.playback_rate, 4.0);
+    }
+
+    #[test]
+    fn set_subtitle_track_selection_updates_decode_worker_state() {
+        let (_command_tx, command_rx) = unbounded();
+        let (event_tx, _event_rx) = unbounded();
+        let shared_queue = Arc::new(SharedVideoQueue::new());
+        let playback_clock = SharedPlaybackClock::default();
+        let mut worker = DecodeWorker::new(command_rx, event_tx, shared_queue, playback_clock);
+
+        assert!(
+            worker.handle_command(DecodeCommand::SetSubtitleTrackSelection(
+                VideoSubtitleTrackSelection::Stream(9),
+            ))
+        );
+
+        assert_eq!(
+            worker.subtitle_track_selection,
+            VideoSubtitleTrackSelection::Stream(9)
+        );
     }
 }

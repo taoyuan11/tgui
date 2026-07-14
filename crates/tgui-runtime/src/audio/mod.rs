@@ -17,7 +17,9 @@ pub mod bench_support {
     };
     use crate::foundation::error::TguiError;
 
-    pub use crate::audio::backend::shared::audio_output_bench_support::BenchAudioOutput;
+    pub use crate::audio::backend::shared::audio_output_bench_support::{
+        AudioOutputDiagnostics, BenchAudioOutput,
+    };
 
     pub fn make_output(channels: u16, volume: f32, muted: bool, playing: bool) -> BenchAudioOutput {
         raw::make_output(channels, volume, muted, playing)
@@ -37,6 +39,26 @@ pub mod bench_support {
 
     pub fn played_frames(output: &BenchAudioOutput) -> u64 {
         raw::played_frames(output)
+    }
+
+    pub fn queued_samples(output: &BenchAudioOutput) -> u64 {
+        raw::queued_samples(output)
+    }
+
+    pub fn underflowing(output: &BenchAudioOutput) -> bool {
+        raw::underflowing(output)
+    }
+
+    pub fn set_playback_rate(output: &BenchAudioOutput, rate: f32) {
+        raw::set_playback_rate(output, rate);
+    }
+
+    pub fn reset_diagnostics() {
+        raw::reset_diagnostics();
+    }
+
+    pub fn diagnostics() -> AudioOutputDiagnostics {
+        raw::diagnostics()
     }
 
     pub fn build_http_options(headers: &[(String, String)]) -> Result<(), TguiError> {

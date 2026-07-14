@@ -287,11 +287,11 @@ pub(crate) fn push_video_texture_or_placeholder<VM>(
     let target_frame = resolve_media_rect(content_frame, snapshot.intrinsic_size, video.fit);
     let target_raster = RasterRequest::from_frame(target_frame, context.units.scale_factor());
     video.controller.set_target_raster(target_raster);
-    let current_frame = video.controller.current_frame();
+    let has_current_frame = video.controller.current_render_frame().is_some();
     let use_surface_background =
-        snapshot.loading || (current_frame.is_none() && snapshot.error.is_none());
+        snapshot.loading || (!has_current_frame && snapshot.error.is_none());
 
-    if current_frame.is_some() {
+    if has_current_frame {
         computed.scene.push_video_texture(VideoTexturePrimitive {
             controller: video.controller.clone(),
             frame: target_frame,
@@ -302,6 +302,24 @@ pub(crate) fn push_video_texture_or_placeholder<VM>(
             clip_rect,
             clip_mask,
         });
+        if let Some(cue) = video.controller.current_subtitle_bitmap().get() {
+            if let Some(frame) =
+                video_subtitle_bitmap_frame(&cue, target_frame, snapshot.intrinsic_size)
+            {
+                computed.scene.push_texture(TexturePrimitive {
+                    texture: Arc::new(cue.texture_frame()),
+                    media_key: None,
+                    media_layout: None,
+                    frame,
+                    quad: None,
+                    uv_rect: None,
+                    corner_radius: 0.0,
+                    opacity: opacity.clamp(0.0, 1.0),
+                    clip_rect,
+                    clip_mask,
+                });
+            }
+        }
         return;
     }
 
@@ -321,6 +339,31 @@ pub(crate) fn push_video_texture_or_placeholder<VM>(
         loading_background,
         use_surface_background,
     );
+}
+
+#[cfg(feature = "video")]
+fn video_subtitle_bitmap_frame(
+    cue: &crate::video::VideoSubtitleBitmapCue,
+    target_frame: Rect,
+    intrinsic_size: IntrinsicSize,
+) -> Option<Rect> {
+    if target_frame.is_empty()
+        || cue.width == 0
+        || cue.height == 0
+        || intrinsic_size.width <= 0.0
+        || intrinsic_size.height <= 0.0
+        || !intrinsic_size.width.is_finite()
+        || !intrinsic_size.height.is_finite()
+    {
+        return None;
+    }
+
+    Some(Rect::new(
+        target_frame.x + target_frame.width * (cue.x as f32 / intrinsic_size.width),
+        target_frame.y + target_frame.height * (cue.y as f32 / intrinsic_size.height),
+        target_frame.width * (cue.width as f32 / intrinsic_size.width),
+        target_frame.height * (cue.height as f32 / intrinsic_size.height),
+    ))
 }
 
 pub(crate) fn push_media_placeholder(

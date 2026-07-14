@@ -79,11 +79,15 @@ impl Renderer {
             brush_pipeline: pipelines.brush_pipeline,
             mesh_pipeline: pipelines.mesh_pipeline,
             scene_text_pipeline: pipelines.scene_text_pipeline,
+            #[cfg(feature = "video")]
+            video_yuv_pipeline: pipelines.video_yuv_pipeline,
             text_pipeline: pipelines.text_pipeline,
             backdrop_blur_pipeline: pipelines.backdrop_blur_pipeline,
             backdrop_composite_pipeline: pipelines.backdrop_composite_pipeline,
             canvas_composite_pipeline: pipelines.canvas_composite_pipeline,
             text_bind_group_layout: pipelines.text_bind_group_layout,
+            #[cfg(feature = "video")]
+            video_yuv_bind_group_layout: pipelines.video_yuv_bind_group_layout,
             present_bind_group_layout: pipelines.present_bind_group_layout,
             mesh_clip_bind_group_layout: pipelines.mesh_clip_bind_group_layout,
             backdrop_blur_bind_group_layout: pipelines.backdrop_blur_bind_group_layout,
@@ -110,6 +114,8 @@ impl Renderer {
             active_text_keys_scratch: HashSet::new(),
             active_texture_keys_scratch: HashSet::new(),
             cache_liveness_scene_serial: None,
+            #[cfg(feature = "video")]
+            video_yuv_texture_cache: HashMap::new(),
             vertex_pool,
             retained_prepare_cache: prepare::RetainedPrepareCache::default(),
             prepared_command_scratch: prepare::PreparedCommandScratch::default(),
@@ -227,11 +233,15 @@ impl Renderer {
             brush_pipeline: pipelines.brush_pipeline,
             mesh_pipeline: pipelines.mesh_pipeline,
             scene_text_pipeline: pipelines.scene_text_pipeline,
+            #[cfg(feature = "video")]
+            video_yuv_pipeline: pipelines.video_yuv_pipeline,
             text_pipeline: pipelines.text_pipeline,
             backdrop_blur_pipeline: pipelines.backdrop_blur_pipeline,
             backdrop_composite_pipeline: pipelines.backdrop_composite_pipeline,
             canvas_composite_pipeline: pipelines.canvas_composite_pipeline,
             text_bind_group_layout: pipelines.text_bind_group_layout,
+            #[cfg(feature = "video")]
+            video_yuv_bind_group_layout: pipelines.video_yuv_bind_group_layout,
             present_bind_group_layout: pipelines.present_bind_group_layout,
             mesh_clip_bind_group_layout: pipelines.mesh_clip_bind_group_layout,
             backdrop_blur_bind_group_layout: pipelines.backdrop_blur_bind_group_layout,
@@ -258,6 +268,8 @@ impl Renderer {
             active_text_keys_scratch: HashSet::new(),
             active_texture_keys_scratch: HashSet::new(),
             cache_liveness_scene_serial: None,
+            #[cfg(feature = "video")]
+            video_yuv_texture_cache: HashMap::new(),
             vertex_pool,
             retained_prepare_cache: prepare::RetainedPrepareCache::default(),
             prepared_command_scratch: prepare::PreparedCommandScratch::default(),

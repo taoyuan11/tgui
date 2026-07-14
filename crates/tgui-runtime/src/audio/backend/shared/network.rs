@@ -1,29 +1,10 @@
+use std::time::Duration;
+
 use ffmpeg_next as ffmpeg;
 
 use crate::foundation::error::TguiError;
 
-pub(crate) enum PacketRead {
-    Packet(ffmpeg::Packet),
-    Retry,
-    Eof,
-}
-
-pub(crate) fn read_ffmpeg_packet(
-    kind: &str,
-    input: &mut ffmpeg::format::context::Input,
-) -> Result<PacketRead, TguiError> {
-    let mut packet = ffmpeg::Packet::empty();
-    match packet.read(input) {
-        Ok(()) => Ok(PacketRead::Packet(packet)),
-        Err(ffmpeg::Error::Eof) => Ok(PacketRead::Eof),
-        Err(ffmpeg::Error::Other {
-            errno: ffmpeg::error::EAGAIN,
-        }) => Ok(PacketRead::Retry),
-        Err(error) => Err(TguiError::Media(format!(
-            "failed to read {kind} packet: {error}"
-        ))),
-    }
-}
+const FFMPEG_NETWORK_IO_TIMEOUT: Duration = Duration::from_secs(15);
 
 pub(crate) fn validate_ffmpeg_headers(
     kind: &str,
@@ -48,6 +29,10 @@ pub(crate) fn validate_ffmpeg_headers(
     }
 
     Ok(())
+}
+
+fn ffmpeg_timeout_micros(duration: Duration) -> String {
+    duration.as_micros().min(i64::MAX as u128).to_string()
 }
 
 pub(crate) fn ffmpeg_http_input_options(
@@ -78,7 +63,9 @@ pub(crate) fn ffmpeg_http_input_options(
     options.set("reconnect_on_network_error", "1");
     options.set("reconnect_on_http_error", "4xx,5xx");
     options.set("reconnect_delay_max", "2");
-    options.set("rw_timeout", "15000000");
+    let io_timeout = ffmpeg_timeout_micros(FFMPEG_NETWORK_IO_TIMEOUT);
+    options.set("timeout", &io_timeout);
+    options.set("rw_timeout", &io_timeout);
     if let Some(headers) = custom_headers {
         options.set("headers", &headers);
     }

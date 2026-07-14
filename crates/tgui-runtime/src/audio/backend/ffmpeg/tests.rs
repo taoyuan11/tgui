@@ -1,15 +1,16 @@
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crossbeam_channel::unbounded;
 
 use super::super::{AudioBackend, BackendSharedState, DEFAULT_AUDIO_BUFFER_MEMORY_LIMIT_BYTES};
 use super::worker::AudioWorker;
-use super::{BackendCommand, FfmpegAudioBackend};
+use super::{AudioWorkerHandle, BackendCommand, FfmpegAudioBackend};
 use crate::animation::AnimationCoordinator;
-use crate::audio::{AudioMetrics, AudioPlaybackState, AudioSource};
+use crate::audio::{AudioController, AudioMetrics, AudioPlaybackState, AudioSource};
 use crate::foundation::binding::{InvalidationSignal, ViewModelContext};
+use crate::foundation::error::TguiError;
 
 fn test_context() -> ViewModelContext {
     ViewModelContext::new(InvalidationSignal::new(), AnimationCoordinator::default())
@@ -22,6 +23,7 @@ fn test_shared(ctx: &ViewModelContext) -> BackendSharedState {
         volume: ctx.state(1.0),
         muted: ctx.state(false),
         looping: ctx.state(false),
+        playback_rate: ctx.state(1.0),
         metrics_observed: Arc::new(AtomicBool::new(false)),
         buffer_memory_limit_bytes: ctx.state(DEFAULT_AUDIO_BUFFER_MEMORY_LIMIT_BYTES),
         error: ctx.state(None),
@@ -44,8 +46,72 @@ fn backend_creation_and_preload_settings_do_not_start_worker() {
     AudioBackend::set_volume(&backend, 0.5);
     AudioBackend::set_muted(&backend, true);
     AudioBackend::set_looping(&backend, true);
+    AudioBackend::set_playback_rate(&backend, 1.5);
     AudioBackend::set_buffer_memory_limit_bytes(&backend, 16 * 1024 * 1024);
 
+    assert!(backend
+        .worker
+        .lock()
+        .expect("audio worker lock poisoned")
+        .is_none());
+}
+
+#[test]
+fn controller_load_rejects_invalid_source_without_starting_worker() {
+    let ctx = test_context();
+    let shared = test_shared(&ctx);
+    let backend = Arc::new(FfmpegAudioBackend::new(shared.clone()));
+    let controller = AudioController::from_parts(shared.clone(), backend.clone());
+    let source =
+        AudioSource::url("https://example.com/demo.mp3").with_header("Bad\nHeader", "value");
+
+    let error = controller
+        .load(source)
+        .expect_err("invalid header should fail synchronously");
+
+    assert!(matches!(
+        error,
+        TguiError::Media(message) if message.contains("invalid line break")
+    ));
+    assert!(backend
+        .worker
+        .lock()
+        .expect("audio worker lock poisoned")
+        .is_none());
+    assert!(matches!(
+        controller.playback_state().get(),
+        AudioPlaybackState::Error(message) if message.contains("invalid line break")
+    ));
+    assert!(controller
+        .error()
+        .get()
+        .is_some_and(|message| message.contains("invalid line break")));
+    assert_eq!(
+        controller.snapshot(),
+        crate::audio::AudioSnapshot {
+            loading: false,
+            error: controller.error().get(),
+        }
+    );
+}
+
+#[test]
+fn shutdown_returns_after_timeout_when_worker_is_blocked() {
+    let ctx = test_context();
+    let shared = test_shared(&ctx);
+    let backend = FfmpegAudioBackend::new(shared);
+    let (command_tx, _command_rx) = unbounded();
+    let worker = std::thread::spawn(|| std::thread::sleep(Duration::from_millis(250)));
+    *backend.worker.lock().expect("audio worker lock poisoned") =
+        Some(AudioWorkerHandle { command_tx, worker });
+
+    let started = Instant::now();
+    AudioBackend::shutdown(&backend);
+
+    assert!(
+        started.elapsed() < Duration::from_millis(200),
+        "shutdown should detach a blocked worker after the configured timeout"
+    );
     assert!(backend
         .worker
         .lock()
@@ -134,6 +200,26 @@ fn looping_control_updates_shared_state() {
 
     assert!(worker.handle_command(BackendCommand::SetLooping(false)));
     assert!(!worker.looping, "worker looping should be disabled");
+}
+
+#[test]
+fn playback_rate_updates_worker_and_shared_state() {
+    let ctx = test_context();
+    let shared = test_shared(&ctx);
+    let (_tx, rx) = unbounded();
+    let mut worker = AudioWorker::new(rx, shared.clone());
+
+    assert!(worker.handle_command(BackendCommand::SetPlaybackRate(2.5)));
+    assert_eq!(worker.playback_rate, 2.5);
+    assert_eq!(shared.playback_rate.get(), 2.5);
+
+    assert!(worker.handle_command(BackendCommand::SetPlaybackRate(99.0)));
+    assert_eq!(worker.playback_rate, 4.0);
+    assert_eq!(shared.playback_rate.get(), 4.0);
+
+    assert!(worker.handle_command(BackendCommand::SetPlaybackRate(f32::NAN)));
+    assert_eq!(worker.playback_rate, 1.0);
+    assert_eq!(shared.playback_rate.get(), 1.0);
 }
 
 #[test]

@@ -266,10 +266,15 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         self.window = Some(window);
         self.initialize_platform_window_binding_state(window_theme);
         self.initialize_accessibility_adapter();
+        #[cfg(feature = "video")]
+        self.notify_video_surface_restored();
 
         if !self.render_hidden_frame(event_loop) {
             return;
         }
+
+        #[cfg(feature = "video")]
+        self.notify_video_app_foreground();
 
         if let Some(window) = self.window.as_ref() {
             window.request_redraw();

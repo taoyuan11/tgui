@@ -1,6 +1,42 @@
 use super::*;
 
 impl<VM: 'static> BoundRuntimeHandler<VM> {
+    #[cfg(feature = "video")]
+    fn active_video_controllers(&self) -> Vec<crate::video::VideoController> {
+        self.widget_tree
+            .as_ref()
+            .map(|tree| tree.video_controllers(&self.theme))
+            .unwrap_or_default()
+    }
+
+    #[cfg(feature = "video")]
+    pub(in crate::runtime) fn notify_video_surface_lost(&self) {
+        for controller in self.active_video_controllers() {
+            controller.notify_surface_lost();
+        }
+    }
+
+    #[cfg(feature = "video")]
+    pub(in crate::runtime) fn notify_video_surface_restored(&self) {
+        for controller in self.active_video_controllers() {
+            controller.notify_surface_restored();
+        }
+    }
+
+    #[cfg(feature = "video")]
+    pub(in crate::runtime) fn notify_video_app_background(&self) {
+        for controller in self.active_video_controllers() {
+            controller.notify_app_background();
+        }
+    }
+
+    #[cfg(feature = "video")]
+    pub(in crate::runtime) fn notify_video_app_foreground(&self) {
+        for controller in self.active_video_controllers() {
+            controller.notify_app_foreground();
+        }
+    }
+
     pub(in crate::runtime) fn dispatch_media_events(&mut self) {
         let Some(tree) = self.widget_tree.as_ref() else {
             self.media_event_states.clear();

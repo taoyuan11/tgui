@@ -34,11 +34,13 @@ use crate::ui::widget::{
 use crate::ui::widget::{Drawer, DrawerPlacement};
 #[cfg(feature = "video")]
 use crate::video::backend::{
-    BackendSharedState, VideoBackend, DEFAULT_VIDEO_BUFFER_MEMORY_LIMIT_BYTES,
+    BackendSharedState, VideoBackend, VideoRenderFrame, DEFAULT_VIDEO_BUFFER_MEMORY_LIMIT_BYTES,
 };
 #[cfg(feature = "video")]
 use crate::video::{
-    Video, VideoController, VideoMetrics, VideoPlaybackState, VideoSize, VideoSurface,
+    Video, VideoAudioTrack, VideoAudioTrackSelection, VideoController, VideoMetrics,
+    VideoPlaybackState, VideoSize, VideoSubtitleCue, VideoSubtitleCuePlacement, VideoSubtitleTrack,
+    VideoSubtitleTrackSelection, VideoSurface,
 };
 
 const ONE_BY_ONE_GIF: &[u8] = &[
@@ -295,8 +297,34 @@ fn test_context() -> ViewModelContext {
 
 #[cfg(feature = "video")]
 fn test_video_controller(snapshot: crate::video::VideoSurfaceSnapshot) -> VideoController {
+    test_video_controller_with_subtitle_bitmap(snapshot, None)
+}
+
+#[cfg(feature = "video")]
+fn test_video_controller_with_subtitle_bitmap(
+    snapshot: crate::video::VideoSurfaceSnapshot,
+    subtitle_bitmap: Option<crate::video::VideoSubtitleBitmapCue>,
+) -> VideoController {
+    let frame = snapshot.texture.clone().map(VideoRenderFrame::rgba);
+    test_video_controller_with_render_frame_and_subtitle_bitmap(snapshot, frame, subtitle_bitmap)
+}
+
+#[cfg(feature = "video")]
+fn test_video_controller_with_render_frame(
+    snapshot: crate::video::VideoSurfaceSnapshot,
+    frame: Option<VideoRenderFrame>,
+) -> VideoController {
+    test_video_controller_with_render_frame_and_subtitle_bitmap(snapshot, frame, None)
+}
+
+#[cfg(feature = "video")]
+fn test_video_controller_with_render_frame_and_subtitle_bitmap(
+    snapshot: crate::video::VideoSurfaceSnapshot,
+    frame: Option<VideoRenderFrame>,
+    subtitle_bitmap: Option<crate::video::VideoSubtitleBitmapCue>,
+) -> VideoController {
     struct StaticVideoBackend {
-        frame: Option<std::sync::Arc<crate::media::TextureFrame>>,
+        frame: Option<VideoRenderFrame>,
     }
 
     impl VideoBackend for StaticVideoBackend {
@@ -310,15 +338,18 @@ fn test_video_controller(snapshot: crate::video::VideoSurfaceSnapshot) -> VideoC
         fn seek(&self, _position: std::time::Duration) {}
         fn set_volume(&self, _volume: f32) {}
         fn set_muted(&self, _muted: bool) {}
+        fn set_looping(&self, _looping: bool) {}
+        fn set_playback_rate(&self, _rate: f32) {}
+        fn set_audio_track_selection(&self, _selection: VideoAudioTrackSelection) {}
+        fn set_subtitle_track_selection(&self, _selection: VideoSubtitleTrackSelection) {}
         fn set_buffer_memory_limit_bytes(&self, _bytes: u64) {}
         fn set_target_raster(&self, _raster: Option<crate::media::RasterRequest>) {}
-        fn current_frame(&self) -> Option<std::sync::Arc<crate::media::TextureFrame>> {
+        fn current_render_frame(&self) -> Option<VideoRenderFrame> {
             self.frame.clone()
         }
         fn shutdown(&self) {}
     }
 
-    let frame = snapshot.texture.clone();
     let ctx = test_context();
     let shared = BackendSharedState {
         playback_state: ctx.state(VideoPlaybackState::Ready),
@@ -331,6 +362,16 @@ fn test_video_controller(snapshot: crate::video::VideoSurfaceSnapshot) -> VideoC
         }),
         volume: ctx.state(1.0),
         muted: ctx.state(false),
+        looping: ctx.state(false),
+        playback_rate: ctx.state(1.0),
+        audio_tracks: ctx.state(Vec::new()),
+        audio_track_selection: ctx.state(VideoAudioTrackSelection::Auto),
+        subtitle_tracks: ctx.state(Vec::new()),
+        subtitle_track_selection: ctx.state(VideoSubtitleTrackSelection::Disabled),
+        current_subtitle: ctx.state(None),
+        current_subtitle_placement: ctx.state(None),
+        current_subtitle_style: ctx.state(None),
+        current_subtitle_bitmap: ctx.state(subtitle_bitmap),
         metrics_observed: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         buffer_memory_limit_bytes: ctx.state(DEFAULT_VIDEO_BUFFER_MEMORY_LIMIT_BYTES),
         video_size: ctx.state(VideoSize {

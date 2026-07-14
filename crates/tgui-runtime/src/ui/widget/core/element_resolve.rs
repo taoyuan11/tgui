@@ -491,7 +491,9 @@ impl<VM: 'static> Element<VM> {
                 );
                 apply_surface_style(&mut background, &mut visual, &resolved_style.surface);
                 video.background = resolved_style.surface.background.clone();
-                video.fit = resolved_style.fit;
+                if !video.fit_overridden {
+                    video.fit = resolved_style.fit;
+                }
                 ResolvedWidgetKind::VideoSurface {
                     video,
                     style: resolved_style,

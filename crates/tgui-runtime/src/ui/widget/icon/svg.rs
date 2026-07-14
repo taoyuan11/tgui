@@ -44,6 +44,7 @@ pub(crate) enum SvgIconId {
     Download,
     Folder,
     RefreshCw,
+    Repeat,
     ExternalLink,
     Menu,
     Filter,
@@ -361,6 +362,12 @@ fn icon_paths(icon: SvgIconId) -> &'static [SvgPath] {
             SvgPath::stroke("M21 12a9 9 0 0 1-15.5 6.2L3 16"),
             SvgPath::stroke("M3 12A9 9 0 0 1 18.5 5.8L21 8"),
             SvgPath::stroke("M21 4v4h-4M3 20v-4h4"),
+        ],
+        SvgIconId::Repeat => svg_paths![
+            SvgPath::stroke("M17 2l4 4l-4 4"),
+            SvgPath::stroke("M3 11V9a3 3 0 0 1 3-3h15"),
+            SvgPath::stroke("M7 22l-4-4l4-4"),
+            SvgPath::stroke("M21 13v2a3 3 0 0 1-3 3H3"),
         ],
         SvgIconId::ExternalLink => svg_paths![
             SvgPath::stroke("M14 4h6v6"),

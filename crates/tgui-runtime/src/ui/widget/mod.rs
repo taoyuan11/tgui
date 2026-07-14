@@ -93,6 +93,8 @@ pub use color_picker::{
     ColorPicker, ColorPickerChange, ColorPickerChangeTrigger, ColorPickerStyle,
 };
 pub use combobox::{AutoComplete, Combobox, ComboboxChange, ComboboxOption};
+#[cfg(all(test, feature = "video"))]
+pub(crate) use common::VideoTexturePrimitive;
 pub(crate) use common::{
     slider_effective_step, slider_resolve_value, slider_value_from_normalized,
     text_input_content_geometry, text_input_content_viewport, text_input_layout_width,

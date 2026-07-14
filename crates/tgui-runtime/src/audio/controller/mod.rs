@@ -6,7 +6,7 @@ use crate::foundation::binding::{Signal, ViewModelContext};
 use crate::foundation::error::TguiError;
 
 use super::backend::{
-    ffmpeg::FfmpegAudioBackend, AudioBackend, BackendSharedState,
+    ffmpeg::FfmpegAudioBackend, shared::normalize_playback_rate, AudioBackend, BackendSharedState,
     DEFAULT_AUDIO_BUFFER_MEMORY_LIMIT_BYTES,
 };
 use super::types::{AudioMetrics, AudioPlaybackState, AudioSnapshot, AudioSource};
@@ -42,6 +42,7 @@ impl AudioController {
             volume: ctx.state(1.0),
             muted: ctx.state(false),
             looping: ctx.state(false),
+            playback_rate: ctx.state(1.0),
             metrics_observed: Arc::new(AtomicBool::new(false)),
             buffer_memory_limit_bytes: ctx.state(DEFAULT_AUDIO_BUFFER_MEMORY_LIMIT_BYTES),
             error: ctx.state(None),
@@ -64,7 +65,8 @@ impl AudioController {
     ///
     /// # 返回值
     /// 成功时返回 `Ok(())`；如果后端无法接受该音频源则返回错误。
-    pub fn load(&self, source: AudioSource) -> Result<(), TguiError> {
+    pub fn load(&self, source: impl Into<AudioSource>) -> Result<(), TguiError> {
+        let source = source.into();
         self.inner.shared.reset_for_load();
         if let Err(error) = self.inner.backend.load(source) {
             self.inner.shared.set_error(error.to_string());
@@ -125,6 +127,15 @@ impl AudioController {
     pub fn set_looping(&self, looping: bool) {
         self.inner.shared.looping.set(looping);
         self.inner.backend.set_looping(looping);
+    }
+
+    /// 设置播放速率，范围会被钳制到 `0.25..=4.0`。
+    ///
+    /// 当前实现会改变播放速度和音高。
+    pub fn set_playback_rate(&self, rate: f32) {
+        let rate = normalize_playback_rate(rate);
+        self.inner.shared.playback_rate.set(rate);
+        self.inner.backend.set_playback_rate(rate);
     }
 
     /// 设置音频缓存允许占用的最大内存。
@@ -205,6 +216,11 @@ impl AudioController {
     /// 返回循环状态信号。
     pub fn looping(&self) -> Signal<bool> {
         self.inner.shared.looping.signal()
+    }
+
+    /// 获取当前播放速率信号。
+    pub fn playback_rate(&self) -> Signal<f32> {
+        self.inner.shared.playback_rate.signal()
     }
 
     /// 获取最近一次播放错误的响应式信号。

@@ -280,6 +280,37 @@ pub(super) struct TextureCacheEntry {
     pub(super) height: u32,
     pub(super) binding: SpriteBindGroup,
     pub(super) texture: wgpu::Texture,
+    pub(super) last_uploaded_pixels: Option<Vec<u8>>,
+}
+
+#[cfg(feature = "video")]
+pub(super) struct VideoYuvTextureCacheEntry {
+    pub(super) revision: u64,
+    pub(super) signature: VideoYuvTextureCacheSignature,
+    pub(super) binding: SpriteBindGroup,
+    pub(super) y_texture: wgpu::Texture,
+    pub(super) u_texture: wgpu::Texture,
+    pub(super) v_texture: wgpu::Texture,
+    pub(super) _uniform_buffer: wgpu::Buffer,
+    pub(super) last_uploaded_planes: Vec<Vec<u8>>,
+}
+
+#[cfg(feature = "video")]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct VideoYuvTextureCacheSignature {
+    pub(super) width: u32,
+    pub(super) height: u32,
+    pub(super) format: crate::video::backend::VideoYuvFormat,
+    pub(super) color_space: crate::video::backend::VideoYuvColorSpace,
+    pub(super) planes: Vec<VideoYuvPlaneCacheSignature>,
+}
+
+#[cfg(feature = "video")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct VideoYuvPlaneCacheSignature {
+    pub(super) format: crate::video::backend::VideoYuvPlaneFormat,
+    pub(super) width: u32,
+    pub(super) height: u32,
 }
 
 #[derive(Clone, PartialEq, Eq)]

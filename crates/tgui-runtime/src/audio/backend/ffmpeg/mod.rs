@@ -1,12 +1,14 @@
-use std::sync::{Mutex, Once};
+use std::sync::Mutex;
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
 use crossbeam_channel::{unbounded, Sender};
 
 use crate::foundation::error::TguiError;
+use crate::foundation::threading::join_with_timeout;
 
 use super::{AudioBackend, BackendSharedState};
+use crate::audio::backend::shared::ensure_ffmpeg_initialized;
 use crate::audio::AudioSource;
 
 mod session;
@@ -17,12 +19,12 @@ mod worker;
 use session::validate_audio_source;
 use worker::worker_main;
 
+const COMMAND_POLL_INTERVAL: Duration = Duration::from_millis(10);
 const STEP_IDLE_SLEEP: Duration = Duration::from_millis(4);
 const LOCAL_AUDIO_QUEUE_HARD_WATER: Duration = Duration::from_millis(3000);
 const NETWORK_AUDIO_QUEUE_HARD_WATER: Duration = Duration::from_millis(8000);
 const METRICS_SYNC_INTERVAL: Duration = Duration::from_millis(100);
-
-static FFMPEG_INIT: Once = Once::new();
+const SHUTDOWN_JOIN_TIMEOUT: Duration = Duration::from_millis(100);
 
 pub(crate) struct FfmpegAudioBackend {
     shared: BackendSharedState,
@@ -48,9 +50,7 @@ impl FfmpegAudioBackend {
             return Ok(handle.command_tx.clone());
         }
 
-        FFMPEG_INIT.call_once(|| {
-            let _ = ffmpeg_next::init();
-        });
+        ensure_ffmpeg_initialized()?;
 
         let (command_tx, command_rx) = unbounded();
         let shared = self.shared.clone();
@@ -127,6 +127,10 @@ impl AudioBackend for FfmpegAudioBackend {
         self.send_if_active(BackendCommand::SetLooping(looping));
     }
 
+    fn set_playback_rate(&self, rate: f32) {
+        self.send_if_active(BackendCommand::SetPlaybackRate(rate));
+    }
+
     fn set_buffer_memory_limit_bytes(&self, bytes: u64) {
         self.send_if_active(BackendCommand::SetBufferMemoryLimitBytes(bytes));
     }
@@ -142,7 +146,7 @@ impl AudioBackend for FfmpegAudioBackend {
         };
 
         let _ = handle.command_tx.send(BackendCommand::Shutdown);
-        let _ = handle.worker.join();
+        let _ = join_with_timeout(handle.worker, SHUTDOWN_JOIN_TIMEOUT);
     }
 }
 
@@ -156,6 +160,7 @@ pub(super) enum BackendCommand {
     SetVolume(f32),
     SetMuted(bool),
     SetLooping(bool),
+    SetPlaybackRate(f32),
     SetBufferMemoryLimitBytes(u64),
     Shutdown,
 }

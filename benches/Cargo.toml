@@ -81,6 +81,11 @@ path = "video_buffering.rs"
 harness = false
 
 [[bench]]
+name = "video_frame_conversion"
+path = "video_frame_conversion.rs"
+harness = false
+
+[[bench]]
 name = "widget_core_layout"
 path = "widget_core_layout.rs"
 harness = false

@@ -43,7 +43,6 @@ impl AudioWorker {
                 self.should_play = false;
                 self.current_duration = None;
                 self.session = None;
-                self.session_dormant = false;
                 self.last_metrics_sync_at = None;
                 self.shared.reset_for_stop();
             }
@@ -65,6 +64,13 @@ impl AudioWorker {
             BackendCommand::SetLooping(looping) => {
                 self.looping = looping;
             }
+            BackendCommand::SetPlaybackRate(rate) => {
+                self.playback_rate = crate::audio::backend::shared::normalize_playback_rate(rate);
+                self.shared.playback_rate.set(self.playback_rate);
+                if let Some(session) = self.session.as_ref() {
+                    session.set_playback_rate(self.playback_rate);
+                }
+            }
             BackendCommand::SetBufferMemoryLimitBytes(bytes) => {
                 self.buffer_memory_limit_bytes = bytes;
             }
@@ -78,59 +84,40 @@ impl AudioWorker {
         let Some(source) = self.current_source.clone() else {
             return;
         };
-
-        self.should_play = should_play;
-        self.session_dormant = false;
-        if let Some(session) = self.session.as_mut() {
-            if session.seek(position, should_play).is_ok() {
-                self.current_duration = session.duration();
-                self.publish_opened_state(position, should_play);
-                return;
-            }
-        }
-
         self.reopen_source(source, position, should_play);
     }
 
     fn reopen_source(&mut self, source: AudioSource, position: Duration, should_play: bool) {
         self.should_play = should_play;
-        self.session_dormant = false;
-        if let Some(session) = self.session.as_ref() {
-            session.set_playing(false);
-        }
-        self.session = None;
         match AudioSession::open(
             source.clone(),
             position,
             self.volume,
             self.muted,
+            self.playback_rate,
             should_play,
         ) {
             Ok(session) => {
                 self.current_duration = session.duration();
                 self.session = Some(session);
-                self.publish_opened_state(position, should_play);
+                if should_play {
+                    self.shared.playback_state.set(AudioPlaybackState::Playing);
+                } else if position.is_zero() {
+                    self.shared.set_ready();
+                } else {
+                    self.shared.playback_state.set(AudioPlaybackState::Paused);
+                    self.shared.snapshot.set(AudioSnapshot {
+                        loading: false,
+                        error: None,
+                    });
+                    self.shared.error.set(None);
+                }
             }
             Err(error) => {
                 self.session = None;
                 self.last_metrics_sync_at = None;
                 self.shared.set_error(error.to_string());
             }
-        }
-    }
-
-    fn publish_opened_state(&self, position: Duration, should_play: bool) {
-        if should_play {
-            self.shared.playback_state.set(AudioPlaybackState::Playing);
-        } else if position.is_zero() {
-            self.shared.set_ready();
-        } else {
-            self.shared.playback_state.set(AudioPlaybackState::Paused);
-            self.shared.snapshot.set(AudioSnapshot {
-                loading: false,
-                error: None,
-            });
-            self.shared.error.set(None);
         }
     }
 }

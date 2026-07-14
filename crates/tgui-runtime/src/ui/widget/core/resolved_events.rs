@@ -86,6 +86,30 @@ impl<VM> ResolvedElement<VM> {
             }
         }
     }
+
+    #[cfg(feature = "video")]
+    pub(super) fn collect_video_controllers(
+        &self,
+        controllers: &mut Vec<crate::video::VideoController>,
+    ) {
+        match &self.kind {
+            ResolvedWidgetKind::Container { children, .. }
+            | ResolvedWidgetKind::Virtual { children, .. } => {
+                for child in children {
+                    child.collect_video_controllers(controllers);
+                }
+            }
+            ResolvedWidgetKind::VideoSurface { video, .. } => {
+                if !controllers
+                    .iter()
+                    .any(|controller| controller == &video.controller)
+                {
+                    controllers.push(video.controller.clone());
+                }
+            }
+            _ => {}
+        }
+    }
 }
 
 #[cfg(test)]

@@ -4,6 +4,7 @@ use std::time::Duration;
 
 use crate::animation::AnimationCoordinator;
 use crate::foundation::binding::{InvalidationSignal, ViewModelContext};
+use crate::media::{MediaPlaybackSource, MediaSource};
 
 use super::super::backend::{AudioBackend, BackendSharedState};
 use super::*;
@@ -16,17 +17,27 @@ struct RecordedCommands {
     volumes: Vec<f32>,
     muteds: Vec<bool>,
     loopings: Vec<bool>,
+    playback_rates: Vec<f32>,
     buffer_memory_limits: Vec<u64>,
 }
 
 struct MockBackend {
     commands: Arc<Mutex<RecordedCommands>>,
+    load_error: Option<&'static str>,
 }
 
 impl MockBackend {
     fn new() -> Self {
         Self {
             commands: Arc::new(Mutex::new(RecordedCommands::default())),
+            load_error: None,
+        }
+    }
+
+    fn failing_load(message: &'static str) -> Self {
+        Self {
+            commands: Arc::new(Mutex::new(RecordedCommands::default())),
+            load_error: Some(message),
         }
     }
 }
@@ -38,6 +49,9 @@ impl AudioBackend for MockBackend {
             .expect("commands lock poisoned")
             .loads
             .push(source);
+        if let Some(message) = self.load_error {
+            return Err(TguiError::Media(message.to_string()));
+        }
         Ok(())
     }
 
@@ -95,6 +109,14 @@ impl AudioBackend for MockBackend {
             .push(looping);
     }
 
+    fn set_playback_rate(&self, rate: f32) {
+        self.commands
+            .lock()
+            .expect("commands lock poisoned")
+            .playback_rates
+            .push(rate);
+    }
+
     fn set_buffer_memory_limit_bytes(&self, bytes: u64) {
         self.commands
             .lock()
@@ -117,6 +139,7 @@ fn test_shared(ctx: &ViewModelContext) -> BackendSharedState {
         volume: ctx.state(1.0),
         muted: ctx.state(false),
         looping: ctx.state(false),
+        playback_rate: ctx.state(1.0),
         metrics_observed: Arc::new(AtomicBool::new(false)),
         buffer_memory_limit_bytes: ctx.state(DEFAULT_AUDIO_BUFFER_MEMORY_LIMIT_BYTES),
         error: ctx.state(None),
@@ -142,6 +165,7 @@ fn controller_forwards_commands_to_backend() {
     controller.set_volume(0.25);
     controller.set_muted(true);
     controller.set_looping(true);
+    controller.set_playback_rate(2.0);
     controller.set_buffer_memory_limit_bytes(32 * 1024 * 1024);
 
     let commands = commands.lock().expect("commands lock poisoned");
@@ -151,7 +175,99 @@ fn controller_forwards_commands_to_backend() {
     assert_eq!(commands.volumes, vec![0.25]);
     assert_eq!(commands.muteds, vec![true]);
     assert_eq!(commands.loopings, vec![true]);
+    assert_eq!(commands.playback_rates, vec![2.0]);
     assert_eq!(commands.buffer_memory_limits, vec![32 * 1024 * 1024]);
+}
+
+#[test]
+fn controller_load_accepts_media_source() {
+    let ctx = test_context();
+    let shared = test_shared(&ctx);
+    let backend = Arc::new(MockBackend::new());
+    let commands = backend.commands.clone();
+    let controller = AudioController::from_parts(shared, backend);
+
+    controller
+        .load(MediaSource::url("https://example.com/demo.mp3"))
+        .expect("mock load should succeed");
+
+    let commands = commands.lock().expect("commands lock poisoned");
+    assert_eq!(
+        commands.loads,
+        vec![AudioSource::url("https://example.com/demo.mp3")]
+    );
+}
+
+#[test]
+fn controller_load_accepts_media_playback_source() {
+    let ctx = test_context();
+    let shared = test_shared(&ctx);
+    let backend = Arc::new(MockBackend::new());
+    let commands = backend.commands.clone();
+    let controller = AudioController::from_parts(shared, backend);
+
+    controller
+        .load(
+            MediaPlaybackSource::url("https://example.com/demo.mp3").with_header("X-Test", "value"),
+        )
+        .expect("mock load should succeed");
+
+    let commands = commands.lock().expect("commands lock poisoned");
+    assert_eq!(
+        commands.loads,
+        vec![AudioSource::url("https://example.com/demo.mp3").with_header("X-Test", "value")]
+    );
+}
+
+#[test]
+fn playback_rate_is_clamped_and_exposed_as_signal() {
+    let ctx = test_context();
+    let shared = test_shared(&ctx);
+    let backend = Arc::new(MockBackend::new());
+    let commands = backend.commands.clone();
+    let controller = AudioController::from_parts(shared, backend);
+
+    controller.set_playback_rate(8.0);
+    controller.set_playback_rate(0.0);
+    controller.set_playback_rate(f32::NAN);
+
+    assert_eq!(controller.playback_rate().get(), 1.0);
+    assert_eq!(
+        commands
+            .lock()
+            .expect("commands lock poisoned")
+            .playback_rates,
+        vec![4.0, 0.25, 1.0]
+    );
+}
+
+#[test]
+fn load_failure_sets_error_state_and_snapshot() {
+    let ctx = test_context();
+    let shared = test_shared(&ctx);
+    let backend = Arc::new(MockBackend::failing_load("invalid audio header"));
+    let controller = AudioController::from_parts(shared.clone(), backend);
+
+    let error = controller
+        .load(AudioSource::url("https://example.com/demo.mp3"))
+        .expect_err("mock load should fail");
+
+    assert_eq!(error.to_string(), "invalid audio header");
+    assert_eq!(
+        controller.playback_state().get(),
+        AudioPlaybackState::Error("invalid audio header".to_string())
+    );
+    assert_eq!(
+        controller.error().get(),
+        Some("invalid audio header".to_string())
+    );
+    assert_eq!(
+        controller.snapshot(),
+        AudioSnapshot {
+            loading: false,
+            error: Some("invalid audio header".to_string()),
+        }
+    );
 }
 
 #[test]
@@ -169,6 +285,7 @@ fn controller_bindings_reflect_shared_state() {
     });
     shared.error.set(Some("boom".to_string()));
     shared.looping.set(true);
+    shared.playback_rate.set(1.5);
 
     assert_eq!(
         controller.playback_state().get(),
@@ -182,6 +299,7 @@ fn controller_bindings_reflect_shared_state() {
     );
     assert_eq!(controller.error().get(), Some("boom".to_string()));
     assert!(controller.looping().get());
+    assert_eq!(controller.playback_rate().get(), 1.5);
 }
 
 #[test]
