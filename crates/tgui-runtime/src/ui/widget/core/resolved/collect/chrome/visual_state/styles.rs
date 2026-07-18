@@ -5,6 +5,7 @@ impl<VM> ResolvedElement<VM> {
         &self,
         widget_state: WidgetState,
         context: &CollectContext<'_, '_>,
+        prepared_slider_style: Option<ResolvedSliderStyle>,
     ) -> CollectResolvedStyles {
         let theme = context.theme;
         CollectResolvedStyles {
@@ -64,7 +65,7 @@ impl<VM> ResolvedElement<VM> {
                 }
                 _ => None,
             },
-            slider_style: match &self.kind {
+            slider_style: prepared_slider_style.or_else(|| match &self.kind {
                 ResolvedWidgetKind::Slider {
                     runtime_style,
                     validation,
@@ -94,7 +95,7 @@ impl<VM> ResolvedElement<VM> {
                     Some(style)
                 }
                 _ => None,
-            },
+            }),
             progress_bar_style: match &self.kind {
                 ResolvedWidgetKind::ProgressBar { runtime_style, .. } => {
                     let mut style = runtime_style.base.clone();

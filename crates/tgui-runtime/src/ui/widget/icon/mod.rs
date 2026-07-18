@@ -139,6 +139,7 @@ impl BuiltinIcon {
 #[derive(Clone)]
 enum IconSourceKind {
     Public(IconSource),
+    MonochromeSvg(MediaBytes),
     Internal(SvgIconId),
 }
 
@@ -179,6 +180,35 @@ impl<VM> Icon<VM> {
         Self::new(IconSource::Svg(MediaBytes::from_shared(Arc::from(
             bytes.into_boxed_slice(),
         ))))
+    }
+
+    /// Creates a monochrome SVG icon whose alpha coverage is tinted by [`IconStyle::color`].
+    ///
+    /// The SVG's original RGB paint is intentionally ignored. Use [`Icon::svg`] for multicolor
+    /// artwork that must preserve its authored colors.
+    pub fn monochrome_svg(bytes: &'static [u8]) -> Self {
+        Self {
+            source: IconSourceKind::MonochromeSvg(MediaBytes::from_static(bytes)),
+            style: None,
+            layout: LayoutStyle::default(),
+            visual: VisualStyle::default(),
+            key: None,
+            _marker: std::marker::PhantomData,
+        }
+    }
+
+    /// Owned-byte variant of [`Icon::monochrome_svg`].
+    pub fn monochrome_svg_owned(bytes: Vec<u8>) -> Self {
+        Self {
+            source: IconSourceKind::MonochromeSvg(MediaBytes::from_shared(Arc::from(
+                bytes.into_boxed_slice(),
+            ))),
+            style: None,
+            layout: LayoutStyle::default(),
+            visual: VisualStyle::default(),
+            key: None,
+            _marker: std::marker::PhantomData,
+        }
     }
 
     fn new(source: IconSource) -> Self {
@@ -387,40 +417,10 @@ impl<VM: 'static> From<Icon<VM>> for Element<VM> {
                 icon.visual.clone(),
             ),
             IconSourceKind::Public(IconSource::Svg(bytes)) => {
-                let style = icon.style.clone();
-                with_visual_identity(
-                    Image::new(MediaSource::bytes(bytes))
-                        .runtime_layout({
-                            let style = style.clone();
-                            move |layout, context, style_sheet, visual| {
-                                let resolved = resolve_icon_style_with_sheet(
-                                    style.as_ref(),
-                                    context,
-                                    style_sheet,
-                                    visual,
-                                    WidgetState::default(),
-                                );
-                                if layout.width.is_none() {
-                                    layout.width = Some(Value::Static(Length::Px(resolved.size)));
-                                }
-                                if layout.height.is_none() {
-                                    layout.height = Some(Value::Static(Length::Px(resolved.size)));
-                                }
-                            }
-                        })
-                        .style_full_with_style_sheet(move |context, style_sheet, visual, state| {
-                            let _ = resolve_icon_style_with_sheet(
-                                style.as_ref(),
-                                context,
-                                style_sheet,
-                                visual,
-                                state,
-                            );
-                            ImageStyle::default_for_theme(context.theme)
-                        })
-                        .into(),
-                    &icon.visual,
-                )
+                public_svg_icon(bytes, icon.style.clone(), icon.visual.clone(), false)
+            }
+            IconSourceKind::MonochromeSvg(bytes) => {
+                public_svg_icon(bytes, icon.style.clone(), icon.visual.clone(), true)
             }
         };
         root.key = icon.key;
@@ -428,6 +428,69 @@ impl<VM: 'static> From<Icon<VM>> for Element<VM> {
         root.layout = merge_layout(root.layout, icon.layout);
         root
     }
+}
+
+fn public_svg_icon<VM: 'static>(
+    bytes: MediaBytes,
+    style: Option<StyleResolver<IconStyle>>,
+    visual: VisualStyle,
+    monochrome: bool,
+) -> Element<VM> {
+    let layout_style = style.clone();
+    let image_style = style.clone();
+    let mut image = Image::new(MediaSource::bytes(bytes)).runtime_layout(
+        move |layout, context, style_sheet, visual| {
+            let resolved = resolve_icon_style_with_sheet(
+                layout_style.as_ref(),
+                context,
+                style_sheet,
+                visual,
+                WidgetState::default(),
+            );
+            if layout.width.is_none() {
+                layout.width = Some(Value::Static(Length::Px(resolved.size)));
+            }
+            if layout.height.is_none() {
+                layout.height = Some(Value::Static(Length::Px(resolved.size)));
+            }
+        },
+    );
+    if monochrome {
+        let tint_style = style.clone();
+        image = image.runtime_mask_tint(
+            move |context, style_sheet, visual, state, animations, widget_id, now| {
+                resolve_icon_style_with_sheet(
+                    tint_style.as_ref(),
+                    context,
+                    style_sheet,
+                    visual,
+                    state,
+                )
+                .color
+                .resolve_widget(
+                    animations,
+                    widget_id,
+                    crate::animation::WidgetProperty::TextureMaskTint,
+                    now,
+                )
+            },
+        );
+    }
+    with_visual_identity(
+        image
+            .style_full_with_style_sheet(move |context, style_sheet, visual, state| {
+                let _ = resolve_icon_style_with_sheet(
+                    image_style.as_ref(),
+                    context,
+                    style_sheet,
+                    visual,
+                    state,
+                );
+                ImageStyle::default_for_theme(context.theme)
+            })
+            .into(),
+        &visual,
+    )
 }
 
 fn icon_svg<VM: 'static>(

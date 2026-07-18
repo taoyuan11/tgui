@@ -21,11 +21,16 @@ impl CardStyle {
         };
         Self {
             surface: WidgetSurfaceStyle::default(),
-            background: Value::Static(theme.colors.surface_overlay),
+            // Cards stay on the regular content plane; overlay tokens and larger
+            // corners are reserved for menus, popovers, drawers, and modals.
+            background: Value::Static(theme.colors.surface),
             border: Value::Static(theme.colors.outline_muted),
             border_width: theme.border.thin,
-            radius: theme.radius.xl,
-            shadow: theme.elevation.lg.clone(),
+            radius: theme.radius.lg,
+            // Regular cards are border-defined surfaces. Keeping elevation opt-in
+            // avoids a shadow texture allocation and draw for every card while
+            // reserving depth for overlays such as popovers, toasts, and modals.
+            shadow: theme.elevation.none.clone(),
             padding,
             gap,
         }

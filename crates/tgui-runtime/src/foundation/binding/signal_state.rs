@@ -151,6 +151,19 @@ impl<T: Clone + PartialEq> State<T> {
 }
 
 impl<T> State<T> {
+    /// 原地更新状态，仅在闭包确认值发生变化时触发失效通知。
+    ///
+    /// 适用于无法实现 `PartialEq`、但更新逻辑可以准确判断是否发生变化的状态。
+    pub(crate) fn mutate_if_changed(&self, updater: impl FnOnce(&mut T) -> bool) -> bool {
+        let mut value = self.value.lock();
+        let changed = updater(&mut value);
+        drop(value);
+        if changed {
+            self.mark_changed();
+        }
+        changed
+    }
+
     /// 原地更新状态，并在更新后无条件触发失效通知。
     ///
     /// 参数:

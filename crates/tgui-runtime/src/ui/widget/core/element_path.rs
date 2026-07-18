@@ -4,38 +4,76 @@ use crate::ui::theme::StyleContext;
 use crate::ui::widget::common::ChildSource;
 use crate::ui::widget::r#virtual::{VirtualCacheState, VirtualViewportHint};
 use crate::ui::widget::StyleSheet;
-use std::borrow::Cow;
 use std::time::Instant;
 
-pub(super) fn resolved_child_elements_with_previous<'a, 'b, VM>(
+/// Resolves every child source in source order, then maps its children directly into the final
+/// output buffer.
+///
+/// The source-resolution pass intentionally completes before `map_child` is called. Besides
+/// preserving the existing dependency-read order, this gives the output an exact capacity. The
+/// previous implementation first built a `Vec<(Cow<Element>, previous)>`; because `Cow<Element>`
+/// is as wide as its large owned variant, a broad static container moved a substantial temporary
+/// buffer before producing the identically sized final child vector.
+#[inline]
+pub(super) fn map_resolved_child_elements_with_previous<'a, VM, Output>(
     owner_id: WidgetId,
-    child_sources: &'b [ChildSource<VM>],
+    child_sources: &[ChildSource<VM>],
     previous_children: &'a [ResolvedElement<VM>],
     child_source_spans: Option<&mut Vec<usize>>,
-) -> Vec<(Cow<'b, Element<VM>>, Option<&'a ResolvedElement<VM>>)> {
-    let previous_by_key: HashMap<_, _> = previous_children
+    mut map_child: impl FnMut(&Element<VM>, Option<&'a ResolvedElement<VM>>) -> Output,
+) -> Vec<Output> {
+    let keyed_previous_count = previous_children
         .iter()
-        .filter_map(|child| child.key.as_ref().map(|key| (key.clone(), child)))
-        .collect();
+        .filter(|child| child.key.is_some())
+        .count();
+    let mut previous_by_key = HashMap::with_capacity(keyed_previous_count);
+    for child in previous_children {
+        if let Some(key) = child.key.as_ref() {
+            previous_by_key.insert(key, child);
+        }
+    }
     let previous_by_id: HashMap<_, _> = previous_children
         .iter()
         .map(|child| (child.id, child))
         .collect();
 
-    let mut resolved = Vec::new();
-    let mut resolved_index = 0usize;
+    // Static sources are already retained in the source tree. Only keep the owning results needed
+    // for non-static sources between the source-resolution and child-mapping passes. This small
+    // source-level buffer preserves the old "resolve all sources, then recurse" ordering without a
+    // per-child `Cow<Element>` buffer.
+    let owned_source_count = child_sources
+        .iter()
+        .filter(|source| !matches!(source, ChildSource::Static(_)))
+        .count();
+    let mut owned_sources = Vec::with_capacity(owned_source_count);
+    let mut child_count = 0usize;
     let mut spans = child_source_spans;
     for child_source in child_sources {
-        // Static children are borrowed straight from the source tree; only
-        // dynamic resolvers produce freshly owned elements. The previous output's
-        // id is carried over inside `resolve_with_previous`, so child ids no
-        // longer need to be rewritten here.
+        let span = match child_source {
+            ChildSource::Static(children) => children.len(),
+            ChildSource::Dynamic(_)
+            | ChildSource::KeyedFor(_)
+            | ChildSource::Show { .. }
+            | ChildSource::Switch { .. } => {
+                let children = child_source.resolve(Some(owner_id));
+                let span = children.len();
+                owned_sources.push(children);
+                span
+            }
+        };
+        child_count += span;
+        if let Some(spans) = spans.as_mut() {
+            spans.push(span);
+        }
+    }
+
+    let mut output = Vec::with_capacity(child_count);
+    let mut owned_sources = owned_sources.into_iter();
+    let mut resolved_index = 0usize;
+    for child_source in child_sources {
         match child_source {
             ChildSource::Static(children) => {
-                if let Some(spans) = spans.as_mut() {
-                    spans.push(children.len());
-                }
-                resolved.extend(children.iter().map(|child| {
+                for child in children {
                     let previous_child = lookup_previous(
                         child,
                         &previous_by_key,
@@ -43,15 +81,17 @@ pub(super) fn resolved_child_elements_with_previous<'a, 'b, VM>(
                         previous_children.get(resolved_index),
                     );
                     resolved_index += 1;
-                    (Cow::Borrowed(child), previous_child)
-                }));
-            }
-            ChildSource::Dynamic(_) | ChildSource::KeyedFor(_) => {
-                let source_children = child_source.resolve(Some(owner_id));
-                if let Some(spans) = spans.as_mut() {
-                    spans.push(source_children.len());
+                    output.push(map_child(child, previous_child));
                 }
-                resolved.extend(source_children.into_iter().map(|child| {
+            }
+            ChildSource::Dynamic(_)
+            | ChildSource::KeyedFor(_)
+            | ChildSource::Show { .. }
+            | ChildSource::Switch { .. } => {
+                let children = owned_sources
+                    .next()
+                    .expect("every non-static child source must have a resolved batch");
+                for child in children {
                     let previous_child = lookup_previous(
                         &child,
                         &previous_by_key,
@@ -59,33 +99,19 @@ pub(super) fn resolved_child_elements_with_previous<'a, 'b, VM>(
                         previous_children.get(resolved_index),
                     );
                     resolved_index += 1;
-                    (Cow::Owned(child), previous_child)
-                }));
-            }
-            ChildSource::Show { .. } | ChildSource::Switch { .. } => {
-                let source_children = child_source.resolve(Some(owner_id));
-                if let Some(spans) = spans.as_mut() {
-                    spans.push(source_children.len());
+                    output.push(map_child(&child, previous_child));
                 }
-                resolved.extend(source_children.into_iter().map(|child| {
-                    let previous_child = lookup_previous(
-                        &child,
-                        &previous_by_key,
-                        &previous_by_id,
-                        previous_children.get(resolved_index),
-                    );
-                    resolved_index += 1;
-                    (Cow::Owned(child), previous_child)
-                }));
             }
         }
     }
-    resolved
+    debug_assert!(owned_sources.next().is_none());
+    debug_assert_eq!(output.len(), child_count);
+    output
 }
 
 fn lookup_previous<'a, VM>(
     child: &Element<VM>,
-    previous_by_key: &HashMap<WidgetKey, &'a ResolvedElement<VM>>,
+    previous_by_key: &HashMap<&WidgetKey, &'a ResolvedElement<VM>>,
     previous_by_id: &HashMap<WidgetId, &'a ResolvedElement<VM>>,
     previous_at_position: Option<&'a ResolvedElement<VM>>,
 ) -> Option<&'a ResolvedElement<VM>> {

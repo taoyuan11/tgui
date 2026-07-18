@@ -23,7 +23,7 @@ use std::ops::Range;
 use smallvec::SmallVec;
 
 /// 池中轮转缓冲的数量。3 足以覆盖典型的在途帧数（双/三缓冲 swapchain）。
-const POOL_FRAME_COUNT: usize = 3;
+pub(super) const POOL_FRAME_COUNT: usize = 3;
 
 /// 池缓冲的初始容量（字节）。约 64KB，足够容纳一帧数百个小四边形的顶点。
 const INITIAL_CAPACITY: u64 = 64 * 1024;
@@ -62,6 +62,8 @@ pub(super) struct VertexBufferPool {
     /// 字节级 diff，只上传变化区间；缓冲扩容重建时强制整段上传。镜像也按相同区间 patch，
     /// 始终与 GPU 中下一帧会读取的有效前缀严格一致。
     last_uploaded: [Vec<u8>; POOL_FRAME_COUNT],
+    generations: [u64; POOL_FRAME_COUNT],
+    next_generation: u64,
 }
 
 impl VertexBufferPool {
@@ -73,6 +75,8 @@ impl VertexBufferPool {
             current: 0,
             staging: Vec::with_capacity(INITIAL_CAPACITY as usize),
             last_uploaded: std::array::from_fn(|_| Vec::new()),
+            generations: [0; POOL_FRAME_COUNT],
+            next_generation: 1,
         }
     }
 
@@ -89,6 +93,14 @@ impl VertexBufferPool {
     pub(super) fn begin_frame(&mut self) {
         self.current = (self.current + 1) % POOL_FRAME_COUNT;
         self.staging.clear();
+    }
+
+    pub(super) fn current_slot(&self) -> usize {
+        self.current
+    }
+
+    pub(super) fn current_generation(&self) -> u64 {
+        self.generations[self.current]
     }
 
     /// 把一段顶点字节 bump-allocate 进本帧 staging，返回其在池缓冲中的字节偏移。
@@ -153,6 +165,10 @@ impl VertexBufferPool {
                 range.start as u64,
                 &self.staging[range.clone()],
             );
+        }
+        if !dirty_ranges.is_empty() {
+            self.generations[self.current] = self.next_generation;
+            self.next_generation = self.next_generation.wrapping_add(1).max(1);
         }
 
         // 镜像也只 patch 相同区间，避免局部视觉变化时仍整段 CPU copy。变短但公共前缀

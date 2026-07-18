@@ -101,6 +101,30 @@ pub enum BackgroundBrush {
     RadialGradient(BackgroundRadialGradient),
 }
 
+impl BackgroundBrush {
+    /// Applies an inherited surface opacity to every color carried by this brush.
+    ///
+    /// Widget background brushes are resolved into an owned value before scene collection, so
+    /// adjusting the colors in place avoids another gradient-stop allocation. Canvas already
+    /// folds its own opacity into the converted brush and therefore does not call this helper.
+    pub(crate) fn with_alpha_factor(mut self, opacity: f32) -> Self {
+        match &mut self {
+            Self::Solid(color) => *color = color.with_alpha_factor(opacity),
+            Self::LinearGradient(gradient) => {
+                for stop in &mut gradient.stops {
+                    stop.color = stop.color.with_alpha_factor(opacity);
+                }
+            }
+            Self::RadialGradient(gradient) => {
+                for stop in &mut gradient.stops {
+                    stop.color = stop.color.with_alpha_factor(opacity);
+                }
+            }
+        }
+        self
+    }
+}
+
 impl From<Color> for BackgroundBrush {
     fn from(value: Color) -> Self {
         Self::Solid(value)

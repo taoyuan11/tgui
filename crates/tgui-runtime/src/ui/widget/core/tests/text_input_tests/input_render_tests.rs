@@ -1,6 +1,56 @@
 use super::*;
 
 #[test]
+fn keyboard_focused_input_renders_theme_focus_ring_without_layout_inset() {
+    let theme = Theme::default();
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let input: Element<()> = Input::new("focus visible").size(dp(220.0), dp(40.0)).into();
+    let input_id = input.id;
+    let tree = WidgetTree::new(input);
+    let mut states = WidgetStateMap::default();
+    states.set(
+        input_id,
+        crate::ui::theme::WidgetState {
+            focused: true,
+            focus_visible: true,
+            ..Default::default()
+        },
+    );
+
+    let rendered = tree.render_output_with_widget_state(
+        &font_manager,
+        &theme,
+        &media,
+        &mut AnimationEngine::default(),
+        false,
+        None,
+        None,
+        &states,
+        &HashMap::new(),
+        &HashMap::new(),
+        Rect::new(0.0, 0.0, 220.0, 40.0),
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+
+    let ring = rendered
+        .primitives
+        .overlay_shapes
+        .iter()
+        .find(|shape| {
+            shape.color == theme.focus_ring.color
+                && shape.stroke_width == theme.focus_ring.width.get()
+        })
+        .expect("keyboard-focused Input should render the theme focus ring");
+    assert!(ring.rect.width > dp(220.0));
+    assert!(ring.rect.height > dp(40.0));
+}
+
+#[test]
 fn input_renders_composition_preview_text() {
     let theme = Theme::default();
     let font_manager = FontManager::new(&FontCatalog::default());

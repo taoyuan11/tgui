@@ -1,6 +1,8 @@
 mod accessibility;
 mod action_stats;
 mod application_handler;
+#[cfg(feature = "bench-support")]
+mod bench_support;
 mod binding_sync;
 mod bootstrap;
 mod cache_support;
@@ -19,7 +21,7 @@ mod menu;
 pub(crate) mod overlay;
 mod popover;
 pub(crate) mod portal;
-mod reactive_slots;
+pub(crate) mod reactive_slots;
 mod render_cycle;
 mod scene_patch;
 mod scene_patch_cleanup;
@@ -34,6 +36,17 @@ mod theme;
 mod timing;
 mod tooltip;
 mod windows;
+
+#[cfg(feature = "bench-support")]
+pub use self::bench_support::{
+    RuntimeButtonHoverBenchmarkContext, RuntimeDataGridBenchmarkContext,
+    RuntimeDataGridHoverTarget, RuntimeFocusBenchmarkContext, RuntimeInteractionBenchmarkVm,
+    RuntimeInteractionFrameStats, RuntimeRowHoverBenchmarkContext, RuntimeRowHoverKind,
+    RuntimeRowSelectionBenchmarkContext, RuntimeRowSelectionKind, RuntimeRowSelectionMode,
+    RuntimeScrollBenchmarkContext, RuntimeScrollBenchmarkVm, RuntimeScrollFrameStats,
+    RuntimeSliderValueBenchmarkContext, RuntimeTextContentBenchmarkContext,
+    RuntimeToastBenchmarkContext, RuntimeTreeCheckedBenchmarkContext,
+};
 
 #[cfg(test)]
 pub(super) use self::bootstrap::centered_window_position_for_monitor;
@@ -57,16 +70,18 @@ use self::state::{
     ActiveTabReorder, ActiveTreeDrag, CachedScene, CanvasPointerContext, ClickHandler,
     ClipboardService, DeferredMouseClick, DispatchedLifecycleState, DispatchedMediaState,
     FocusedWidget, HoverMoveHandler, HoverTargetId, HoverTransitionHandler, HoveredWidget,
-    PendingClick, PendingLifecycleEvent, PendingMediaEvent, PendingSplitterClick, ScrollbarDrag,
+    PendingClick, PendingLifecycleEvent, PendingMediaEvent, PendingSplitterClick,
+    RetainedButtonHoverPatch, RetainedButtonPressedPatch, RetainedRowHoverPatch, ScrollbarDrag,
     SliderDrag, SmoothScrollState, StrictCapabilityEntry, StrictCapabilityKind,
     StrictCapabilityReport, TextInputBufferState, TextInputSessionConfig, TextSelectionDrag,
     TooltipState, TouchScrollDrag, TouchScrollInertiaState,
 };
 use self::theme::{resolve_theme, resolve_window_theme};
 use self::windows::MultiWindowHandler;
+use crate::accessibility::AccessibilityNodeRegistry;
 use crate::animation::{
-    default_theme_transition, AnimationCoordinator, AnimationEngine, AnimationKey, Transition,
-    WindowProperty,
+    default_theme_transition, AdaptiveFrameClock, AnimationCoordinator, AnimationEngine,
+    AnimationKey, AnimationRefresh, Transition, WindowProperty,
 };
 use crate::application::{
     build_root_element, ApplicationConfig, RootViewFactory, ThemeSelection, WindowClosePolicy,
@@ -103,6 +118,7 @@ use crate::platform::window::{
     WindowAttributes, WindowId,
 };
 use crate::rendering::renderer::{RenderStatus, Renderer};
+use crate::runtime::overlay::OverlayId;
 use crate::runtime::portal::ExternalPortalRequest;
 #[cfg(feature = "audio")]
 use crate::runtime::state::AudioLifecycleState;
@@ -122,7 +138,6 @@ use crossbeam_channel::{Receiver, Sender};
 use image::GenericImageView;
 use smallvec::SmallVec;
 use std::collections::{HashMap, HashSet};
-use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -134,7 +149,6 @@ pub(super) const TOUCH_SCROLL_ACTIVATION_THRESHOLD: f32 = 8.0;
 pub(super) const TOUCH_SCROLL_INERTIA_MIN_VELOCITY: f32 = 30.0;
 pub(super) const TOUCH_SCROLL_INERTIA_MAX_VELOCITY: f32 = 3600.0;
 pub(super) const TOUCH_SCROLL_INERTIA_DECAY_PER_SECOND: f32 = 8.0;
-pub(super) const TOUCH_SCROLL_INERTIA_FRAME: Duration = Duration::from_millis(16);
 pub(super) const LONG_PRESS_THRESHOLD: Duration = Duration::from_millis(500);
 pub(super) const TOOLTIP_LONG_PRESS_HIDE_DELAY: Duration = Duration::from_millis(150);
 pub(super) const LONG_PRESS_MOVE_TOLERANCE: f32 = 8.0;
@@ -306,6 +320,8 @@ pub struct BoundRuntimeHandler<VM> {
     last_lifecycle_dispatch_revision: u64,
     animations: AnimationCoordinator,
     animation_engine: AnimationEngine,
+    frame_clock: AdaptiveFrameClock,
+    last_frame_clock_probe: Option<Instant>,
     animation_epoch: u64,
     layout_animation_epoch: u64,
     accessibility_animation_epoch: u64,
@@ -313,6 +329,9 @@ pub struct BoundRuntimeHandler<VM> {
     cursor_position: Option<Point>,
     modifiers: ModifiersState,
     hovered_widgets: SmallVec<[HoveredWidget<VM>; 8]>,
+    button_hover_patch_pending: Option<RetainedButtonHoverPatch>,
+    button_pressed_patch_pending: Option<RetainedButtonPressedPatch>,
+    row_hover_patch_pending: Option<RetainedRowHoverPatch>,
     /// Widget 进入 hover 的时间戳（按 `WidgetId` 索引）。
     /// `handle_hover` 维护：路径中新出现的 widget 写入 `Instant::now()`；离开 hover 链时删除。
     /// collect 阶段读取它来判断 Tooltip 是否已等够 `delay`。
@@ -322,6 +341,10 @@ pub struct BoundRuntimeHandler<VM> {
     next_tooltip_wakeup_deadline: Option<Instant>,
     /// 最近一次 collect 上报的 toast 唤醒时刻（最早自动消失 deadline）。
     next_toast_wakeup_deadline: Option<Instant>,
+    /// Set only when a ToastHost frame deadline is the sole reason the retained scene became
+    /// invalid. The next scene request may then reuse prepared card layout trees; every other
+    /// invalidation path clears this flag and falls back to ordinary ToastHost collection.
+    toast_motion_patch_pending: bool,
     /// Carousel autoplay 的下一次唤醒时刻。
     next_carousel_wakeup_deadline: Option<Instant>,
     tooltip_state: TooltipState,
@@ -391,6 +414,10 @@ pub struct BoundRuntimeHandler<VM> {
     touch_scroll_inertia_states: HashMap<WidgetId, TouchScrollInertiaState>,
     virtual_states: HashMap<WidgetId, VirtualCacheState>,
     select_open_states: HashMap<WidgetId, bool>,
+    /// Stable identity generation for cross-window Portal publications. It advances only when
+    /// the source root tree is rebuilt, never for ordinary scene collection or animation frames.
+    portal_publication_generation: u64,
+    external_portal_focus_scopes: HashMap<OverlayId, WidgetId>,
     external_portal_requests: Vec<ExternalPortalRequest<VM>>,
     external_portal_revision: u64,
     scroll_epoch: u64,
@@ -403,10 +430,12 @@ pub struct BoundRuntimeHandler<VM> {
     media_manager: MediaManager,
     startup_started_at: Instant,
     first_frame_logged: bool,
-    rebuild_requested: Arc<AtomicBool>,
+    last_root_rebuild_revision: u64,
     window_requests: WindowRequestQueue,
     window: Option<Arc<dyn Window>>,
     accessibility_adapter: Option<PlatformAccessibilityAdapter>,
+    accessibility_node_registry: AccessibilityNodeRegistry,
+    accessibility_focused_node: Option<accesskit::NodeId>,
     accessibility_action_sender: Sender<accesskit::ActionRequest>,
     accessibility_action_receiver: Receiver<accesskit::ActionRequest>,
     renderer: Option<Box<Renderer>>,
@@ -454,6 +483,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         let theme_store = ThemeStore::new(config.theme_set.clone(), initial_theme_mode, None);
         let resource_budget = config.resource_budget;
         let reduced_motion = config.reduced_motion;
+        let last_root_rebuild_revision = invalidation.root_rebuild_revision();
         let (accessibility_action_sender, accessibility_action_receiver) =
             crossbeam_channel::unbounded();
 
@@ -478,6 +508,8 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             last_lifecycle_dispatch_revision: 0,
             animations,
             animation_engine: AnimationEngine::default(),
+            frame_clock: AdaptiveFrameClock::new(Instant::now()),
+            last_frame_clock_probe: None,
             animation_epoch: 0,
             layout_animation_epoch: 0,
             accessibility_animation_epoch: 0,
@@ -485,9 +517,13 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             cursor_position: None,
             modifiers: ModifiersState::default(),
             hovered_widgets: SmallVec::new(),
+            button_hover_patch_pending: None,
+            button_pressed_patch_pending: None,
+            row_hover_patch_pending: None,
             tooltip_hover_started_at: HashMap::new(),
             next_tooltip_wakeup_deadline: None,
             next_toast_wakeup_deadline: None,
+            toast_motion_patch_pending: false,
             next_carousel_wakeup_deadline: None,
             tooltip_state: TooltipState {
                 active: None,
@@ -543,6 +579,8 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             touch_scroll_inertia_states: HashMap::new(),
             virtual_states: HashMap::new(),
             select_open_states: HashMap::new(),
+            portal_publication_generation: 1,
+            external_portal_focus_scopes: HashMap::new(),
             external_portal_requests: Vec::new(),
             external_portal_revision: 0,
             scroll_epoch: 0,
@@ -553,10 +591,12 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             media_manager: MediaManager::with_budget(invalidation.clone(), resource_budget),
             startup_started_at: Instant::now(),
             first_frame_logged: false,
-            rebuild_requested: Arc::new(AtomicBool::new(false)),
+            last_root_rebuild_revision,
             window_requests: WindowRequestQueue::default(),
             window: None,
             accessibility_adapter: None,
+            accessibility_node_registry: AccessibilityNodeRegistry::default(),
+            accessibility_focused_node: None,
             accessibility_action_sender,
             accessibility_action_receiver,
             renderer: None,

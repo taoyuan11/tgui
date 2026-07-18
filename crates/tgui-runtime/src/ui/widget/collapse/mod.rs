@@ -1,7 +1,5 @@
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
 
-use crate::animation::Transition;
 use crate::foundation::view_model::{Command, ValueCommand};
 use crate::theme::{StyleContext, WidgetState};
 use crate::ui::layout::{Insets, LayoutStyle, Length, Overflow, Value};
@@ -20,7 +18,6 @@ use super::{CursorStyle, Flex, Icon, Stack, Text, WidgetKey};
 
 const COLLAPSE_ICON_SIZE: Dp = dp(20.0);
 const COLLAPSE_PANEL_MAX_HEIGHT: Dp = dp(320.0);
-const COLLAPSE_TRANSITION_MS: u64 = 180;
 
 pub struct Collapse<VM> {
     title: Value<String>,
@@ -84,6 +81,7 @@ impl<VM: 'static> From<Collapse<VM>> for Element<VM> {
         let expanded = collapse.expanded.resolve();
         let expanded_for_click = collapse.expanded.clone();
         let progress = collapse_progress_value(collapse.expanded.clone());
+        let panel_max_height = collapse_progress_max_height(progress.clone());
         let on_change = collapse.on_change.clone();
         let header_style = collapse.style.clone();
         let header_identity = collapse.visual.clone();
@@ -185,15 +183,18 @@ impl<VM: 'static> From<Collapse<VM>> for Element<VM> {
             vec![with_visual_identity(header.into(), &header_identity)];
         let style = collapse.style.clone();
         let panel_identity = collapse.visual.clone();
-        let panel_padding_cache = Arc::new(Mutex::new(None::<(Insets, Value<Insets>)>));
+        let panel_padding_cache = Arc::new(Mutex::new(
+            None::<(Insets, Option<crate::animation::Transition>, Value<Insets>)>,
+        ));
         children.push(with_visual_identity(
             Stack::new()
                 .overflow(Overflow::Hidden)
                 .runtime_layout({
                     let style = collapse.style.clone();
                     let progress = progress.clone();
+                    let max_height = panel_max_height.clone();
                     let padding_cache = panel_padding_cache.clone();
-                    move |_layout, container, context, style_sheet, visual| {
+                    move |layout, container, context, style_sheet, visual| {
                         let resolved = resolve_collapse_style_with_sheet(
                             style.as_ref(),
                             context,
@@ -201,22 +202,27 @@ impl<VM: 'static> From<Collapse<VM>> for Element<VM> {
                             visual,
                             WidgetState::default(),
                         );
+                        let transition = context.motion_normal_transition();
+                        layout.max_height =
+                            Some(max_height.clone().with_default_transition(transition));
+                        visual.opacity = progress.clone().with_default_transition(transition);
                         if container.padding.is_none() {
                             let mut cache = padding_cache
                                 .lock()
                                 .unwrap_or_else(|poisoned| poisoned.into_inner());
                             let padding = match cache.as_ref() {
-                                Some((cached_padding, value))
-                                    if *cached_padding == resolved.padding =>
+                                Some((cached_padding, cached_transition, value))
+                                    if *cached_padding == resolved.padding
+                                        && *cached_transition == transition =>
                                 {
                                     value.clone()
                                 }
                                 _ => {
                                     let value = collapse_progress_padding(
-                                        progress.clone(),
+                                        progress.clone().with_default_transition(transition),
                                         resolved.padding,
                                     );
-                                    *cache = Some((resolved.padding, value.clone()));
+                                    *cache = Some((resolved.padding, transition, value.clone()));
                                     value
                                 }
                             };
@@ -224,8 +230,6 @@ impl<VM: 'static> From<Collapse<VM>> for Element<VM> {
                         }
                     }
                 })
-                .max_height(collapse_progress_max_height(progress.clone()))
-                .opacity(progress)
                 .style_full_with_style_sheet(move |context, style_sheet, visual, state| {
                     let resolved = resolve_collapse_style_with_sheet(
                         style.as_ref(),
@@ -425,12 +429,7 @@ fn collapse_progress_value(expanded: Value<bool>) -> Value<f32> {
     match expanded {
         Value::Static(expanded) => Value::Static(if expanded { 1.0 } else { 0.0 }),
         Value::Signal(signal) => {
-            let progress = signal.map(|expanded| if expanded { 1.0 } else { 0.0 });
-            if progress.transition().is_some() {
-                Value::Signal(progress)
-            } else {
-                Value::Signal(progress.animated(default_collapse_transition()))
-            }
+            Value::Signal(signal.map(|expanded| if expanded { 1.0 } else { 0.0 }))
         }
     }
 }
@@ -472,8 +471,4 @@ fn collapse_panel_max_height(progress: f32) -> Length {
     Length::Px(Dp::new(
         COLLAPSE_PANEL_MAX_HEIGHT.get() * progress.clamp(0.0, 1.0),
     ))
-}
-
-fn default_collapse_transition() -> Transition {
-    Transition::ease_in_out(Duration::from_millis(COLLAPSE_TRANSITION_MS))
 }

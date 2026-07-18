@@ -12,12 +12,12 @@ mod vertex;
 mod vertex_pool;
 
 #[cfg(feature = "bench-support")]
-pub use texture::{
-    renderer_texture_diagnostics, reset_renderer_texture_diagnostics, RendererTextureDiagnostics,
-};
+pub(crate) use prepare::TransformTranslatePrepareProbe;
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
+#[cfg(feature = "bench-support")]
+use std::time::{Duration, Instant};
 
 use self::surface::{
     create_instance, create_surface, pipeline_multisample_state, request_adapter,
@@ -55,6 +55,16 @@ pub enum RenderStatus {
     Rendered,
     ReconfigureSurface,
     SkipFrame,
+}
+
+#[cfg(feature = "bench-support")]
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct BenchRenderProfile {
+    pub(crate) liveness: Duration,
+    pub(crate) prepare_upload: Duration,
+    pub(crate) encode: Duration,
+    pub(crate) submit: Duration,
+    pub(crate) gpu_wait: Duration,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -110,24 +120,10 @@ pub(super) fn initial_scene_clear_strategy(
 
 fn collect_active_texture_keys(scene: &ScenePrimitives, keys: &mut HashSet<u64>) {
     keys.clear();
-    keys.extend(
-        scene
-            .textures
-            .iter()
-            .chain(scene.overlay_textures.iter())
-            .map(|texture| texture.texture.id()),
-    );
-
-    #[cfg(feature = "video")]
-    {
-        keys.extend(scene.video_textures.iter().filter_map(|texture| {
-            texture
-                .controller
-                .current_render_frame()
-                .and_then(|frame| frame.as_rgba_texture())
-                .map(|frame| frame.id())
-        }));
-    }
+    // Command streams are the authoritative submitted texture set. The parallel texture arrays
+    // contain the same top-level primitives for indexed slot writes, so scanning both duplicates
+    // every lookup and HashSet insertion on liveness refreshes. Recursive command traversal also
+    // preserves nested composite and video-frame keys.
     collect_texture_keys_from_commands(&scene.commands, keys);
     collect_texture_keys_from_commands(&scene.overlay_commands, keys);
 }
@@ -135,9 +131,9 @@ fn collect_active_texture_keys(scene: &ScenePrimitives, keys: &mut HashSet<u64>)
 fn cache_liveness_needs_refresh(
     last_scene_serial: Option<u64>,
     scene_serial: u64,
-    has_dirty_draws: bool,
+    cache_liveness_dirty: bool,
 ) -> bool {
-    last_scene_serial != Some(scene_serial) || has_dirty_draws
+    last_scene_serial != Some(scene_serial) || cache_liveness_dirty
 }
 
 #[cfg(feature = "video")]
@@ -260,6 +256,7 @@ pub struct Renderer {
     text_upload_scratch: Vec<u8>,
     text_atlas: text::TextAtlas,
     text_cache: HashMap<TextCacheKey, TextCacheEntry>,
+    stale_text_atlas_allocations_scratch: Vec<TextAtlasAllocation>,
     texture_cache: HashMap<u64, TextureCacheEntry>,
     /// Monotonic identity for actual sprite bind-group instances.
     ///
@@ -271,22 +268,40 @@ pub struct Renderer {
     /// Scene serial whose text/static-texture cache liveness was last scanned.
     ///
     /// Stable retained frames reuse the same prepared bind groups, so walking every
-    /// nested command merely to rebuild identical key sets is unnecessary. Dirty
-    /// draw ranges deliberately bypass this shortcut because direct scene splices
-    /// keep the serial stable while replacing commands.
+    /// nested command merely to rebuild identical key sets is unnecessary. Retained scene
+    /// mutations separately flag changes that can affect text/texture cache identities; ordinary
+    /// paint/geometry dirty ranges do not invalidate this liveness snapshot.
     cache_liveness_scene_serial: Option<u64>,
     #[cfg(feature = "video")]
     video_yuv_texture_cache: HashMap<u64, VideoYuvTextureCacheEntry>,
+    #[cfg(any(test, feature = "bench-support"))]
+    text_atlas_whole_page_stale_release_enabled: bool,
+    #[cfg(any(test, feature = "bench-support"))]
+    cache_liveness_legacy_dirty_draw_gate: bool,
+    #[cfg(any(test, feature = "bench-support"))]
+    cache_liveness_scan_count: usize,
+    #[cfg(any(test, feature = "bench-support"))]
+    cache_liveness_paint_only_skip_count: usize,
     vertex_pool: self::vertex_pool::VertexBufferPool,
     retained_prepare_cache: prepare::RetainedPrepareCache,
+    clean_prepared_frame_cache: prepare::CleanPreparedFrameCache,
+    clean_prepared_content_generation: u64,
     /// Reuses the large frame-local prepared command arrays for retained main/overlay scenes.
     prepared_command_scratch: prepare::PreparedCommandScratch,
     /// Frame-local GPU-scroll translation lookups shared by main and overlay prepare streams.
     scroll_translate_cache: prepare::ScrollTranslateCache,
+    /// Frame-local retained transform-chain resolutions shared by main and overlay streams.
+    transform_translate_cache: prepare::TransformTranslateCache,
     /// Frame-local deduplication for identical mesh clip uniforms. Retained templates keep their
     /// cloned binding alive after this lookup table is cleared.
     mesh_clip_bind_group_cache: prepare::MeshClipBindGroupCache,
     last_prepare_stats: HashMap<prepare::DrawStream, prepare::PrepareReuseStats>,
+    #[cfg(any(test, feature = "bench-support"))]
+    clean_prepared_frame_cache_enabled: bool,
+    #[cfg(any(test, feature = "bench-support"))]
+    clean_prepared_frame_cache_hits: usize,
+    #[cfg(any(test, feature = "bench-support"))]
+    clean_prepared_frame_cache_misses: usize,
     /// Benchmark/test-only switch and counters for an isomorphic unbatched control path.
     /// Production builds compile the switch away and always use safe contiguous sprite batching.
     #[cfg(any(test, feature = "bench-support"))]
@@ -297,12 +312,20 @@ pub struct Renderer {
     transparent_shape_skip_enabled: bool,
     #[cfg(any(test, feature = "bench-support"))]
     last_scene_draw_stats: draw::SceneDrawStats,
+    #[cfg(feature = "bench-support")]
+    last_bench_render_profile: BenchRenderProfile,
     #[cfg(any(test, feature = "bench-support"))]
     text_cache_hits: usize,
     #[cfg(any(test, feature = "bench-support"))]
     text_cache_misses: usize,
     #[cfg(any(test, feature = "bench-support"))]
     text_atlas_releases: usize,
+    #[cfg(any(test, feature = "bench-support"))]
+    text_atlas_whole_pages_released: usize,
+    #[cfg(any(test, feature = "bench-support"))]
+    text_atlas_whole_page_releases: usize,
+    #[cfg(any(test, feature = "bench-support"))]
+    text_atlas_individual_releases: usize,
     #[cfg(any(test, feature = "bench-support"))]
     text_prepare_cache_clears: usize,
     #[cfg(any(test, feature = "bench-support"))]
@@ -607,6 +630,8 @@ impl Renderer {
         transform_records: &HashMap<WidgetId, TransformRecord>,
         view: &wgpu::TextureView,
     ) -> Result<(), TguiError> {
+        #[cfg(feature = "bench-support")]
+        let profile_started = Instant::now();
         #[cfg(any(test, feature = "bench-support"))]
         {
             self.last_scene_draw_stats = draw::SceneDrawStats::default();
@@ -623,11 +648,35 @@ impl Renderer {
         let previous_glyph_image_entries = self.text_system.swash_cache.image_cache.len();
         let viewport = self.vertex_viewport();
         let scene_serial = scene.prepare_cache_serial();
+        #[cfg(any(test, feature = "bench-support"))]
+        let has_dirty_draws = !scene.dirty_draw_ranges().is_empty();
+        let cache_liveness_dirty = {
+            let key_dirty = scene.cache_liveness_dirty();
+            #[cfg(any(test, feature = "bench-support"))]
+            {
+                key_dirty
+                    || (self.cache_liveness_legacy_dirty_draw_gate
+                        && !scene.dirty_draw_ranges().is_empty())
+            }
+            #[cfg(not(any(test, feature = "bench-support")))]
+            {
+                key_dirty
+            }
+        };
         let refresh_static_liveness = cache_liveness_needs_refresh(
             self.cache_liveness_scene_serial,
             scene_serial,
-            !scene.dirty_draw_ranges().is_empty(),
+            cache_liveness_dirty,
         );
+        #[cfg(any(test, feature = "bench-support"))]
+        {
+            if refresh_static_liveness {
+                self.cache_liveness_scan_count = self.cache_liveness_scan_count.saturating_add(1);
+            } else if has_dirty_draws {
+                self.cache_liveness_paint_only_skip_count =
+                    self.cache_liveness_paint_only_skip_count.saturating_add(1);
+            }
+        }
 
         #[cfg(feature = "video")]
         let refresh_texture_liveness = true;
@@ -652,49 +701,106 @@ impl Renderer {
             self.retain_active_text_cache(scene);
             self.cache_liveness_scene_serial = Some(scene_serial);
         }
+        #[cfg(feature = "bench-support")]
+        let liveness_finished = Instant::now();
 
         // 推进到下一个轮转池缓冲并清空 staging；prepare_commands 会 bump-allocate 进来。
         self.vertex_pool.begin_frame();
         self.scroll_translate_cache.begin_frame();
+        self.transform_translate_cache.begin_frame();
         self.mesh_clip_bind_group_cache.begin_frame();
-
-        let command_buffers = self.prepare_commands(
-            prepare::DrawStream::Main,
-            &scene.commands,
-            font_manager,
-            viewport,
-            scroll_regions,
-            scene.command_gpu_scroll_containers(),
-            scene.command_transform_chains(),
-            transform_records,
-            scene.dirty_draw_ranges(),
-            Some(scene.prepare_cache_serial()),
-        )?;
-        let overlay_buffers = match self.prepare_commands(
-            prepare::DrawStream::Overlay,
-            &scene.overlay_commands,
-            font_manager,
-            viewport,
-            scroll_regions,
-            scene.overlay_command_gpu_scroll_containers(),
-            scene.overlay_command_transform_chains(),
-            transform_records,
-            scene.dirty_draw_ranges(),
-            Some(scene.prepare_cache_serial()),
-        ) {
-            Ok(prepared) => prepared,
-            Err(error) => {
-                self.recycle_prepared_commands(command_buffers);
-                self.text_system
-                    .finish_raster_batch(previous_glyph_image_entries);
-                return Err(error);
+        if !scene.dirty_draw_ranges().is_empty() {
+            self.clean_prepared_content_generation =
+                self.clean_prepared_content_generation.wrapping_add(1);
+        }
+        let clean_cache_enabled = {
+            #[cfg(any(test, feature = "bench-support"))]
+            {
+                self.clean_prepared_frame_cache_enabled
+            }
+            #[cfg(not(any(test, feature = "bench-support")))]
+            {
+                true
             }
         };
+        let clean_signature = prepare::CleanPreparedFrameSignature {
+            scene_serial,
+            viewport,
+            main_command_count: scene.commands.len(),
+            overlay_command_count: scene.overlay_commands.len(),
+            font_identity: font_manager.cache_identity(),
+            resource_generation: self.retained_prepare_cache.generation(),
+            content_generation: self.clean_prepared_content_generation,
+        };
+        let vertex_slot = self.vertex_pool.current_slot();
+        let vertex_generation = self.vertex_pool.current_generation();
+        let cached_prepared = if clean_cache_enabled
+            && scene.dirty_draw_ranges().is_empty()
+            && transform_records.is_empty()
+        {
+            self.clean_prepared_frame_cache
+                .take(vertex_slot, clean_signature, vertex_generation)
+        } else {
+            None
+        };
+        #[cfg(any(test, feature = "bench-support"))]
+        {
+            if cached_prepared.is_some() {
+                self.clean_prepared_frame_cache_hits =
+                    self.clean_prepared_frame_cache_hits.saturating_add(1);
+            } else {
+                self.clean_prepared_frame_cache_misses =
+                    self.clean_prepared_frame_cache_misses.saturating_add(1);
+            }
+        }
+
+        let (command_buffers, overlay_buffers, used_clean_cache) =
+            if let Some((main, overlay)) = cached_prepared {
+                (main, overlay, true)
+            } else {
+                let main = self.prepare_commands(
+                    prepare::DrawStream::Main,
+                    &scene.commands,
+                    font_manager,
+                    viewport,
+                    scroll_regions,
+                    scene.command_gpu_scroll_containers(),
+                    scene.command_transform_chains(),
+                    transform_records,
+                    scene.dirty_draw_ranges(),
+                    Some(scene.prepare_cache_serial()),
+                )?;
+                let overlay = match self.prepare_commands(
+                    prepare::DrawStream::Overlay,
+                    &scene.overlay_commands,
+                    font_manager,
+                    viewport,
+                    scroll_regions,
+                    scene.overlay_command_gpu_scroll_containers(),
+                    scene.overlay_command_transform_chains(),
+                    transform_records,
+                    scene.dirty_draw_ranges(),
+                    Some(scene.prepare_cache_serial()),
+                ) {
+                    Ok(prepared) => prepared,
+                    Err(error) => {
+                        self.recycle_prepared_commands(main);
+                        self.text_system
+                            .finish_raster_batch(previous_glyph_image_entries);
+                        return Err(error);
+                    }
+                };
+                (main, overlay, false)
+            };
         self.text_system
             .finish_raster_batch(previous_glyph_image_entries);
         self.text_atlas.flush_pending_uploads(&self.queue);
-        // 两次 prepare 的顶点数据都已进 staging，这里一次性上传到 GPU。
-        self.vertex_pool.flush(&self.device, &self.queue);
+        if !used_clean_cache {
+            // 两次 prepare 的顶点数据都已进 staging，这里一次性上传到 GPU。
+            self.vertex_pool.flush(&self.device, &self.queue);
+        }
+        #[cfg(feature = "bench-support")]
+        let prepare_finished = Instant::now();
 
         let mut encoder = self
             .device
@@ -756,12 +862,39 @@ impl Renderer {
                 &mut cleared_draw_target,
             )
         })();
-        self.recycle_prepared_commands(command_buffers);
-        self.recycle_prepared_commands(overlay_buffers);
+        let clean_cacheable = clean_cache_enabled
+            && transform_records.is_empty()
+            && command_buffers.clean_frame_cacheable
+            && overlay_buffers.clean_frame_cacheable;
+        if clean_cacheable {
+            self.clean_prepared_frame_cache.store(
+                vertex_slot,
+                clean_signature,
+                self.vertex_pool.current_generation(),
+                command_buffers,
+                overlay_buffers,
+            );
+        } else {
+            self.recycle_prepared_commands(command_buffers);
+            self.recycle_prepared_commands(overlay_buffers);
+        }
         execute_result?;
         self.blit_scene_to_surface(&mut encoder, view, None);
 
+        #[cfg(feature = "bench-support")]
+        let encode_finished = Instant::now();
         self.queue.submit(Some(encoder.finish()));
+        #[cfg(feature = "bench-support")]
+        {
+            let submit_finished = Instant::now();
+            self.last_bench_render_profile = BenchRenderProfile {
+                liveness: liveness_finished.duration_since(profile_started),
+                prepare_upload: prepare_finished.duration_since(liveness_finished),
+                encode: encode_finished.duration_since(prepare_finished),
+                submit: submit_finished.duration_since(encode_finished),
+                gpu_wait: Duration::ZERO,
+            };
+        }
         self.text_system.finish_frame();
         scene.clear_dirty_draw_ranges();
         Ok(())
@@ -793,19 +926,39 @@ impl Renderer {
             .filter(|key| !active_text_keys.contains(*key))
             .cloned()
             .collect::<Vec<_>>();
-        let mut released_atlas_region = false;
+        let mut stale_atlas_allocations =
+            std::mem::take(&mut self.stale_text_atlas_allocations_scratch);
+        stale_atlas_allocations.clear();
         for key in stale_keys {
             let Some(entry) = self.text_cache.remove(&key) else {
                 continue;
             };
             if let TextTextureStorage::Atlas(allocation) = entry.storage {
-                self.text_atlas.release(allocation);
-                released_atlas_region = true;
-                #[cfg(any(test, feature = "bench-support"))]
-                {
-                    self.text_atlas_releases = self.text_atlas_releases.saturating_add(1);
-                }
+                stale_atlas_allocations.push(allocation);
             }
+        }
+        #[cfg(any(test, feature = "bench-support"))]
+        let whole_page_fast_path = self.text_atlas_whole_page_stale_release_enabled;
+        #[cfg(not(any(test, feature = "bench-support")))]
+        let whole_page_fast_path = true;
+        let release_stats = self
+            .text_atlas
+            .release_many(&stale_atlas_allocations, whole_page_fast_path);
+        let released_atlas_region = release_stats.released_allocations != 0;
+        #[cfg(any(test, feature = "bench-support"))]
+        {
+            self.text_atlas_releases = self
+                .text_atlas_releases
+                .saturating_add(release_stats.released_allocations);
+            self.text_atlas_whole_pages_released = self
+                .text_atlas_whole_pages_released
+                .saturating_add(release_stats.whole_pages);
+            self.text_atlas_whole_page_releases = self
+                .text_atlas_whole_page_releases
+                .saturating_add(release_stats.whole_page_allocations);
+            self.text_atlas_individual_releases = self
+                .text_atlas_individual_releases
+                .saturating_add(release_stats.individual_allocations);
         }
         if released_atlas_region {
             // A retained template stores both the atlas page binding and its UVs.
@@ -817,6 +970,7 @@ impl Renderer {
                 self.text_prepare_cache_clears = self.text_prepare_cache_clears.saturating_add(1);
             }
         }
+        self.stale_text_atlas_allocations_scratch = stale_atlas_allocations;
         self.active_text_keys_scratch = active_text_keys;
     }
 
@@ -926,11 +1080,21 @@ impl HeadlessBenchRenderer {
             transform_records,
             &view,
         )?;
+        let wait_started = Instant::now();
         self.renderer
             .device
             .poll(wgpu::PollType::wait_indefinitely())
             .map_err(|error| TguiError::TextRender(format!("headless GPU wait failed: {error}")))?;
+        self.renderer.last_bench_render_profile.gpu_wait = wait_started.elapsed();
         Ok(())
+    }
+
+    pub(crate) fn last_render_profile(&self) -> BenchRenderProfile {
+        self.renderer.last_bench_render_profile
+    }
+
+    pub(crate) fn push_constants_supported(&self) -> bool {
+        self.renderer.push_constants_supported()
     }
 
     pub(crate) fn read_output_rgba(&self) -> Result<Vec<u8>, TguiError> {
@@ -1017,7 +1181,17 @@ impl HeadlessBenchRenderer {
 
     pub(crate) fn text_gpu_cache_stats(
         &self,
-    ) -> (usize, usize, usize, usize, usize, usize, usize, usize) {
+    ) -> (
+        usize,
+        usize,
+        usize,
+        usize,
+        usize,
+        usize,
+        usize,
+        usize,
+        usize,
+    ) {
         let atlas_allocations = self
             .renderer
             .text_cache
@@ -1055,6 +1229,7 @@ impl HeadlessBenchRenderer {
             rgba_atlas_pages,
             r8_allocations,
             rgba_allocations,
+            self.renderer.text_atlas.live_allocation_count(),
         )
     }
 
@@ -1070,12 +1245,17 @@ impl HeadlessBenchRenderer {
         self.renderer.text_system.reset_stats();
     }
 
-    pub(crate) fn text_cache_activity_stats(&self) -> (usize, usize, usize, usize) {
+    pub(crate) fn text_cache_activity_stats(
+        &self,
+    ) -> (usize, usize, usize, usize, usize, usize, usize) {
         (
             self.renderer.text_cache_hits,
             self.renderer.text_cache_misses,
             self.renderer.text_atlas_releases,
             self.renderer.text_prepare_cache_clears,
+            self.renderer.text_atlas_whole_pages_released,
+            self.renderer.text_atlas_whole_page_releases,
+            self.renderer.text_atlas_individual_releases,
         )
     }
 
@@ -1130,6 +1310,9 @@ impl HeadlessBenchRenderer {
         self.renderer.text_cache_misses = 0;
         self.renderer.text_atlas_releases = 0;
         self.renderer.text_prepare_cache_clears = 0;
+        self.renderer.text_atlas_whole_pages_released = 0;
+        self.renderer.text_atlas_whole_page_releases = 0;
+        self.renderer.text_atlas_individual_releases = 0;
     }
 
     pub(crate) fn set_text_alpha_cache_normalization(&mut self, enabled: bool) {
@@ -1186,6 +1369,54 @@ impl HeadlessBenchRenderer {
             stats.sprite_commands,
             stats.sprite_draw_calls,
         )
+    }
+
+    pub(crate) fn prepare_reuse_stats(&self) -> (usize, usize, usize) {
+        self.renderer.last_prepare_stats.values().fold(
+            (0, 0, 0),
+            |(total, rebuild, reuse), stats| {
+                (
+                    total + stats.total,
+                    rebuild + stats.rebuild,
+                    reuse + stats.reuse,
+                )
+            },
+        )
+    }
+
+    pub(crate) fn clean_prepared_frame_cache_stats(&self) -> (usize, usize) {
+        (
+            self.renderer.clean_prepared_frame_cache_hits,
+            self.renderer.clean_prepared_frame_cache_misses,
+        )
+    }
+
+    pub(crate) fn set_clean_prepared_frame_cache(&mut self, enabled: bool) {
+        self.renderer.clean_prepared_frame_cache_enabled = enabled;
+    }
+
+    pub(crate) fn cache_liveness_stats(&self) -> (usize, usize) {
+        (
+            self.renderer.cache_liveness_scan_count,
+            self.renderer.cache_liveness_paint_only_skip_count,
+        )
+    }
+
+    pub(crate) fn reset_cache_liveness_stats(&mut self) {
+        self.renderer.cache_liveness_scan_count = 0;
+        self.renderer.cache_liveness_paint_only_skip_count = 0;
+    }
+
+    pub(crate) fn set_cache_liveness_legacy_dirty_draw_gate(&mut self, enabled: bool) {
+        self.renderer.cache_liveness_legacy_dirty_draw_gate = enabled;
+    }
+
+    pub(crate) fn set_text_atlas_whole_page_stale_release(&mut self, enabled: bool) {
+        self.renderer.text_atlas_whole_page_stale_release_enabled = enabled;
+    }
+
+    pub(crate) fn force_cache_liveness_refresh(&mut self) {
+        self.renderer.cache_liveness_scene_serial = None;
     }
 
     pub(crate) fn clear_text_gpu_cache(&mut self) {

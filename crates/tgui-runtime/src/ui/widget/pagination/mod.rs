@@ -36,7 +36,7 @@ impl<VM> Pagination<VM> {
             page: page.into(),
             page_count: page_count.into(),
             page_size: Value::Static(25),
-            page_size_options: vec![10, 25, 50, 100],
+            page_size_options: Vec::new(),
             on_change: None,
             style: None,
             layout: LayoutStyle::default(),

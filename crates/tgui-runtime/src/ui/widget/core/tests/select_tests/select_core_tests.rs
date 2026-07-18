@@ -1,4 +1,151 @@
 use super::*;
+use crate::theme::WidgetState;
+use crate::ui::layout::Value;
+
+#[test]
+fn default_select_arrow_stays_neutral_across_interactive_states() {
+    for theme in [Theme::light(), Theme::dark()] {
+        let style = crate::ui::widget::SelectStyle::default_for_theme(&theme);
+        let normal = style.arrow.resolve(WidgetState::default()).resolve();
+        assert_eq!(normal, theme.colors.on_surface_muted);
+        for state in [
+            WidgetState {
+                hovered: true,
+                ..Default::default()
+            },
+            WidgetState {
+                pressed: true,
+                ..Default::default()
+            },
+            WidgetState {
+                focused: true,
+                ..Default::default()
+            },
+            WidgetState {
+                open: true,
+                ..Default::default()
+            },
+        ] {
+            assert_eq!(style.arrow.resolve(state).resolve(), normal);
+        }
+        assert_eq!(
+            style
+                .arrow
+                .resolve(WidgetState {
+                    disabled: true,
+                    ..Default::default()
+                })
+                .resolve(),
+            theme.colors.on_disabled
+        );
+    }
+}
+
+fn select_arrow_texture_id(
+    tree: &WidgetTree<()>,
+    theme: &Theme,
+    media: &MediaManager,
+    animations: &mut AnimationEngine,
+    state: WidgetState,
+    reduced_motion: bool,
+) -> u64 {
+    let select_id = tree.root.id;
+    let mut states = WidgetStateMap::default();
+    states.set(select_id, state);
+    tree.compute_scene_with_widget_state(
+        &FontManager::new(&FontCatalog::default()),
+        theme,
+        media,
+        animations,
+        reduced_motion,
+        None,
+        None,
+        &states,
+        &HashMap::new(),
+        &HashMap::new(),
+        Rect::new(0.0, 0.0, 180.0, 40.0),
+        None,
+        None,
+        None,
+        None,
+        false,
+    )
+    .scene
+    .textures
+    .first()
+    .expect("select arrow texture")
+    .texture
+    .id()
+}
+
+#[test]
+fn default_select_arrow_reuses_texture_for_pressed_full_recollect() {
+    let theme = Theme::light();
+    let media = test_media();
+    let tree: WidgetTree<()> = WidgetTree::new(
+        Select::<(), String, String>::new(
+            vec![SelectOption::new("email".into(), "Email".into())],
+            None::<String>,
+        )
+        .size(dp(180.0), dp(40.0)),
+    );
+    let normal = select_arrow_texture_id(
+        &tree,
+        &theme,
+        &media,
+        &mut AnimationEngine::default(),
+        WidgetState::default(),
+        true,
+    );
+    let pressed = select_arrow_texture_id(
+        &tree,
+        &theme,
+        &media,
+        &mut AnimationEngine::default(),
+        WidgetState {
+            pressed: true,
+            ..Default::default()
+        },
+        true,
+    );
+    assert_eq!(normal, pressed);
+}
+
+#[test]
+fn custom_select_pressed_arrow_color_remains_supported() {
+    let theme = Theme::light();
+    let media = test_media();
+    let tree: WidgetTree<()> = WidgetTree::new(
+        Select::<(), String, String>::new(
+            vec![SelectOption::new("email".into(), "Email".into())],
+            None::<String>,
+        )
+        .style(|style, context| {
+            style.arrow.pressed = Value::Static(context.theme.colors.error);
+        })
+        .size(dp(180.0), dp(40.0)),
+    );
+    let normal = select_arrow_texture_id(
+        &tree,
+        &theme,
+        &media,
+        &mut AnimationEngine::default(),
+        WidgetState::default(),
+        true,
+    );
+    let pressed = select_arrow_texture_id(
+        &tree,
+        &theme,
+        &media,
+        &mut AnimationEngine::default(),
+        WidgetState {
+            pressed: true,
+            ..Default::default()
+        },
+        true,
+    );
+    assert_ne!(normal, pressed);
+}
 
 #[test]
 fn select_renders_placeholder_and_arrow_when_unselected() {

@@ -26,6 +26,11 @@ path = "animation.rs"
 harness = false
 
 [[bench]]
+name = "animation_frame_pipeline"
+path = "animation_frame_pipeline.rs"
+harness = false
+
+[[bench]]
 name = "audio_output"
 path = "audio_output.rs"
 harness = false
@@ -38,6 +43,11 @@ harness = false
 [[bench]]
 name = "event_handling"
 path = "event_handling.rs"
+harness = false
+
+[[bench]]
+name = "interaction_frame_pipeline"
+path = "interaction_frame_pipeline.rs"
 harness = false
 
 [[bench]]

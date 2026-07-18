@@ -259,3 +259,57 @@ fn borrowed_canvas_scene_collection_reuses_shadow_cache() {
     assert_eq!(first_shadow.id(), second_shadow.id());
     assert_eq!(first_shadow.size(), second_shadow.size());
 }
+
+#[test]
+fn canvas_shadow_opacity_reuses_canonical_texture_and_updates_primitive_alpha() {
+    let scene = CanvasRecorder::build(|canvas| {
+        canvas
+            .set_fill(Color::WHITE)
+            .set_shadow(CanvasShadow::new(
+                Color::hexa(0x112233B8),
+                Point::new(3.0, 5.0),
+                dp(6.0),
+            ))
+            .begin_path()
+            .move_to(0.0, 0.0)
+            .quad_to(24.0, -12.0, 48.0, 10.0)
+            .line_to(36.0, 42.0)
+            .close_path()
+            .fill();
+    });
+    let media = test_media();
+    let low = super::super::tessellate_canvas_scene_items(
+        &scene,
+        Point::ZERO,
+        0.25,
+        None,
+        None,
+        false,
+        &FontManager::new(&FontCatalog::default()),
+        &media,
+        UnitContext::default(),
+    );
+    let high = super::super::tessellate_canvas_scene_items(
+        &scene,
+        Point::ZERO,
+        0.85,
+        None,
+        None,
+        false,
+        &FontManager::new(&FontCatalog::default()),
+        &media,
+        UnitContext::default(),
+    );
+
+    let low_shadow = &low[0].output.textures[0];
+    let high_shadow = &high[0].output.textures[0];
+    assert_eq!(low_shadow.texture.id(), high_shadow.texture.id());
+    assert_eq!(
+        low_shadow.texture.revision(),
+        high_shadow.texture.revision()
+    );
+    assert_eq!(low_shadow.texture.size(), high_shadow.texture.size());
+    assert_eq!(low_shadow.texture.pixels(), high_shadow.texture.pixels());
+    assert!((low_shadow.opacity - 0.25).abs() <= f32::EPSILON);
+    assert!((high_shadow.opacity - 0.85).abs() <= f32::EPSILON);
+}

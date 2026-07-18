@@ -1,5 +1,6 @@
 use super::*;
 use crate::ui::widget::r#virtual::{VirtualCacheState, VirtualViewportHint};
+use std::sync::{Arc, Mutex};
 
 #[test]
 fn text_signal_records_layout_and_scene_dependencies() {
@@ -263,6 +264,67 @@ fn keyed_dynamic_children_reuse_widget_ids_across_reorder_patch() {
 }
 
 #[test]
+fn dynamic_child_sources_resolve_before_any_child_style() {
+    let ctx = test_context();
+    let first = ctx.state(1usize);
+    let second = ctx.state(2usize);
+    let events = Arc::new(Mutex::new(Vec::new()));
+
+    let first_source_events = Arc::clone(&events);
+    let first_style_events = Arc::clone(&events);
+    let first_child = first.signal().map_unchecked(move |value| {
+        first_source_events.lock().unwrap().push("source-first");
+        Text::new(format!("first {value}")).style({
+            let first_style_events = Arc::clone(&first_style_events);
+            move |_style, _context| {
+                first_style_events.lock().unwrap().push("style-first");
+            }
+        })
+    });
+
+    let second_source_events = Arc::clone(&events);
+    let second_style_events = Arc::clone(&events);
+    let second_child = second.signal().map_unchecked(move |value| {
+        second_source_events.lock().unwrap().push("source-second");
+        Text::new(format!("second {value}")).style({
+            let second_style_events = Arc::clone(&second_style_events);
+            move |_style, _context| {
+                second_style_events.lock().unwrap().push("style-second");
+            }
+        })
+    });
+
+    let tree = WidgetTree::new_legacy(
+        Stack::<()>::new()
+            .dynamic_child(first_child)
+            .dynamic_child(second_child),
+    );
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let mut animations = AnimationEngine::default();
+    tree.build_scene_layout(
+        &font_manager,
+        &Theme::default(),
+        &media,
+        &mut animations,
+        UnitContext::default(),
+        &HashMap::new(),
+        &HashMap::new(),
+        Rect::new(0.0, 0.0, 200.0, 120.0),
+    );
+
+    assert_eq!(
+        *events.lock().unwrap(),
+        [
+            "source-first",
+            "source-second",
+            "style-first",
+            "style-second"
+        ]
+    );
+}
+
+#[test]
 fn strict_keyed_for_children_reuse_widget_ids_across_reorder_patch() {
     use crate::ui::widget::For;
 
@@ -322,6 +384,148 @@ fn strict_keyed_for_children_reuse_widget_ids_across_reorder_patch() {
         _ => panic!("stack root should remain a container"),
     };
     assert_eq!(reordered_ids, vec![initial_ids[1], initial_ids[0]]);
+}
+
+#[test]
+fn mixed_child_sources_preserve_spans_and_previous_identity_matching() {
+    use crate::ui::widget::common::ChildSource;
+    use crate::ui::widget::{For, Show, ViewSwitch, WidgetKey};
+
+    let ctx = test_context();
+    let dynamic_generation = ctx.state(0usize);
+    let show_visible = ctx.state(true);
+    let items = ctx.state(vec![1usize, 2]);
+    let switch_index = ctx.state(0usize);
+    let stable_static: Element<()> = Text::new("stable static").into();
+    let stable_static_source_id = stable_static.id;
+
+    // Keep every ChildSource variant in one container. The unkeyed dynamic child exercises
+    // position fallback, hiding Show shifts the later static child so it must match by id, For
+    // reorders by key, and switching cases must not reuse the previous keyed case by position.
+    let container: Element<()> = Stack::new()
+        .dynamic_child(
+            dynamic_generation
+                .signal()
+                .map_unchecked(|generation| Text::new(format!("dynamic generation {generation}"))),
+        )
+        .child(Show::new(
+            show_visible.signal(),
+            Text::new("conditionally shown").key("shown"),
+        ))
+        .child(stable_static)
+        .child(For::new(
+            items.signal(),
+            |item| *item,
+            |_index, item| Text::new(format!("keyed item {item}")),
+        ))
+        .child(
+            ViewSwitch::new(switch_index.signal())
+                .case(Text::new("switch zero").key("switch-zero"))
+                .case(Text::new("switch one").key("switch-one"))
+                .fallback(Text::new("switch fallback").key("switch-fallback")),
+        )
+        .into();
+    let container_id = container.id;
+    let WidgetKind::Container { children, .. } = &container.kind else {
+        panic!("stack root should retain child sources in a container");
+    };
+    assert_eq!(children.len(), 5);
+    assert!(matches!(children[0], ChildSource::Dynamic(_)));
+    assert!(matches!(children[1], ChildSource::Show { .. }));
+    assert!(matches!(children[2], ChildSource::Static(_)));
+    assert!(matches!(children[3], ChildSource::KeyedFor(_)));
+    let ChildSource::Switch {
+        cases, fallback, ..
+    } = &children[4]
+    else {
+        panic!("last child source should remain a retained switch");
+    };
+    assert_eq!(cases.len(), 2);
+    assert_eq!(
+        fallback.as_deref().and_then(|child| child.key.as_ref()),
+        Some(&WidgetKey::from("switch-fallback"))
+    );
+    let tree = WidgetTree::new_legacy(container.clone());
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let theme = Theme::default();
+    let viewport = Rect::new(0.0, 0.0, 320.0, 180.0);
+    let mut animations = AnimationEngine::default();
+
+    let mut layout = tree.build_scene_layout(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        UnitContext::default(),
+        &HashMap::new(),
+        &HashMap::new(),
+        viewport,
+    );
+    assert_eq!(layout.resolved_root.child_source_spans, vec![1, 1, 1, 2, 1]);
+    let initial_ids = match &layout.resolved_root.kind {
+        ResolvedWidgetKind::Container { children, .. } => {
+            children.iter().map(|child| child.id).collect::<Vec<_>>()
+        }
+        _ => panic!("stack root should resolve to a container"),
+    };
+    assert_eq!(initial_ids.len(), 6);
+    assert_eq!(initial_ids[2], stable_static_source_id);
+    assert!(layout.dependencies().contains_owner(DependencyOwner {
+        widget_id: container_id.raw(),
+        phase: DependencyPhase::Structure,
+        property: None,
+    }));
+
+    dynamic_generation.set(1);
+    show_visible.set(false);
+    items.set(vec![2, 1]);
+    switch_index.set(1);
+    layout
+        .patch_layout_roots(
+            &[container_id],
+            &font_manager,
+            &theme,
+            &media,
+            &mut animations,
+            viewport,
+            Instant::now(),
+        )
+        .expect("mixed child sources should patch successfully");
+
+    assert_eq!(layout.resolved_root.child_source_spans, vec![1, 0, 1, 2, 1]);
+    let updated_ids = match &layout.resolved_root.kind {
+        ResolvedWidgetKind::Container { children, .. } => {
+            children.iter().map(|child| child.id).collect::<Vec<_>>()
+        }
+        _ => panic!("stack root should remain a container"),
+    };
+    assert_eq!(updated_ids.len(), 5);
+    assert_eq!(
+        updated_ids[0], initial_ids[0],
+        "unkeyed dynamic child uses position"
+    );
+    assert_eq!(
+        updated_ids[1], initial_ids[2],
+        "shifted static child uses source id"
+    );
+    assert_eq!(
+        updated_ids[2], initial_ids[4],
+        "For key 2 follows its keyed child"
+    );
+    assert_eq!(
+        updated_ids[3], initial_ids[3],
+        "For key 1 follows its keyed child"
+    );
+    assert_ne!(
+        updated_ids[4], initial_ids[5],
+        "a different keyed switch case must not reuse identity by position"
+    );
+    assert!(layout.dependencies().contains_owner(DependencyOwner {
+        widget_id: container_id.raw(),
+        phase: DependencyPhase::Structure,
+        property: None,
+    }));
 }
 
 #[test]

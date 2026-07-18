@@ -174,6 +174,9 @@ pub struct TexturePrimitive {
     pub(crate) texture: Arc<TextureFrame>,
     pub(crate) media_key: Option<crate::media::MediaTextureKey>,
     pub(crate) media_layout: Option<crate::media::MediaTextureLayout>,
+    /// Treat the texture's alpha channel as monochrome coverage and color it at draw time.
+    /// Ordinary images keep this as `None`, preserving their original RGB content.
+    pub(crate) mask_tint: Option<Color>,
     pub frame: Rect,
     pub quad: Option<[Point; 4]>,
     pub uv_rect: Option<Rect>,
@@ -280,6 +283,10 @@ pub struct ScenePrimitives {
     pub(crate) command_transform_chains: SmallVec<[TransformChain; 1]>,
     pub(crate) overlay_command_transform_chains: SmallVec<[TransformChain; 1]>,
     pub(crate) dirty_draw_ranges: SmallVec<[DirtyDrawRange; 4]>,
+    /// A retained mutation may dirty vertices without changing the set of text/texture cache
+    /// keys. Keep that distinction so paint-only animation frames do not rescan every command.
+    /// Structural and unclassified mutations set this conservatively.
+    pub(crate) cache_liveness_dirty: bool,
     pub(crate) prepare_cache_serial: u64,
     active_gpu_scroll_container: Option<WidgetId>,
     active_transform_chain: TransformChain,
@@ -315,6 +322,7 @@ pub(crate) struct ScenePrimitiveCursor {
     command_transform_chains: usize,
     overlay_command_transform_chains: usize,
     dirty_draw_ranges: SmallVec<[DirtyDrawRange; 4]>,
+    cache_liveness_dirty: bool,
     prepare_cache_serial: u64,
     active_gpu_scroll_container: Option<WidgetId>,
     active_transform_chain: TransformChain,
@@ -338,6 +346,29 @@ impl ScenePrimitives {
 
     pub(crate) fn clear_dirty_draw_ranges(&mut self) {
         self.dirty_draw_ranges.clear();
+        self.cache_liveness_dirty = false;
+    }
+
+    pub(crate) fn cache_liveness_dirty(&self) -> bool {
+        self.cache_liveness_dirty
+    }
+
+    /// Remove overlay-only draw streams while retaining their allocations.
+    ///
+    /// Inline primitives deliberately remain intact: view-stack components use
+    /// this when an outgoing panel is still visually crossfading but must no
+    /// longer own portals, menus, tooltips, or other interactive overlays.
+    pub(crate) fn clear_overlay_streams(&mut self) {
+        self.cache_liveness_dirty |= !self.overlay_commands.is_empty();
+        self.overlay_shapes.clear();
+        self.overlay_textures.clear();
+        self.overlay_meshes.clear();
+        self.overlay_texts.clear();
+        self.overlay_text_decorations.clear();
+        self.overlay_commands.clear();
+        self.overlay_command_sources.clear();
+        self.overlay_command_gpu_scroll_containers.clear();
+        self.overlay_command_transform_chains.clear();
     }
 
     /// Clear every retained draw stream without releasing its backing allocation.
@@ -370,6 +401,7 @@ impl ScenePrimitives {
         self.command_transform_chains.clear();
         self.overlay_command_transform_chains.clear();
         self.dirty_draw_ranges.clear();
+        self.cache_liveness_dirty = true;
         // `extend` appends streams but deliberately does not overwrite collection state. The
         // legacy path starts from `before_children.clone()`, so copy those scalar states exactly;
         // this matters if a later finalize step appends commands to the recomposed root.
@@ -423,6 +455,21 @@ impl ScenePrimitives {
     }
 
     fn mark_dirty_draw(&mut self, stream: SceneDrawStream, command_index: usize) {
+        if let Some(last) = self.dirty_draw_ranges.last_mut() {
+            if last.stream == stream {
+                if last.range.contains(&command_index) {
+                    return;
+                }
+                if last.range.end == command_index {
+                    last.range.end += 1;
+                    return;
+                }
+                if command_index.checked_add(1) == Some(last.range.start) {
+                    last.range.start = command_index;
+                    return;
+                }
+            }
+        }
         if self.dirty_draw_ranges.iter().any(|range| {
             range.stream == stream
                 && range.range.start <= command_index
@@ -487,6 +534,7 @@ impl ScenePrimitives {
             command_transform_chains: self.command_transform_chains.len(),
             overlay_command_transform_chains: self.overlay_command_transform_chains.len(),
             dirty_draw_ranges: self.dirty_draw_ranges.clone(),
+            cache_liveness_dirty: self.cache_liveness_dirty,
             prepare_cache_serial: self.prepare_cache_serial,
             active_gpu_scroll_container: self.active_gpu_scroll_container,
             active_transform_chain: self.active_transform_chain.clone(),
@@ -613,6 +661,7 @@ impl ScenePrimitives {
         delta
             .dirty_draw_ranges
             .extend(self.dirty_draw_ranges.iter().cloned());
+        delta.cache_liveness_dirty = self.cache_liveness_dirty;
         delta
     }
 
@@ -733,6 +782,7 @@ impl ScenePrimitives {
                 .cloned(),
         );
         prefix.dirty_draw_ranges = cursor.dirty_draw_ranges.clone();
+        prefix.cache_liveness_dirty = cursor.cache_liveness_dirty;
         prefix.prepare_cache_serial = cursor.prepare_cache_serial;
         prefix.active_gpu_scroll_container = cursor.active_gpu_scroll_container;
         prefix.active_transform_chain = cursor.active_transform_chain.clone();
@@ -1491,11 +1541,17 @@ impl ScenePrimitives {
         }
         let text_index = offset.texts + slot.text_index;
         let command_index = offset.commands + slot.command_index;
+        let old_color = self.texts[text_index].color;
+        let cache_key_color_changed =
+            old_color.r != color.r || old_color.g != color.g || old_color.b != color.b;
         self.texts[text_index].color = color;
         match &mut self.commands[command_index] {
             RenderCommand::Text(primitive) => {
                 primitive.color = color;
                 self.mark_dirty_draw(SceneDrawStream::Main, command_index);
+                // Top-level alpha is normalized out of the raster cache key and applied by vertex
+                // tint. RGB remains key material for rich/non-mask fallback text.
+                self.cache_liveness_dirty |= cache_key_color_changed;
                 true
             }
             _ => false,
@@ -1518,6 +1574,7 @@ impl ScenePrimitives {
             RenderCommand::Text(target) => {
                 **target = primitive;
                 self.mark_dirty_draw(SceneDrawStream::Main, command_index);
+                self.cache_liveness_dirty = true;
                 true
             }
             _ => false,
@@ -1543,6 +1600,7 @@ impl ScenePrimitives {
                 primitive.content = content;
                 primitive.font_family = font_family;
                 self.mark_dirty_draw(SceneDrawStream::Main, command_index);
+                self.cache_liveness_dirty = true;
                 true
             }
             _ => false,
@@ -1580,11 +1638,15 @@ impl ScenePrimitives {
         }
         let text_index = offset.overlay_texts + slot.text_index;
         let command_index = offset.overlay_commands + slot.command_index;
+        let old_color = self.overlay_texts[text_index].color;
+        let cache_key_color_changed =
+            old_color.r != color.r || old_color.g != color.g || old_color.b != color.b;
         self.overlay_texts[text_index].color = color;
         match &mut self.overlay_commands[command_index] {
             RenderCommand::Text(primitive) => {
                 primitive.color = color;
                 self.mark_dirty_draw(SceneDrawStream::Overlay, command_index);
+                self.cache_liveness_dirty |= cache_key_color_changed;
                 true
             }
             _ => false,
@@ -1608,6 +1670,7 @@ impl ScenePrimitives {
             RenderCommand::Text(target) => {
                 **target = primitive;
                 self.mark_dirty_draw(SceneDrawStream::Overlay, command_index);
+                self.cache_liveness_dirty = true;
                 true
             }
             _ => false,
@@ -1634,6 +1697,7 @@ impl ScenePrimitives {
                 primitive.content = content;
                 primitive.font_family = font_family;
                 self.mark_dirty_draw(SceneDrawStream::Overlay, command_index);
+                self.cache_liveness_dirty = true;
                 true
             }
             _ => false,
@@ -1782,6 +1846,31 @@ impl ScenePrimitives {
         }
     }
 
+    pub(crate) fn write_texture_mask_tint_slot(
+        &mut self,
+        offset: &SceneCounts,
+        slot: TexturePrimitiveSlot,
+        color: Color,
+    ) -> bool {
+        if !self.can_write_texture_opacity_slot(offset, slot) {
+            return false;
+        }
+        let texture_index = offset.textures + slot.texture_index;
+        let command_index = offset.commands + slot.command_index;
+        if self.textures[texture_index].mask_tint.is_none() {
+            return false;
+        }
+        self.textures[texture_index].mask_tint = Some(color);
+        match &mut self.commands[command_index] {
+            RenderCommand::Texture(primitive) if primitive.mask_tint.is_some() => {
+                primitive.mask_tint = Some(color);
+                self.mark_dirty_draw(SceneDrawStream::Main, command_index);
+                true
+            }
+            _ => false,
+        }
+    }
+
     pub(crate) fn write_texture_slot(
         &mut self,
         offset: &SceneCounts,
@@ -1793,11 +1882,13 @@ impl ScenePrimitives {
         }
         let texture_index = offset.textures + slot.texture_index;
         let command_index = offset.commands + slot.command_index;
+        let cache_key_changed = self.textures[texture_index].texture.id() != primitive.texture.id();
         self.textures[texture_index] = primitive.clone();
         match &mut self.commands[command_index] {
             RenderCommand::Texture(target) => {
                 *target = primitive;
                 self.mark_dirty_draw(SceneDrawStream::Main, command_index);
+                self.cache_liveness_dirty |= cache_key_changed;
                 true
             }
             _ => false,
@@ -1873,11 +1964,14 @@ impl ScenePrimitives {
         }
         let texture_index = offset.overlay_textures + slot.texture_index;
         let command_index = offset.overlay_commands + slot.command_index;
+        let cache_key_changed =
+            self.overlay_textures[texture_index].texture.id() != primitive.texture.id();
         self.overlay_textures[texture_index] = primitive.clone();
         match &mut self.overlay_commands[command_index] {
             RenderCommand::Texture(target) => {
                 *target = primitive;
                 self.mark_dirty_draw(SceneDrawStream::Overlay, command_index);
+                self.cache_liveness_dirty |= cache_key_changed;
                 true
             }
             _ => false,
@@ -1935,6 +2029,7 @@ impl ScenePrimitives {
                 range.range = (range.range.start + offset)..(range.range.end + offset);
                 range
             }));
+        self.cache_liveness_dirty |= other.cache_liveness_dirty;
     }
 
     /// 各渲染流当前的命令数量快照。Splice 快路径用它在
@@ -2028,6 +2123,9 @@ impl ScenePrimitives {
                 &chunk.command_transform_chains,
             );
         if ok {
+            // Splice can replace text content, font attributes, texture identities, or nested
+            // composites. Qualification proves counts, not cache-key equality.
+            self.cache_liveness_dirty = true;
             if !chunk.commands.is_empty() {
                 self.dirty_draw_ranges.push(DirtyDrawRange {
                     stream: SceneDrawStream::Main,
@@ -2279,6 +2377,7 @@ mod culling_tests {
             uv_rect: None,
             corner_radius: 0.0,
             opacity,
+            mask_tint: None,
             clip_rect: None,
             clip_mask: None,
         }

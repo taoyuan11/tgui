@@ -316,9 +316,10 @@ fn large_list_selection_snapshot_is_shared_and_membership_stays_equivalent() {
 #[test]
 #[cfg(target_pointer_width = "64")]
 fn list_selection_metadata_stays_out_of_line() {
+    let size = std::mem::size_of::<crate::ui::widget::common::ListItemState<()>>();
     assert!(
-        std::mem::size_of::<crate::ui::widget::common::ListItemState<()>>() <= 960,
-        "selection lookup tables must remain behind Arc so recursive Element/ResolvedElement values do not grow"
+        size <= 960,
+        "selection lookup tables must remain behind Arc so recursive Element/ResolvedElement values do not grow; got {size} bytes"
     );
 }
 

@@ -81,6 +81,9 @@ pub mod window_ext {
         fn request_redraw(&self);
         fn pre_present_notify(&self);
         fn surface_size(&self) -> winit::dpi::PhysicalSize<u32>;
+        fn current_monitor(&self) -> Option<winit::monitor::MonitorHandle> {
+            None
+        }
         fn set_visible(&self, visible: bool);
         fn set_title(&self, title: &str);
         fn is_decorated(&self) -> bool;
@@ -124,6 +127,10 @@ pub mod window_ext {
 
         fn surface_size(&self) -> winit::dpi::PhysicalSize<u32> {
             winit::window::Window::inner_size(self)
+        }
+
+        fn current_monitor(&self) -> Option<winit::monitor::MonitorHandle> {
+            winit::window::Window::current_monitor(self)
         }
 
         fn set_visible(&self, visible: bool) {

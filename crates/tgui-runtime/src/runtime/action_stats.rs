@@ -35,16 +35,14 @@ mod imp {
         });
     }
 
-    /// 启用探针并清零累计。仅被测试使用，故按 `test` 门控，避免非测试的
-    /// `cargo check --features bench-support` 报「未使用」警告。
-    #[cfg(test)]
+    /// Enable the probe and clear accumulated counters. Runtime-equivalent benchmarks use the
+    /// same entry point to prove which invalidation path a measured frame actually hit.
     pub(crate) fn reset() {
         ENABLED.with(|cell| cell.set(true));
         COUNTS.with(|counts| counts.borrow_mut().clear());
     }
 
-    /// 读出各 action 命中次数并关闭探针。仅被测试使用，故按 `test` 门控。
-    #[cfg(test)]
+    /// Read the action counts and disable the probe.
     pub(crate) fn snapshot() -> Vec<(&'static str, u64)> {
         let mut entries = COUNTS.with(|counts| {
             counts
@@ -62,5 +60,5 @@ mod imp {
 
 pub(crate) use imp::record;
 
-#[cfg(all(feature = "bench-support", test))]
+#[cfg(feature = "bench-support")]
 pub(crate) use imp::{reset, snapshot};

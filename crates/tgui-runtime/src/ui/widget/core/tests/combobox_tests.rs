@@ -403,6 +403,15 @@ fn combobox_menu_uses_real_light_and_dark_surface_tokens() {
         );
         let style = ComboboxStyle::default_for_theme(&theme);
         assert_eq!(style.option_height, dp(40.0));
+        let highlight = style.highlight.resolve();
+        assert!(
+            scene
+                .scene
+                .overlay_shapes
+                .iter()
+                .all(|shape| shape.color != highlight),
+            "resting combobox options must stay transparent until hover/press"
+        );
         assert!(scene
             .scene
             .overlay_shapes
@@ -411,6 +420,7 @@ fn combobox_menu_uses_real_light_and_dark_surface_tokens() {
         assert!(scene.scene.overlay_shapes.iter().any(|shape| {
             shape.color == theme.colors.outline_muted
                 && shape.stroke_width == theme.border.thin.get()
+                && shape.corner_radius == theme.radius.xl.get()
         }));
         assert!(scene
             .scene

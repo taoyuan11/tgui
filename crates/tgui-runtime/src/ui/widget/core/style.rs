@@ -1,5 +1,3 @@
-use std::time::Duration;
-
 use crate::animation::Transition;
 use crate::foundation::color::Color;
 use crate::ui::layout::Value;
@@ -69,10 +67,12 @@ pub(super) struct ResolvedSelectStyle {
     pub(super) focus_ring: Option<crate::theme::FocusRingStyle>,
     pub(super) arrow: Color,
     pub(super) menu_background: Color,
+    pub(super) menu_border: Color,
+    pub(super) menu_border_width: Dp,
+    pub(super) menu_radius: Dp,
     pub(super) selected_option_background: Color,
     pub(super) border_width: Dp,
     pub(super) radius: Dp,
-    pub(super) menu_radius: Dp,
     pub(super) padding_x: Dp,
     pub(super) padding_y: Dp,
     pub(super) min_height: Dp,
@@ -499,24 +499,12 @@ pub(super) fn resolve_stateful_widget_color(
     value.resolve(state).resolve()
 }
 
-pub(super) fn default_state_transition(theme: &Theme, reduced_motion: bool) -> Option<Transition> {
-    if reduced_motion {
-        None
-    } else {
-        Some(Transition::ease_out(Duration::from_millis(
-            theme.motion.fast_ms,
-        )))
-    }
+pub(super) fn default_state_transition(context: StyleContext<'_>) -> Option<Transition> {
+    context.motion_fast_transition()
 }
 
-pub(super) fn default_motion_transition(theme: &Theme, reduced_motion: bool) -> Option<Transition> {
-    if reduced_motion {
-        None
-    } else {
-        Some(Transition::ease_in_out(Duration::from_millis(
-            theme.motion.normal_ms,
-        )))
-    }
+pub(super) fn default_motion_transition(context: StyleContext<'_>) -> Option<Transition> {
+    context.motion_normal_transition()
 }
 
 pub(super) fn base_interaction_state(mut state: WidgetState) -> WidgetState {
@@ -641,10 +629,12 @@ pub(super) fn resolve_select_style(
         focus_ring: resolve_focus_ring(theme, style.focus_ring.as_ref(), state),
         arrow: resolve_stateful_widget_color(&style.arrow, visual_state),
         menu_background: style.menu_background.resolve(),
+        menu_border: style.menu_border.resolve(),
+        menu_border_width: style.menu_border_width.resolve(),
+        menu_radius: style.menu_radius.resolve(),
         selected_option_background: style.selected_option_background.resolve(),
         border_width: style.border_width.resolve(),
         radius: style.radius.resolve(),
-        menu_radius: theme.radius.lg,
         padding_x: style.padding_x,
         padding_y: style.padding_y,
         min_height: style.min_height,

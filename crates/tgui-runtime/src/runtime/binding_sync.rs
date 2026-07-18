@@ -319,6 +319,10 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         let revision = self.invalidation.revision();
         let caret_blink_changed = self.caret_blink_needs_redraw(now);
         if revision != self.last_invalidation_revision {
+            // A model/media dependency changed in addition to any scheduled Toast tick. Do not
+            // reuse prepared card trees across that change; the normal retained/full path will
+            // rebuild them with the new signal/theme/media state.
+            self.toast_motion_patch_pending = false;
             let started_at = text_profile_enabled().then_some(Instant::now());
             let previous_revision = self.last_invalidation_revision;
             let media_only = self

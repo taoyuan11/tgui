@@ -2,6 +2,57 @@ use super::*;
 use smallvec::SmallVec;
 
 impl<VM: 'static> BoundRuntimeHandler<VM> {
+    pub(super) fn patch_animation_refresh(
+        &mut self,
+        animation_refresh: &AnimationRefresh,
+        now: Instant,
+    ) -> bool {
+        let property_targets = animation_refresh.scene_property_targets.as_slice();
+        let layout_property_targets = animation_refresh.layout_property_targets.as_slice();
+        let direct_layout_patch = !layout_property_targets.is_empty()
+            && animation_refresh.scene_widget_ids.is_empty()
+            && !animation_refresh.has_unscoped_layout_changes
+            && !self.animation_layout_refresh_is_dense(&animation_refresh.layout_widget_ids)
+            // Recollecting the layout root preserves no scene or renderer work and adds patch
+            // bookkeeping to the same whole-tree collection. Animation has a safe full-layout
+            // fallback, unlike generic strict-reactive updates which still use the shared writer.
+            && !self.animation_layout_targets_require_root_recollect(layout_property_targets)
+            && self.try_update_reactive_layout_slots(layout_property_targets, now);
+        if direct_layout_patch {
+            super::action_stats::record("animation_reactive_layout_slot_update");
+        }
+        let direct_property_patch = !direct_layout_patch
+            && animation_refresh.layout_widget_ids.is_empty()
+            && !property_targets.is_empty()
+            && !animation_refresh.has_unscoped_scene_changes
+            && (self.try_update_canonical_reactive_transform_records(property_targets, now)
+                || self.try_patch_canonical_reactive_property_slots(property_targets, now));
+        if direct_property_patch {
+            super::action_stats::record("animation_reactive_property_slot_write");
+            if let Some(cached) = self.cached_scene.as_mut() {
+                cached.computed_valid = true;
+                cached.animation_epoch = self.animation_epoch;
+                cached.layout_animation_epoch = self.layout_animation_epoch;
+                cached.accessibility_animation_epoch = self.accessibility_animation_epoch;
+            }
+        }
+        direct_layout_patch
+            || direct_property_patch
+            || (animation_refresh.layout_widget_ids.is_empty()
+                && !animation_refresh.scene_widget_ids.is_empty()
+                && self.patch_animation_scene_widgets_inner(
+                    &animation_refresh.scene_widget_ids,
+                    now,
+                    // A failed retained property write can require a topology-changing bounded
+                    // recollect (for example BorderWidth making an inset background appear).
+                    // Re-resolving the source element on that path freezes the current animated
+                    // value into the resolved snapshot and drops its Signal dependency. Recollect
+                    // the existing runtime-bound subtree whenever every scene change is already
+                    // property-scoped; unscoped animation changes still need source resolution.
+                    !property_targets.is_empty() && !animation_refresh.has_unscoped_scene_changes,
+                ))
+    }
+
     pub(super) fn active_slider_value_override(&self) -> Option<(WidgetId, f32)> {
         self.active_slider_drag
             .as_ref()
@@ -27,10 +78,20 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         self.patch_cached_scene_for_roots(&roots, now, true)
     }
 
+    #[cfg(test)]
     pub(super) fn patch_animation_scene_widgets(
         &mut self,
         widget_ids: &[u64],
         now: Instant,
+    ) -> bool {
+        self.patch_animation_scene_widgets_inner(widget_ids, now, false)
+    }
+
+    fn patch_animation_scene_widgets_inner(
+        &mut self,
+        widget_ids: &[u64],
+        now: Instant,
+        sync_runtime_scene_state: bool,
     ) -> bool {
         let Some(cached) = self.cached_scene.as_ref() else {
             return false;
@@ -39,20 +100,19 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             return false;
         };
 
-        let mut affected_ids: HashSet<WidgetId> = HashSet::new();
-        for widget_id in widget_ids {
-            affected_ids.insert(WidgetId::from_raw(*widget_id));
-        }
-        if affected_ids.is_empty() {
+        if widget_ids.is_empty() {
             return false;
         }
 
-        let roots = self.highest_layout_roots_smallvec(layout, &affected_ids);
+        // `AnimationRefresh` canonicalizes these IDs once after all typed animation stores have
+        // refreshed. Avoid rebuilding an equivalent HashSet on every animation frame; parent
+        // membership is a binary search over the already-sorted slice.
+        let roots = layout.highest_roots_from_sorted_raw_ids(widget_ids);
         if roots.is_empty() {
             return false;
         }
 
-        self.patch_cached_scene_for_roots(&roots, now, false)
+        self.patch_cached_scene_for_roots(&roots, now, sync_runtime_scene_state)
     }
 
     pub(super) fn highest_layout_roots_smallvec(

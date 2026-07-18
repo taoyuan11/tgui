@@ -20,6 +20,7 @@ pub(crate) fn push_media_texture_or_placeholder<VM>(
     clip_rect: Option<Rect>,
     clip_mask: Option<ClipMask>,
     opacity: f32,
+    mask_tint: Option<Color>,
     loading_background: Color,
     context: &mut CollectContext<'_, '_>,
     computed: &mut ComputedScene<VM>,
@@ -57,6 +58,7 @@ pub(crate) fn push_media_texture_or_placeholder<VM>(
             texture: Arc::clone(texture),
             media_key,
             media_layout,
+            mask_tint,
             frame: target_frame,
             quad: None,
             uv_rect: None,
@@ -89,6 +91,7 @@ pub(crate) fn push_media_texture_or_placeholder<VM>(
             texture: transparent_media_texture(),
             media_key,
             media_layout,
+            mask_tint,
             frame: target_frame,
             quad: None,
             uv_rect: None,
@@ -141,6 +144,7 @@ pub(crate) fn push_background_media_texture<VM>(
             media_key: raster_request
                 .map(|request| crate::media::MediaTextureKey::new(source.clone(), request)),
             media_layout,
+            mask_tint: None,
             frame: target_frame,
             quad: None,
             uv_rect: None,
@@ -158,6 +162,7 @@ pub(crate) fn push_background_media_texture<VM>(
                     raster_request,
                 )),
                 media_layout,
+                mask_tint: None,
                 frame: target_frame,
                 quad: None,
                 uv_rect: None,
@@ -223,10 +228,12 @@ pub(crate) fn rounded_rect_shadow_texture(
     let radius = (corner_radius + spread)
         .max(0.0)
         .min(expanded.width.min(expanded.height).get() * 0.5);
-    let effective_color = spec
-        .shadow
-        .color
-        .with_alpha_factor(spec.opacity.clamp(0.0, 1.0));
+    let legacy_opacity = widget_shadow_opacity_legacy_enabled();
+    let effective_color = spec.shadow.color.with_alpha_factor(if legacy_opacity {
+        spec.opacity.clamp(0.0, 1.0)
+    } else {
+        1.0
+    });
     if effective_color.a == 0 {
         return None;
     }
@@ -259,11 +266,16 @@ pub(crate) fn rounded_rect_shadow_texture(
         texture,
         media_key: None,
         media_layout: None,
+        mask_tint: None,
         frame: texture_frame,
         quad: None,
         uv_rect: None,
         corner_radius: 0.0,
-        opacity: 1.0,
+        opacity: if legacy_opacity {
+            1.0
+        } else {
+            spec.opacity.clamp(0.0, 1.0)
+        },
         clip_rect: spec.clip_rect,
         clip_mask: spec.clip_mask,
     })
@@ -317,6 +329,7 @@ pub(crate) fn push_video_texture_or_placeholder<VM>(
                     opacity: opacity.clamp(0.0, 1.0),
                     clip_rect,
                     clip_mask,
+                    mask_tint: None,
                 });
             }
         }

@@ -86,7 +86,7 @@ fn element_contains_virtual<VM>(element: &Element<VM>) -> bool {
                     cases, fallback, ..
                 } => {
                     cases.iter().any(element_contains_virtual)
-                        || fallback.as_ref().is_some_and(element_contains_virtual)
+                        || fallback.as_deref().is_some_and(element_contains_virtual)
                 }
                 crate::ui::widget::common::ChildSource::Show { child, .. } => {
                     element_contains_virtual(child)
@@ -111,7 +111,7 @@ fn element_contains_dynamic_children<VM>(element: &Element<VM>) -> bool {
                 } => {
                     cases.iter().any(element_contains_dynamic_children)
                         || fallback
-                            .as_ref()
+                            .as_deref()
                             .is_some_and(element_contains_dynamic_children)
                 }
                 crate::ui::widget::common::ChildSource::Show { child, .. } => {
@@ -143,7 +143,7 @@ fn element_may_have_media_event_handlers<VM>(element: &Element<VM>) -> bool {
             } => {
                 cases.iter().any(element_may_have_media_event_handlers)
                     || fallback
-                        .as_ref()
+                        .as_deref()
                         .is_some_and(element_may_have_media_event_handlers)
             }
             crate::ui::widget::common::ChildSource::Show { child, .. } => {
@@ -293,7 +293,8 @@ impl<VM: 'static> WidgetTree<VM> {
         caret_visible: bool,
         now: Instant,
     ) -> ComputedScene<VM> {
-        let layout = self.build_scene_layout_at(
+        let default_style_sheet = crate::ui::widget::StyleSheet::default();
+        let layout = self.build_scene_layout_at_with_previous_style_sheet_and_reduced_motion(
             font_manager,
             theme,
             media,
@@ -303,6 +304,9 @@ impl<VM: 'static> WidgetTree<VM> {
             &HashMap::new(),
             viewport,
             now,
+            None,
+            reduced_motion,
+            &default_style_sheet,
         );
         self.collect_scene_from_layout_at(
             font_manager,
@@ -522,6 +526,7 @@ impl<VM: 'static> WidgetTree<VM> {
                     layout_root: root_layout,
                     taffy,
                     units,
+                    frame_clock: crate::animation::FrameClockSnapshot::fallback(now),
                     dependencies: DependencyGraph::default(),
                     paths: HashMap::new(),
                     parents: HashMap::new(),
@@ -954,6 +959,7 @@ impl<VM: 'static> WidgetTree<VM> {
             animations,
             reduced_motion,
             now,
+            frame_clock: layout.frame_clock,
             focus: super::scene::FocusCollectState::default(),
             tooltip_hover_started_at,
             next_tooltip_wakeup: &next_tooltip_wakeup,
@@ -963,6 +969,8 @@ impl<VM: 'static> WidgetTree<VM> {
             gpu_scroll_enabled,
             gpu_scroll_container: None,
             transform_stack: smallvec::SmallVec::new(),
+            portal_accessibility_geometry: None,
+            portal_accessibility_path: smallvec::SmallVec::new(),
         };
         self.collect_scene_cache_with_context(
             layout,

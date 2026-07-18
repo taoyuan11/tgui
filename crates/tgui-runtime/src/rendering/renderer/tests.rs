@@ -231,6 +231,45 @@ fn scene_slot_write_marks_only_the_touched_draw_dirty() {
             range: 1..2,
         }]
     );
+    assert!(
+        !scene.cache_liveness_dirty(),
+        "shape color changes do not alter text or texture cache keys"
+    );
+}
+
+#[test]
+fn adjacent_scene_slot_writes_coalesce_dirty_draw_ranges() {
+    let mut scene = ScenePrimitives::default();
+    for index in 0..4 {
+        scene.push_shape(RenderPrimitive {
+            rect: Rect::new(index as f32 * 10.0, 0.0, 10.0, 10.0),
+            color: TguiColorAlias::RED,
+            corner_radius: 0.0,
+            stroke_width: 0.0,
+            clip_rect: None,
+            clip_mask: None,
+        });
+    }
+
+    for index in [1, 2, 3, 0] {
+        assert!(scene.write_shape_color_slot(
+            &SceneCounts::default(),
+            ShapePrimitiveSlot {
+                shape_index: index,
+                command_index: index,
+            },
+            TguiColorAlias::GREEN,
+        ));
+    }
+
+    assert_eq!(
+        scene.dirty_draw_ranges(),
+        &[DirtyDrawRange {
+            stream: SceneDrawStream::Main,
+            range: 0..4,
+        }]
+    );
+    assert!(!scene.cache_liveness_dirty());
 }
 
 #[test]
@@ -277,6 +316,10 @@ fn scene_splice_marks_replaced_draw_range_dirty_without_bumping_serial() {
             stream: SceneDrawStream::Main,
             range: 1..2,
         }]
+    );
+    assert!(
+        scene.cache_liveness_dirty(),
+        "spliced commands may replace active cache keys and must refresh liveness"
     );
 }
 
@@ -398,10 +441,8 @@ fn active_texture_keys_include_overlay_textures() {
     let main_texture = std::sync::Arc::new(TextureFrame::new(2, 2, vec![255; 2 * 2 * 4]));
     let overlay_texture = std::sync::Arc::new(TextureFrame::new(3, 3, vec![128; 3 * 3 * 4]));
     let mut scene = ScenePrimitives::default();
-    scene.textures.push(texture_primitive(main_texture.clone()));
-    scene
-        .overlay_textures
-        .push(texture_primitive(overlay_texture.clone()));
+    scene.push_texture(texture_primitive(main_texture.clone()));
+    scene.push_overlay_texture(texture_primitive(overlay_texture.clone()));
 
     let mut keys = HashSet::new();
     collect_active_texture_keys(&scene, &mut keys);
@@ -416,9 +457,9 @@ fn active_texture_key_scratch_reuses_capacity_between_frames() {
         .map(|value| std::sync::Arc::new(TextureFrame::new(2, 2, vec![value; 2 * 2 * 4])))
         .collect();
     let mut scene = ScenePrimitives::default();
-    scene
-        .textures
-        .extend(textures.iter().cloned().map(texture_primitive));
+    for texture in textures.iter().cloned() {
+        scene.push_texture(texture_primitive(texture));
+    }
     let mut keys = HashSet::new();
 
     collect_active_texture_keys(&scene, &mut keys);
@@ -542,6 +583,7 @@ fn texture_primitive(texture: std::sync::Arc<TextureFrame>) -> TexturePrimitive 
         uv_rect: None,
         corner_radius: 0.0,
         opacity: 1.0,
+        mask_tint: None,
         clip_rect: None,
         clip_mask: None,
     }

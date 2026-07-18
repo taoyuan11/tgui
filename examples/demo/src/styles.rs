@@ -178,7 +178,6 @@ pub(crate) fn component_card_style(ctx: &StyleContext<'_>) -> CardStyle {
     style.border = demo_colors(ctx).outline_muted.into();
     style.border_width = ctx.theme.border.thin;
     style.radius = ctx.theme.radius.xl;
-    style.shadow = ctx.theme.elevation.sm.clone();
     style.padding = Insets::all(ctx.theme.spacing.md);
     style.gap = ctx.theme.spacing.md;
     style
@@ -247,7 +246,8 @@ mod tests {
         assert_eq!(light_card.background.resolve(), light.colors.surface);
         assert_eq!(dark_card.background.resolve(), dark.colors.surface);
         assert_eq!(light_card.radius, light.radius.xl);
-        assert_eq!(dark_card.shadow, dark.elevation.sm);
+        assert_eq!(light_card.shadow, light.elevation.none);
+        assert_eq!(dark_card.shadow, dark.elevation.none);
     }
 
     #[test]

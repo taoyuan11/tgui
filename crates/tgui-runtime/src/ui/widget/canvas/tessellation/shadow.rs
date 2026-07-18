@@ -12,6 +12,41 @@ use crate::ui::widget::common;
 use super::super::*;
 use super::mesh::{dashed_path, normalize_dash_pattern};
 
+#[cfg(feature = "bench-support")]
+thread_local! {
+    static FORCE_LEGACY_CANVAS_SHADOW_OPACITY: std::cell::Cell<bool> =
+        const { std::cell::Cell::new(false) };
+}
+
+/// Benchmark-only A/B control for the former canvas-shadow path, which baked the
+/// current visual opacity into every cached RGBA texture.
+#[cfg(feature = "bench-support")]
+pub(crate) fn with_legacy_canvas_shadow_opacity<R>(legacy: bool, f: impl FnOnce() -> R) -> R {
+    FORCE_LEGACY_CANVAS_SHADOW_OPACITY.with(|flag| {
+        let previous = flag.replace(legacy);
+        struct Reset<'a> {
+            flag: &'a std::cell::Cell<bool>,
+            previous: bool,
+        }
+        impl Drop for Reset<'_> {
+            fn drop(&mut self) {
+                self.flag.set(self.previous);
+            }
+        }
+        let _reset = Reset { flag, previous };
+        f()
+    })
+}
+
+fn canvas_shadow_opacity_legacy_enabled() -> bool {
+    #[cfg(feature = "bench-support")]
+    {
+        return FORCE_LEGACY_CANVAS_SHADOW_OPACITY.with(std::cell::Cell::get);
+    }
+    #[cfg(not(feature = "bench-support"))]
+    false
+}
+
 pub(super) fn shadow_texture_for_path(
     path: &CanvasPath,
     lyon_path: &Path,
@@ -42,7 +77,14 @@ pub(super) fn shadow_texture_for_path(
         .ceil()
         .max(1.0) as u32;
 
-    let cache_key = canvas_shadow_cache_key(path, shadow, opacity, units.scale_factor());
+    let legacy_opacity = canvas_shadow_opacity_legacy_enabled();
+    let opacity = opacity.clamp(0.0, 1.0);
+    let cache_key = canvas_shadow_cache_key(
+        path,
+        shadow,
+        if legacy_opacity { opacity } else { 1.0 },
+        units.scale_factor(),
+    );
     let texture = media
         .canvas_shadow_texture(cache_key, width, height, || {
             rasterize_canvas_shadow(
@@ -51,7 +93,7 @@ pub(super) fn shadow_texture_for_path(
                 stroke,
                 path.fill_rule,
                 shadow,
-                opacity,
+                if legacy_opacity { opacity } else { 1.0 },
                 min_x,
                 min_y,
                 units.scale_factor(),
@@ -63,11 +105,12 @@ pub(super) fn shadow_texture_for_path(
         texture,
         media_key: None,
         media_layout: None,
+        mask_tint: None,
         frame,
         quad: None,
         uv_rect: None,
         corner_radius: 0.0,
-        opacity: 1.0,
+        opacity: if legacy_opacity { 1.0 } else { opacity },
         clip_rect: clip.clip_rect,
         clip_mask: clip.clip_mask,
     })
@@ -314,6 +357,67 @@ pub(in super::super) fn canvas_text_hit_cache_key(item: &CanvasItem, units: Unit
     }
 
     hasher.finish()
+}
+
+#[cfg(test)]
+mod tests {
+    use lyon::math::point;
+
+    use super::*;
+    use crate::foundation::color::Color;
+    use crate::ui::unit::dp;
+
+    #[test]
+    fn canonical_canvas_shadow_pixels_match_legacy_opacity_scaling() {
+        let mut builder = Path::builder();
+        builder.begin(point(4.0, 4.0));
+        builder.line_to(point(44.0, 4.0));
+        builder.line_to(point(40.0, 28.0));
+        builder.line_to(point(8.0, 32.0));
+        builder.end(true);
+        let path = builder.build();
+        let shadow = CanvasShadow::new(
+            Color::hexa(0x112233B8),
+            Point::new(dp(2.0), dp(4.0)),
+            dp(6.0),
+        );
+        let canonical = rasterize_canvas_shadow(
+            &path,
+            true,
+            None,
+            CanvasFillRule::NonZero,
+            shadow,
+            1.0,
+            0.0,
+            0.0,
+            1.0,
+        )
+        .expect("canonical canvas shadow should rasterize");
+        let legacy = rasterize_canvas_shadow(
+            &path,
+            true,
+            None,
+            CanvasFillRule::NonZero,
+            shadow,
+            0.35,
+            0.0,
+            0.0,
+            1.0,
+        )
+        .expect("legacy canvas shadow should rasterize");
+        assert_eq!(canonical.size(), legacy.size());
+        let mut max_alpha_error = 0_u8;
+        for (canonical, legacy) in canonical
+            .pixels()
+            .chunks_exact(4)
+            .zip(legacy.pixels().chunks_exact(4))
+        {
+            assert_eq!(&canonical[..3], &legacy[..3]);
+            let expected_alpha = ((canonical[3] as f32) * 0.35).round() as u8;
+            max_alpha_error = max_alpha_error.max(legacy[3].abs_diff(expected_alpha));
+        }
+        assert!(max_alpha_error <= 2, "alpha error was {max_alpha_error}");
+    }
 }
 
 pub(in super::super) fn shadow_padding(blur: Dp) -> f32 {

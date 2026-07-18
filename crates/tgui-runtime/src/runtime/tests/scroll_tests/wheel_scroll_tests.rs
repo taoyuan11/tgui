@@ -1406,6 +1406,108 @@ fn smooth_scroll_advances_linearly() {
 }
 
 #[test]
+fn smooth_scroll_duration_is_stable_at_60_120_and_144_hz() {
+    use crate::runtime::state::{SmoothScrollState, SMOOTH_SCROLL_DURATION};
+
+    for refresh_rate in [60_000, 120_000, 144_000] {
+        let invalidation = InvalidationSignal::new();
+        let mut handler = test_handler(None, invalidation);
+        let widget_id = WidgetId::from_raw(u64::from(refresh_rate));
+        let start = Instant::now();
+        handler
+            .frame_clock
+            .update_refresh_rate(Some(refresh_rate), start);
+        handler.smooth_scroll_states.insert(
+            widget_id,
+            SmoothScrollState {
+                start: Point::ZERO,
+                target: Point::new(Dp::ZERO, dp(100.0)),
+                started_at: start,
+                last_advanced_at: start,
+            },
+        );
+
+        assert!(handler.advance_smooth_scroll_at(start + SMOOTH_SCROLL_DURATION / 2));
+        let halfway = handler
+            .scroll_states
+            .get(&widget_id)
+            .map(|offset| offset.y.get())
+            .unwrap_or_default();
+        assert!(
+            (halfway - 50.0).abs() <= 0.001,
+            "{refresh_rate}mHz should reach the same halfway position, got {halfway}"
+        );
+
+        assert!(handler.advance_smooth_scroll_at(start + SMOOTH_SCROLL_DURATION));
+        assert_eq!(handler.scroll_states[&widget_id].y, dp(100.0));
+        assert!(!handler.smooth_scroll_states.contains_key(&widget_id));
+    }
+}
+
+#[test]
+fn touch_inertia_deadline_uses_window_60_120_and_144_hz_clock() {
+    for (refresh_rate, expected_interval) in [
+        (60_000, Duration::from_nanos(16_666_667)),
+        (120_000, Duration::from_nanos(8_333_333)),
+        (144_000, Duration::from_nanos(6_944_444)),
+    ] {
+        let invalidation = InvalidationSignal::new();
+        let mut handler = test_handler(None, invalidation);
+        let widget_id = WidgetId::from_raw(u64::from(refresh_rate));
+        let start = Instant::now();
+        handler.frame_clock = crate::animation::AdaptiveFrameClock::new(start);
+        handler
+            .frame_clock
+            .update_refresh_rate(Some(refresh_rate), start);
+        handler.touch_scroll_inertia_states.insert(
+            widget_id,
+            TouchScrollInertiaState {
+                velocity: Point::new(Dp::ZERO, dp(900.0)),
+                max_offset: Point::new(Dp::ZERO, dp(500.0)),
+                can_scroll_x: false,
+                can_scroll_y: true,
+                last_advanced_at: start,
+            },
+        );
+
+        assert_eq!(
+            handler.next_deadline(start),
+            Some(start + expected_interval),
+            "touch inertia should follow {refresh_rate}mHz cadence"
+        );
+    }
+}
+
+#[test]
+fn reduced_motion_scrolls_immediately_and_leaves_frame_clock_disarmed() {
+    let invalidation = InvalidationSignal::new();
+    let mut handler = test_handler(None, invalidation);
+    handler.reduced_motion = true;
+    let widget_id = WidgetId::from_raw(90_002);
+    let target = Point::new(dp(24.0), dp(96.0));
+
+    handler.set_smooth_scroll_target(widget_id, target);
+    assert_eq!(handler.scroll_states.get(&widget_id), Some(&target));
+    assert!(handler.smooth_scroll_states.is_empty());
+
+    let now = Instant::now();
+    handler.touch_scroll_inertia_states.insert(
+        widget_id,
+        TouchScrollInertiaState {
+            velocity: Point::new(Dp::ZERO, dp(900.0)),
+            max_offset: Point::new(dp(100.0), dp(200.0)),
+            can_scroll_x: false,
+            can_scroll_y: true,
+            last_advanced_at: now,
+        },
+    );
+    let _ = handler.settle_scroll_motion_for_reduced_motion();
+    assert!(handler.touch_scroll_inertia_states.is_empty());
+    assert!(handler.next_deadline(now).is_none());
+    assert!(!handler.frame_clock.is_armed());
+}
+
+#[test]
 fn mouse_wheel_scrolls_stack_wrapped_grid_of_canvas_cards() {
     let invalidation = InvalidationSignal::new();
     let card = || {

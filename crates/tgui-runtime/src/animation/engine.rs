@@ -1,17 +1,71 @@
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
+use crate::foundation::binding::PropertySlot;
 use crate::foundation::color::Color;
 use crate::ui::layout::Insets;
 use crate::ui::unit::{Dp, Sp};
-use crate::ui::widget::Point;
+use crate::ui::widget::{Point, WidgetId};
 use smallvec::SmallVec;
 
-use super::controller::{sample_timeline, FRAME_INTERVAL};
+#[cfg(feature = "bench-support")]
+use std::cell::Cell;
+
+use super::controller::sample_timeline;
 use super::spec::{AnimationCurve, Keyframe, Keyframes, Transition};
 
 const THEME_DURATION_MS: u64 = 240;
 const INACTIVE_SLOT_INDEX: usize = usize::MAX;
+
+#[cfg(feature = "bench-support")]
+thread_local! {
+    static LEGACY_REFRESH_WIDGET_DEDUP: Cell<bool> = const { Cell::new(false) };
+    static REFRESH_WIDGET_DEDUP_COMPARISONS: Cell<u64> = const { Cell::new(0) };
+    static REFRESH_WIDGET_ID_BUFFER_SPILLS: Cell<u64> = const { Cell::new(0) };
+}
+
+#[cfg(feature = "bench-support")]
+pub(crate) fn with_legacy_refresh_widget_dedup<R>(legacy: bool, f: impl FnOnce() -> R) -> R {
+    LEGACY_REFRESH_WIDGET_DEDUP.with(|mode| {
+        let previous = mode.replace(legacy);
+        let result = f();
+        mode.set(previous);
+        result
+    })
+}
+
+#[cfg(feature = "bench-support")]
+pub(crate) fn reset_refresh_widget_dedup_stats() {
+    REFRESH_WIDGET_DEDUP_COMPARISONS.with(|counter| counter.set(0));
+    REFRESH_WIDGET_ID_BUFFER_SPILLS.with(|counter| counter.set(0));
+}
+
+#[cfg(feature = "bench-support")]
+pub(crate) fn refresh_widget_dedup_stats() -> (u64, u64) {
+    (
+        REFRESH_WIDGET_DEDUP_COMPARISONS.with(Cell::get),
+        REFRESH_WIDGET_ID_BUFFER_SPILLS.with(Cell::get),
+    )
+}
+
+#[cfg(feature = "bench-support")]
+fn legacy_refresh_widget_dedup_enabled() -> bool {
+    LEGACY_REFRESH_WIDGET_DEDUP.with(Cell::get)
+}
+
+#[cfg(feature = "bench-support")]
+fn record_refresh_widget_dedup_comparison() {
+    REFRESH_WIDGET_DEDUP_COMPARISONS.with(|counter| {
+        counter.set(counter.get().saturating_add(1));
+    });
+}
+
+#[cfg(feature = "bench-support")]
+fn record_refresh_widget_id_buffer_spill() {
+    REFRESH_WIDGET_ID_BUFFER_SPILLS.with(|counter| {
+        counter.set(counter.get().saturating_add(1));
+    });
+}
 
 /// 槽位回收软上限:槽位总数超过此值才会尝试回收陈旧的已稳定槽位。常规应用
 /// 远低于此值,因此不触发任何回收、零行为变化。
@@ -19,6 +73,9 @@ pub(crate) const SLOT_GC_SOFT_CAP: usize = 8192;
 /// 已稳定槽位在超过软上限后,`last_touch` 早于此时长即视为陈旧(对应已销毁
 /// widget)可回收。取值足够宽松,确保仅短暂未重收集的存活 widget 不被误回收。
 pub(crate) const SLOT_GC_TTL: Duration = Duration::from_secs(10);
+/// 大型槽位表的最短 GC 间隔。GC 是 O(retained slots) 的维护操作，不能在每次事件
+/// refresh 中重复执行；一秒节流把过期回收延迟限制在最多一秒，同时避免输入热路径抖动。
+pub(crate) const SLOT_GC_SWEEP_INTERVAL: Duration = Duration::from_secs(1);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum WidgetProperty {
@@ -29,12 +86,12 @@ pub(crate) enum WidgetProperty {
     BorderRadius,
     BorderWidth,
     TextColor,
+    TextureMaskTint,
     Opacity,
     Offset,
     Scale,
     TooltipVisibility,
-    ModalVisibility,
-    DrawerVisibility,
+    PopoverVisibility,
     SwitchThumbColor,
     SwitchThumbOffset,
     SelectMenuOpen,
@@ -116,6 +173,30 @@ impl WidgetProperty {
             self,
             Self::Offset | Self::Scale | Self::CollapseProgress | Self::CarouselSlideProgress
         )
+    }
+
+    /// Retained scene-property slot corresponding to this transition channel. Properties without
+    /// a one-to-one retained representation deliberately return `None` and keep the existing
+    /// subtree patch/full-recollect fallback.
+    pub(crate) const fn retained_property_slot(self) -> Option<PropertySlot> {
+        match self {
+            Self::Background => Some(PropertySlot::Background),
+            Self::BackgroundBlur => Some(PropertySlot::BackgroundBlur),
+            Self::BorderColor => Some(PropertySlot::BorderColor),
+            Self::BorderRadius => Some(PropertySlot::BorderRadius),
+            Self::BorderWidth => Some(PropertySlot::BorderWidth),
+            Self::TextColor => Some(PropertySlot::TextColor),
+            Self::TextureMaskTint => Some(PropertySlot::TextureMaskTint),
+            Self::Opacity => Some(PropertySlot::Opacity),
+            Self::Offset => Some(PropertySlot::Offset),
+            Self::Scale => Some(PropertySlot::Scale),
+            Self::Width => Some(PropertySlot::Width),
+            Self::Height => Some(PropertySlot::Height),
+            Self::Margin => Some(PropertySlot::Margin),
+            Self::Padding => Some(PropertySlot::Padding),
+            Self::Grow => Some(PropertySlot::Grow),
+            _ => None,
+        }
     }
 }
 
@@ -506,7 +587,6 @@ impl<T: Animatable> AnimationStore<T> {
 
     fn refresh(&mut self, now: Instant, refresh: &mut AnimationRefresh) {
         if !self.has_active() {
-            self.gc_stale_settled_slots_if_needed(now);
             return;
         }
 
@@ -540,12 +620,12 @@ impl<T: Animatable> AnimationStore<T> {
                 refresh.changed = true;
                 if key.affects_layout() {
                     refresh.layout_changed = true;
-                    if let AnimationKey::Widget { id, .. } = key {
-                        refresh.push_layout_widget(id);
+                    if let AnimationKey::Widget { id, property } = key {
+                        refresh.push_layout_widget(id, property);
                     }
                 } else if let AnimationKey::Widget { id, property } = key {
                     if property.affects_scene() {
-                        refresh.push_scene_widget(id);
+                        refresh.push_scene_widget(id, property);
                     }
                     if property.affects_accessibility_geometry() {
                         refresh.accessibility_geometry_changed = true;
@@ -561,9 +641,6 @@ impl<T: Animatable> AnimationStore<T> {
                 active_index += 1;
             }
         }
-        if self.slots.len() > SLOT_GC_SOFT_CAP {
-            self.gc_stale_settled_slots(now);
-        }
     }
 
     /// 当槽位总数超过软上限时,回收长期未被 `resolve` 触达的已稳定槽位 ——
@@ -576,12 +653,6 @@ impl<T: Animatable> AnimationStore<T> {
                 || state.animation.is_some()
                 || now.saturating_duration_since(state.last_touch) < SLOT_GC_TTL
         });
-    }
-
-    fn gc_stale_settled_slots_if_needed(&mut self, now: Instant) {
-        if self.slots.len() > SLOT_GC_SOFT_CAP {
-            self.gc_stale_settled_slots(now);
-        }
     }
 
     fn has_active(&self) -> bool {
@@ -606,22 +677,128 @@ pub(crate) struct AnimationRefresh {
     pub(crate) layout_changed: bool,
     pub(crate) accessibility_geometry_changed: bool,
     pub(crate) layout_widget_ids: SmallVec<[u64; 16]>,
+    pub(crate) layout_property_targets: SmallVec<[(WidgetId, PropertySlot); 16]>,
+    pub(crate) has_unscoped_layout_changes: bool,
     pub(crate) scene_widget_ids: SmallVec<[u64; 16]>,
+    pub(crate) scene_property_targets: SmallVec<[(WidgetId, PropertySlot); 16]>,
+    pub(crate) has_unscoped_scene_changes: bool,
     #[cfg(test)]
     pub(crate) visited_slots: usize,
 }
 
 impl AnimationRefresh {
-    fn push_layout_widget(&mut self, widget_id: u64) {
-        if !self.layout_widget_ids.contains(&widget_id) {
-            self.layout_widget_ids.push(widget_id);
+    fn push_layout_widget(&mut self, widget_id: u64, property: WidgetProperty) {
+        #[cfg(feature = "bench-support")]
+        if legacy_refresh_widget_dedup_enabled() {
+            let duplicate = self.layout_widget_ids.iter().any(|existing| {
+                record_refresh_widget_dedup_comparison();
+                *existing == widget_id
+            });
+            if !duplicate {
+                let was_spilled = self.layout_widget_ids.spilled();
+                self.layout_widget_ids.push(widget_id);
+                if !was_spilled && self.layout_widget_ids.spilled() {
+                    record_refresh_widget_id_buffer_spill();
+                }
+            }
+            if let Some(property) = property.retained_property_slot() {
+                self.layout_property_targets
+                    .push((WidgetId::from_raw(widget_id), property));
+            } else {
+                self.has_unscoped_layout_changes = true;
+            }
+            return;
+        }
+        #[cfg(feature = "bench-support")]
+        let was_spilled = self.layout_widget_ids.spilled();
+        self.layout_widget_ids.push(widget_id);
+        #[cfg(feature = "bench-support")]
+        if !was_spilled && self.layout_widget_ids.spilled() {
+            record_refresh_widget_id_buffer_spill();
+        }
+        if let Some(property) = property.retained_property_slot() {
+            self.layout_property_targets
+                .push((WidgetId::from_raw(widget_id), property));
+        } else {
+            self.has_unscoped_layout_changes = true;
         }
     }
 
-    fn push_scene_widget(&mut self, widget_id: u64) {
-        if !self.scene_widget_ids.contains(&widget_id) {
-            self.scene_widget_ids.push(widget_id);
+    fn push_scene_widget(&mut self, widget_id: u64, property: WidgetProperty) {
+        #[cfg(feature = "bench-support")]
+        if legacy_refresh_widget_dedup_enabled() {
+            let duplicate = self.scene_widget_ids.iter().any(|existing| {
+                record_refresh_widget_dedup_comparison();
+                *existing == widget_id
+            });
+            if !duplicate {
+                let was_spilled = self.scene_widget_ids.spilled();
+                self.scene_widget_ids.push(widget_id);
+                if !was_spilled && self.scene_widget_ids.spilled() {
+                    record_refresh_widget_id_buffer_spill();
+                }
+            }
+            if let Some(property) = property.retained_property_slot() {
+                self.scene_property_targets
+                    .push((WidgetId::from_raw(widget_id), property));
+            } else {
+                self.has_unscoped_scene_changes = true;
+            }
+            return;
         }
+        #[cfg(feature = "bench-support")]
+        let was_spilled = self.scene_widget_ids.spilled();
+        self.scene_widget_ids.push(widget_id);
+        #[cfg(feature = "bench-support")]
+        if !was_spilled && self.scene_widget_ids.spilled() {
+            record_refresh_widget_id_buffer_spill();
+        }
+        if let Some(property) = property.retained_property_slot() {
+            self.scene_property_targets
+                .push((WidgetId::from_raw(widget_id), property));
+        } else {
+            self.has_unscoped_scene_changes = true;
+        }
+    }
+
+    fn normalize_widget_ids(&mut self) {
+        // One widget can have several animated properties, possibly stored in different typed
+        // animation stores. Deduplicating on every insertion made a frame with N independently
+        // animated widgets O(N²), even though the common case has no duplicates at all. Runtime
+        // consumers treat these as sets and order patch roots independently, so collect densely
+        // and canonicalize once after all stores have refreshed.
+        #[cfg(feature = "bench-support")]
+        if legacy_refresh_widget_dedup_enabled() {
+            self.layout_property_targets
+                .sort_unstable_by_key(|(widget_id, property)| (widget_id.raw(), *property as u8));
+            self.layout_property_targets.dedup();
+            self.scene_property_targets
+                .sort_unstable_by_key(|(widget_id, property)| (widget_id.raw(), *property as u8));
+            self.scene_property_targets.dedup();
+            return;
+        }
+        #[cfg(feature = "bench-support")]
+        self.layout_widget_ids.sort_unstable_by(|left, right| {
+            record_refresh_widget_dedup_comparison();
+            left.cmp(right)
+        });
+        #[cfg(not(feature = "bench-support"))]
+        self.layout_widget_ids.sort_unstable();
+        self.layout_widget_ids.dedup();
+        self.layout_property_targets
+            .sort_unstable_by_key(|(widget_id, property)| (widget_id.raw(), *property as u8));
+        self.layout_property_targets.dedup();
+        #[cfg(feature = "bench-support")]
+        self.scene_widget_ids.sort_unstable_by(|left, right| {
+            record_refresh_widget_dedup_comparison();
+            left.cmp(right)
+        });
+        #[cfg(not(feature = "bench-support"))]
+        self.scene_widget_ids.sort_unstable();
+        self.scene_widget_ids.dedup();
+        self.scene_property_targets
+            .sort_unstable_by_key(|(widget_id, property)| (widget_id.raw(), *property as u8));
+        self.scene_property_targets.dedup();
     }
 }
 
@@ -632,6 +809,9 @@ pub(crate) struct AnimationEngine {
     dps: AnimationStore<Dp>,
     points: AnimationStore<Point>,
     insets: AnimationStore<Insets>,
+    next_slot_gc_sweep_at: Option<Instant>,
+    #[cfg(test)]
+    slot_gc_sweep_count: usize,
 }
 
 impl AnimationEngine {
@@ -699,11 +879,7 @@ impl AnimationEngine {
 
     pub(crate) fn refresh(&mut self, now: Instant) -> AnimationRefresh {
         if !self.has_active_animations() {
-            self.colors.gc_stale_settled_slots_if_needed(now);
-            self.floats.gc_stale_settled_slots_if_needed(now);
-            self.dps.gc_stale_settled_slots_if_needed(now);
-            self.points.gc_stale_settled_slots_if_needed(now);
-            self.insets.gc_stale_settled_slots_if_needed(now);
+            self.gc_stale_settled_slots_if_due(now);
             return AnimationRefresh::default();
         }
 
@@ -713,7 +889,55 @@ impl AnimationEngine {
         self.dps.refresh(now, &mut refresh);
         self.points.refresh(now, &mut refresh);
         self.insets.refresh(now, &mut refresh);
+        self.gc_stale_settled_slots_if_due(now);
+        refresh.normalize_widget_ids();
         refresh
+    }
+
+    fn gc_stale_settled_slots_if_due(&mut self, now: Instant) {
+        let has_over_cap_store = self.colors.slots.len() > SLOT_GC_SOFT_CAP
+            || self.floats.slots.len() > SLOT_GC_SOFT_CAP
+            || self.dps.slots.len() > SLOT_GC_SOFT_CAP
+            || self.points.slots.len() > SLOT_GC_SOFT_CAP
+            || self.insets.slots.len() > SLOT_GC_SOFT_CAP;
+        if !has_over_cap_store {
+            self.next_slot_gc_sweep_at = None;
+            return;
+        }
+        if self
+            .next_slot_gc_sweep_at
+            .is_some_and(|deadline| now < deadline)
+        {
+            return;
+        }
+
+        if self.colors.slots.len() > SLOT_GC_SOFT_CAP {
+            self.colors.gc_stale_settled_slots(now);
+        }
+        if self.floats.slots.len() > SLOT_GC_SOFT_CAP {
+            self.floats.gc_stale_settled_slots(now);
+        }
+        if self.dps.slots.len() > SLOT_GC_SOFT_CAP {
+            self.dps.gc_stale_settled_slots(now);
+        }
+        if self.points.slots.len() > SLOT_GC_SOFT_CAP {
+            self.points.gc_stale_settled_slots(now);
+        }
+        if self.insets.slots.len() > SLOT_GC_SOFT_CAP {
+            self.insets.gc_stale_settled_slots(now);
+        }
+        #[cfg(test)]
+        {
+            self.slot_gc_sweep_count = self.slot_gc_sweep_count.saturating_add(1);
+        }
+
+        let still_over_cap = self.colors.slots.len() > SLOT_GC_SOFT_CAP
+            || self.floats.slots.len() > SLOT_GC_SOFT_CAP
+            || self.dps.slots.len() > SLOT_GC_SOFT_CAP
+            || self.points.slots.len() > SLOT_GC_SOFT_CAP
+            || self.insets.slots.len() > SLOT_GC_SOFT_CAP;
+        self.next_slot_gc_sweep_at =
+            still_over_cap.then(|| now.checked_add(SLOT_GC_SWEEP_INTERVAL).unwrap_or(now));
     }
 
     pub(crate) fn has_active_animations(&self) -> bool {
@@ -748,10 +972,6 @@ impl AnimationEngine {
         }
     }
 
-    pub(crate) fn next_frame_deadline(&self, now: Instant) -> Option<Instant> {
-        self.has_active_animations().then_some(now + FRAME_INTERVAL)
-    }
-
     #[cfg(test)]
     pub(crate) fn debug_total_slots(&self) -> usize {
         self.colors.slots.len()
@@ -759,6 +979,11 @@ impl AnimationEngine {
             + self.dps.slots.len()
             + self.points.slots.len()
             + self.insets.slots.len()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn debug_slot_gc_sweep_count(&self) -> usize {
+        self.slot_gc_sweep_count
     }
 }
 

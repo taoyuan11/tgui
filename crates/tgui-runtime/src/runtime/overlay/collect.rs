@@ -1,8 +1,8 @@
 use crate::ui::unit::Dp;
 use crate::ui::widget::{
-    BackdropBlurPrimitive, CanvasCompositePrimitive, CanvasTextHitRegion, ClipMask, ComputedScene,
-    HitGeometry, HitInteraction, HitRegion, Point, Rect, RenderCommand, ScrollRegion,
-    TextDecorationPrimitive, TextPrimitive, TexturePrimitive,
+    AccessibilityFragment, BackdropBlurPrimitive, CanvasCompositePrimitive, CanvasTextHitRegion,
+    ClipMask, ComputedScene, HitGeometry, HitInteraction, HitRegion, OverlayId, Point, Rect,
+    RenderCommand, ScrollRegion, TextDecorationPrimitive, TextPrimitive, TexturePrimitive,
 };
 
 use super::close::OverlayCloseHandle;
@@ -190,9 +190,23 @@ fn translate_hit_region<VM>(
     origin: Point,
     overlay_scope_path: Option<&Vec<crate::ui::widget::WidgetId>>,
     content_clip: Option<Rect>,
-) -> HitRegion<VM> {
+) -> Option<HitRegion<VM>> {
     hit.rect = translate_rect(hit.rect, origin);
-    hit.clip_rect = content_clip.or_else(|| hit.clip_rect.map(|rect| translate_rect(rect, origin)));
+    if hit.rect.is_empty() {
+        return None;
+    }
+    let translated_inner_clip = hit.clip_rect.map(|rect| translate_rect(rect, origin));
+    hit.clip_rect = match (translated_inner_clip, content_clip) {
+        (Some(inner), Some(outer)) => Some(inner.intersect(outer)?),
+        (Some(inner), None) => Some(inner),
+        (None, outer) => outer,
+    };
+    if hit
+        .clip_rect
+        .is_some_and(|clip| hit.rect.intersect(clip).is_none())
+    {
+        return None;
+    }
     hit.geometry = translate_hit_geometry(hit.geometry, origin);
     hit.interaction = translate_hit_interaction(hit.interaction, origin);
     if let Some(scope_path) = overlay_scope_path {
@@ -201,7 +215,7 @@ fn translate_hit_region<VM>(
             focus.scope_path = scope_path.clone();
         }
     }
-    hit
+    Some(hit)
 }
 
 fn translate_text(mut text: TextPrimitive, origin: Point) -> TextPrimitive {
@@ -316,6 +330,46 @@ fn translate_scroll_region(region: ScrollRegion, origin: Point) -> ScrollRegion 
             .vertical_thumb
             .map(|rect| translate_rect(rect, origin)),
     }
+}
+
+fn translate_accessibility_fragment<VM>(
+    mut fragment: AccessibilityFragment<VM>,
+    origin: Point,
+    overlay_id: OverlayId,
+    overlay_scope_path: Option<&Vec<crate::ui::widget::WidgetId>>,
+    content_clip: Option<Rect>,
+) -> AccessibilityFragment<VM> {
+    fragment.owner_path.insert(0, overlay_id);
+    if let Some(scope_path) = overlay_scope_path {
+        let mut effective_scope = scope_path.clone();
+        effective_scope.extend(fragment.scope_path.iter().copied());
+        fragment.scope_path = effective_scope;
+    }
+    let translated_local_clip = fragment.clip_rect.map(|clip| translate_rect(clip, origin));
+    fragment.clip_rect = match (translated_local_clip, content_clip) {
+        (Some(local), Some(outer)) => Some(
+            local
+                .intersect(outer)
+                .unwrap_or_else(|| Rect::new(outer.x, outer.y, Dp::ZERO, Dp::ZERO)),
+        ),
+        (Some(local), None) => Some(local),
+        (None, outer) => outer,
+    };
+    let effective_scope = (!fragment.scope_path.is_empty()).then_some(&fragment.scope_path);
+    for node in &mut fragment.nodes {
+        node.bounds = translate_rect(node.bounds, origin);
+        node.clip_rect = node.clip_rect.map(|clip| translate_rect(clip, origin));
+        node.hits = std::mem::take(&mut node.hits)
+            .into_iter()
+            .filter_map(|hit| {
+                translate_hit_region(hit, origin, effective_scope, fragment.clip_rect)
+            })
+            .collect();
+        for region in &mut node.scroll_regions {
+            *region = translate_scroll_region(*region, origin);
+        }
+    }
+    fragment
 }
 
 fn translate_overlay_anchor_rect(rect: Rect, origin: Point) -> Rect {
@@ -490,9 +544,12 @@ fn finalize_portal_entry<VM>(
         }
     }
 
-    for mut hit in hits {
-        hit = translate_hit_region(hit, origin, overlay_scope_path.as_ref(), content_clip);
-        bucket.hits.push(hit);
+    for hit in hits {
+        if let Some(hit) =
+            translate_hit_region(hit, origin, overlay_scope_path.as_ref(), content_clip)
+        {
+            bucket.hits.push(hit);
+        }
     }
 
     if let Some(scene) = nested_scene {
@@ -530,20 +587,29 @@ fn finalize_portal_entry<VM>(
             push_overlay_command!(bucket, translate_render_command(command, origin), source);
         }
         for hit in scene.hit_regions {
-            bucket.hits.push(translate_hit_region(
-                hit,
-                origin,
-                overlay_scope_path.as_ref(),
-                content_clip,
-            ));
+            if let Some(hit) =
+                translate_hit_region(hit, origin, overlay_scope_path.as_ref(), content_clip)
+            {
+                bucket.hits.push(hit);
+            }
         }
         for hit in scene.overlay_hit_regions {
-            bucket.hits.push(translate_hit_region(
-                hit,
-                origin,
-                overlay_scope_path.as_ref(),
-                content_clip,
-            ));
+            if let Some(hit) =
+                translate_hit_region(hit, origin, overlay_scope_path.as_ref(), content_clip)
+            {
+                bucket.hits.push(hit);
+            }
+        }
+        for fragment in scene.accessibility_fragments {
+            bucket
+                .accessibility_fragments
+                .push(translate_accessibility_fragment(
+                    fragment,
+                    origin,
+                    entry.overlay_id,
+                    overlay_scope_path.as_ref(),
+                    content_clip,
+                ));
         }
         for scope in scene.focus_scopes {
             bucket.focus_scopes.push(scope);
@@ -633,4 +699,32 @@ fn finalize_portal_entry<VM>(
     }
 
     Some(solved)
+}
+
+#[cfg(test)]
+mod clip_tests {
+    use super::*;
+
+    #[test]
+    fn disjoint_inner_and_solver_clips_drop_the_hit_instead_of_leaving_zero_clip() {
+        let widget_id = crate::ui::widget::WidgetId::from_raw(42);
+        let hit = HitRegion::<()> {
+            rect: Rect::new(0.0, 0.0, 20.0, 20.0),
+            clip_rect: Some(Rect::new(0.0, 0.0, 20.0, 20.0)),
+            geometry: HitGeometry::Rect,
+            transform_chain: Default::default(),
+            scope_path: Vec::new(),
+            focus: None,
+            interaction: HitInteraction::Disabled { id: widget_id },
+            gpu_scroll_container: None,
+        };
+
+        assert!(translate_hit_region(
+            hit,
+            Point::ZERO,
+            None,
+            Some(Rect::new(30.0, 30.0, 20.0, 20.0)),
+        )
+        .is_none());
+    }
 }

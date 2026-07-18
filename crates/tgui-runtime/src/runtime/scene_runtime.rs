@@ -6,18 +6,151 @@ use smallvec::SmallVec;
 
 const MAX_VIRTUAL_LAYOUT_FEEDBACK_PASSES: usize = 4;
 
+/// Benchmark-only path accounting for one runtime scene request.
+///
+/// Unlike timing inferred from the resulting cache flags, these counters distinguish a retained
+/// scene recollect from a root layout rebuild even though both leave a valid cache behind. The
+/// probe is opt-in, thread-local, and compiled out of normal production builds.
+#[cfg(any(test, feature = "bench-support"))]
+#[allow(dead_code)]
+pub(in crate::runtime) mod frame_path_probe {
+    use std::cell::Cell;
+
+    thread_local! {
+        static ENABLED: Cell<bool> = const { Cell::new(false) };
+        static CACHE_HITS: Cell<u64> = const { Cell::new(0) };
+        static SCENE_RECOLLECTS: Cell<u64> = const { Cell::new(0) };
+        static LAYOUT_REUSES: Cell<u64> = const { Cell::new(0) };
+        static LAYOUT_BUILDS: Cell<u64> = const { Cell::new(0) };
+    }
+
+    #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+    pub(in crate::runtime) struct Snapshot {
+        pub cache_hits: u64,
+        pub scene_recollects: u64,
+        pub layout_reuses: u64,
+        pub layout_builds: u64,
+    }
+
+    pub(in crate::runtime) fn begin() {
+        CACHE_HITS.with(|value| value.set(0));
+        SCENE_RECOLLECTS.with(|value| value.set(0));
+        LAYOUT_REUSES.with(|value| value.set(0));
+        LAYOUT_BUILDS.with(|value| value.set(0));
+        ENABLED.with(|enabled| enabled.set(true));
+    }
+
+    pub(in crate::runtime) fn finish() -> Snapshot {
+        ENABLED.with(|enabled| enabled.set(false));
+        Snapshot {
+            cache_hits: CACHE_HITS.with(Cell::get),
+            scene_recollects: SCENE_RECOLLECTS.with(Cell::get),
+            layout_reuses: LAYOUT_REUSES.with(Cell::get),
+            layout_builds: LAYOUT_BUILDS.with(Cell::get),
+        }
+    }
+
+    #[inline]
+    pub(in crate::runtime) fn record_cache_hit() {
+        if ENABLED.with(Cell::get) {
+            CACHE_HITS.with(|value| value.set(value.get() + 1));
+        }
+    }
+
+    #[inline]
+    pub(in crate::runtime) fn record_scene_recollect(layout_reused: bool) {
+        if !ENABLED.with(Cell::get) {
+            return;
+        }
+        SCENE_RECOLLECTS.with(|value| value.set(value.get() + 1));
+        if layout_reused {
+            LAYOUT_REUSES.with(|value| value.set(value.get() + 1));
+        } else {
+            LAYOUT_BUILDS.with(|value| value.set(value.get() + 1));
+        }
+    }
+}
+
+#[cfg(test)]
+pub(in crate::runtime) mod row_hover_patch_probe {
+    use std::cell::Cell;
+
+    thread_local! {
+        static HITS: Cell<u64> = const { Cell::new(0) };
+    }
+
+    pub(in crate::runtime) fn reset() {
+        HITS.with(|hits| hits.set(0));
+    }
+
+    pub(in crate::runtime) fn record_hit() {
+        HITS.with(|hits| hits.set(hits.get() + 1));
+    }
+
+    pub(in crate::runtime) fn hits() -> u64 {
+        HITS.with(Cell::get)
+    }
+}
+
+#[cfg(test)]
+pub(in crate::runtime) mod button_hover_patch_probe {
+    use std::cell::Cell;
+
+    thread_local! {
+        static HITS: Cell<u64> = const { Cell::new(0) };
+    }
+
+    pub(in crate::runtime) fn reset() {
+        HITS.with(|hits| hits.set(0));
+    }
+
+    pub(in crate::runtime) fn record_hit() {
+        HITS.with(|hits| hits.set(hits.get() + 1));
+    }
+
+    pub(in crate::runtime) fn hits() -> u64 {
+        HITS.with(Cell::get)
+    }
+}
+
+#[cfg(test)]
+pub(in crate::runtime) mod button_pressed_patch_probe {
+    use std::cell::Cell;
+
+    thread_local! {
+        static HITS: Cell<u64> = const { Cell::new(0) };
+    }
+
+    pub(in crate::runtime) fn reset() {
+        HITS.with(|hits| hits.set(0));
+    }
+
+    pub(in crate::runtime) fn record_hit() {
+        HITS.with(|hits| hits.set(hits.get() + 1));
+    }
+
+    pub(in crate::runtime) fn hits() -> u64 {
+        HITS.with(Cell::get)
+    }
+}
+
 /// 测试探针：记录纯滚动快路径命中次数，让测试能断言「确实走了滚动快路径而非整帧重收集」。
 /// 仅测试构建编译，热路径零成本。
-#[cfg(test)]
+#[cfg(any(test, feature = "bench-support"))]
+#[allow(dead_code)]
 pub(in crate::runtime) mod scroll_fast_path_probe {
     use std::cell::Cell;
     thread_local! {
-        static HITS: Cell<u64> = const { Cell::new(0) };
+        static GPU_HITS: Cell<u64> = const { Cell::new(0) };
+        static PATCH_HITS: Cell<u64> = const { Cell::new(0) };
         static VIRTUAL_HITS: Cell<u64> = const { Cell::new(0) };
         static VIRTUAL_SCENE_HITS: Cell<u64> = const { Cell::new(0) };
     }
-    pub(in crate::runtime) fn record_hit() {
-        HITS.with(|h| h.set(h.get() + 1));
+    pub(in crate::runtime) fn record_gpu_hit() {
+        GPU_HITS.with(|h| h.set(h.get() + 1));
+    }
+    pub(in crate::runtime) fn record_patch_hit() {
+        PATCH_HITS.with(|h| h.set(h.get() + 1));
     }
     pub(in crate::runtime) fn record_virtual_hit() {
         VIRTUAL_HITS.with(|h| h.set(h.get() + 1));
@@ -26,12 +159,19 @@ pub(in crate::runtime) mod scroll_fast_path_probe {
         VIRTUAL_SCENE_HITS.with(|h| h.set(h.get() + 1));
     }
     pub(in crate::runtime) fn reset() {
-        HITS.with(|h| h.set(0));
+        GPU_HITS.with(|h| h.set(0));
+        PATCH_HITS.with(|h| h.set(0));
         VIRTUAL_HITS.with(|h| h.set(0));
         VIRTUAL_SCENE_HITS.with(|h| h.set(0));
     }
     pub(in crate::runtime) fn hits() -> u64 {
-        HITS.with(Cell::get)
+        gpu_hits() + patch_hits()
+    }
+    pub(in crate::runtime) fn gpu_hits() -> u64 {
+        GPU_HITS.with(Cell::get)
+    }
+    pub(in crate::runtime) fn patch_hits() -> u64 {
+        PATCH_HITS.with(Cell::get)
     }
     pub(in crate::runtime) fn virtual_hits() -> u64 {
         VIRTUAL_HITS.with(Cell::get)
@@ -286,8 +426,19 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             return false;
         }
         if !cached.computed.overlay_hit_regions.is_empty()
+            || !cached.computed.accessibility_fragments.is_empty()
+            || cached
+                .computed
+                .overlay_layers
+                .iter()
+                .any(|layer| !layer.accessibility_fragments.is_empty())
             || cached.computed.portal_overlay_counts.commands > 0
             || cached.computed.portal_overlay_counts.hits > 0
+            || cached
+                .computed
+                .portal_overlay_counts
+                .accessibility_fragments
+                > 0
             || !cached.computed.portal_entries.is_empty()
             || !cached.computed.external_portal_requests.is_empty()
             || cached.computed.ime_cursor_area.is_some()
@@ -403,8 +554,8 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         cached.hovered_scrollbar = self.hovered_scrollbar;
         cached.gpu_scroll_deferred = true;
         self.scroll_dirty_widgets.clear();
-        #[cfg(test)]
-        scroll_fast_path_probe::record_hit();
+        #[cfg(any(test, feature = "bench-support"))]
+        scroll_fast_path_probe::record_gpu_hit();
         true
     }
 
@@ -560,7 +711,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         layout_invalidated
     }
 
-    fn sync_virtual_state_updates(&mut self, computed: &ComputedScene<VM>) -> bool {
+    pub(super) fn sync_virtual_state_updates(&mut self, computed: &ComputedScene<VM>) -> bool {
         self.sync_virtual_state_update_list(&computed.virtual_state_updates)
     }
 
@@ -794,8 +945,8 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             cached.gpu_scroll_deferred = false;
         }
         self.scroll_dirty_widgets.clear();
-        #[cfg(test)]
-        scroll_fast_path_probe::record_hit();
+        #[cfg(any(test, feature = "bench-support"))]
+        scroll_fast_path_probe::record_patch_hit();
         true
     }
 
@@ -809,7 +960,338 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
     }
 
     pub(in crate::runtime) fn computed_scene(&mut self) -> &ComputedScene<VM> {
-        with_runtime_scene_stack(|| self.computed_scene_with_virtual_feedback(0))
+        let _ = self.observe_root_rebuild_request();
+        loop {
+            with_runtime_scene_stack(|| {
+                let _ = self.computed_scene_with_virtual_feedback(0);
+            });
+            if !self.reconcile_accessibility_focus_after_scene_update() {
+                break;
+            }
+            self.invalidate_computed_scene();
+        }
+        &self
+            .cached_scene
+            .as_ref()
+            .expect("computed_scene should populate cached scene")
+            .computed
+    }
+
+    fn try_toast_prepared_card_fast_path(
+        &mut self,
+        viewport: Rect,
+        units: UnitContext,
+        caret_visible: bool,
+        active_scrollbar: Option<ScrollbarHandle>,
+        now: Instant,
+    ) -> bool {
+        if !std::mem::take(&mut self.toast_motion_patch_pending) {
+            return false;
+        }
+        let roots = {
+            let Some(cached) = self.cached_scene.as_ref() else {
+                return false;
+            };
+            if cached.computed_valid
+                || !cached.layout_valid
+                || cached.gpu_scroll_deferred
+                || cached.scroll_epoch != self.scroll_epoch
+                || cached.accessibility_animation_epoch != self.accessibility_animation_epoch
+                || !self.scene_cache_fields_match_ignoring_scroll(
+                    cached,
+                    viewport,
+                    units,
+                    caret_visible,
+                    active_scrollbar,
+                )
+            {
+                return false;
+            }
+            let Some(layout) = cached.layout.as_ref() else {
+                return false;
+            };
+            layout
+                .all_widget_ids()
+                .filter(|widget_id| {
+                    layout.resolved_widget(*widget_id).is_some_and(|widget| {
+                        matches!(
+                            widget.kind,
+                            crate::ui::widget::ResolvedWidgetKind::ToastHost { .. }
+                        )
+                    })
+                })
+                .collect::<SmallVec<[WidgetId; 4]>>()
+        };
+        if roots.is_empty() {
+            return false;
+        }
+
+        let patched = crate::ui::widget::with_prepared_toast_card_cache(|| {
+            crate::ui::widget::with_toast_base_scene_replay(|| {
+                self.patch_cached_scene_for_roots(&roots, now, false)
+            })
+        });
+        if patched {
+            super::action_stats::record("toast_prepared_card_scene_patch");
+        }
+        patched
+    }
+
+    fn try_retained_row_hover_fast_path(
+        &mut self,
+        viewport: Rect,
+        units: UnitContext,
+        caret_visible: bool,
+        active_scrollbar: Option<ScrollbarHandle>,
+        now: Instant,
+    ) -> bool {
+        let Some(pending) = self.row_hover_patch_pending.take() else {
+            return false;
+        };
+        if self.invalidation.revision() != pending.source_invalidation_revision
+            || self.last_invalidation_revision != pending.source_invalidation_revision
+            || self.invalidation.root_rebuild_revision() != pending.source_root_rebuild_revision
+            || self.last_root_rebuild_revision != pending.source_root_rebuild_revision
+            || self.animation_engine.has_active_animations()
+            || self.next_tooltip_wakeup_deadline.is_some()
+            || self.next_toast_wakeup_deadline.is_some()
+            || self.hover_epoch != pending.source_hover_epoch.wrapping_add(1)
+        {
+            return false;
+        }
+        let roots = {
+            let Some(cached) = self.cached_scene.as_ref() else {
+                return false;
+            };
+            if !cached.computed_valid
+                || !cached.layout_valid
+                || cached.gpu_scroll_deferred
+                || cached.hover_epoch != pending.source_hover_epoch
+                || cached.scroll_epoch != self.scroll_epoch
+                || !self.scene_cache_fields_match_ignoring_scroll_and_hover(
+                    cached,
+                    viewport,
+                    units,
+                    caret_visible,
+                    active_scrollbar,
+                )
+            {
+                return false;
+            }
+            let Some(layout) = cached.layout.as_ref() else {
+                return false;
+            };
+            let mut roots = SmallVec::<[WidgetId; 2]>::new();
+            for (row, kind) in [pending.previous_row, pending.next_row]
+                .into_iter()
+                .flatten()
+            {
+                if roots.contains(&row)
+                    || !layout
+                        .resolved_widget(row)
+                        .is_some_and(|widget| widget.retained_hover_row_kind() == Some(kind))
+                {
+                    return false;
+                }
+                roots.push(row);
+            }
+            roots
+        };
+        if roots.is_empty() || !self.patch_cached_scene_for_roots(&roots, now, true) {
+            return false;
+        }
+        #[cfg(test)]
+        row_hover_patch_probe::record_hit();
+        super::action_stats::record("row_hover_scene_patch");
+        true
+    }
+
+    fn try_retained_button_hover_fast_path(
+        &mut self,
+        viewport: Rect,
+        units: UnitContext,
+        caret_visible: bool,
+        active_scrollbar: Option<ScrollbarHandle>,
+        now: Instant,
+    ) -> bool {
+        let Some(pending) = self.button_hover_patch_pending.take() else {
+            return false;
+        };
+        if !self.button_hover_runtime_is_idle()
+            || self.invalidation.revision() != pending.source_invalidation_revision
+            || self.last_invalidation_revision != pending.source_invalidation_revision
+            || self.invalidation.root_rebuild_revision() != pending.source_root_rebuild_revision
+            || self.last_root_rebuild_revision != pending.source_root_rebuild_revision
+            || self.hover_epoch != pending.source_hover_epoch.wrapping_add(1)
+        {
+            super::action_stats::record("button_hover_patch_reject_guard");
+            return false;
+        }
+        let roots = {
+            let Some(cached) = self.cached_scene.as_ref() else {
+                return false;
+            };
+            if !cached.computed_valid
+                || !cached.layout_valid
+                || cached.gpu_scroll_deferred
+                || cached.hover_epoch != pending.source_hover_epoch
+                || cached.scroll_epoch != self.scroll_epoch
+                || cached.accessibility_animation_epoch != self.accessibility_animation_epoch
+                || !cached.computed.is_simple_for_button_hover_recompose()
+                || !cached.lifecycle_states.is_empty()
+                || !cached.media_texture_bindings.is_empty()
+                || !self.media_event_states.is_empty()
+                || !self.external_portal_requests.is_empty()
+                || !Self::button_hover_path_is_passive(&self.hovered_widgets)
+                || !self.scene_cache_fields_match_ignoring_scroll_and_hover(
+                    cached,
+                    viewport,
+                    units,
+                    caret_visible,
+                    active_scrollbar,
+                )
+            {
+                super::action_stats::record("button_hover_patch_reject_cache");
+                return false;
+            }
+            let Some(layout) = cached.layout.as_ref() else {
+                super::action_stats::record("button_hover_patch_reject_layout");
+                return false;
+            };
+            if layout.contains_virtual() {
+                super::action_stats::record("button_hover_patch_reject_virtual");
+                return false;
+            }
+
+            let mut current_button = None;
+            for hovered in &self.hovered_widgets {
+                let HoverTargetId::Widget(id) = hovered.target_id else {
+                    continue;
+                };
+                if matches!(
+                    layout.resolved_widget(id).map(|widget| &widget.kind),
+                    Some(crate::ui::widget::ResolvedWidgetKind::Button { .. })
+                ) && current_button.replace(id).is_some()
+                {
+                    super::action_stats::record("button_hover_patch_reject_multiple_buttons");
+                    return false;
+                }
+            }
+            if current_button != pending.next_button
+                || pending.previous_button == pending.next_button
+                || (pending.previous_button.is_none() && pending.next_button.is_none())
+            {
+                super::action_stats::record("button_hover_patch_reject_target");
+                return false;
+            }
+
+            let mut roots = SmallVec::<[WidgetId; 2]>::new();
+            for id in [pending.previous_button, pending.next_button]
+                .into_iter()
+                .flatten()
+            {
+                if roots.contains(&id)
+                    || !Self::is_simple_button_hover_root(layout, id)
+                    || !cached
+                        .scene_chunks
+                        .get(&id)
+                        .is_some_and(|chunk| chunk.is_simple_for_button_hover_recompose())
+                    || !cached.visual_contexts.contains_key(&id)
+                {
+                    super::action_stats::record("button_hover_patch_reject_root");
+                    return false;
+                }
+                roots.push(id);
+            }
+            roots
+        };
+        if roots.is_empty() {
+            super::action_stats::record("button_hover_patch_reject_empty");
+            return false;
+        }
+        if !self.patch_cached_scene_for_roots(&roots, now, true) {
+            super::action_stats::record("button_hover_patch_reject_patch");
+            return false;
+        }
+        #[cfg(test)]
+        button_hover_patch_probe::record_hit();
+        super::action_stats::record("button_hover_scene_patch");
+        true
+    }
+
+    fn try_retained_button_pressed_fast_path(
+        &mut self,
+        viewport: Rect,
+        units: UnitContext,
+        caret_visible: bool,
+        active_scrollbar: Option<ScrollbarHandle>,
+        now: Instant,
+    ) -> bool {
+        let Some(pending) = self.button_pressed_patch_pending.take() else {
+            return false;
+        };
+        if !self.button_visual_runtime_is_idle_ignoring_pressed()
+            || self.invalidation.revision() != pending.source_invalidation_revision
+            || self.last_invalidation_revision != pending.source_invalidation_revision
+            || self.invalidation.root_rebuild_revision() != pending.source_root_rebuild_revision
+            || self.last_root_rebuild_revision != pending.source_root_rebuild_revision
+            || self.hover_epoch != pending.source_hover_epoch
+            || self.pressed_widget != pending.next_pressed_widget
+        {
+            super::action_stats::record("button_pressed_patch_reject_guard");
+            return false;
+        }
+        {
+            let Some(cached) = self.cached_scene.as_ref() else {
+                return false;
+            };
+            if !cached.computed_valid
+                || !cached.layout_valid
+                || cached.gpu_scroll_deferred
+                || cached.pressed_widget != pending.source_pressed_widget
+                || cached.hover_epoch != pending.source_hover_epoch
+                || cached.scroll_epoch != self.scroll_epoch
+                || cached.accessibility_animation_epoch != self.accessibility_animation_epoch
+                || !cached.computed.is_simple_for_button_hover_recompose()
+                || !cached.lifecycle_states.is_empty()
+                || !cached.media_texture_bindings.is_empty()
+                || !self.media_event_states.is_empty()
+                || !self.external_portal_requests.is_empty()
+                || !self.scene_cache_fields_match_ignoring_scroll_hover_and_pressed(
+                    cached,
+                    viewport,
+                    units,
+                    caret_visible,
+                    active_scrollbar,
+                )
+            {
+                super::action_stats::record("button_pressed_patch_reject_cache");
+                return false;
+            }
+            let Some(layout) = cached.layout.as_ref() else {
+                return false;
+            };
+            if layout.contains_virtual()
+                || self.hovered_simple_button(layout) != Some(pending.button)
+                || !Self::is_simple_button_pressed_root(layout, pending.button)
+                || !cached
+                    .scene_chunks
+                    .get(&pending.button)
+                    .is_some_and(|chunk| chunk.is_simple_for_button_hover_recompose())
+                || !cached.visual_contexts.contains_key(&pending.button)
+            {
+                super::action_stats::record("button_pressed_patch_reject_root");
+                return false;
+            }
+        }
+        if !self.patch_cached_scene_for_roots(&[pending.button], now, true) {
+            super::action_stats::record("button_pressed_patch_reject_patch");
+            return false;
+        }
+        #[cfg(test)]
+        button_pressed_patch_probe::record_hit();
+        super::action_stats::record("button_pressed_scene_patch");
+        true
     }
 
     fn computed_scene_with_virtual_feedback(
@@ -883,6 +1365,67 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 started_at.map(|_| "no_cached_scene".to_string()),
             )
         };
+        if self.try_toast_prepared_card_fast_path(
+            viewport,
+            units,
+            caret_visible,
+            active_scrollbar,
+            now,
+        ) {
+            return &self
+                .cached_scene
+                .as_ref()
+                .expect("Toast prepared-card patch should preserve cached scene")
+                .computed;
+        }
+        if !cache_valid
+            && layout_cache_valid
+            && self.try_retained_row_hover_fast_path(
+                viewport,
+                units,
+                caret_visible,
+                active_scrollbar,
+                now,
+            )
+        {
+            return &self
+                .cached_scene
+                .as_ref()
+                .expect("DataGrid hover patch should preserve cached scene")
+                .computed;
+        }
+        if !cache_valid
+            && layout_cache_valid
+            && self.try_retained_button_hover_fast_path(
+                viewport,
+                units,
+                caret_visible,
+                active_scrollbar,
+                now,
+            )
+        {
+            return &self
+                .cached_scene
+                .as_ref()
+                .expect("Button hover patch should preserve cached scene")
+                .computed;
+        }
+        if !cache_valid
+            && layout_cache_valid
+            && self.try_retained_button_pressed_fast_path(
+                viewport,
+                units,
+                caret_visible,
+                active_scrollbar,
+                now,
+            )
+        {
+            return &self
+                .cached_scene
+                .as_ref()
+                .expect("Button pressed patch should preserve cached scene")
+                .computed;
+        }
         let selected_text_state = self
             .selected_text
             .and_then(|id| self.text_edit_state(id))
@@ -1007,8 +1550,15 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 .computed;
         }
 
+        #[cfg(any(test, feature = "bench-support"))]
+        if cache_valid {
+            frame_path_probe::record_cache_hit();
+        }
+
         let widget_states = self.widget_state_map(active_scrollbar);
         if !cache_valid {
+            #[cfg(any(test, feature = "bench-support"))]
+            frame_path_probe::record_scene_recollect(layout_cache_valid);
             let mut layout_duration = Duration::ZERO;
             let mut collect_duration = Duration::ZERO;
             let mut recollect_duration = Duration::ZERO;
@@ -1164,7 +1714,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                             let previous_layout = previous_cached
                                 .as_ref()
                                 .and_then(|cached| cached.layout.as_ref());
-                            let layout = tree
+                            let mut layout = tree
                                 .build_scene_layout_at_with_previous_style_sheet_and_reduced_motion(
                                     &self.font_manager,
                                     &theme,
@@ -1179,6 +1729,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                                     self.reduced_motion,
                                     &self.config.style_sheet,
                                 );
+                            layout.set_frame_clock(self.frame_clock.snapshot());
                             layout_duration += layout_started_at.elapsed();
                             layout
                         };

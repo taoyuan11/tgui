@@ -16,6 +16,10 @@ mod combobox;
 mod common;
 mod container;
 mod core;
+#[cfg(all(test, feature = "bench-support"))]
+pub(crate) use core::{offset_direct_probe, scale_direct_probe};
+#[cfg(feature = "bench-support")]
+pub(crate) use core::{toast_scene_bench_profile, with_legacy_text_content_reactive_resolve};
 mod date_picker;
 mod divider;
 mod drawer;
@@ -98,19 +102,20 @@ pub(crate) use common::VideoTexturePrimitive;
 pub(crate) use common::{
     slider_effective_step, slider_resolve_value, slider_value_from_normalized,
     text_input_content_geometry, text_input_content_viewport, text_input_layout_width,
-    BackdropBlurPrimitive, BackdropBlurPrimitiveSlot, BrushPrimitive, BrushPrimitiveData,
-    BrushPrimitiveSlot, CanvasCompositePrimitive, CanvasItemInteractionHandlers,
-    CanvasTextHitRegion, CanvasTextSpanPrimitive, ClipMask, CompositionState, ComputedScene,
-    ContainerLayout, DataGridCellState, DataGridHeaderState, DataGridResizeHandleState,
-    DefaultActivation, DirtyDrawRange, FocusScopeState, FocusTargetMeta, HitGeometry,
-    HitInteraction, HitPath, HitRegion, HitTargetId, InteractionHandlers, LifecycleEventHandlers,
-    LifecycleEventState, ListItemState, MeasureContext, MediaEventPhase, MediaEventState,
-    MeshPrimitive, MeshVertex, OverlayShapePrimitiveSlot, OverlayTextDecorationPrimitiveSlot,
-    OverlayTextPrimitiveSlot, OverlayTexturePrimitiveSlot, RenderCommand, SceneCounts,
-    SceneDrawStream, ScrollRegion, ScrollbarAxis, ScrollbarHandle, ShapePrimitiveSlot,
-    SplitterHandleState, TextDecorationPrimitiveSlot, TextEditState, TextInputContentGeometry,
-    TextPrimitiveSlot, TexturePrimitive, TexturePrimitiveSlot, TransformChain, TransformRecord,
-    TreeNodeState, WidgetStateMap,
+    AccessibilityFragment, AccessibilityFragmentNode, BackdropBlurPrimitive,
+    BackdropBlurPrimitiveSlot, BrushPrimitive, BrushPrimitiveData, BrushPrimitiveSlot,
+    CanvasCompositePrimitive, CanvasItemInteractionHandlers, CanvasTextHitRegion,
+    CanvasTextSpanPrimitive, ClipMask, CompositionState, ComputedScene, ContainerLayout,
+    DataGridCellState, DataGridHeaderState, DataGridResizeHandleState, DefaultActivation,
+    DirtyDrawRange, FocusScopeState, FocusTargetMeta, HitGeometry, HitInteraction, HitPath,
+    HitRegion, HitTargetId, InteractionHandlers, LifecycleEventHandlers, LifecycleEventState,
+    ListItemState, MeasureContext, MediaEventPhase, MediaEventState, MeshPrimitive, MeshVertex,
+    OverlayShapePrimitiveSlot, OverlayTextDecorationPrimitiveSlot, OverlayTextPrimitiveSlot,
+    OverlayTexturePrimitiveSlot, RenderCommand, SceneCounts, SceneDrawStream, ScrollRegion,
+    ScrollbarAxis, ScrollbarHandle, ShapePrimitiveSlot, SplitterHandleState,
+    TextDecorationPrimitiveSlot, TextEditState, TextInputContentGeometry, TextPrimitiveSlot,
+    TexturePrimitive, TexturePrimitiveSlot, TransformChain, TransformRecord, TreeNodeState,
+    WidgetStateMap,
 };
 pub use common::{
     CursorStyle, DividerOrientation, FileDropEvent, FocusScopeOptions, Point, Rect,
@@ -120,23 +125,31 @@ pub use common::{
 pub use container::{Flex, Grid, IntoLengthValue, Stack};
 #[cfg(feature = "bench-support")]
 pub use core::bench_support::{
-    default_bench_viewport, GpuBenchmarkAdapterInfo, GpuDrawStats, GpuGlyphRasterCacheStats,
-    GpuTextCacheActivityStats, GpuTextCacheStats, GpuTextureSceneStats, TextMeasureActivityStats,
-    WidgetBenchmarkContext, WidgetBenchmarkStats,
+    default_bench_viewport, widget_type_size_telemetry, AnimationFrameActivityStats,
+    ContainerOffsetResolveSnapshot, ContainerScaleResolveSnapshot, GpuBenchmarkAdapterInfo,
+    GpuCacheLivenessStats, GpuCleanFrameCacheStats, GpuDrawStats, GpuGlyphRasterCacheStats,
+    GpuPrepareStats, GpuTextCacheActivityStats, GpuTextCacheStats, GpuTextureRetainedState,
+    GpuTextureSceneStats, ProgressValueLabelSnapshot, ProgressValueResolveSnapshot,
+    ScrollRegionLookupStats, ScrollTargetLookupStats, SelectArrowBenchmarkContext,
+    SelectArrowBenchmarkStats, SliderValueResolveSnapshot, TextMeasureActivityStats,
+    WidgetBenchmarkContext, WidgetBenchmarkStats, WidgetTypeSizeEntry,
 };
 #[cfg(feature = "bench-support")]
 pub use core::bench_support_ext;
 #[cfg(test)]
 pub(crate) use core::media_event_walk_probe;
+pub(crate) use core::with_toast_base_scene_replay;
+#[cfg(feature = "bench-support")]
+pub(crate) use core::without_toast_base_scene_replay;
 pub(crate) use core::LifecycleSnapshot;
 #[cfg(feature = "audio")]
 pub(crate) use core::LifecycleWidgetKind;
 pub(crate) use core::{
     build_external_portal_overlay, collect_portal_content_scene, compute_scrollbar_geometry,
-    resolve_external_portal_anchor, ActiveTooltipState, CollectContext, CollectedSceneCache,
-    FocusCollectState, ReactiveScenePropertyValue, ResolvedElement, ResolvedSceneLayout,
-    ResolvedWidgetKind, SceneChunkParts, TextInputLayoutOverride, TooltipTrigger,
-    VisualContextSnapshot,
+    resolve_external_portal_anchor, with_prepared_toast_card_cache, ActiveTooltipState,
+    CollectContext, CollectedSceneCache, FocusCollectState, ReactiveScenePropertyValue,
+    ResolvedElement, ResolvedSceneLayout, ResolvedWidgetKind, RetainedHoverRowKind,
+    SceneChunkParts, TextInputLayoutOverride, TooltipTrigger, VisualContextSnapshot,
 };
 pub use core::{
     rect, Element, StrictReactiveViolation, WidgetCommand, WidgetEventResult, WidgetStyleExt,
@@ -157,10 +170,10 @@ pub use list::{
     List, ListItem, ListItemAction, ListItemContext, ListSection, ListSelectionChange,
     ListSelectionMode, ListSelectionTrigger, ListStyle,
 };
+pub(crate) use menu::{menu_item_state_owner, ContextMenuDescriptor, MenuItemState};
 pub use menu::{
     ChordKey, ContextMenu, KeyChord, Menu, MenuBar, MenuBarEntry, MenuIcon, MenuItem, MenuItemKind,
 };
-pub(crate) use menu::{ContextMenuDescriptor, MenuItemState};
 pub use modal::{Modal, ModalAction};
 pub use number_input::{
     NumberInput, NumberInputChange, NumberInputChangeTrigger, NumberInputStyle,
@@ -217,6 +230,8 @@ pub use textarea::Textarea;
 pub use time_picker::{TimePicker, TimePickerChange, TimePickerStyle};
 pub use toast::ToastHost;
 pub use tooltip::Tooltip;
+#[cfg(feature = "bench-support")]
+pub(crate) use tree::legacy_tree_row_source;
 pub(crate) use tree::tree_check_state;
 pub use tree::{
     Tree, TreeCheckChange, TreeCheckState, TreeCheckTrigger, TreeDropEvent, TreeDropPosition,

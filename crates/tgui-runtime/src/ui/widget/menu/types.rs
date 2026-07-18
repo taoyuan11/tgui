@@ -8,6 +8,8 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
+use crate::ui::widget::WidgetId;
+
 use crate::foundation::view_model::Command;
 use crate::platform::keyboard::{meta_modifier, Key, KeyCode, ModifiersState, NamedKey};
 use crate::ui::layout::Value;
@@ -268,4 +270,28 @@ impl MenuBarGroupId {
     pub(crate) fn raw(self) -> u64 {
         self.0
     }
+}
+
+/// Returns the retained interaction-state owner for one menu level.
+///
+/// Root menu items intentionally keep using the trigger widget id so the existing public-facing
+/// state semantics remain unchanged. Nested levels need a distinct owner: reusing
+/// `(menu_id, option_index)` makes e.g. root item `0` and submenu item `0` share hover state. A
+/// domain-separated FNV-1a fold over the complete parent path keeps every visible level stable
+/// across frames without allocating a path in each hit region.
+pub(crate) fn menu_item_state_owner(menu_id: WidgetId, parent_path: &[usize]) -> WidgetId {
+    if parent_path.is_empty() {
+        return menu_id;
+    }
+
+    const OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
+    const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
+    const MENU_STATE_DOMAIN: u64 = 0x4d45_4e55_5354_4154; // "MENUSTAT"
+
+    let mut hash = OFFSET_BASIS ^ MENU_STATE_DOMAIN;
+    hash = (hash ^ menu_id.raw()).wrapping_mul(FNV_PRIME);
+    for &index in parent_path {
+        hash = (hash ^ (index as u64).wrapping_add(1)).wrapping_mul(FNV_PRIME);
+    }
+    WidgetId::from_raw(hash)
 }

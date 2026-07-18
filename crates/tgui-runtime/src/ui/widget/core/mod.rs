@@ -71,6 +71,8 @@ mod element_resolve;
 mod layout;
 mod render;
 mod resolved;
+#[cfg(all(test, feature = "bench-support"))]
+pub(crate) use resolved::{offset_direct_probe, scale_direct_probe};
 mod resolved_eq;
 mod resolved_eq_lifecycle;
 mod resolved_events;
@@ -95,6 +97,14 @@ use self::element_path::{
 pub(crate) use self::layout::compute_scrollbar_geometry;
 use self::layout::*;
 use self::render::*;
+#[cfg(feature = "bench-support")]
+pub(crate) use self::resolved::collect::toast::bench_profile as toast_scene_bench_profile;
+pub(crate) use self::resolved::collect::toast::with_prepared_toast_card_cache;
+pub(crate) use self::resolved::collect::toast::with_toast_base_scene_replay;
+#[cfg(feature = "bench-support")]
+pub(crate) use self::resolved::collect::toast::without_toast_base_scene_replay;
+#[cfg(feature = "bench-support")]
+pub(crate) use self::resolved::with_legacy_text_content_reactive_resolve;
 pub(crate) use self::resolved::{
     build_external_portal_overlay, collect_portal_content_scene, resolve_external_portal_anchor,
 };
@@ -112,6 +122,7 @@ pub use self::types::Element;
 use self::types::*;
 pub(crate) use self::types::{
     LifecycleSnapshot, LifecycleWidgetKind, ResolvedElement, ResolvedWidgetKind,
+    RetainedHoverRowKind,
 };
 
 /// Caret width in logical pixels.

@@ -66,7 +66,7 @@ impl<VM> ResolvedElement<VM> {
                         property: WidgetProperty::BorderColor,
                     },
                     button_style.border_color_value.resolve(),
-                    default_state_transition(context.theme, context.reduced_motion),
+                    default_state_transition(context.style_context),
                     context.now,
                 )
             }
@@ -81,7 +81,7 @@ impl<VM> ResolvedElement<VM> {
                         property: WidgetProperty::BorderColor,
                     },
                     select_style.border,
-                    default_state_transition(context.theme, context.reduced_motion),
+                    default_state_transition(context.style_context),
                     context.now,
                 )
             }
@@ -96,7 +96,7 @@ impl<VM> ResolvedElement<VM> {
                         property: WidgetProperty::BorderColor,
                     },
                     input_style.border,
-                    default_state_transition(context.theme, context.reduced_motion),
+                    default_state_transition(context.style_context),
                     context.now,
                 )
             }
@@ -117,7 +117,7 @@ impl<VM> ResolvedElement<VM> {
                         property: WidgetProperty::BorderColor,
                     },
                     color,
-                    default_state_transition(context.theme, context.reduced_motion),
+                    default_state_transition(context.style_context),
                     context.now,
                 )
             }
@@ -152,14 +152,14 @@ impl<VM> ResolvedElement<VM> {
                     property: WidgetProperty::Background,
                 },
                 color,
-                default_state_transition(context.theme, context.reduced_motion),
+                default_state_transition(context.style_context),
                 context.now,
             );
         }
         if let Some(tree_node) = self.tree_node.as_ref() {
             let color = if tree_node.disabled.resolve() {
                 tree_node.item_disabled_background.resolve()
-            } else if tree_node.selected_keys.resolve().contains(&tree_node.key) {
+            } else if tree_node.selected {
                 tree_node.item_selected_background.resolve()
             } else if widget_state.hovered || widget_state.pressed || widget_state.focused {
                 tree_node.item_hover_background.resolve()
@@ -172,7 +172,7 @@ impl<VM> ResolvedElement<VM> {
                     property: WidgetProperty::Background,
                 },
                 color,
-                default_state_transition(context.theme, context.reduced_motion),
+                default_state_transition(context.style_context),
                 context.now,
             );
         }
@@ -188,7 +188,7 @@ impl<VM> ResolvedElement<VM> {
                         property: WidgetProperty::Background,
                     },
                     button_style.background_value.resolve(),
-                    default_state_transition(context.theme, context.reduced_motion),
+                    default_state_transition(context.style_context),
                     context.now,
                 )
             }
@@ -204,7 +204,7 @@ impl<VM> ResolvedElement<VM> {
                         property: WidgetProperty::Background,
                     },
                     background,
-                    default_state_transition(context.theme, context.reduced_motion),
+                    default_state_transition(context.style_context),
                     context.now,
                 )
             }
@@ -220,7 +220,7 @@ impl<VM> ResolvedElement<VM> {
                         property: WidgetProperty::Background,
                     },
                     background,
-                    default_state_transition(context.theme, context.reduced_motion),
+                    default_state_transition(context.style_context),
                     context.now,
                 )
             }
@@ -254,7 +254,7 @@ impl<VM> ResolvedElement<VM> {
                             .unwrap_or(resolve_stateful_widget_color(&style.track, visual_state))
                     }
                 },
-                default_motion_transition(context.theme, context.reduced_motion),
+                default_motion_transition(context.style_context),
                 context.now,
             ),
             ResolvedWidgetKind::Slider { .. } => Color::TRANSPARENT,

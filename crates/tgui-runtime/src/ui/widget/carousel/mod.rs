@@ -4,14 +4,15 @@ use crate::foundation::view_model::{Command, ValueCommand};
 use crate::theme::{StyleContext, WidgetState};
 use crate::ui::layout::{Align, LayoutStyle, Length, Value};
 
-use super::common::CarouselAutoPlayState;
-use super::common::VisualStyle;
+use super::common::{CarouselAutoPlayState, Point, VisualStyle};
 use super::core::Element;
 use super::p3_support::{
     impl_p3_layout_api, merge_layout, resolve_component_style_with_sheet, with_visual_identity,
 };
 use super::style::{CarouselStyle, ContainerStyle, StyleResolver, StyleSheet};
-use super::{Button, CursorStyle, Flex, Stack, WidgetKey};
+use super::{Button, CursorStyle, Flex, FocusScopeOptions, Stack, WidgetKey};
+
+const CAROUSEL_PANEL_SHIFT_DP: f32 = 10.0;
 
 pub struct Carousel<VM> {
     items: Vec<Element<VM>>,
@@ -72,19 +73,49 @@ impl<VM> Carousel<VM> {
 
 impl<VM: 'static> From<Carousel<VM>> for Element<VM> {
     fn from(carousel: Carousel<VM>) -> Self {
-        let count = carousel.items.len().max(1);
-        let selected = carousel.selected.resolve().min(count - 1);
-        let item = carousel
-            .items
+        let Carousel {
+            items,
+            selected,
+            on_change,
+            auto_play,
+            style,
+            layout,
+            visual,
+            key,
+        } = carousel;
+        let count = items.len().max(1);
+        let selected = normalized_carousel_selection(selected, count);
+        let panels = items
             .into_iter()
-            .nth(selected)
-            .unwrap_or_else(|| Stack::new().into());
-        let prev = carousel_change_button("Prev", selected, count, -1, carousel.on_change.clone());
-        let next = carousel_change_button("Next", selected, count, 1, carousel.on_change.clone());
+            .enumerate()
+            .map(|(index, item)| {
+                let active = carousel_index_active_value(&selected, index);
+                let opacity = carousel_active_opacity_value(active.clone());
+                let offset = carousel_panel_offset_value(&selected, index);
+                Stack::new()
+                    .runtime_layout(move |_, _, context, _, visual| {
+                        visual.opacity = opacity
+                            .clone()
+                            .with_default_transition(context.motion_normal_transition());
+                        visual.offset = offset
+                            .clone()
+                            .with_default_transition(context.motion_fast_transition());
+                    })
+                    .focus_scope(
+                        FocusScopeOptions::new()
+                            .active(active)
+                            .suppress_interactions_when_inactive(),
+                    )
+                    .child(item)
+            })
+            .collect::<Vec<_>>();
+        let prev = carousel_change_button("Prev", selected.clone(), count, -1, on_change.clone());
+        let next = carousel_change_button("Next", selected.clone(), count, 1, on_change.clone());
         let indicators = (0..count)
             .map(|index| {
-                let on_change = carousel.on_change.clone();
-                let style = carousel.style.clone();
+                let on_change = on_change.clone();
+                let style = style.clone();
+                let active = carousel_index_active_value(&selected, index);
                 with_visual_identity(
                     Stack::new()
                         .runtime_layout({
@@ -116,7 +147,7 @@ impl<VM: 'static> From<Carousel<VM>> for Element<VM> {
                                 state,
                             );
                             let mut container = ContainerStyle::default_for_theme(context.theme);
-                            container.surface.background = Some(if index == selected {
+                            container.surface.background = Some(if active.resolve() {
                                 resolved.active_indicator
                             } else {
                                 resolved.indicator
@@ -134,13 +165,13 @@ impl<VM: 'static> From<Carousel<VM>> for Element<VM> {
                         .tab_index(0)
                         .cursor(CursorStyle::Pointer)
                         .into(),
-                    &carousel.visual,
+                    &visual,
                 )
             })
             .collect::<Vec<Element<VM>>>();
-        let root_style = carousel.style.clone();
-        let row_style = carousel.style.clone();
-        let indicator_row_style = carousel.style.clone();
+        let root_style = style.clone();
+        let row_style = style.clone();
+        let indicator_row_style = style.clone();
         let mut root: Element<VM> = Flex::vertical()
             .gap(crate::ui::unit::dp(0.0))
             .runtime_layout(move |_layout, container, context, style_sheet, visual| {
@@ -168,7 +199,7 @@ impl<VM: 'static> From<Carousel<VM>> for Element<VM> {
                         container.gap = Value::Static(Length::Px(resolved.gap));
                     })
                     .child(prev)
-                    .child(Stack::new().grow(1.0).child(item))
+                    .child(Stack::new().grow(1.0).child(panels))
                     .child(next),
             )
             .child(
@@ -188,7 +219,7 @@ impl<VM: 'static> From<Carousel<VM>> for Element<VM> {
                     .child(indicators),
             )
             .into();
-        if let Some(interval) = carousel.auto_play {
+        if let Some(interval) = auto_play {
             root.carousel_auto_play = Some(CarouselAutoPlayState {
                 id: root.id,
                 frame: crate::ui::widget::Rect::new(
@@ -197,39 +228,87 @@ impl<VM: 'static> From<Carousel<VM>> for Element<VM> {
                     crate::ui::unit::Dp::ZERO,
                     crate::ui::unit::Dp::ZERO,
                 ),
-                selected,
+                selected: selected.clone(),
                 count,
                 interval,
-                on_change: carousel.on_change.clone(),
+                on_change: on_change.clone(),
             });
         }
-        root.key = carousel.key;
-        root = with_visual_identity(root, &carousel.visual);
-        root.layout = merge_layout(root.layout, carousel.layout);
+        root.key = key;
+        root = with_visual_identity(root, &visual);
+        root.layout = merge_layout(root.layout, layout);
         root
+    }
+}
+
+fn normalized_carousel_selection(selected: Value<usize>, count: usize) -> Value<usize> {
+    let max_index = count.saturating_sub(1);
+    match selected {
+        Value::Static(selected) => Value::Static(selected.min(max_index)),
+        Value::Signal(signal) => {
+            Value::Signal(signal.map_memo(move |selected| selected.min(max_index)))
+        }
+    }
+}
+
+fn carousel_index_active_value(selected: &Value<usize>, index: usize) -> Value<bool> {
+    match selected {
+        Value::Static(selected) => Value::Static(*selected == index),
+        Value::Signal(signal) => Value::Signal(signal.map_memo(move |selected| selected == index)),
+    }
+}
+
+fn carousel_active_opacity_value(active: Value<bool>) -> Value<f32> {
+    match active {
+        Value::Static(active) => Value::Static(if active { 1.0 } else { 0.0 }),
+        Value::Signal(signal) => {
+            Value::Signal(signal.map_memo(|active| if active { 1.0 } else { 0.0 }))
+        }
+    }
+}
+
+fn carousel_panel_offset_value(selected: &Value<usize>, index: usize) -> Value<Point> {
+    match selected {
+        Value::Static(selected) => Value::Static(carousel_panel_offset(*selected, index)),
+        Value::Signal(signal) => {
+            Value::Signal(signal.map_memo(move |selected| carousel_panel_offset(selected, index)))
+        }
+    }
+}
+
+fn carousel_panel_offset(selected: usize, index: usize) -> Point {
+    if selected == index {
+        Point::ZERO
+    } else {
+        let direction = if index < selected { -1.0 } else { 1.0 };
+        Point::new(
+            crate::ui::unit::dp(CAROUSEL_PANEL_SHIFT_DP * direction),
+            crate::ui::unit::dp(0.0),
+        )
     }
 }
 
 fn carousel_change_button<VM: 'static>(
     label: &str,
-    selected: usize,
+    selected: Value<usize>,
     count: usize,
     step: i32,
     command: Option<ValueCommand<VM, usize>>,
 ) -> Element<VM> {
-    let target = if step < 0 {
-        if selected == 0 {
-            count - 1
-        } else {
-            selected - 1
-        }
-    } else {
-        (selected + 1) % count
-    };
     Button::new(label)
         .secondary()
         .on_click(Command::new_with_context(move |vm, context| {
             if let Some(command) = command.as_ref() {
+                let selected = selected.resolve_untracked().min(count.saturating_sub(1));
+                let target = if step < 0 {
+                    if selected == 0 {
+                        count - 1
+                    } else {
+                        selected - 1
+                    }
+                } else {
+                    (selected + 1) % count
+                };
                 command.execute_with_context(vm, target, context);
             }
         }))

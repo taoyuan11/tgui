@@ -1,8 +1,9 @@
 use std::sync::Arc;
 
 use crate::foundation::binding::{TextChangeSet, TextController};
+use crate::foundation::color::Color;
 use crate::foundation::view_model::{Command, ValueCommand};
-use crate::theme::{StyleContext, WidgetState};
+use crate::theme::{StateValue, StyleContext, WidgetState};
 use crate::ui::layout::{pct, Insets, LayoutStyle, Length, Value};
 use crate::ui::unit::{dp, Dp};
 
@@ -306,9 +307,8 @@ impl<VM: 'static> From<Combobox<VM>> for Element<VM> {
                                     );
                                     let mut button =
                                         ButtonStyle::default_for_theme(context.theme, variant);
-                                    button.background = crate::ui::theme::StateValue::new(
-                                        resolved.highlight.clone(),
-                                    );
+                                    button.background =
+                                        combobox_option_background(resolved.highlight.clone());
                                     button
                                 },
                             )
@@ -394,6 +394,16 @@ impl<VM: 'static> From<Combobox<VM>> for Element<VM> {
     }
 }
 
+fn combobox_option_background(highlight: Value<Color>) -> StateValue<Value<Color>> {
+    let transparent = Value::Static(Color::TRANSPARENT);
+    StateValue::interactive(
+        transparent.clone(),
+        highlight.clone(),
+        highlight,
+        transparent,
+    )
+}
+
 fn filtered_options(
     options: Vec<ComboboxOption>,
     query: &str,
@@ -444,9 +454,42 @@ fn combobox_menu_surface_style(
     let _ = resolve_combobox_style_with_sheet(style, context, style_sheet, visual, state);
     let mut container = ContainerStyle::default_for_theme(context.theme);
     container.surface.background = Some(Value::Static(context.theme.colors.surface_overlay));
-    container.surface.border_radius = Some(Value::Static(context.theme.radius.lg));
+    container.surface.border_radius = Some(Value::Static(context.theme.radius.xl));
     container.surface.border_color = Some(Value::Static(context.theme.colors.outline_muted));
     container.surface.border_width = Some(Value::Static(context.theme.border.thin));
-    container.surface.shadow = Some(Value::Static(context.theme.elevation.lg.clone()));
+    container.surface.shadow = Some(Value::Static(context.theme.elevation.md.clone()));
     container
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn option_highlight_is_limited_to_hover_and_press() {
+        let highlight = Color::rgba(32, 96, 224, 180);
+        let background = combobox_option_background(Value::Static(highlight));
+
+        for state in [
+            WidgetState::default(),
+            WidgetState {
+                disabled: true,
+                ..Default::default()
+            },
+        ] {
+            assert_eq!(background.resolve(state).resolve(), Color::TRANSPARENT);
+        }
+        for state in [
+            WidgetState {
+                hovered: true,
+                ..Default::default()
+            },
+            WidgetState {
+                pressed: true,
+                ..Default::default()
+            },
+        ] {
+            assert_eq!(background.resolve(state).resolve(), highlight);
+        }
+    }
 }

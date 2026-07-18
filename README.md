@@ -61,6 +61,7 @@ pnpm --dir docs preview
 - `TextController`：`Input` / `Textarea` 的保留式文本状态，支持程序化读写与批量变更通知
 - `Form` / `FormField<T>` / `TextFormField`：纯 ViewModel 层表单值聚合、校验、错误传播与提交/重置抽象
 - `Command<T>` / `ValueCommand<T, V>`：把按钮、输入、画布事件接回 ViewModel
+- `CommandEffect::NoUiChange`：为日志、统计、遥测等无 UI 副作用命令保留 layout / scene 缓存
 - 生命周期事件：`on_mount`、`on_unmount`、`on_update`
 - `CommandContext::window()`：在命令中请求窗口拖拽、拉伸、最小化、最大化/还原、关闭
 - `CommandContext::notifications()`：在命令中发送通知、请求权限、处理通知 action 回调
@@ -151,7 +152,7 @@ tgui = { version = "0.2.0", features = ["video"] }
 `tgui` 的公开类型按职责分类导出：
 
 - `application`：应用、窗口和运行入口
-- `mvvm`：`ViewModel`、`ViewModelContext`、`State`、`Signal`、`TextController`、`Form`、`FormField`、`TextFormField`、`Command`、`ValueCommand`、`CommandContext`、`WindowControl`
+- `mvvm`：`ViewModel`、`ViewModelContext`、`State`、`Signal`、`TextController`、`Form`、`FormField`、`TextFormField`、`Command`、`ValueCommand`、`CommandEffect`、`CommandContext`、`WindowControl`
 - `layout`：布局容器、尺寸、间距和滚动相关类型
 - `widgets` / `canvas`：基础控件、控件树和 Canvas 绘制 API
 - `theme`：主题、色板、排版、状态和设计 token
@@ -242,6 +243,7 @@ Signal<T>
 TextController
 Command<T>
 ValueCommand<T, V>
+CommandEffect
 CommandContext<T>
 WindowControl
 WindowResizeDirection
@@ -887,6 +889,19 @@ fn main() -> Result<(), tgui::core::TguiError> {
 - `ctx.notifications()`：系统通知、权限、action 回调
 - `ctx.window()`：当前窗口控制
 - `ctx.log()`：运行时日志
+
+对于只记录统计、日志、遥测或调用独立平台服务，且不会改变 widget tree、布局、绘制、命中、无障碍、Portal 或窗口绑定的命令，可以声明无 UI 副作用：
+
+```rust
+use tgui::mvvm::{Command, CommandEffect};
+
+let command = Command::new(|vm: &mut AppVm| {
+    vm.analytics_clicks += 1;
+})
+.effect(CommandEffect::NoUiChange);
+```
+
+命中该声明时，runtime 不会为一次不可见的命令重建 layout 或提交冗余帧。若命令执行期间触发了 `State` / `TextController` 等响应式 revision，或调用了 `ctx.request_rebuild()`，runtime 会自动回退到原有保守失效路径。默认仍是 `CommandEffect::Conservative`；修改普通 ViewModel 字段且这些字段会影响 UI 时，不要使用 `NoUiChange`。
 
 相关类型：
 

@@ -30,6 +30,14 @@ impl<VM: ViewModel> ApplicationHandler for BoundRuntimeHandler<VM> {
             return;
         }
 
+        if matches!(
+            &event,
+            winit::event::WindowEvent::Moved(_)
+                | winit::event::WindowEvent::ScaleFactorChanged { .. }
+        ) {
+            self.refresh_frame_clock_from_monitor(Instant::now(), true);
+        }
+
         for event in WindowEvent::from_winit(event, self.physical_cursor_position()) {
             if self.handle_bound_window_event(event_loop, event) {
                 event_loop.exit();

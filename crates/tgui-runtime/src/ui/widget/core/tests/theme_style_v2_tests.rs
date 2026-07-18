@@ -182,7 +182,7 @@ fn theme_tokens_drive_default_component_styles() {
     let modal = ModalStyle::default_for_theme(&theme);
     assert_eq!(modal.background.resolve(), theme.colors.surface_overlay);
     assert_eq!(modal.radius.resolve(), theme.radius.xl);
-    assert_eq!(modal.title_text_style.weight, theme.typography.label.weight);
+    assert_eq!(modal.title_text_style, theme.typography.title);
 }
 
 #[test]
@@ -330,4 +330,93 @@ fn local_style_resolves_after_stylesheet_state_patch_without_double_applying_mut
 
     assert_eq!(resolved.background, local_color);
     assert_eq!(state_style.padding_x, expected_padding);
+}
+
+#[test]
+fn container_runtime_visual_delta_reaches_primitives_without_freezing_live_surface_state() {
+    let light = Color::hexa(0xE11D48FF);
+    let dark = Color::hexa(0x2563EBFF);
+    let hovered = Color::hexa(0x16A34AFF);
+    let element: Element<()> = Stack::new()
+        .size(dp(100.0), dp(50.0))
+        .style_full_with_style_sheet(move |context, _, _, state| {
+            let mut style = ContainerStyle::default_for_theme(context.theme);
+            style.surface.background = Some(Value::Static(if state.hovered {
+                hovered
+            } else if context.mode == crate::ui::theme::ResolvedThemeMode::Dark {
+                dark
+            } else {
+                light
+            }));
+            style
+        })
+        .runtime_layout(|_, _, _, _, visual| {
+            visual.opacity = Value::Static(0.5);
+            visual.offset = Value::Static(Point::new(dp(7.0), dp(3.0)));
+            visual.scale = Value::Static(1.2);
+        })
+        .into();
+    let id = element.id;
+    let tree = WidgetTree::new(element);
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+
+    let render = |theme: &Theme, state: WidgetState| {
+        let mut states = WidgetStateMap::default();
+        states.set(id, state);
+        tree.compute_scene_with_units_and_widget_state_at(
+            &font_manager,
+            theme,
+            &media,
+            UnitContext::default(),
+            &mut AnimationEngine::default(),
+            false,
+            None,
+            None,
+            &states,
+            &HashMap::new(),
+            &HashMap::new(),
+            Rect::new(0.0, 0.0, 240.0, 160.0),
+            None,
+            None,
+            None,
+            None,
+            false,
+            Instant::now(),
+        )
+    };
+
+    for (theme, state, expected) in [
+        (Theme::light(), WidgetState::default(), light),
+        (
+            Theme::light(),
+            WidgetState {
+                hovered: true,
+                ..Default::default()
+            },
+            hovered,
+        ),
+        (Theme::dark(), WidgetState::default(), dark),
+    ] {
+        let scene = render(&theme, state);
+        let shape = scene
+            .scene
+            .shapes
+            .iter()
+            .find(|shape| shape.color.r == expected.r && shape.color.g == expected.g)
+            .expect("runtime container surface shape");
+        assert_eq!(shape.color.a, 128);
+        assert!(
+            (shape.rect.x.get() - -3.0).abs() <= 0.01,
+            "{:?}",
+            shape.rect
+        );
+        assert!(
+            (shape.rect.y.get() - -2.0).abs() <= 0.01,
+            "{:?}",
+            shape.rect
+        );
+        assert!((shape.rect.width.get() - 120.0).abs() <= 0.01);
+        assert!((shape.rect.height.get() - 60.0).abs() <= 0.01);
+    }
 }

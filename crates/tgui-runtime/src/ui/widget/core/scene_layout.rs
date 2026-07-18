@@ -11,6 +11,7 @@ use super::scene::ActiveTooltipState;
 use super::*;
 use crate::ui::widget::r#virtual::{resolve_virtual_window_plan, VirtualViewportHint};
 use crate::ui::widget::VirtualCacheState;
+use smallvec::SmallVec;
 
 #[derive(Clone)]
 pub(crate) struct ResolvedSceneLayout<VM> {
@@ -19,6 +20,7 @@ pub(crate) struct ResolvedSceneLayout<VM> {
     pub(super) layout_root: LayoutNode,
     pub(super) taffy: TaffyTree<MeasureContext>,
     pub(super) units: UnitContext,
+    pub(super) frame_clock: crate::animation::FrameClockSnapshot,
     pub(super) dependencies: DependencyGraph,
     pub(super) root_id: WidgetId,
     pub(super) paths: HashMap<WidgetId, Vec<usize>>,
@@ -41,12 +43,51 @@ pub(crate) struct ResolvedSceneLayout<VM> {
 }
 
 impl<VM: 'static> ResolvedSceneLayout<VM> {
+    pub(crate) fn set_frame_clock(&mut self, frame_clock: crate::animation::FrameClockSnapshot) {
+        self.frame_clock = frame_clock;
+    }
+
     pub(crate) fn dependencies(&self) -> &DependencyGraph {
         &self.dependencies
     }
 
     pub(crate) fn root_id(&self) -> WidgetId {
         self.root_id
+    }
+
+    pub(crate) fn widget_count(&self) -> usize {
+        self.paths.len()
+    }
+
+    /// Returns the highest affected roots for a canonical sorted list of raw widget IDs.
+    ///
+    /// Animation refresh already sorts and deduplicates IDs across all typed stores. Keeping the
+    /// membership representation as that slice avoids rebuilding a frame-local HashSet before
+    /// every scene patch. Equal-depth root order has no semantic significance; sorting by raw ID
+    /// merely makes the formerly HashSet-dependent order deterministic.
+    pub(crate) fn highest_roots_from_sorted_raw_ids(
+        &self,
+        sorted_widget_ids: &[u64],
+    ) -> SmallVec<[WidgetId; 16]> {
+        debug_assert!(sorted_widget_ids.windows(2).all(|pair| pair[0] < pair[1]));
+        let mut roots = SmallVec::<[WidgetId; 16]>::new();
+        for raw_id in sorted_widget_ids.iter().copied() {
+            let widget_id = WidgetId::from_raw(raw_id);
+            let mut parent = self.parent_of(widget_id);
+            let mut is_highest = true;
+            while let Some(current) = parent {
+                if sorted_widget_ids.binary_search(&current.raw()).is_ok() {
+                    is_highest = false;
+                    break;
+                }
+                parent = self.parent_of(current);
+            }
+            if is_highest {
+                roots.push(widget_id);
+            }
+        }
+        roots.sort_by_key(|widget_id| std::cmp::Reverse(self.depth_of(*widget_id)));
+        roots
     }
 
     pub(crate) fn contains_virtual(&self) -> bool {
@@ -447,6 +488,7 @@ impl<VM: 'static> ResolvedSceneLayout<VM> {
         scroll_offsets: &HashMap<WidgetId, Point>,
         virtual_states: &HashMap<WidgetId, VirtualCacheState>,
         viewport: Rect,
+        now: std::time::Instant,
         focused_input: Option<WidgetId>,
         focused_text_state: Option<&TextEditState>,
         focused_text_value: Option<&str>,
@@ -517,7 +559,8 @@ impl<VM: 'static> ResolvedSceneLayout<VM> {
                     units: self.units,
                     animations,
                     reduced_motion,
-                    now: std::time::Instant::now(),
+                    now,
+                    frame_clock: self.frame_clock,
                     focus: super::scene::FocusCollectState::default(),
                     tooltip_hover_started_at: &tooltip_hover_started_at,
                     next_tooltip_wakeup: &next_tooltip_wakeup,
@@ -527,6 +570,8 @@ impl<VM: 'static> ResolvedSceneLayout<VM> {
                     gpu_scroll_enabled: false,
                     gpu_scroll_container: None,
                     transform_stack: smallvec::SmallVec::new(),
+                    portal_accessibility_geometry: None,
+                    portal_accessibility_path: smallvec::SmallVec::new(),
                 };
                 let root_id = self.resolved_at_path(path).collect_subtree_cache(
                     self.layout_at_path(path),
@@ -565,16 +610,13 @@ impl<VM: 'static> ResolvedSceneLayout<VM> {
         })
     }
 
-    pub(crate) fn resolve_reactive_scene_property_value(
+    fn with_reactive_collect_context<R>(
         &self,
-        widget_id: WidgetId,
-        property: PropertySlot,
         font_manager: &FontManager,
         theme: &Theme,
         media: &MediaManager,
         animations: &mut AnimationEngine,
         reduced_motion: bool,
-        visual_context: VisualContextSnapshot,
         hovered_scrollbar: Option<ScrollbarHandle>,
         active_scrollbar: Option<ScrollbarHandle>,
         widget_states: &WidgetStateMap,
@@ -584,8 +626,8 @@ impl<VM: 'static> ResolvedSceneLayout<VM> {
         viewport: Rect,
         now: std::time::Instant,
         style_sheet: &crate::ui::widget::StyleSheet,
-    ) -> Option<ReactiveScenePropertyValue> {
-        let path = self.path_for(widget_id)?;
+        resolve: impl FnOnce(&mut CollectContext<'_, '_>) -> R,
+    ) -> R {
         let tooltip_hover_started_at: HashMap<WidgetId, std::time::Instant> = HashMap::new();
         let next_tooltip_wakeup: std::cell::Cell<Option<std::time::Instant>> =
             std::cell::Cell::new(None);
@@ -627,6 +669,7 @@ impl<VM: 'static> ResolvedSceneLayout<VM> {
             animations,
             reduced_motion,
             now,
+            frame_clock: self.frame_clock,
             focus: super::scene::FocusCollectState::default(),
             tooltip_hover_started_at: &tooltip_hover_started_at,
             next_tooltip_wakeup: &next_tooltip_wakeup,
@@ -636,25 +679,24 @@ impl<VM: 'static> ResolvedSceneLayout<VM> {
             gpu_scroll_enabled: false,
             gpu_scroll_container: None,
             transform_stack: smallvec::SmallVec::new(),
+            portal_accessibility_geometry: None,
+            portal_accessibility_path: smallvec::SmallVec::new(),
         };
-        self.resolved_at_path(path)
-            .resolve_reactive_scene_property_value(
-                property,
-                self.layout_at_path(path),
-                visual_context.into(),
-                &mut context,
-            )
+        resolve(&mut context)
     }
 
-    pub(crate) fn resolve_reactive_transform_offset(
+    /// Resolve one frame's retained scene-property targets through a single immutable style and
+    /// widget-state context. Values remain target-local, while theme/style inputs and the
+    /// animation timestamp are intentionally shared exactly as they are during a full collect.
+    pub(crate) fn resolve_reactive_scene_property_values(
         &self,
-        widget_id: WidgetId,
+        targets: &[(WidgetId, PropertySlot)],
+        visual_contexts: &HashMap<WidgetId, VisualContextSnapshot>,
         font_manager: &FontManager,
         theme: &Theme,
         media: &MediaManager,
         animations: &mut AnimationEngine,
         reduced_motion: bool,
-        visual_context: VisualContextSnapshot,
         hovered_scrollbar: Option<ScrollbarHandle>,
         active_scrollbar: Option<ScrollbarHandle>,
         widget_states: &WidgetStateMap,
@@ -664,65 +706,93 @@ impl<VM: 'static> ResolvedSceneLayout<VM> {
         viewport: Rect,
         now: std::time::Instant,
         style_sheet: &crate::ui::widget::StyleSheet,
-    ) -> Option<Point> {
-        let path = self.path_for(widget_id)?;
-        let tooltip_hover_started_at: HashMap<WidgetId, std::time::Instant> = HashMap::new();
-        let next_tooltip_wakeup: std::cell::Cell<Option<std::time::Instant>> =
-            std::cell::Cell::new(None);
-        let next_toast_wakeup: std::cell::Cell<Option<std::time::Instant>> =
-            std::cell::Cell::new(None);
-        let empty_menu_open_states = HashMap::<WidgetId, bool>::new();
-        let empty_menubar_active_states = HashMap::<u64, Option<usize>>::new();
-        let empty_context_menu_anchor_states = HashMap::<WidgetId, Point>::new();
-        let style_context = crate::ui::theme::StyleContext::from_theme(theme)
-            .with_reduced_motion(reduced_motion)
-            .with_text_scale(self.units.font_scale());
-        let mut context = CollectContext {
-            taffy: &self.taffy,
+    ) -> Vec<Option<ReactiveScenePropertyValue>> {
+        self.with_reactive_collect_context(
             font_manager,
             theme,
-            style_context,
-            style_sheet,
             media,
-            focused_input: None,
-            focused_text_state: None,
-            focused_text_value: None,
-            focused_text_layout: None,
-            text_layout_overrides: None,
-            active_slider_value: None,
-            caret_visible: false,
-            selected_text: None,
-            selected_text_state: None,
+            animations,
+            reduced_motion,
             hovered_scrollbar,
             active_scrollbar,
             widget_states,
             select_open_states,
-            menu_open_states: &empty_menu_open_states,
-            menubar_active_states: &empty_menubar_active_states,
-            context_menu_anchor_states: &empty_context_menu_anchor_states,
             scroll_offsets,
             virtual_states,
             viewport,
-            units: self.units,
+            now,
+            style_sheet,
+            |context| {
+                targets
+                    .iter()
+                    .map(|&(widget_id, property)| {
+                        let path = self.path_for(widget_id)?;
+                        let visual_context = visual_contexts.get(&widget_id).copied()?;
+                        self.resolved_at_path(path)
+                            .resolve_reactive_scene_property_value(
+                                property,
+                                self.layout_at_path(path),
+                                visual_context.into(),
+                                context,
+                            )
+                    })
+                    .collect()
+            },
+        )
+    }
+
+    /// Batched counterpart used by retained transform records. A missing path/context stays a
+    /// per-target `None`, allowing the runtime to abandon the entire write plan before mutation.
+    pub(crate) fn resolve_reactive_transform_offsets(
+        &self,
+        targets: &[WidgetId],
+        visual_contexts: &HashMap<WidgetId, VisualContextSnapshot>,
+        font_manager: &FontManager,
+        theme: &Theme,
+        media: &MediaManager,
+        animations: &mut AnimationEngine,
+        reduced_motion: bool,
+        hovered_scrollbar: Option<ScrollbarHandle>,
+        active_scrollbar: Option<ScrollbarHandle>,
+        widget_states: &WidgetStateMap,
+        select_open_states: &HashMap<WidgetId, bool>,
+        scroll_offsets: &HashMap<WidgetId, Point>,
+        virtual_states: &HashMap<WidgetId, VirtualCacheState>,
+        viewport: Rect,
+        now: std::time::Instant,
+        style_sheet: &crate::ui::widget::StyleSheet,
+    ) -> Vec<Option<Point>> {
+        self.with_reactive_collect_context(
+            font_manager,
+            theme,
+            media,
             animations,
             reduced_motion,
+            hovered_scrollbar,
+            active_scrollbar,
+            widget_states,
+            select_open_states,
+            scroll_offsets,
+            virtual_states,
+            viewport,
             now,
-            focus: super::scene::FocusCollectState::default(),
-            tooltip_hover_started_at: &tooltip_hover_started_at,
-            next_tooltip_wakeup: &next_tooltip_wakeup,
-            next_toast_wakeup: &next_toast_wakeup,
-            active_tooltip: None,
-            active_hover_popover: None,
-            gpu_scroll_enabled: false,
-            gpu_scroll_container: None,
-            transform_stack: smallvec::SmallVec::new(),
-        };
-        self.resolved_at_path(path)
-            .resolve_reactive_transform_offset(
-                self.layout_at_path(path),
-                visual_context.into(),
-                &mut context,
-            )
+            style_sheet,
+            |context| {
+                targets
+                    .iter()
+                    .map(|&widget_id| {
+                        let path = self.path_for(widget_id)?;
+                        let visual_context = visual_contexts.get(&widget_id).copied()?;
+                        self.resolved_at_path(path)
+                            .resolve_reactive_transform_offset(
+                                self.layout_at_path(path),
+                                visual_context.into(),
+                                context,
+                            )
+                    })
+                    .collect()
+            },
+        )
     }
 
     /// Scene splice 支撑：计算 `target` 子树在它**每一个严格祖先** chunk 里的命令区间
@@ -825,8 +895,31 @@ impl<VM: 'static> ResolvedSceneLayout<VM> {
             composed.extend(child_chunk);
         }
         composed.extend(&parts.after_children);
+        Self::apply_inactive_scope_interaction_gate(node, &mut composed);
         chunks.insert(widget_id, composed);
         Some(())
+    }
+
+    fn apply_inactive_scope_interaction_gate(
+        node: &ResolvedElement<VM>,
+        composed: &mut ComputedScene<VM>,
+    ) {
+        let Some(scope) = node.focus.scope.as_ref() else {
+            return;
+        };
+        let active = scope.is_active_untracked();
+        if !scope.suppresses_interactions(active) {
+            return;
+        }
+        let own_scope = composed
+            .focus_scopes
+            .iter()
+            .find(|candidate| candidate.scope_id == node.id)
+            .cloned();
+        composed.clear_interactive_subtree_channels();
+        if let Some(scope) = own_scope {
+            composed.register_focus_scope(scope);
+        }
     }
 
     /// Clone-based control retained only for benchmark A/B and equivalence tests.
@@ -849,6 +942,7 @@ impl<VM: 'static> ResolvedSceneLayout<VM> {
             }
         }
         composed.extend(&parts.after_children);
+        Self::apply_inactive_scope_interaction_gate(node, &mut composed);
         chunks.insert(widget_id, composed);
         Some(())
     }

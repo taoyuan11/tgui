@@ -1,4 +1,4 @@
-use super::element_path::resolved_child_elements_with_previous;
+use super::element_path::map_resolved_child_elements_with_previous;
 use super::*;
 use crate::ui::theme::StyleContext;
 use crate::ui::widget::r#virtual::{
@@ -130,7 +130,10 @@ impl<VM: 'static> Element<VM> {
         let mut layout = self.layout.clone();
         let mut visual = self.visual.clone();
         let mut background = self.background.clone();
-        let mut child_source_spans = Vec::new();
+        let mut child_source_spans = match &self.kind {
+            WidgetKind::Container { children, .. } => Vec::with_capacity(children.len()),
+            _ => Vec::new(),
+        };
         let kind = match &self.kind {
             WidgetKind::Container {
                 layout: container_layout,
@@ -148,7 +151,9 @@ impl<VM: 'static> Element<VM> {
                 );
                 apply_surface_style(&mut background, &mut visual, &resolved_style.surface);
                 let mut resolved_container_layout = container_layout.clone();
+                let mut runtime_explicit_visual = self.visual.clone();
                 if let Some(runtime_layout) = runtime_layout {
+                    let before_runtime_layout = visual.clone();
                     runtime_layout(
                         &mut layout,
                         &mut resolved_container_layout,
@@ -156,6 +161,8 @@ impl<VM: 'static> Element<VM> {
                         style_sheet,
                         &mut visual,
                     );
+                    runtime_explicit_visual
+                        .apply_runtime_layout_overrides(&before_runtime_layout, &visual);
                 }
                 resolved_container_layout.scrollbar_style = resolved_style.scrollbar;
                 let previous_children = previous
@@ -164,32 +171,30 @@ impl<VM: 'static> Element<VM> {
                         _ => None,
                     })
                     .unwrap_or(&[]);
-                let resolved_children = resolved_child_elements_with_previous(
+                let resolved_children = map_resolved_child_elements_with_previous(
                     id,
                     children,
                     previous_children,
                     Some(&mut child_source_spans),
-                )
-                .into_iter()
-                .map(|(child, previous_child)| {
-                    child.resolve_with_runtime_state_and_style_sheet(
-                        theme,
-                        previous_child,
-                        scroll_offsets,
-                        virtual_states,
-                        fallback_viewport_hint.clone(),
-                        context,
-                        style_sheet,
-                    )
-                })
-                .collect();
+                    |child, previous_child| {
+                        child.resolve_with_runtime_state_and_style_sheet(
+                            theme,
+                            previous_child,
+                            scroll_offsets,
+                            virtual_states,
+                            fallback_viewport_hint.clone(),
+                            context,
+                            style_sheet,
+                        )
+                    },
+                );
                 ResolvedWidgetKind::Container {
                     layout: resolved_container_layout,
                     children: resolved_children,
                     runtime_style: ResolvedRuntimeSurfaceStyle {
                         base: base_style,
                         local: style.as_ref().cloned(),
-                        explicit_visual: self.visual.clone(),
+                        explicit_visual: runtime_explicit_visual,
                         explicit_background: self.background.clone(),
                     },
                 }
@@ -287,8 +292,10 @@ impl<VM: 'static> Element<VM> {
                 let mut children = Vec::with_capacity(window_plan.placements.len());
                 let mut reused_child_ids = HashSet::new();
                 for placement in &window_plan.placements {
-                    let Some(mut child) = source.build(placement.item_index, *context, style_sheet)
-                    else {
+                    let Some(mut child) = track_dependency_scope(
+                        id.dependency_owner(DependencyPhase::Structure),
+                        || source.build(placement.item_index, *context, style_sheet),
+                    ) else {
                         continue;
                     };
                     child.layout.position_type = crate::ui::layout::PositionType::Absolute;
@@ -878,6 +885,18 @@ impl<VM: 'static> Element<VM> {
                 max_visible,
                 style,
             } => {
+                let prepared_cards = previous
+                    .and_then(|previous| match &previous.kind {
+                        ResolvedWidgetKind::ToastHost { prepared_cards, .. } => {
+                            Some(prepared_cards.clone())
+                        }
+                        _ => None,
+                    })
+                    .unwrap_or_else(|| {
+                        std::sync::Arc::new(std::sync::Mutex::new(
+                            super::resolved::collect::toast::ToastPreparedCardCache::default(),
+                        ))
+                    });
                 let mut resolved_style =
                     crate::ui::widget::style::ToastStyle::default_for_theme(theme);
                 context
@@ -900,6 +919,7 @@ impl<VM: 'static> Element<VM> {
                         .as_ref()
                         .map(|resolver| resolver.resolve_from(resolved_style.clone(), context))
                         .unwrap_or(resolved_style),
+                    prepared_cards,
                 }
             }
             WidgetKind::Portal {
@@ -931,6 +951,7 @@ impl<VM: 'static> Element<VM> {
 
         ResolvedElement {
             id,
+            reactive_direct_fallback_mask: std::cell::Cell::new(0),
             key: self.key.clone(),
             layout,
             focus: self.focus.clone(),

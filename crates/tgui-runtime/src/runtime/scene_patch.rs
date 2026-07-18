@@ -41,10 +41,9 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 .iter()
                 .any(|root| layout.subtree_contains_virtual(*root))
         };
-        // A normal reactive/theme layout patch can include a Virtual descendant
-        // just as readily as a scroll-driven patch. Preserve its measured index,
-        // viewport hint, stable keyed ids, and scroll offset instead of silently
-        // rebuilding the window from empty runtime state.
+        // A patched subtree can include a Virtual descendant just as readily as a scroll-driven
+        // patch. Preserve its measured index, viewport hint, stable keyed ids, and scroll offset
+        // without paying to clone runtime state for unrelated roots elsewhere in the tree.
         if contains_virtual {
             return self.patch_cached_layout_for_roots_with_runtime_state_inner(roots, now);
         }
@@ -362,6 +361,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 &self.scroll_states,
                 &self.virtual_states,
                 viewport,
+                now,
                 focused_input,
                 focused_text_state.as_ref(),
                 focused_text_value,
@@ -430,6 +430,10 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 ),
             );
         }
+        let patched_next_toast_wakeup = patches
+            .iter()
+            .filter_map(|patch| patch.cache.next_toast_wakeup)
+            .min();
 
         let mut scene_owner_ids = HashSet::new();
         let mut ancestor_ids = HashSet::new();
@@ -727,6 +731,16 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
 
         let updated_hit_region_count = updated_computed.hit_regions.len();
         let updated_scroll_region_count = updated_computed.scroll_regions.len();
+        let virtual_layout_invalidated = self.sync_virtual_state_updates(&updated_computed);
+        if virtual_layout_invalidated {
+            if let Some(cached) = self.cached_scene.as_mut() {
+                cached.computed = updated_computed;
+                cached.layout_valid = false;
+                cached.computed_valid = false;
+            }
+            self.text_input_regions.clear();
+            return false;
+        }
         self.sync_text_inputs_from_computed(&updated_computed);
         if let Some(cached) = self.cached_scene.as_mut() {
             cached.computed = updated_computed;
@@ -774,6 +788,12 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 ),
             );
         }
+        if let Some(deadline) = patched_next_toast_wakeup {
+            self.next_toast_wakeup_deadline = Some(
+                self.next_toast_wakeup_deadline
+                    .map_or(deadline, |current| current.min(deadline)),
+            );
+        }
         true
     }
 }
@@ -783,6 +803,7 @@ fn computed_allows_direct_scene_splice<VM>(computed: &ComputedScene<VM>) -> bool
     computed.scene.counts().has_no_overlay()
         && computed.overlay_hit_regions.is_empty()
         && computed.overlay_close_handlers.is_empty()
+        && computed.accessibility_fragments.is_empty()
         && computed.portal_entries.is_empty()
         && computed.external_portal_requests.is_empty()
         && portal_counts.shapes == 0
@@ -794,6 +815,7 @@ fn computed_allows_direct_scene_splice<VM>(computed: &ComputedScene<VM>) -> bool
         && portal_counts.hits == 0
         && portal_counts.close_handlers == 0
         && portal_counts.focus_scopes == 0
+        && portal_counts.accessibility_fragments == 0
         && computed.overlay_layer_graph.layers.is_empty()
         && computed.overlay_layer_graph.anchor_slots.is_empty()
         && computed.overlay_layers.iter().all(|bucket| {
@@ -808,6 +830,7 @@ fn computed_allows_direct_scene_splice<VM>(computed: &ComputedScene<VM>) -> bool
                 && bucket.hits.is_empty()
                 && bucket.close_handlers.is_empty()
                 && bucket.focus_scopes.is_empty()
+                && bucket.accessibility_fragments.is_empty()
         })
 }
 

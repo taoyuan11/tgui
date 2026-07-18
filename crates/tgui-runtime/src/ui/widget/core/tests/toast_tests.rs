@@ -2,10 +2,18 @@ pub(super) use super::*;
 
 use std::time::{Duration, Instant};
 
+use crate::animation::FrameClockSnapshot;
 use crate::foundation::binding::{Toast, ToastKind, ToastPlacement, ToastQueue};
+#[cfg(feature = "bench-support")]
+use crate::ui::layout::Value;
 use crate::ui::theme::Density;
 use crate::ui::widget::style::ToastStyle;
-use crate::ui::widget::{ComputedScene, Stack, ToastHost};
+#[cfg(feature = "bench-support")]
+use crate::ui::widget::{
+    with_prepared_toast_card_cache, with_toast_base_scene_replay, CollectedSceneCache, HitGeometry,
+    ResolvedSceneLayout,
+};
+use crate::ui::widget::{Button, ComputedScene, Popover, Stack, ToastHost};
 
 #[test]
 fn toast_density_geometry_reaches_real_overlay_primitives() {
@@ -17,67 +25,105 @@ fn toast_density_geometry_reaches_real_overlay_primitives_impl() {
     let media = test_media();
     let viewport = Rect::new(0.0, 0.0, 640.0, 480.0);
 
-    for (density, expected_width, expected_icon) in [
-        (Density::Compact, dp(280.0), dp(16.0)),
-        (Density::Spacious, dp(360.0), dp(20.0)),
-    ] {
-        let mut theme = Theme::light();
-        theme.density = density;
-        let context = test_context();
-        let queue = ToastQueue::<()>::new(&context);
-        let now = Instant::now();
-        queue.push_at(
-            Toast::new("Density-aware toast")
-                .title("Saved")
-                .kind(ToastKind::Success)
-                .duration(Duration::from_secs(10)),
-            now - Duration::from_secs(1),
-        );
-        let tree = WidgetTree::new(Stack::new().child(ToastHost::new(queue)));
-        let mut animations = AnimationEngine::default();
-        let computed = compute_scene_at(
-            &tree,
-            &font_manager,
-            &theme,
-            &media,
-            &mut animations,
-            viewport,
-            now,
-        );
+    for mut theme in [Theme::light(), Theme::dark()] {
+        for (density, expected_width, expected_icon) in [
+            (Density::Compact, dp(280.0), dp(16.0)),
+            (Density::Spacious, dp(360.0), dp(20.0)),
+        ] {
+            theme.density = density;
+            let context = test_context();
+            let queue = ToastQueue::<()>::new(&context);
+            let now = Instant::now();
+            queue.push_at(
+                Toast::new("Density-aware toast")
+                    .title("Saved")
+                    .kind(ToastKind::Success)
+                    .duration(Duration::from_secs(10)),
+                now - Duration::from_secs(1),
+            );
+            let tree = WidgetTree::new(Stack::new().child(ToastHost::new(queue)));
+            let mut animations = AnimationEngine::default();
+            let computed = compute_scene_at(
+                &tree,
+                &font_manager,
+                &theme,
+                &media,
+                &mut animations,
+                viewport,
+                now,
+            );
 
-        let card = computed
-            .scene
-            .overlay_shapes
-            .iter()
-            .find(|shape| {
-                shape.color == theme.colors.outline_muted
-                    && (shape.rect.width - expected_width).abs() <= dp(0.1)
-            })
-            .unwrap_or_else(|| {
-                panic!(
-                    "toast card should render with density width {expected_width:?}; target={:?}, shapes={:?}",
-                    theme.colors.outline_muted,
-                    computed
-                        .scene
-                        .overlay_shapes
-                        .iter()
-                        .map(|shape| (shape.rect, shape.color, shape.corner_radius))
-                        .collect::<Vec<_>>()
-                )
-            });
-        assert_eq!(card.corner_radius, theme.radius.lg.get());
+            let card = computed
+                .scene
+                .overlay_shapes
+                .iter()
+                .find(|shape| {
+                    shape.color == theme.colors.outline_muted
+                        && (shape.rect.width - expected_width).abs() <= dp(0.1)
+                })
+                .unwrap_or_else(|| {
+                    panic!(
+                        "toast card should render with density width {expected_width:?}; target={:?}, shapes={:?}",
+                        theme.colors.outline_muted,
+                        computed
+                            .scene
+                            .overlay_shapes
+                            .iter()
+                            .map(|shape| (shape.rect, shape.color, shape.corner_radius))
+                            .collect::<Vec<_>>()
+                    )
+                });
+            assert_eq!(card.corner_radius, theme.radius.lg.get());
 
-        let icon = computed
-            .scene
-            .overlay_shapes
-            .iter()
-            .find(|shape| {
-                shape.color == theme.colors.success
-                    && (shape.rect.width - expected_icon).abs() <= dp(0.1)
-                    && (shape.rect.height - expected_icon).abs() <= dp(0.1)
-            })
-            .expect("toast kind icon should render with its density size");
-        assert_eq!(icon.corner_radius, expected_icon.get() * 0.5);
+            let icon = computed
+                .scene
+                .overlay_shapes
+                .iter()
+                .find(|shape| {
+                    shape.color == theme.colors.success
+                        && (shape.rect.width - expected_icon).abs() <= dp(0.1)
+                        && (shape.rect.height - expected_icon).abs() <= dp(0.1)
+                })
+                .expect("toast kind icon should render with its density size");
+            assert_eq!(icon.corner_radius, expected_icon.get() * 0.5);
+
+            let title = computed
+                .scene
+                .overlay_texts
+                .iter()
+                .find(|text| text.content.as_ref() == "Saved")
+                .expect("toast title primitive");
+            let body = computed
+                .scene
+                .overlay_texts
+                .iter()
+                .find(|text| text.content.as_ref() == "Density-aware toast")
+                .expect("toast body primitive");
+            assert_eq!(title.font_size, theme.typography.label.size.get());
+            assert_eq!(title.font_weight, crate::theme::FontWeight::Medium);
+            assert_eq!(
+                title.line_height,
+                theme
+                    .typography
+                    .label
+                    .line_height
+                    .expect("default label line height")
+                    .get()
+            );
+            assert_eq!(body.font_size, theme.typography.body_small.size.get());
+            assert_eq!(body.font_weight, crate::theme::FontWeight::Regular);
+            assert_eq!(
+                body.line_height,
+                theme
+                    .typography
+                    .body_small
+                    .line_height
+                    .expect("default body-small line height")
+                    .get()
+            );
+            assert!(title.frame.y < body.frame.y);
+            assert!(body.frame.height.get() >= body.line_height);
+        }
     }
 }
 
@@ -235,6 +281,49 @@ fn empty_toast_host_does_not_cover_underlying_hits_impl() {
         matches!(hit, Some(HitInteraction::Widget { id, .. }) if id == clickable_id),
         "empty ToastHost should not block the clickable below"
     );
+}
+
+#[test]
+fn stable_toast_host_collection_does_not_invalidate_queue() {
+    run_with_large_stack(stable_toast_host_collection_does_not_invalidate_queue_impl);
+}
+
+fn stable_toast_host_collection_does_not_invalidate_queue_impl() {
+    let theme = Theme::default();
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let viewport = Rect::new(0.0, 0.0, 480.0, 320.0);
+    let now = Instant::now();
+
+    for has_live_entry in [false, true] {
+        let context = test_context();
+        let queue = ToastQueue::<()>::new(&context);
+        if has_live_entry {
+            queue.push_at(
+                Toast::new("live").duration(Duration::from_secs(10)),
+                now - Duration::from_secs(1),
+            );
+        }
+        let tree = WidgetTree::new(Stack::new().child(ToastHost::new(queue)));
+        let revision = context.invalidation().revision();
+        let mut animations = AnimationEngine::default();
+
+        let _ = compute_scene_at(
+            &tree,
+            &font_manager,
+            &theme,
+            &media,
+            &mut animations,
+            viewport,
+            now,
+        );
+
+        assert_eq!(
+            context.invalidation().revision(),
+            revision,
+            "stable ToastHost collection must not self-invalidate; has_live_entry={has_live_entry}"
+        );
+    }
 }
 
 #[test]
@@ -495,7 +584,7 @@ fn toast_stack_top_placements_animate_new_front_toast_while_collapsed_impl() {
             &media,
             &mut animations,
             viewport,
-            now + Duration::from_millis(100),
+            now + Duration::from_millis(60),
         );
         let settled = compute_scene_at(
             &tree,
@@ -525,6 +614,228 @@ fn toast_stack_top_placements_animate_new_front_toast_while_collapsed_impl() {
             _ => unreachable!(),
         }
     }
+}
+
+#[test]
+fn toast_mid_enter_dismiss_preserves_card_and_sibling_continuity() {
+    run_with_large_stack(toast_mid_enter_dismiss_preserves_card_and_sibling_continuity_impl);
+}
+
+fn toast_mid_enter_dismiss_preserves_card_and_sibling_continuity_impl() {
+    let theme = Theme::default();
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let mut animations = AnimationEngine::default();
+    let context = test_context();
+    let queue = ToastQueue::<()>::new(&context);
+    let created_at = Instant::now();
+    queue.push_at(
+        Toast::new("older toast").duration(Duration::from_secs(10)),
+        created_at - Duration::from_secs(1),
+    );
+    let tree = WidgetTree::new(
+        Stack::new().child(ToastHost::new(queue.clone()).placement(ToastPlacement::TopEnd)),
+    );
+    let viewport = Rect::new(0.0, 0.0, 480.0, 360.0);
+    let baseline = compute_scene_at(
+        &tree,
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        viewport,
+        created_at,
+    );
+    let baseline_older = toast_label_frame(&baseline, "older toast");
+    let baseline_hits = baseline.overlay_hit_regions.len();
+
+    let entering_id = queue.push_at(
+        Toast::new("entering toast").duration(Duration::from_secs(10)),
+        created_at,
+    );
+    let dismiss_at = created_at + Duration::from_millis(80);
+    let immediately_after_insert = compute_scene_at(
+        &tree,
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        viewport,
+        created_at,
+    );
+    assert_rect_near(
+        toast_label_frame(&immediately_after_insert, "older toast"),
+        baseline_older,
+        dp(0.01),
+        "a zero-occupancy entering toast must not jump its sibling",
+    );
+
+    let just_before_dismiss = compute_scene_at(
+        &tree,
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        viewport,
+        dismiss_at,
+    );
+    let entering_before = toast_label_frame(&just_before_dismiss, "entering toast");
+    let older_before = toast_label_frame(&just_before_dismiss, "older toast");
+    assert!(
+        older_before.y > baseline_older.y + dp(1.0),
+        "the older sibling should be part-way through insertion reflow: baseline={baseline_older:?}, mid={older_before:?}"
+    );
+    assert!(queue.dismiss_at(entering_id, dismiss_at));
+    let at_dismiss = compute_scene_at(
+        &tree,
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        viewport,
+        dismiss_at,
+    );
+    assert_rect_near(
+        toast_label_frame(&at_dismiss, "entering toast"),
+        entering_before,
+        dp(0.01),
+        "dismiss must start from the exact in-flight card transform",
+    );
+    assert_rect_near(
+        toast_label_frame(&at_dismiss, "older toast"),
+        older_before,
+        dp(0.01),
+        "dismiss must preserve the sibling flow position at the reversal instant",
+    );
+    assert_eq!(
+        at_dismiss.overlay_hit_regions.len(),
+        baseline_hits,
+        "the closing card must release every hit on the first exit frame"
+    );
+    assert!(
+        just_before_dismiss.overlay_hit_regions.len() > at_dismiss.overlay_hit_regions.len(),
+        "the entering card should have owned interactions before dismiss"
+    );
+
+    let exit_mid = compute_scene_at(
+        &tree,
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        viewport,
+        dismiss_at + Duration::from_millis(70),
+    );
+    let older_exit_mid = toast_label_frame(&exit_mid, "older toast");
+    assert!(
+        older_exit_mid.y > baseline_older.y && older_exit_mid.y < older_before.y,
+        "the sibling should flow continuously back toward its old slot: baseline={baseline_older:?}, dismiss={older_before:?}, mid={older_exit_mid:?}"
+    );
+
+    let exit_done = compute_scene_at(
+        &tree,
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        viewport,
+        dismiss_at + Duration::from_secs(1),
+    );
+    assert_rect_near(
+        toast_label_frame(&exit_done, "older toast"),
+        baseline_older,
+        dp(0.01),
+        "removing the zero-occupancy card must not leave a final reflow jump",
+    );
+    assert!(
+        !exit_done
+            .scene
+            .overlay_texts
+            .iter()
+            .any(|text| text.content.as_ref() == "entering toast"),
+        "the exiting card should be removed after its motion window"
+    );
+}
+
+#[test]
+fn toast_reduced_motion_insertion_and_dismiss_land_immediately() {
+    run_with_large_stack(toast_reduced_motion_insertion_and_dismiss_land_immediately_impl);
+}
+
+fn toast_reduced_motion_insertion_and_dismiss_land_immediately_impl() {
+    let theme = Theme::default();
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let mut animations = AnimationEngine::default();
+    let context = test_context();
+    let queue = ToastQueue::<()>::new(&context);
+    let now = Instant::now();
+    queue.push_at(
+        Toast::new("older toast").duration(Duration::from_secs(10)),
+        now - Duration::from_secs(1),
+    );
+    let tree = WidgetTree::new(
+        Stack::new().child(ToastHost::new(queue.clone()).placement(ToastPlacement::TopEnd)),
+    );
+    let viewport = Rect::new(0.0, 0.0, 480.0, 360.0);
+    let baseline = compute_scene_at_with_reduced_motion(
+        &tree,
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        viewport,
+        now,
+        true,
+    );
+    let baseline_older = toast_label_frame(&baseline, "older toast");
+    let baseline_hits = baseline.overlay_hit_regions.len();
+
+    let inserted = queue.push_at(
+        Toast::new("instant toast").duration(Duration::from_secs(10)),
+        now,
+    );
+    let inserted_scene = compute_scene_at_with_reduced_motion(
+        &tree,
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        viewport,
+        now,
+        true,
+    );
+    assert!(
+        toast_label_frame(&inserted_scene, "older toast").y > baseline_older.y + dp(20.0),
+        "reduced motion should place the sibling directly in its final inserted slot"
+    );
+
+    assert!(queue.dismiss_at(inserted, now));
+    let dismissed_scene = compute_scene_at_with_reduced_motion(
+        &tree,
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        viewport,
+        now,
+        true,
+    );
+    assert_rect_near(
+        toast_label_frame(&dismissed_scene, "older toast"),
+        baseline_older,
+        dp(0.01),
+        "reduced motion should remove the flow slot without an intermediate frame",
+    );
+    assert_eq!(dismissed_scene.overlay_hit_regions.len(), baseline_hits);
+    assert!(
+        !dismissed_scene
+            .scene
+            .overlay_texts
+            .iter()
+            .any(|text| text.content.as_ref() == "instant toast"),
+        "reduced motion dismiss should remove the card immediately"
+    );
 }
 
 #[test]
@@ -579,7 +890,6 @@ fn toast_manual_dismiss_and_clear_use_exit_animation_impl() {
         dismiss_mid_labels.iter().any(|label| label == "toast 1"),
         "manual dismiss should keep toast visible during exit animation, got {dismiss_mid_labels:?}"
     );
-
     let dismiss_done = compute_scene_at(
         &tree,
         &font_manager,
@@ -594,6 +904,17 @@ fn toast_manual_dismiss_and_clear_use_exit_animation_impl() {
         !dismiss_done_labels.iter().any(|label| label == "toast 1")
             && dismiss_done_labels.iter().any(|label| label == "toast 2"),
         "manual dismiss should remove only after exit completes, got {dismiss_done_labels:?}"
+    );
+    assert_eq!(
+        (
+            dismiss_mid.hit_regions.len(),
+            dismiss_mid.overlay_hit_regions.len()
+        ),
+        (
+            dismiss_done.hit_regions.len(),
+            dismiss_done.overlay_hit_regions.len()
+        ),
+        "an exiting toast may remain visible but must add no interactions beyond the live toast"
     );
 
     let clear_at = now + Duration::from_secs(1);
@@ -911,6 +1232,626 @@ fn toast_kind_icon_is_centered_inside_circle_impl() {
     );
 }
 
+#[test]
+fn toast_animation_deadline_uses_window_60_120_and_144_hz_clock() {
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let viewport = Rect::new(0.0, 0.0, 480.0, 320.0);
+    let created_at = Instant::now();
+    let sample_at = created_at + Duration::from_millis(70);
+    let mut reference_frame = None;
+
+    for (refresh_rate, expected_interval) in [
+        (60_000, Duration::from_nanos(16_666_667)),
+        (120_000, Duration::from_nanos(8_333_333)),
+        (144_000, Duration::from_nanos(6_944_444)),
+    ] {
+        let theme = Theme::light();
+        let context = test_context();
+        let queue = ToastQueue::<()>::new(&context);
+        queue.push_at(
+            Toast::new("Refresh-aware toast").duration(Duration::from_secs(10)),
+            created_at,
+        );
+        let tree = WidgetTree::new(
+            Popover::new(Button::new("Toast anchor").size(dp(120.0), dp(36.0)))
+                .content(Stack::new().child(ToastHost::new(queue)))
+                .open(true),
+        );
+        let mut animations = AnimationEngine::default();
+        let mut layout = tree.build_scene_layout_at(
+            &font_manager,
+            &theme,
+            &media,
+            &mut animations,
+            UnitContext::default(),
+            &HashMap::new(),
+            &HashMap::new(),
+            viewport,
+            sample_at,
+        );
+        layout.set_frame_clock(FrameClockSnapshot::for_refresh_rate(
+            sample_at,
+            Some(refresh_rate),
+        ));
+        let style_sheet = crate::ui::widget::StyleSheet::default();
+        let collected = tree.collect_scene_cache_from_layout_with_focus_value_at(
+            &font_manager,
+            &layout,
+            &theme,
+            &media,
+            &mut animations,
+            false,
+            None,
+            None,
+            &WidgetStateMap::default(),
+            &HashMap::new(),
+            &HashMap::new(),
+            viewport,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            false,
+            sample_at,
+            &HashMap::new(),
+            None,
+            None,
+            &style_sheet,
+        );
+
+        assert_eq!(
+            collected.next_toast_wakeup,
+            Some(sample_at + expected_interval),
+            "toast cadence should follow {refresh_rate}mHz"
+        );
+        let frame = toast_label_frame(&collected.computed, "Refresh-aware toast");
+        if let Some(reference) = reference_frame {
+            assert_rect_near(
+                frame,
+                reference,
+                dp(0.01),
+                "refresh cadence must not change animation geometry at one absolute instant",
+            );
+        } else {
+            reference_frame = Some(frame);
+        }
+    }
+}
+
+#[test]
+fn toast_reduced_or_zero_motion_has_no_animation_frame_deadline() {
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let viewport = Rect::new(0.0, 0.0, 480.0, 320.0);
+
+    for (reduced_motion, zero_motion) in [(true, false), (false, true)] {
+        let mut theme = Theme::light();
+        if zero_motion {
+            theme.motion.fast_ms = 0;
+            theme.motion.normal_ms = 0;
+            theme.motion.slow_ms = 0;
+        }
+        let context = test_context();
+        let queue = ToastQueue::<()>::new(&context);
+        let now = Instant::now();
+        queue.push_at(
+            Toast::new("Motion-safe toast").duration(Duration::from_secs(10)),
+            now,
+        );
+        let tree = WidgetTree::new(Stack::new().child(ToastHost::new(queue)));
+        let mut animations = AnimationEngine::default();
+        let layout = tree.build_scene_layout_at(
+            &font_manager,
+            &theme,
+            &media,
+            &mut animations,
+            UnitContext::default(),
+            &HashMap::new(),
+            &HashMap::new(),
+            viewport,
+            now,
+        );
+        let style_sheet = crate::ui::widget::StyleSheet::default();
+        let collected = tree.collect_scene_cache_from_layout_with_focus_value_at(
+            &font_manager,
+            &layout,
+            &theme,
+            &media,
+            &mut animations,
+            reduced_motion,
+            None,
+            None,
+            &WidgetStateMap::default(),
+            &HashMap::new(),
+            &HashMap::new(),
+            viewport,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            false,
+            now,
+            &HashMap::new(),
+            None,
+            None,
+            &style_sheet,
+        );
+
+        assert!(
+            !animations.has_active_animations(),
+            "reduced/zero motion must not retain an animation slot"
+        );
+        assert!(
+            collected
+                .next_toast_wakeup
+                .is_some_and(|deadline| deadline >= now + Duration::from_secs(9)),
+            "only the toast expiry deadline should remain; got {:?}",
+            collected.next_toast_wakeup
+        );
+    }
+}
+
+#[cfg(feature = "bench-support")]
+#[test]
+fn toast_base_scene_replay_matches_full_collect_for_motion_and_closing_hits() {
+    run_with_large_stack(|| {
+        for placement in [ToastPlacement::TopEnd, ToastPlacement::BottomEnd] {
+            let theme = Theme::default();
+            let font_manager = FontManager::new(&FontCatalog::default());
+            let media = test_media();
+            let context = test_context();
+            let queue = ToastQueue::<()>::new(&context);
+            let created_at = Instant::now();
+            queue.push_at(
+                Toast::new("first moving toast")
+                    .title("First")
+                    .persistent(true),
+                created_at,
+            );
+            queue.push_at(
+                Toast::new("second moving toast")
+                    .title("Second")
+                    .persistent(true),
+                created_at,
+            );
+            let tree =
+                WidgetTree::new(Stack::new().child(ToastHost::new(queue).placement(placement)));
+            let sample_at = created_at + Duration::from_millis(93);
+            assert_toast_base_scene_replay_matches(
+                &tree,
+                &font_manager,
+                &theme,
+                &media,
+                Rect::new(0.0, 0.0, 640.0, 480.0),
+                sample_at,
+                true,
+            );
+        }
+
+        let theme = Theme::default();
+        let font_manager = FontManager::new(&FontCatalog::default());
+        let media = test_media();
+        let context = test_context();
+        let queue = ToastQueue::<()>::new(&context);
+        let now = Instant::now();
+        let closing = queue.push_at(
+            Toast::new("closing toast")
+                .title("Closing")
+                .persistent(true),
+            now - Duration::from_secs(1),
+        );
+        queue.push_at(
+            Toast::new("live toast").title("Live").persistent(true),
+            now - Duration::from_secs(1),
+        );
+        assert!(queue.dismiss_at(closing, now));
+        let tree = WidgetTree::new(
+            Stack::new().child(ToastHost::new(queue).placement(ToastPlacement::BottomEnd)),
+        );
+        assert_toast_base_scene_replay_matches(
+            &tree,
+            &font_manager,
+            &theme,
+            &media,
+            Rect::new(0.0, 0.0, 640.0, 480.0),
+            now + Duration::from_millis(71),
+            true,
+        );
+
+        let theme = Theme::default();
+        let font_manager = FontManager::new(&FontCatalog::default());
+        let media = test_media();
+        let context = test_context();
+        let queue = ToastQueue::<()>::new(&context);
+        let now = Instant::now();
+        queue.push_at(
+            Toast::new("unsupported nested shadow")
+                .title("Fallback")
+                .persistent(true),
+            now - Duration::from_secs(1),
+        );
+        let tree = WidgetTree::new(Stack::new().child(ToastHost::new(queue).style_full(
+            |context| {
+                let mut style = ToastStyle::default_for_theme(context.theme);
+                style.close_button.surface.shadow =
+                    Some(Value::Static(context.theme.elevation.sm.clone()));
+                style
+            },
+        )));
+        assert_toast_base_scene_replay_matches(
+            &tree,
+            &font_manager,
+            &theme,
+            &media,
+            Rect::new(0.0, 0.0, 640.0, 480.0),
+            now,
+            false,
+        );
+    });
+}
+
+#[cfg(feature = "bench-support")]
+fn assert_toast_base_scene_replay_matches(
+    tree: &WidgetTree<()>,
+    font_manager: &FontManager,
+    theme: &Theme,
+    media: &MediaManager,
+    viewport: Rect,
+    now: Instant,
+    expect_replay: bool,
+) {
+    let mut animations = AnimationEngine::default();
+    let layout = tree.build_scene_layout_at(
+        font_manager,
+        theme,
+        media,
+        &mut animations,
+        UnitContext::default(),
+        &HashMap::new(),
+        &HashMap::new(),
+        viewport,
+        now,
+    );
+    let _ = with_prepared_toast_card_cache(|| {
+        collect_toast_layout_scene(
+            tree,
+            &layout,
+            font_manager,
+            theme,
+            media,
+            &mut animations,
+            viewport,
+            now,
+        )
+    });
+    crate::ui::widget::toast_scene_bench_profile::reset();
+    let replay = with_prepared_toast_card_cache(|| {
+        with_toast_base_scene_replay(|| {
+            collect_toast_layout_scene(
+                tree,
+                &layout,
+                font_manager,
+                theme,
+                media,
+                &mut animations,
+                viewport,
+                now,
+            )
+        })
+    });
+    let replay_profile = crate::ui::widget::toast_scene_bench_profile::snapshot();
+    if expect_replay {
+        assert!(replay_profile.base_scene_replay_hits > 0);
+        assert_eq!(replay_profile.base_scene_replay_fallbacks, 0);
+    } else {
+        assert_eq!(replay_profile.base_scene_replay_hits, 0);
+        assert!(replay_profile.base_scene_replay_fallbacks > 0);
+    }
+    let control = with_prepared_toast_card_cache(|| {
+        collect_toast_layout_scene(
+            tree,
+            &layout,
+            font_manager,
+            theme,
+            media,
+            &mut animations,
+            viewport,
+            now,
+        )
+    });
+    assert_eq!(replay.next_toast_wakeup, control.next_toast_wakeup);
+    assert_toast_computed_scene_equivalent(&replay.computed, &control.computed);
+}
+
+#[cfg(feature = "bench-support")]
+fn collect_toast_layout_scene(
+    tree: &WidgetTree<()>,
+    layout: &ResolvedSceneLayout<()>,
+    font_manager: &FontManager,
+    theme: &Theme,
+    media: &MediaManager,
+    animations: &mut AnimationEngine,
+    viewport: Rect,
+    now: Instant,
+) -> CollectedSceneCache<()> {
+    let style_sheet = crate::ui::widget::StyleSheet::default();
+    tree.collect_scene_cache_from_layout_with_focus_value_at(
+        font_manager,
+        layout,
+        theme,
+        media,
+        animations,
+        false,
+        None,
+        None,
+        &WidgetStateMap::default(),
+        &HashMap::new(),
+        &HashMap::new(),
+        viewport,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        false,
+        now,
+        &HashMap::new(),
+        None,
+        None,
+        &style_sheet,
+    )
+}
+
+#[cfg(feature = "bench-support")]
+fn assert_toast_computed_scene_equivalent(
+    actual: &ComputedScene<()>,
+    expected: &ComputedScene<()>,
+) {
+    assert_eq!(actual.scene.backdrop_blurs, expected.scene.backdrop_blurs);
+    assert_eq!(actual.scene.brushes, expected.scene.brushes);
+    assert_eq!(
+        actual.scene.canvas_composites.len(),
+        expected.scene.canvas_composites.len()
+    );
+    assert_eq!(actual.scene.meshes.len(), expected.scene.meshes.len());
+    assert_eq!(
+        actual.scene.overlay_shapes.len(),
+        expected.scene.overlay_shapes.len()
+    );
+    for (actual, expected) in actual
+        .scene
+        .overlay_shapes
+        .iter()
+        .zip(expected.scene.overlay_shapes.iter())
+    {
+        assert_eq!(actual.rect, expected.rect);
+        assert_eq!(actual.color, expected.color);
+        assert_eq!(actual.corner_radius, expected.corner_radius);
+        assert_eq!(actual.stroke_width, expected.stroke_width);
+        assert_eq!(actual.clip_rect, expected.clip_rect);
+        assert_eq!(actual.clip_mask, expected.clip_mask);
+    }
+    assert_eq!(
+        actual.scene.overlay_textures.len(),
+        expected.scene.overlay_textures.len()
+    );
+    for (actual, expected) in actual
+        .scene
+        .overlay_textures
+        .iter()
+        .zip(expected.scene.overlay_textures.iter())
+    {
+        assert_eq!(actual.texture.id(), expected.texture.id());
+        assert_eq!(actual.frame, expected.frame);
+        assert_eq!(actual.quad, expected.quad);
+        assert_eq!(actual.uv_rect, expected.uv_rect);
+        assert_eq!(actual.corner_radius, expected.corner_radius);
+        assert_eq!(actual.opacity, expected.opacity);
+        assert_eq!(actual.clip_rect, expected.clip_rect);
+        assert_eq!(actual.clip_mask, expected.clip_mask);
+        assert_eq!(actual.mask_tint, expected.mask_tint);
+    }
+    assert_eq!(actual.scene.overlay_texts, expected.scene.overlay_texts);
+    assert_eq!(
+        actual.scene.overlay_text_decorations,
+        expected.scene.overlay_text_decorations,
+    );
+    assert_eq!(
+        actual.scene.overlay_commands.len(),
+        expected.scene.overlay_commands.len()
+    );
+    let command_kind = |command: &crate::ui::widget::common::RenderCommand| match command {
+        crate::ui::widget::common::RenderCommand::Shape(_) => 0_u8,
+        crate::ui::widget::common::RenderCommand::Texture(_) => 1,
+        crate::ui::widget::common::RenderCommand::Text(_) => 2,
+        crate::ui::widget::common::RenderCommand::TextDecoration(_) => 3,
+        crate::ui::widget::common::RenderCommand::BackdropBlur(_) => 4,
+        crate::ui::widget::common::RenderCommand::Brush(_) => 5,
+        crate::ui::widget::common::RenderCommand::CanvasComposite(_) => 6,
+        crate::ui::widget::common::RenderCommand::Mesh(_) => 7,
+        #[cfg(feature = "video")]
+        crate::ui::widget::common::RenderCommand::VideoTexture(_) => 8,
+    };
+    assert_eq!(
+        actual
+            .scene
+            .overlay_commands
+            .iter()
+            .map(command_kind)
+            .collect::<Vec<_>>(),
+        expected
+            .scene
+            .overlay_commands
+            .iter()
+            .map(command_kind)
+            .collect::<Vec<_>>(),
+    );
+    assert_eq!(
+        actual.overlay_hit_regions.len(),
+        expected.overlay_hit_regions.len()
+    );
+    for (actual, expected) in actual
+        .overlay_hit_regions
+        .iter()
+        .zip(expected.overlay_hit_regions.iter())
+    {
+        assert_eq!(actual.rect, expected.rect);
+        assert_eq!(actual.clip_rect, expected.clip_rect);
+        assert!(matches!(actual.geometry, HitGeometry::Rect));
+        assert!(matches!(expected.geometry, HitGeometry::Rect));
+        assert_eq!(actual.transform_chain, expected.transform_chain);
+        assert_eq!(actual.scope_path, expected.scope_path);
+        assert_eq!(
+            actual.interaction.target_id(),
+            expected.interaction.target_id()
+        );
+        assert_eq!(actual.focus.is_some(), expected.focus.is_some());
+        assert_eq!(actual.gpu_scroll_container, expected.gpu_scroll_container);
+    }
+    assert_eq!(actual.scroll_regions.len(), expected.scroll_regions.len());
+    for (actual, expected) in actual
+        .scroll_regions
+        .iter()
+        .zip(expected.scroll_regions.iter())
+    {
+        assert_eq!(actual.id, expected.id);
+        assert_eq!(actual.content_viewport, expected.content_viewport);
+        assert_eq!(actual.visible_frame, expected.visible_frame);
+        assert_eq!(actual.content_bounds, expected.content_bounds);
+        assert_eq!(
+            actual.gpu_base_scroll_offset,
+            expected.gpu_base_scroll_offset
+        );
+        assert_eq!(actual.scroll_offset, expected.scroll_offset);
+        assert_eq!(actual.overflow_x, expected.overflow_x);
+        assert_eq!(actual.overflow_y, expected.overflow_y);
+        assert_eq!(actual.horizontal_track, expected.horizontal_track);
+        assert_eq!(actual.horizontal_thumb, expected.horizontal_thumb);
+        assert_eq!(actual.vertical_track, expected.vertical_track);
+        assert_eq!(actual.vertical_thumb, expected.vertical_thumb);
+    }
+    assert_eq!(actual.focus_scopes, expected.focus_scopes);
+    assert_toast_accessibility_fragments_equivalent(
+        &actual.accessibility_fragments,
+        &expected.accessibility_fragments,
+    );
+    assert_eq!(actual.overlay_layers.len(), expected.overlay_layers.len());
+    for (actual, expected) in actual.overlay_layers.iter().zip(&expected.overlay_layers) {
+        assert_toast_accessibility_fragments_equivalent(
+            &actual.accessibility_fragments,
+            &expected.accessibility_fragments,
+        );
+    }
+    assert_eq!(actual.overlay_layer_graph, expected.overlay_layer_graph);
+    assert_eq!(actual.portal_entries.len(), expected.portal_entries.len());
+    assert_eq!(
+        actual.external_portal_requests.len(),
+        expected.external_portal_requests.len()
+    );
+    assert_eq!(
+        (
+            actual.portal_overlay_counts.shapes,
+            actual.portal_overlay_counts.textures,
+            actual.portal_overlay_counts.meshes,
+            actual.portal_overlay_counts.texts,
+            actual.portal_overlay_counts.text_decorations,
+            actual.portal_overlay_counts.commands,
+            actual.portal_overlay_counts.hits,
+            actual.portal_overlay_counts.close_handlers,
+            actual.portal_overlay_counts.focus_scopes,
+            actual.portal_overlay_counts.accessibility_fragments,
+        ),
+        (
+            expected.portal_overlay_counts.shapes,
+            expected.portal_overlay_counts.textures,
+            expected.portal_overlay_counts.meshes,
+            expected.portal_overlay_counts.texts,
+            expected.portal_overlay_counts.text_decorations,
+            expected.portal_overlay_counts.commands,
+            expected.portal_overlay_counts.hits,
+            expected.portal_overlay_counts.close_handlers,
+            expected.portal_overlay_counts.focus_scopes,
+            expected.portal_overlay_counts.accessibility_fragments,
+        )
+    );
+    assert_eq!(actual.overlay_anchors, expected.overlay_anchors);
+    assert_eq!(actual.ime_cursor_area, expected.ime_cursor_area);
+    assert_eq!(
+        actual.transform_records.len(),
+        expected.transform_records.len()
+    );
+    assert_eq!(
+        actual.virtual_state_updates.len(),
+        expected.virtual_state_updates.len()
+    );
+    assert_eq!(
+        actual.dependencies.dependency_count(),
+        expected.dependencies.dependency_count(),
+    );
+    assert_eq!(
+        actual.dependencies.all_owners(),
+        expected.dependencies.all_owners()
+    );
+}
+
+#[cfg(feature = "bench-support")]
+fn assert_toast_accessibility_fragments_equivalent(
+    actual: &[crate::ui::widget::AccessibilityFragment<()>],
+    expected: &[crate::ui::widget::AccessibilityFragment<()>],
+) {
+    assert_eq!(actual.len(), expected.len());
+    for (actual, expected) in actual.iter().zip(expected) {
+        assert_eq!(
+            actual.source_window_instance_id,
+            expected.source_window_instance_id
+        );
+        assert_eq!(
+            actual.source_publication_generation,
+            expected.source_publication_generation
+        );
+        assert_eq!(
+            actual
+                .source_open
+                .as_ref()
+                .map(crate::ui::layout::Value::resolve_untracked),
+            expected
+                .source_open
+                .as_ref()
+                .map(crate::ui::layout::Value::resolve_untracked)
+        );
+        assert_eq!(actual.owner_path, expected.owner_path);
+        assert_eq!(actual.scope_path, expected.scope_path);
+        assert_eq!(actual.clip_rect, expected.clip_rect);
+        assert_eq!(
+            actual.has_duplicate_widget_ids,
+            expected.has_duplicate_widget_ids
+        );
+        assert_eq!(actual.resolved_root.id, expected.resolved_root.id);
+        assert_eq!(actual.nodes.len(), expected.nodes.len());
+        for (actual, expected) in actual.nodes.iter().zip(&expected.nodes) {
+            assert_eq!(actual.widget_id, expected.widget_id);
+            assert_eq!(actual.resolved_path, expected.resolved_path);
+            assert_eq!(actual.bounds, expected.bounds);
+            assert_eq!(actual.clip_rect, expected.clip_rect);
+            assert_eq!(actual.children, expected.children);
+            assert_eq!(actual.hits.len(), expected.hits.len());
+            assert_eq!(actual.scroll_regions.len(), expected.scroll_regions.len());
+        }
+    }
+}
+
 fn compute_scene_at(
     tree: &WidgetTree<()>,
     font_manager: &FontManager,
@@ -920,13 +1861,36 @@ fn compute_scene_at(
     viewport: Rect,
     now: Instant,
 ) -> ComputedScene<()> {
+    compute_scene_at_with_reduced_motion(
+        tree,
+        font_manager,
+        theme,
+        media,
+        animations,
+        viewport,
+        now,
+        false,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn compute_scene_at_with_reduced_motion(
+    tree: &WidgetTree<()>,
+    font_manager: &FontManager,
+    theme: &Theme,
+    media: &MediaManager,
+    animations: &mut AnimationEngine,
+    viewport: Rect,
+    now: Instant,
+    reduced_motion: bool,
+) -> ComputedScene<()> {
     tree.compute_scene_with_units_and_widget_state_at(
         font_manager,
         theme,
         media,
         UnitContext::default(),
         animations,
-        false,
+        reduced_motion,
         None,
         None,
         &WidgetStateMap::default(),
@@ -962,6 +1926,16 @@ fn toast_label_frame(computed: &ComputedScene<()>, label: &str) -> Rect {
         .iter()
         .find_map(|text| (text.content.as_ref() == label).then_some(text.frame))
         .unwrap_or_else(|| panic!("toast label {label:?} should render"))
+}
+
+fn assert_rect_near(actual: Rect, expected: Rect, tolerance: Dp, message: &str) {
+    assert!(
+        (actual.x - expected.x).abs() <= tolerance
+            && (actual.y - expected.y).abs() <= tolerance
+            && (actual.width - expected.width).abs() <= tolerance
+            && (actual.height - expected.height).abs() <= tolerance,
+        "{message}: actual={actual:?}, expected={expected:?}, tolerance={tolerance:?}"
+    );
 }
 
 fn toast_stack_card_layers(computed: &ComputedScene<()>) -> (Rect, Vec<Rect>) {

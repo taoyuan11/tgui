@@ -6,6 +6,12 @@ pub struct FocusScopeOptions {
     pub(crate) trap: bool,
     pub(crate) auto_focus_first: bool,
     pub(crate) active: Value<bool>,
+    /// Internal component gate used by retained visual transitions. An inactive
+    /// scope normally only removes descendants from keyboard focus order. Tabs,
+    /// carousels, drawers, and similar view stacks additionally need the outgoing
+    /// visual subtree to stop receiving *all* input as soon as logical selection
+    /// changes, while its opacity/offset are still animating.
+    pub(crate) suppress_interactions_when_inactive: bool,
 }
 
 impl FocusScopeOptions {
@@ -14,6 +20,7 @@ impl FocusScopeOptions {
             trap: false,
             auto_focus_first: false,
             active: Value::Static(true),
+            suppress_interactions_when_inactive: false,
         }
     }
 
@@ -32,6 +39,11 @@ impl FocusScopeOptions {
         self
     }
 
+    pub(crate) fn suppress_interactions_when_inactive(mut self) -> Self {
+        self.suppress_interactions_when_inactive = true;
+        self
+    }
+
     pub fn is_trap(&self) -> bool {
         self.trap
     }
@@ -42,6 +54,14 @@ impl FocusScopeOptions {
 
     pub(crate) fn is_active(&self) -> bool {
         self.active.resolve()
+    }
+
+    pub(crate) fn is_active_untracked(&self) -> bool {
+        self.active.resolve_untracked()
+    }
+
+    pub(crate) fn suppresses_interactions(&self, active: bool) -> bool {
+        self.suppress_interactions_when_inactive && !active
     }
 }
 
@@ -368,6 +388,9 @@ pub(crate) enum HitInteraction<VM> {
     },
     SelectOption {
         id: WidgetId,
+        /// Owner used only for hover/pressed visual state. This differs from `id` for nested menu
+        /// levels so equal local option indices cannot alias across the submenu path.
+        state_id: WidgetId,
         option_index: usize,
         interactions: InteractionHandlers<VM>,
         on_select: Option<Command<VM>>,
@@ -611,12 +634,14 @@ impl<VM> Clone for HitInteraction<VM> {
             },
             Self::SelectOption {
                 id,
+                state_id,
                 option_index,
                 interactions,
                 on_select,
                 on_open_change,
             } => Self::SelectOption {
                 id: *id,
+                state_id: *state_id,
                 option_index: *option_index,
                 interactions: interactions.clone(),
                 on_select: on_select.clone(),
@@ -646,6 +671,14 @@ impl<VM> Clone for HitInteraction<VM> {
 }
 
 impl<VM> HitInteraction<VM> {
+    pub(crate) fn widget_id(&self) -> WidgetId {
+        match self.target_id() {
+            HitTargetId::Widget(id) => id,
+            HitTargetId::SelectOption { widget_id, .. }
+            | HitTargetId::CanvasItem { widget_id, .. } => widget_id,
+        }
+    }
+
     pub(crate) fn translated(mut self, delta: Point) -> Self {
         if delta == Point::ZERO {
             return self;

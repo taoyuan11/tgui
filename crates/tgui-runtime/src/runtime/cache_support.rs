@@ -62,11 +62,46 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         caret_visible: bool,
         active_scrollbar: Option<ScrollbarHandle>,
     ) -> bool {
+        cached.hover_epoch == self.hover_epoch
+            && self.scene_cache_fields_match_ignoring_scroll_and_hover(
+                cached,
+                viewport,
+                units,
+                caret_visible,
+                active_scrollbar,
+            )
+    }
+
+    pub(in crate::runtime) fn scene_cache_fields_match_ignoring_scroll_and_hover(
+        &self,
+        cached: &CachedScene<VM>,
+        viewport: Rect,
+        units: UnitContext,
+        caret_visible: bool,
+        active_scrollbar: Option<ScrollbarHandle>,
+    ) -> bool {
+        cached.pressed_widget == self.pressed_widget
+            && self.scene_cache_fields_match_ignoring_scroll_hover_and_pressed(
+                cached,
+                viewport,
+                units,
+                caret_visible,
+                active_scrollbar,
+            )
+    }
+
+    pub(in crate::runtime) fn scene_cache_fields_match_ignoring_scroll_hover_and_pressed(
+        &self,
+        cached: &CachedScene<VM>,
+        viewport: Rect,
+        units: UnitContext,
+        caret_visible: bool,
+        active_scrollbar: Option<ScrollbarHandle>,
+    ) -> bool {
         cached.viewport == viewport
             && cached.units == units
             && cached.focused_widget == self.focused_widget_id()
             && cached.focus_visible == self.focus_visible
-            && cached.pressed_widget == self.pressed_widget
             && cached.selected_text == self.selected_text
             && cached.caret_visible == caret_visible
             && cached.theme_epoch == self.theme_store.version()
@@ -76,7 +111,6 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             && cached.text_scale_bits == units.font_scale().to_bits()
             && cached.animation_epoch == self.animation_epoch
             && cached.layout_animation_epoch == self.layout_animation_epoch
-            && cached.hover_epoch == self.hover_epoch
             && cached.text_input_epoch == self.text_input_epoch
             && cached.external_portal_revision == self.external_portal_revision
             && cached.hovered_scrollbar == self.hovered_scrollbar

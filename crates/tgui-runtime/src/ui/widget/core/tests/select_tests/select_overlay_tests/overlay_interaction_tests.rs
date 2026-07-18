@@ -308,7 +308,7 @@ fn select_dropdown_pressed_highlight_preserves_menu_corner_clip() {
     let select_style = default_select_style(&theme, crate::ui::theme::WidgetState::default());
     let option_height = UnitContext::default().resolve_dp(select_style.option_height);
     assert_eq!(select_style.radius, theme.radius.lg);
-    assert_eq!(select_style.menu_radius, theme.radius.lg);
+    assert_eq!(select_style.menu_radius, theme.radius.xl);
     let menu_radius = select_style.menu_radius.get();
     let highlight = rendered
         .primitives
@@ -423,8 +423,32 @@ fn select_dropdown_animates_open_and_close() {
         .iter()
         .find(|shape| shape.rect.height > dp(0.0))
         .expect("opening select menu should render");
-    assert!(opening_menu.rect.height < dp(80.0));
+    assert!(
+        opening_menu
+            .clip_rect
+            .expect("opening menu should be clipped to its animated height")
+            .height
+            < dp(80.0)
+    );
     assert!(opening_menu.color.a > 0);
+    let opening_outline = opening
+        .scene
+        .overlay_shapes
+        .iter()
+        .find(|shape| {
+            shape.color == theme.colors.outline_muted
+                && shape.stroke_width == theme.border.thin.get()
+        })
+        .expect("opening Select menu should retain its themed outline");
+    assert_eq!(opening_outline.corner_radius, theme.radius.xl.get());
+    assert!(
+        opening.scene.overlay_texts.iter().any(|text| {
+            text.clip_rect.is_some()
+                && text.color.a > 0
+                && (text.content.as_ref() == "Email" || text.content.as_ref() == "SMS")
+        }),
+        "option content should reveal continuously instead of popping in on the final frame"
+    );
     assert!(opening.overlay_hit_regions.is_empty());
 
     animations.refresh(start + Duration::from_millis(200));
@@ -502,7 +526,10 @@ fn select_dropdown_animates_open_and_close() {
         .find(|shape| shape.rect.height > dp(0.0))
         .expect("closing select menu should still render during animation");
     assert!(
-        closing_menu.rect.height
+        closing_menu
+            .clip_rect
+            .expect("closing menu should be clipped to its animated height")
+            .height
             < open
                 .scene
                 .overlay_shapes

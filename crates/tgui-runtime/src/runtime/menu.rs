@@ -18,7 +18,8 @@ use crate::foundation::view_model::ValueCommand;
 use crate::platform::keyboard::{Key, KeyCode, ModifiersState};
 use crate::runtime::overlay::OverlayLayer;
 use crate::ui::widget::{
-    HitInteraction, KeyChord, MenuItemKind, MenuItemState, Rect, WidgetId, WidgetStateMap,
+    menu_item_state_owner, HitInteraction, KeyChord, MenuItemKind, MenuItemState, Rect, WidgetId,
+    WidgetStateMap,
 };
 use smallvec::SmallVec;
 
@@ -587,10 +588,13 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 continue;
             }
             // 路径每一层都标 hovered=true，让 submenu 自动展开。最末层是真正的 cursor。
+            let mut parent_path = SmallVec::<[usize; 4]>::new();
             for cursor_opt_index in path {
-                let mut state = states.get_select_option(*menu_id, *cursor_opt_index);
+                let state_owner = menu_item_state_owner(*menu_id, &parent_path);
+                let mut state = states.get_select_option(state_owner, *cursor_opt_index);
                 state.hovered = true;
-                states.set_select_option(*menu_id, *cursor_opt_index, state);
+                states.set_select_option(state_owner, *cursor_opt_index, state);
+                parent_path.push(*cursor_opt_index);
             }
         }
     }

@@ -1,6 +1,6 @@
 use super::*;
 use crate::foundation::view_model::ValueCommand;
-use crate::theme::{Density, WidgetState};
+use crate::theme::{ComponentThemes, Density, WidgetState};
 use crate::ui::layout::Value;
 use crate::ui::widget::{
     Calendar, ColorPicker, DatePicker, NumberInput, PopoverStyle, TimePicker, Upload, UploadFile,
@@ -559,6 +559,105 @@ fn number_input_combines_text_field_and_step_buttons() {
 
     assert!(button_hits >= 2);
     assert_eq!(text_inputs, 1);
+}
+
+#[test]
+fn advanced_inputs_apply_base_component_theme_overrides_in_the_real_scene() {
+    let input_color = Color::hexa(0x123456FF);
+    let button_color = Color::hexa(0xA12B3CFF);
+    let select_menu_color = Color::hexa(0x1B4332FF);
+    let mut theme = Theme::light();
+    theme.components = ComponentThemes::default()
+        .input(move |style, _| {
+            style.background = StateValue::new(Value::Static(input_color));
+        })
+        .button(move |style, _| {
+            style.background = StateValue::new(Value::Static(button_color));
+        })
+        .select(move |style, _| {
+            style.menu_background = Value::Static(select_menu_color);
+        });
+
+    let cases: Vec<(&str, WidgetTree<()>, bool)> = vec![
+        (
+            "number",
+            WidgetTree::new(NumberInput::new("12", Some(12.0))),
+            false,
+        ),
+        (
+            "date",
+            WidgetTree::new(
+                DatePicker::new(
+                    "2026-06-06",
+                    Some(NaiveDate::from_ymd_opt(2026, 6, 6).unwrap()),
+                    NaiveDate::from_ymd_opt(2026, 6, 1).unwrap(),
+                )
+                .open(true),
+            ),
+            true,
+        ),
+        (
+            "time",
+            WidgetTree::new(TimePicker::new("09:30", NaiveTime::from_hms_opt(9, 30, 0)).open(true)),
+            true,
+        ),
+        (
+            "color",
+            WidgetTree::new(ColorPicker::new(Color::hexa(0x3366CCFF)).open(true)),
+            true,
+        ),
+        (
+            "upload",
+            WidgetTree::new(
+                Upload::new(Vec::new()).on_select(ValueCommand::new(|_: &mut (), _| {})),
+            ),
+            false,
+        ),
+    ];
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+
+    for (name, tree, has_picker_panel) in cases {
+        let mut animations = AnimationEngine::default();
+        let computed = tree.compute_scene(
+            &font_manager,
+            &theme,
+            &media,
+            &mut animations,
+            None,
+            None,
+            &HashMap::new(),
+            Rect::new(0.0, 0.0, 640.0, 520.0),
+            None,
+            None,
+            None,
+            None,
+            false,
+        );
+        let rendered = computed.rendered();
+        let has_color = |color| {
+            rendered
+                .primitives
+                .shapes
+                .iter()
+                .chain(rendered.primitives.overlay_shapes.iter())
+                .any(|shape| shape.color == color)
+        };
+        assert!(
+            has_color(input_color),
+            "{name} must use the Input component theme"
+        );
+        assert!(
+            has_color(button_color),
+            "{name} must use the Button component theme"
+        );
+        if has_picker_panel {
+            assert!(
+                has_color(select_menu_color),
+                "{name} picker panel must use the Select menu component token"
+            );
+        }
+    }
 }
 
 #[test]

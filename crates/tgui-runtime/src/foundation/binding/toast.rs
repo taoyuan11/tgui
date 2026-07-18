@@ -299,7 +299,7 @@ impl<VM> ToastQueue<VM> {
     }
 
     pub(crate) fn dismiss_at(&self, id: ToastId, now: Instant) -> bool {
-        let changed = self.entries.mutate(|entries| {
+        let changed = self.entries.mutate_if_changed(|entries| {
             let Some(entry) = entries.iter_mut().find(|entry| entry.id == id) else {
                 return false;
             };
@@ -322,7 +322,7 @@ impl<VM> ToastQueue<VM> {
     }
 
     pub(crate) fn clear_at(&self, now: Instant) {
-        let changed = self.entries.mutate(|entries| {
+        let changed = self.entries.mutate_if_changed(|entries| {
             let mut changed = false;
             for entry in entries.iter_mut() {
                 if entry.deadline.is_some_and(|deadline| deadline <= now) && !entry.paused {
@@ -390,7 +390,7 @@ impl<VM> ToastQueue<VM> {
     }
 
     pub(crate) fn pause_at(&self, id: ToastId, now: Instant) -> bool {
-        let changed = self.entries.mutate(|entries| {
+        self.entries.mutate_if_changed(|entries| {
             let Some(entry) = entries.iter_mut().find(|entry| entry.id == id) else {
                 return false;
             };
@@ -404,8 +404,7 @@ impl<VM> ToastQueue<VM> {
             entry.deadline = None;
             entry.paused = true;
             true
-        });
-        changed
+        })
     }
 
     pub fn resume(&self, id: ToastId) -> bool {
@@ -413,7 +412,7 @@ impl<VM> ToastQueue<VM> {
     }
 
     pub(crate) fn resume_at(&self, id: ToastId, now: Instant) -> bool {
-        let changed = self.entries.mutate(|entries| {
+        self.entries.mutate_if_changed(|entries| {
             let Some(entry) = entries.iter_mut().find(|entry| entry.id == id) else {
                 return false;
             };
@@ -425,8 +424,7 @@ impl<VM> ToastQueue<VM> {
             entry.paused_remaining = None;
             entry.paused = false;
             true
-        });
-        changed
+        })
     }
 
     pub fn earliest_deadline(&self) -> Option<Instant> {
@@ -441,10 +439,17 @@ impl<VM> ToastQueue<VM> {
     }
 
     pub fn flush_expired(&self, now: Instant) -> bool {
-        /// 退场动画时长，与collect/toast.rs中的EXIT_DURATION_MS保持一致
-        const EXIT_DURATION_MS: u64 = 300;
+        self.flush_expired_after(now, Duration::from_millis(300))
+    }
 
-        let changed = self.entries.mutate(|entries| {
+    /// Remove entries once their caller-selected exit window has elapsed.
+    ///
+    /// The public `flush_expired` keeps its historical 300ms behavior. The
+    /// themed ToastHost uses this internal form so custom MotionScale and
+    /// reduced-motion can control the visual lifetime without changing the
+    /// queue API.
+    pub(crate) fn flush_expired_after(&self, now: Instant, exit_duration: Duration) -> bool {
+        self.entries.mutate_if_changed(|entries| {
             let before = entries.len();
             entries.retain(|entry| match entry.deadline {
                 Some(deadline) => {
@@ -457,13 +462,12 @@ impl<VM> ToastQueue<VM> {
                     } else {
                         // deadline已到，但需要等待退场动画完成后才移除
                         let exit_elapsed = now.saturating_duration_since(deadline);
-                        exit_elapsed.as_millis() < EXIT_DURATION_MS as u128
+                        exit_elapsed < exit_duration
                     }
                 }
                 None => true,
             });
             before != entries.len()
-        });
-        changed
+        })
     }
 }

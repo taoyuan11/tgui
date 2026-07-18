@@ -31,7 +31,10 @@ impl SpinnerStyle {
             size,
             thickness,
             sweep_degrees: 104.0,
-            show_track: true,
+            // A single rotating accent arc is both visually quieter and materially cheaper:
+            // the optional 360-degree ring accounts for most Spinner mesh vertices every frame.
+            // Callers that need the explicit progress track can still opt in with `.track(true)`.
+            show_track: false,
         }
     }
 }

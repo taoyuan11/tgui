@@ -1,6 +1,8 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
+use parking_lot::RwLock;
+
 use crate::foundation::color::Color;
 use crate::foundation::view_model::{Command, ValueCommand};
 use crate::theme::StyleContext;
@@ -10,7 +12,8 @@ use crate::ui::unit::{dp, sp, Dp, Sp};
 
 use super::common::{
     CursorStyle, FocusScopeOptions, InteractionHandlers, LifecycleEventHandlers,
-    MediaEventHandlers, TreeNodeState, TreeRootState, VisualStyle, WidgetId, WidgetKey,
+    MediaEventHandlers, TreeControlledKeyMetadata, TreeKeySnapshot, TreeNodeState, TreeRootState,
+    TreeSelectionMetadata, VisualStyle, WidgetId, WidgetKey,
 };
 use super::container::{set_layout_inset, set_layout_length, set_layout_lengths, IntoLengthValue};
 use super::core::Element;
@@ -286,6 +289,7 @@ struct TreeRow<T> {
     child_keys: Arc<[WidgetKey]>,
     descendant_keys: Arc<[WidgetKey]>,
     check_target_keys: Arc<[WidgetKey]>,
+    check_target_disabled: Arc<[Value<bool>]>,
 }
 
 impl<T: Clone> Clone for TreeRow<T> {
@@ -304,13 +308,44 @@ impl<T: Clone> Clone for TreeRow<T> {
             child_keys: self.child_keys.clone(),
             descendant_keys: self.descendant_keys.clone(),
             check_target_keys: self.check_target_keys.clone(),
+            check_target_disabled: self.check_target_disabled.clone(),
         }
+    }
+}
+
+impl<T> TreeRow<T> {
+    fn enabled_check_target_keys(&self) -> Arc<[WidgetKey]> {
+        self.check_target_keys
+            .iter()
+            .zip(self.check_target_disabled.iter())
+            .filter_map(|(key, disabled)| (!disabled.resolve()).then(|| key.clone()))
+            .collect::<Vec<_>>()
+            .into()
     }
 }
 
 struct TreeRowSource<T> {
     nodes: Arc<[TreeNode<T>]>,
-    expanded_keys: Value<Vec<WidgetKey>>,
+    expanded_keys: Value<Arc<TreeKeySnapshot>>,
+    snapshot: Arc<RwLock<Option<TreeRowSnapshot<T>>>>,
+}
+
+struct TreeRowSnapshot<T> {
+    expanded_keys: Arc<TreeKeySnapshot>,
+    rows: Arc<[TreeRow<T>]>,
+    visible_keys: Arc<[WidgetKey]>,
+    visible_disabled: Arc<[Value<bool>]>,
+}
+
+impl<T> Clone for TreeRowSnapshot<T> {
+    fn clone(&self) -> Self {
+        Self {
+            expanded_keys: self.expanded_keys.clone(),
+            rows: self.rows.clone(),
+            visible_keys: self.visible_keys.clone(),
+            visible_disabled: self.visible_disabled.clone(),
+        }
+    }
 }
 
 impl<T: Clone> Clone for TreeRowSource<T> {
@@ -318,36 +353,58 @@ impl<T: Clone> Clone for TreeRowSource<T> {
         Self {
             nodes: self.nodes.clone(),
             expanded_keys: self.expanded_keys.clone(),
+            snapshot: self.snapshot.clone(),
         }
     }
 }
 
 impl<T: Clone> TreeRowSource<T> {
-    fn new(nodes: Arc<[TreeNode<T>]>, expanded_keys: Value<Vec<WidgetKey>>) -> Self {
+    fn new(nodes: Arc<[TreeNode<T>]>, expanded_keys: Value<Arc<TreeKeySnapshot>>) -> Self {
         Self {
             nodes,
             expanded_keys,
+            snapshot: Arc::new(RwLock::new(None)),
         }
     }
 
-    fn rows(&self) -> Vec<TreeRow<T>> {
-        let expanded_now: HashSet<_> = self.expanded_keys.resolve().into_iter().collect();
-        flatten_tree_rows(&self.nodes, &expanded_now)
-    }
+    fn snapshot(&self) -> TreeRowSnapshot<T> {
+        let expanded_keys = self.expanded_keys.resolve();
+        if tree_row_snapshot_cache_enabled() {
+            if let Some(snapshot) = self.snapshot.read().as_ref().filter(|snapshot| {
+                Arc::ptr_eq(&snapshot.expanded_keys, &expanded_keys)
+                    || snapshot.expanded_keys.ordered == expanded_keys.ordered
+            }) {
+                return snapshot.clone();
+            }
+        }
 
-    fn visible_keys_and_disabled(&self) -> (Arc<[WidgetKey]>, Arc<[bool]>) {
-        let rows = self.rows();
-        let visible_keys: Arc<[WidgetKey]> = rows
+        let rows: Arc<[TreeRow<T>]> =
+            flatten_tree_rows(&self.nodes, expanded_keys.membership.as_ref()).into();
+        let visible_keys = rows
             .iter()
             .map(|row| row.key.clone())
             .collect::<Vec<_>>()
             .into();
-        let visible_disabled: Arc<[bool]> = rows
+        let visible_disabled = rows
             .iter()
-            .map(|row| row.disabled.resolve())
+            .map(|row| row.disabled.clone())
             .collect::<Vec<_>>()
             .into();
-        (visible_keys, visible_disabled)
+        let snapshot = TreeRowSnapshot {
+            expanded_keys,
+            rows,
+            visible_keys,
+            visible_disabled,
+        };
+        if tree_row_snapshot_cache_enabled() {
+            *self.snapshot.write() = Some(snapshot.clone());
+        }
+        snapshot
+    }
+
+    fn visible_keys_and_disabled(&self) -> (Arc<[WidgetKey]>, Arc<[Value<bool>]>) {
+        let snapshot = self.snapshot();
+        (snapshot.visible_keys, snapshot.visible_disabled)
     }
 }
 
@@ -356,16 +413,54 @@ where
     T: Clone + Send + Sync + 'static,
 {
     fn len(&self) -> usize {
-        self.rows().len()
+        self.snapshot().rows.len()
     }
 
     fn item(&self, index: usize) -> Option<TreeRow<T>> {
-        self.rows().get(index).cloned()
+        self.snapshot().rows.get(index).cloned()
     }
 
     fn key(&self, index: usize) -> Option<WidgetKey> {
-        self.rows().get(index).map(|row| row.key.clone())
+        self.snapshot().rows.get(index).map(|row| row.key.clone())
     }
+}
+
+#[cfg(feature = "bench-support")]
+pub(crate) mod legacy_tree_row_source {
+    use std::cell::Cell;
+
+    thread_local! {
+        static ENABLED: Cell<bool> = const { Cell::new(false) };
+    }
+
+    pub(crate) fn enabled() -> bool {
+        ENABLED.with(Cell::get)
+    }
+
+    pub(crate) fn with_enabled<R>(f: impl FnOnce() -> R) -> R {
+        ENABLED.with(|enabled| {
+            let previous = enabled.replace(true);
+            struct Reset<'a> {
+                enabled: &'a Cell<bool>,
+                previous: bool,
+            }
+            impl Drop for Reset<'_> {
+                fn drop(&mut self) {
+                    self.enabled.set(self.previous);
+                }
+            }
+            let _reset = Reset { enabled, previous };
+            f()
+        })
+    }
+}
+
+fn tree_row_snapshot_cache_enabled() -> bool {
+    #[cfg(feature = "bench-support")]
+    if legacy_tree_row_source::enabled() {
+        return false;
+    }
+    true
 }
 
 pub struct Tree<T, VM> {
@@ -752,6 +847,21 @@ where
     }
 }
 
+fn tree_key_snapshot_value(value: Value<Vec<WidgetKey>>) -> Value<Arc<TreeKeySnapshot>> {
+    let snapshot = |keys: Vec<WidgetKey>| {
+        let ordered: Arc<[WidgetKey]> = keys.into();
+        let membership = Arc::new(ordered.iter().cloned().collect::<HashSet<_>>());
+        Arc::new(TreeKeySnapshot {
+            ordered,
+            membership,
+        })
+    };
+    match value {
+        Value::Static(keys) => Value::Static(snapshot(keys)),
+        Value::Signal(signal) => Value::Signal(signal.map_memo(snapshot)),
+    }
+}
+
 impl<T, VM> Tree<T, VM>
 where
     T: Clone + Send + Sync + 'static,
@@ -774,7 +884,13 @@ where
         let row_visual = self.visual.clone();
         let root_style_resolver = self.style.clone();
         let root_visual = self.visual.clone();
-        let source = TreeRowSource::new(self.nodes.into(), self.expanded_keys.clone());
+        let expanded_keys = tree_key_snapshot_value(self.expanded_keys);
+        let checked_keys = tree_key_snapshot_value(self.checked_keys);
+        let controlled_keys = Arc::new(TreeControlledKeyMetadata {
+            expanded: expanded_keys.clone(),
+            checked: checked_keys.clone(),
+        });
+        let source = TreeRowSource::new(self.nodes.into(), expanded_keys);
         let row_count = source.len();
         if row_count == 0 {
             return self
@@ -783,10 +899,24 @@ where
         }
         let source_for_render = source.clone();
         let render = self.render.clone();
-        let selected_keys = self.selected_keys.clone();
-        let root_selected_keys = selected_keys.clone();
-        let expanded_keys = self.expanded_keys.clone();
-        let checked_keys = self.checked_keys.clone();
+        let (selected_keys, selected_key_membership) = match self.selected_keys {
+            Value::Static(keys) => {
+                let shared: Arc<[WidgetKey]> = keys.into();
+                let membership = Arc::new(shared.iter().cloned().collect::<HashSet<_>>());
+                (Value::Static(shared), Value::Static(membership))
+            }
+            Value::Signal(signal) => {
+                let shared = signal.map_memo(|keys| Arc::<[WidgetKey]>::from(keys));
+                let membership =
+                    shared.map_memo(|keys| Arc::new(keys.iter().cloned().collect::<HashSet<_>>()));
+                (Value::Signal(shared), Value::Signal(membership))
+            }
+        };
+        let selection = Arc::new(TreeSelectionMetadata {
+            selected_keys,
+            selected_key_membership,
+        });
+        let root_selection = selection.clone();
         let checkable = self.checkable.clone();
         let root_checkable = checkable.clone();
         let selection_mode = self.selection_mode;
@@ -809,9 +939,18 @@ where
                     style_sheet,
                     &row_visual,
                 ));
-                let selected = selected_keys.resolve().contains(&row.key);
+                let selected = selection
+                    .selected_key_membership
+                    .resolve_ref(|membership| membership.contains(&row.key));
                 let disabled_now = row.disabled.resolve();
-                let check_state = tree_check_state(&row.check_target_keys, &checked_keys.resolve());
+                let mut row = row.clone();
+                row.check_target_keys = row.enabled_check_target_keys();
+                let check_state = controlled_keys.checked.resolve_ref(|snapshot| {
+                    tree_check_state_from_membership(
+                        &row.check_target_keys,
+                        snapshot.membership.as_ref(),
+                    )
+                });
                 let context = TreeNodeContext {
                     index: row.source_index,
                     key: row.key.clone(),
@@ -830,11 +969,12 @@ where
                 build_tree_row(
                     tree_id,
                     visible_index,
-                    row.clone(),
+                    row,
                     child,
-                    selected_keys.clone(),
-                    expanded_keys.clone(),
-                    checked_keys.clone(),
+                    selected,
+                    check_state,
+                    selection.clone(),
+                    controlled_keys.clone(),
                     checkable.clone(),
                     selection_mode,
                     visible_keys.clone(),
@@ -882,7 +1022,7 @@ where
             tree_id,
             node_count: row_count,
             selection_mode,
-            selected_keys: root_selected_keys,
+            selection: root_selection,
             checkable: root_checkable,
         });
         tree
@@ -895,13 +1035,14 @@ fn build_tree_row<T, VM: 'static>(
     visible_index: usize,
     row: TreeRow<T>,
     child: Element<VM>,
-    selected_keys: Value<Vec<WidgetKey>>,
-    expanded_keys: Value<Vec<WidgetKey>>,
-    checked_keys: Value<Vec<WidgetKey>>,
+    selected: bool,
+    check_state: TreeCheckState,
+    selection: Arc<TreeSelectionMetadata>,
+    controlled_keys: Arc<TreeControlledKeyMetadata>,
     checkable: Value<bool>,
     selection_mode: TreeSelectionMode,
     visible_keys: Arc<[WidgetKey]>,
-    visible_disabled: Arc<[bool]>,
+    visible_disabled: Arc<[Value<bool>]>,
     style: Arc<TreeStyle>,
     item_layout: ItemLayout,
     item_extent: Dp,
@@ -918,7 +1059,6 @@ where
     T: Clone + Send + Sync + 'static,
 {
     let disabled_now = row.disabled.resolve();
-    let check_state = tree_check_state(&row.check_target_keys, &checked_keys.resolve());
     let mut content = Flex::horizontal()
         .align(Align::Center)
         .child(
@@ -975,9 +1115,9 @@ where
         has_children: row.has_children,
         expanded: row.expanded,
         check_state,
-        selected_keys,
-        expanded_keys,
-        checked_keys,
+        selected,
+        selection,
+        controlled_keys,
         selection_mode,
         checkable,
         disabled: row.disabled.clone(),
@@ -1064,8 +1204,15 @@ fn flatten_children<T: Clone>(
         let mut descendant_index = source_index + 1;
         collect_descendant_keys(&node.children, &mut descendant_index, &mut descendant_keys);
         let mut check_target_keys = Vec::new();
+        let mut check_target_disabled = Vec::new();
         let mut check_index = source_index + 1;
-        collect_check_target_keys(&key, node, &mut check_index, &mut check_target_keys);
+        collect_check_targets(
+            &key,
+            node,
+            &mut check_index,
+            &mut check_target_keys,
+            &mut check_target_disabled,
+        );
         let row = TreeRow {
             source_index,
             key: key.clone(),
@@ -1080,6 +1227,7 @@ fn flatten_children<T: Clone>(
             child_keys: child_keys.into(),
             descendant_keys: descendant_keys.into(),
             check_target_keys: check_target_keys.into(),
+            check_target_disabled: check_target_disabled.into(),
         };
         rows.push(row);
         if expanded {
@@ -1137,22 +1285,23 @@ fn collect_descendant_keys<T>(
     }
 }
 
-fn collect_check_target_keys<T>(
+fn collect_check_targets<T>(
     self_key: &WidgetKey,
     node: &TreeNode<T>,
     next_index: &mut usize,
-    output: &mut Vec<WidgetKey>,
+    keys: &mut Vec<WidgetKey>,
+    disabled: &mut Vec<Value<bool>>,
 ) {
-    if !node.disabled.resolve() {
-        output.push(self_key.clone());
-    }
-    collect_enabled_descendant_keys(&node.children, next_index, output);
+    keys.push(self_key.clone());
+    disabled.push(node.disabled.clone());
+    collect_descendant_check_targets(&node.children, next_index, keys, disabled);
 }
 
-fn collect_enabled_descendant_keys<T>(
+fn collect_descendant_check_targets<T>(
     nodes: &[TreeNode<T>],
     next_index: &mut usize,
-    output: &mut Vec<WidgetKey>,
+    keys: &mut Vec<WidgetKey>,
+    disabled: &mut Vec<Value<bool>>,
 ) {
     for node in nodes {
         let source_index = *next_index;
@@ -1161,26 +1310,150 @@ fn collect_enabled_descendant_keys<T>(
             .key
             .clone()
             .unwrap_or_else(|| WidgetKey::from(source_index));
-        if !node.disabled.resolve() {
-            output.push(key.clone());
-        }
-        collect_enabled_descendant_keys(&node.children, next_index, output);
+        keys.push(key);
+        disabled.push(node.disabled.clone());
+        collect_descendant_check_targets(&node.children, next_index, keys, disabled);
     }
 }
 
 pub(crate) fn tree_check_state(keys: &[WidgetKey], checked: &[WidgetKey]) -> TreeCheckState {
+    let membership = checked.iter().cloned().collect::<HashSet<_>>();
+    tree_check_state_from_membership(keys, &membership)
+}
+
+fn tree_check_state_from_membership(
+    keys: &[WidgetKey],
+    checked: &HashSet<WidgetKey>,
+) -> TreeCheckState {
     if keys.is_empty() {
         return TreeCheckState::Unchecked;
     }
-    let checked_count = keys
-        .iter()
-        .filter(|key| checked.iter().any(|checked_key| checked_key == *key))
-        .count();
+    let checked_count = keys.iter().filter(|key| checked.contains(*key)).count();
     if checked_count == keys.len() {
         TreeCheckState::Checked
     } else if checked_count == 0 {
         TreeCheckState::Unchecked
     } else {
         TreeCheckState::Indeterminate
+    }
+}
+
+#[cfg(test)]
+mod row_source_tests {
+    use std::sync::{Arc, Mutex};
+
+    use crate::foundation::binding::{InvalidationSignal, Signal};
+
+    use super::*;
+
+    fn source_with_expansion(
+        expanded: Arc<Mutex<Vec<WidgetKey>>>,
+    ) -> (TreeRowSource<&'static str>, InvalidationSignal) {
+        let expanded_for_signal = Arc::clone(&expanded);
+        let invalidation = InvalidationSignal::new();
+        let source = TreeRowSource::new(
+            vec![
+                TreeNode::keyed("root", "Root").children([
+                    TreeNode::keyed("child-a", "Child A"),
+                    TreeNode::keyed("child-b", "Child B"),
+                ]),
+                TreeNode::keyed("sibling", "Sibling"),
+            ]
+            .into(),
+            tree_key_snapshot_value(
+                Signal::new(
+                    move || expanded_for_signal.lock().unwrap().clone(),
+                    invalidation.clone(),
+                )
+                .into(),
+            ),
+        );
+        (source, invalidation)
+    }
+
+    #[test]
+    fn retained_row_snapshot_refreshes_when_expansion_changes() {
+        let expanded = Arc::new(Mutex::new(Vec::new()));
+        let (source, invalidation) = source_with_expansion(Arc::clone(&expanded));
+
+        assert_eq!(source.len(), 2);
+        assert_eq!(source.item(1).map(|row| row.key), Some("sibling".into()));
+
+        expanded.lock().unwrap().push("root".into());
+        invalidation.mark_dirty();
+
+        assert_eq!(source.len(), 4);
+        let keys = (0..source.len())
+            .filter_map(|index| source.key(index))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            keys,
+            vec![
+                "root".into(),
+                "child-a".into(),
+                "child-b".into(),
+                "sibling".into()
+            ]
+        );
+    }
+
+    #[test]
+    fn retained_row_snapshot_keeps_disabled_check_targets_live() {
+        let invalidation = InvalidationSignal::new();
+        let child_disabled = Arc::new(Mutex::new(false));
+        let child_disabled_for_signal = Arc::clone(&child_disabled);
+        let source =
+            TreeRowSource::new(
+                vec![TreeNode::keyed("root", "Root").child(
+                    TreeNode::keyed("child", "Child").disable(Signal::new(
+                        move || *child_disabled_for_signal.lock().unwrap(),
+                        invalidation.clone(),
+                    )),
+                )]
+                .into(),
+                tree_key_snapshot_value(vec![WidgetKey::from("root")].into()),
+            );
+
+        let root = source.item(0).expect("root row");
+        assert_eq!(
+            root.enabled_check_target_keys().as_ref(),
+            &[WidgetKey::from("root"), WidgetKey::from("child")]
+        );
+
+        *child_disabled.lock().unwrap() = true;
+        invalidation.mark_dirty();
+
+        let cached_root = source.item(0).expect("cached root row");
+        assert_eq!(
+            cached_root.enabled_check_target_keys().as_ref(),
+            &[WidgetKey::from("root")]
+        );
+    }
+
+    #[cfg(feature = "bench-support")]
+    #[test]
+    fn retained_row_snapshot_matches_legacy_per_query_flattening() {
+        let expanded = Arc::new(Mutex::new(vec![WidgetKey::from("root")]));
+        let (source, _) = source_with_expansion(expanded);
+        let collect = || {
+            (0..source.len())
+                .filter_map(|index| source.item(index))
+                .map(|row| {
+                    (
+                        row.key,
+                        row.depth,
+                        row.parent_key,
+                        row.expanded,
+                        row.child_keys,
+                        row.descendant_keys,
+                        row.check_target_keys,
+                    )
+                })
+                .collect::<Vec<_>>()
+        };
+
+        let retained = collect();
+        let legacy = legacy_tree_row_source::with_enabled(collect);
+        assert_eq!(retained, legacy);
     }
 }

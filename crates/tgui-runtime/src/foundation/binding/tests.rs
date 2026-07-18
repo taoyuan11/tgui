@@ -9,7 +9,7 @@ use crate::animation::{AnimationCoordinator, Transition};
 use super::{
     track_dependency_scope, track_property_scope, with_dependency_collection, DependencyOwner,
     DependencyPhase, DirtyDependencySet, InvalidationSignal, PropertySlot, ReactiveTarget, Signal,
-    State, TextController, Toast, ToastQueue, ViewModelContext,
+    State, TextController, Toast, ToastId, ToastQueue, ViewModelContext,
 };
 
 fn context() -> ViewModelContext {
@@ -62,6 +62,28 @@ fn invalidation_wake_permit_is_shared_by_clones_and_rolls_back_failed_send() {
         true
     }));
     assert_eq!(attempts.load(Ordering::Relaxed), 2);
+}
+
+#[test]
+fn invalidation_revisions_are_shared_by_clones() {
+    let invalidation = InvalidationSignal::new();
+    let clone = invalidation.clone();
+    let revision_before = invalidation.revision();
+    let root_revision_before = invalidation.root_rebuild_revision();
+
+    clone.mark_dirty();
+    assert_eq!(invalidation.revision(), revision_before + 1);
+    assert_eq!(invalidation.root_rebuild_revision(), root_revision_before);
+
+    invalidation.request_root_rebuild();
+    assert_eq!(clone.revision(), revision_before + 2);
+    assert_eq!(clone.root_rebuild_revision(), root_revision_before + 1);
+}
+
+#[test]
+#[cfg(target_pointer_width = "64")]
+fn invalidation_revisions_share_one_allocation_without_growing_signal_handles() {
+    assert_eq!(std::mem::size_of::<InvalidationSignal>(), 56);
 }
 
 #[test]
@@ -624,6 +646,25 @@ fn toast_queue_pause_and_resume_preserve_remaining_time() {
     let resumed = queue.snapshot().pop().expect("toast should exist");
     assert!(!resumed.paused);
     assert_eq!(resumed.deadline, Some(now + Duration::from_secs(7)));
+}
+
+#[test]
+fn toast_queue_no_op_mutations_do_not_invalidate() {
+    let ctx = context();
+    let queue = ToastQueue::<()>::new(&ctx);
+    let now = Instant::now();
+    let id = queue.push_at(Toast::new("live").duration(Duration::from_secs(5)), now);
+    let revision = ctx.invalidation().revision();
+
+    assert!(!queue.flush_expired(now + Duration::from_secs(1)));
+    assert!(!queue.dismiss_at(ToastId::new(id.raw() + 1), now));
+    assert_eq!(ctx.invalidation().revision(), revision);
+
+    assert!(queue.dismiss_at(id, now));
+    let dismissed_revision = ctx.invalidation().revision();
+    assert!(!queue.dismiss_at(id, now));
+    queue.clear_at(now);
+    assert_eq!(ctx.invalidation().revision(), dismissed_revision);
 }
 
 // 属性级依赖归因

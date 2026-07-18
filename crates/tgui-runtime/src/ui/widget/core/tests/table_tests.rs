@@ -34,6 +34,23 @@ fn subtree_container_padding<VM>(element: &ResolvedElement<VM>) -> Option<Value<
         .find_map(subtree_container_padding)
 }
 
+fn resolved_data_grid_row<'a, VM>(
+    element: &'a ResolvedElement<VM>,
+    row_key: &WidgetKey,
+) -> Option<&'a ResolvedElement<VM>> {
+    if resolved_children(&element.kind).iter().any(|child| {
+        child
+            .data_grid_cell
+            .as_ref()
+            .is_some_and(|cell| &cell.row_key == row_key)
+    }) {
+        return Some(element);
+    }
+    resolved_children(&element.kind)
+        .iter()
+        .find_map(|child| resolved_data_grid_row(child, row_key))
+}
+
 fn columns<VM: 'static>() -> Vec<DataGridColumn<String, VM>> {
     vec![
         DataGridColumn::new("name", "Name".to_string(), |ctx| Text::new(ctx.row).into())
@@ -116,6 +133,193 @@ fn data_grid_resolves_header_and_virtualized_rows() {
             .any(|cell| cell.data_grid_cell.is_some()),
         "visible row cells should carry DataGrid cell state"
     );
+}
+
+#[test]
+fn data_grid_row_identity_survives_virtual_window_and_pinned_scroll() {
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let theme = Theme::default();
+    let mut animations = AnimationEngine::default();
+    let rows = (0..64)
+        .map(|index| DataGridRow::keyed(format!("row-{index}"), format!("Row {index}")))
+        .collect::<Vec<_>>();
+    let tree: WidgetTree<()> = WidgetTree::new(
+        DataGrid::new(rows, pinned_columns())
+            .row_height(dp(32.0))
+            .overscan(2)
+            .size(dp(240.0), dp(160.0)),
+    );
+    let viewport = Rect::new(0.0, 0.0, 240.0, 160.0);
+    let initial = tree.build_scene_layout(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        UnitContext::default(),
+        &HashMap::new(),
+        &HashMap::new(),
+        viewport,
+    );
+    let ResolvedWidgetKind::Container { children, .. } = &initial.resolved_root.kind else {
+        panic!("DataGrid root should resolve to a container");
+    };
+    let body_id = children[1].id;
+    let row_key = WidgetKey::from("row-2");
+    let initial_row = resolved_data_grid_row(&initial.resolved_root, &row_key)
+        .expect("overlap row should be visible in the initial window");
+    let initial_cell_ids = resolved_children(&initial_row.kind)
+        .iter()
+        .filter_map(|cell| cell.data_grid_cell.as_ref().map(|state| state.row_id))
+        .collect::<Vec<_>>();
+    assert_eq!(initial_cell_ids.len(), 4);
+    assert!(initial_cell_ids.iter().all(|id| *id == initial_row.id));
+
+    let mut scroll_offsets = HashMap::new();
+    scroll_offsets.insert(body_id, Point::new(dp(96.0), dp(64.0)));
+    let scrolled = tree.build_scene_layout(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        UnitContext::default(),
+        &scroll_offsets,
+        &HashMap::new(),
+        viewport,
+    );
+    let scrolled_row = resolved_data_grid_row(&scrolled.resolved_root, &row_key)
+        .expect("overscan overlap row should survive virtual window reconstruction");
+    let scrolled_cell_ids = resolved_children(&scrolled_row.kind)
+        .iter()
+        .filter_map(|cell| cell.data_grid_cell.as_ref().map(|state| state.row_id))
+        .collect::<Vec<_>>();
+    assert_eq!(scrolled_row.id, initial_row.id);
+    assert_eq!(scrolled_cell_ids, initial_cell_ids);
+}
+
+#[test]
+fn data_grid_row_visual_state_prioritizes_disabled_selected_and_hover() {
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let theme = Theme::light();
+    let mut animations = AnimationEngine::default();
+    let hover = Color::rgb(17, 79, 131);
+    let selected = Color::rgb(139, 53, 19);
+    let tree: WidgetTree<()> = WidgetTree::new(
+        DataGrid::new(
+            vec![
+                DataGridRow::keyed("selected", "Selected".to_string()),
+                DataGridRow::keyed("hovered", "Hovered".to_string()),
+                DataGridRow::keyed("disabled", "Disabled".to_string()).disable(true),
+            ],
+            pinned_columns(),
+        )
+        .selected_keys(vec![WidgetKey::from("selected")])
+        .style(move |style, _| {
+            style.row_background = Value::Static(Color::TRANSPARENT);
+            style.zebra_background = Value::Static(Color::TRANSPARENT);
+            style.row_hover_background = Value::Static(hover);
+            style.row_selected_background = Value::Static(selected);
+        })
+        .size(dp(240.0), dp(180.0)),
+    );
+    let viewport = Rect::new(0.0, 0.0, 240.0, 180.0);
+    let layout = tree.build_scene_layout(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        UnitContext::default(),
+        &HashMap::new(),
+        &HashMap::new(),
+        viewport,
+    );
+    let ResolvedWidgetKind::Container { children, .. } = &layout.resolved_root.kind else {
+        panic!("DataGrid root should resolve to a container");
+    };
+    let body_id = children[1].id;
+    let row_id = |key: &str| {
+        resolved_data_grid_row(&layout.resolved_root, &WidgetKey::from(key))
+            .unwrap_or_else(|| panic!("row {key} should be visible"))
+            .id
+    };
+    let mut states = WidgetStateMap::default();
+    for key in ["selected", "hovered", "disabled"] {
+        states.set(
+            row_id(key),
+            crate::ui::theme::WidgetState {
+                hovered: true,
+                ..Default::default()
+            },
+        );
+    }
+    let mut scroll_offsets = HashMap::new();
+    scroll_offsets.insert(body_id, Point::new(dp(96.0), Dp::ZERO));
+    let rendered = tree.collect_scene_from_layout(
+        &font_manager,
+        &layout,
+        &theme,
+        &media,
+        &mut animations,
+        false,
+        None,
+        None,
+        &states,
+        &HashMap::new(),
+        &scroll_offsets,
+        viewport,
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+
+    let selected_rows = rendered
+        .scene
+        .shapes
+        .iter()
+        .filter(|shape| shape.color == selected)
+        .collect::<Vec<_>>();
+    let hovered_rows = rendered
+        .scene
+        .shapes
+        .iter()
+        .filter(|shape| shape.color == hover)
+        .collect::<Vec<_>>();
+    assert_eq!(selected_rows.len(), 1, "selected must win over hover");
+    assert_eq!(hovered_rows.len(), 1, "disabled must suppress hover");
+    for shape in selected_rows.into_iter().chain(hovered_rows) {
+        let clip = shape
+            .clip_rect
+            .expect("row background should stay body-clipped");
+        assert_eq!(clip.x, Dp::ZERO);
+        assert_eq!(clip.right(), viewport.right());
+        assert!(shape.rect.x <= Dp::ZERO && shape.rect.right() >= viewport.right());
+    }
+}
+
+#[test]
+fn data_grid_interaction_layers_use_modern_semantic_tokens_in_both_themes() {
+    for theme in [Theme::light(), Theme::dark()] {
+        let style = DataGridStyle::default_for_theme(&theme);
+        assert_eq!(
+            style.row_hover_background.resolve(),
+            theme.colors.on_surface.with_alpha_factor(0.06)
+        );
+        assert_eq!(
+            style.row_selected_background.resolve(),
+            theme.colors.primary.with_alpha_factor(0.12)
+        );
+        assert_ne!(
+            style.row_hover_background.resolve(),
+            style.row_selected_background.resolve()
+        );
+        assert_eq!(
+            style.grid_line.resolve(),
+            theme.colors.outline_muted.with_alpha_factor(0.42)
+        );
+    }
 }
 
 #[test]
@@ -277,6 +481,10 @@ fn data_grid_default_surface_applies_modern_shape_tokens() {
             && shape.stroke_width == 0.0
             && shape.color == theme.colors.surface
             && shape.corner_radius == radius
+    }));
+    let grid_line = theme.colors.outline_muted.with_alpha_factor(0.42);
+    assert!(rendered.primitives.shapes.iter().any(|shape| {
+        shape.stroke_width == theme.border.thin.get() && shape.color == grid_line
     }));
 }
 
@@ -911,4 +1119,77 @@ fn data_grid_does_not_paint_trailing_space_as_an_extra_column() {
         !matches!(region.interaction, HitInteraction::DataGridCell { .. })
             || region.rect.right() <= expected_width
     }));
+}
+
+#[test]
+fn large_data_grid_selection_snapshot_is_shared_and_membership_stays_equivalent() {
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let theme = Theme::default();
+    let mut animations = AnimationEngine::default();
+    let rows = (0..10_000)
+        .map(|index| DataGridRow::keyed(index, format!("Row {index}")))
+        .collect::<Vec<_>>();
+    let selected = (0..10_000)
+        .step_by(2)
+        .map(WidgetKey::from)
+        .collect::<Vec<_>>();
+    let tree: WidgetTree<()> = WidgetTree::new(
+        DataGrid::new(rows, columns())
+            .selected_keys(selected)
+            .selection_mode(DataGridSelectionMode::Multiple)
+            .size(dp(240.0), dp(160.0)),
+    );
+    let layout = tree.build_scene_layout(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        UnitContext::default(),
+        &HashMap::new(),
+        &HashMap::new(),
+        Rect::new(0.0, 0.0, 240.0, 160.0),
+    );
+    let root_selection = layout
+        .resolved_root
+        .data_grid_root
+        .as_ref()
+        .expect("DataGrid root selection metadata")
+        .selection
+        .clone();
+    let ResolvedWidgetKind::Container { children, .. } = &layout.resolved_root.kind else {
+        panic!("DataGrid root should resolve to a container");
+    };
+    let ResolvedWidgetKind::Virtual { children: rows, .. } = &children[1].kind else {
+        panic!("DataGrid body should use VirtualList");
+    };
+    let states = rows
+        .iter()
+        .flat_map(|row| resolved_children(&row.kind))
+        .filter_map(|cell| cell.data_grid_cell.as_ref())
+        .collect::<Vec<_>>();
+    let shared_keys = root_selection.selected_keys.resolve();
+    let shared_membership = root_selection.selected_key_membership.resolve();
+    for state in states {
+        assert!(Arc::ptr_eq(&root_selection, &state.selection));
+        let keys = state.selection.selected_keys.resolve();
+        let membership = state.selection.selected_key_membership.resolve();
+        assert!(Arc::ptr_eq(&shared_keys, &keys));
+        assert!(Arc::ptr_eq(&shared_membership, &membership));
+        assert_eq!(
+            membership.contains(&state.row_key),
+            keys.contains(&state.row_key),
+            "membership snapshot must preserve controlled DataGrid selection semantics"
+        );
+    }
+}
+
+#[test]
+#[cfg(target_pointer_width = "64")]
+fn data_grid_selection_metadata_stays_out_of_line() {
+    let size = std::mem::size_of::<crate::ui::widget::common::DataGridCellState<()>>();
+    assert!(
+        size <= 800,
+        "DataGrid selection lookup tables must remain behind Arc; got {size} bytes"
+    );
 }

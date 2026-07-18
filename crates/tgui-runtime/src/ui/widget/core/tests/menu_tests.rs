@@ -3,7 +3,8 @@ pub(super) use super::*;
 use crate::ui::layout::Value;
 use crate::ui::theme::Density;
 use crate::ui::widget::{
-    Button, ContextMenu, Menu, MenuBar, MenuBarStyle, MenuIcon, MenuItem, MenuStyle, RenderCommand,
+    Button, ContextMenu, HitInteraction, Menu, MenuBar, MenuBarStyle, MenuIcon, MenuItem,
+    MenuStyle, RenderCommand,
 };
 
 const SIMPLE_MENU_SVG: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16"><rect width="16" height="16" rx="3" fill="#2f80ed"/></svg>"##;
@@ -371,9 +372,23 @@ fn menubar_runtime_geometry_and_open_menu_follow_the_same_tree() {
             }),
     );
 
-    for (mut theme, height, padding, entry_min_width, entry_gap) in [
-        (Theme::light(), dp(30.0), dp(3.0), dp(64.0), dp(2.0)),
-        (Theme::dark(), dp(50.0), dp(11.0), dp(104.0), dp(10.0)),
+    for (mut theme, height, padding, entry_height, entry_min_width, entry_gap) in [
+        (
+            Theme::light(),
+            dp(30.0),
+            dp(3.0),
+            dp(24.0),
+            dp(64.0),
+            dp(2.0),
+        ),
+        (
+            Theme::dark(),
+            dp(50.0),
+            dp(11.0),
+            dp(28.0),
+            dp(104.0),
+            dp(10.0),
+        ),
     ] {
         theme.density = if matches!(theme.mode, crate::ui::theme::ResolvedThemeMode::Light) {
             Density::Compact
@@ -413,7 +428,7 @@ fn menubar_runtime_geometry_and_open_menu_follow_the_same_tree() {
         );
         assert_eq!(children.len(), 2);
         assert!(children.iter().all(|entry| {
-            entry.layout.height == Some(Value::Static(crate::ui::layout::Length::Px(height)))
+            entry.layout.height == Some(Value::Static(crate::ui::layout::Length::Px(entry_height)))
                 && entry.layout.min_width
                     == Some(Value::Static(crate::ui::layout::Length::Px(
                         entry_min_width,
@@ -449,6 +464,93 @@ fn menubar_runtime_geometry_and_open_menu_follow_the_same_tree() {
             .shapes
             .iter()
             .any(|shape| shape.color == expected_background));
+        let entry_hits = computed
+            .hit_regions
+            .iter()
+            .filter(|hit| matches!(hit.interaction, HitInteraction::Widget { .. }))
+            .collect::<Vec<_>>();
+        assert_eq!(entry_hits.len(), 2);
+        assert!(entry_hits.iter().all(|hit| hit.rect.height == entry_height));
+    }
+}
+
+#[test]
+fn menubar_default_solved_and_hit_geometry_tracks_density_and_keeps_dropdown_below_bar() {
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let viewport = Rect::new(0.0, 0.0, 640.0, 360.0);
+
+    for mut theme in [Theme::light(), Theme::dark()] {
+        for (density, expected_height) in [
+            (Density::Compact, dp(32.0)),
+            (Density::Comfortable, dp(40.0)),
+            (Density::Spacious, dp(48.0)),
+        ] {
+            theme.density = density;
+            let tree: WidgetTree<()> = WidgetTree::new(
+                MenuBar::new(Some(0usize))
+                    .entry(
+                        "File",
+                        vec![MenuItem::new("New").on_select(Command::new(|_: &mut ()| {}))],
+                    )
+                    .entry("Edit", vec![MenuItem::new("Undo")]),
+            );
+            let mut animations = AnimationEngine::default();
+            let layout = tree.build_scene_layout(
+                &font_manager,
+                &theme,
+                &media,
+                &mut animations,
+                UnitContext::default(),
+                &HashMap::new(),
+                &HashMap::new(),
+                viewport,
+            );
+            let root_layout = layout
+                .taffy
+                .layout(layout.layout_root.node)
+                .expect("MenuBar root layout");
+            assert_eq!(dp(root_layout.size.height), expected_height);
+            assert!(layout.layout_root.children.iter().all(|entry| {
+                layout
+                    .taffy
+                    .layout(entry.node)
+                    .is_ok_and(|entry_layout| dp(entry_layout.size.height) == expected_height)
+            }));
+
+            let mut animations = AnimationEngine::default();
+            let computed = tree.compute_scene(
+                &font_manager,
+                &theme,
+                &media,
+                &mut animations,
+                None,
+                None,
+                &HashMap::new(),
+                viewport,
+                None,
+                None,
+                None,
+                None,
+                false,
+            );
+            let entry_hits = computed
+                .hit_regions
+                .iter()
+                .filter(|hit| matches!(hit.interaction, HitInteraction::Widget { .. }))
+                .collect::<Vec<_>>();
+            assert_eq!(entry_hits.len(), 2);
+            assert!(entry_hits
+                .iter()
+                .all(|hit| hit.rect.height == expected_height));
+            let dropdown_top = computed
+                .overlay_hit_regions
+                .iter()
+                .map(|hit| hit.rect.y)
+                .min_by(|left, right| left.get().total_cmp(&right.get()))
+                .expect("open MenuBar entry should emit dropdown hits");
+            assert!(dropdown_top >= expected_height);
+        }
     }
 }
 
@@ -631,5 +733,96 @@ fn submenu_emits_nested_overlay_when_parent_is_hovered() {
     assert!(
         hover_labels.iter().any(|t| t == "b.txt"),
         "submenu item 'b.txt' should appear when parent hovered, got {hover_labels:?}"
+    );
+}
+
+#[test]
+fn nested_submenu_hover_state_and_overlay_ids_are_path_scoped() {
+    let theme = Theme::default();
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let mut animations = AnimationEngine::default();
+    let menu_element: Element<()> = Menu::new(Button::new("File").size(dp(80.0), dp(28.0)))
+        .items(vec![MenuItem::submenu(
+            "Level 1",
+            vec![MenuItem::submenu("Level 2", vec![MenuItem::new("Leaf")])],
+        )])
+        .open(true)
+        .into();
+    let menu_id = menu_element.id;
+    let tree = WidgetTree::new(menu_element);
+    let viewport = Rect::new(0.0, 0.0, 900.0, 500.0);
+
+    let mut root_hover = WidgetStateMap::default();
+    let mut state = root_hover.get_select_option(menu_id, 0);
+    state.hovered = true;
+    root_hover.set_select_option(menu_id, 0, state);
+    let root_scene = tree.compute_scene_with_widget_state(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        false,
+        None,
+        None,
+        &root_hover,
+        &HashMap::new(),
+        &HashMap::new(),
+        viewport,
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+    let root_labels: Vec<_> = root_scene
+        .scene
+        .overlay_texts
+        .iter()
+        .map(|text| text.content.as_ref())
+        .collect();
+    assert!(root_labels.contains(&"Level 2"));
+    assert!(
+        !root_labels.contains(&"Leaf"),
+        "hovering root option 0 must not also hover submenu option 0"
+    );
+
+    let nested_owner = crate::ui::widget::menu_item_state_owner(menu_id, &[0]);
+    let mut nested_hover = root_hover;
+    let mut state = nested_hover.get_select_option(nested_owner, 0);
+    state.hovered = true;
+    nested_hover.set_select_option(nested_owner, 0, state);
+    let nested_scene = tree.compute_scene_with_widget_state(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        false,
+        None,
+        None,
+        &nested_hover,
+        &HashMap::new(),
+        &HashMap::new(),
+        viewport,
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+    assert!(nested_scene
+        .scene
+        .overlay_texts
+        .iter()
+        .any(|text| text.content.as_ref() == "Leaf"));
+    let overlay_ids: std::collections::HashSet<_> = nested_scene
+        .overlay_close_handlers
+        .iter()
+        .map(|handler| handler.overlay_id)
+        .collect();
+    assert_eq!(
+        overlay_ids.len(),
+        nested_scene.overlay_close_handlers.len(),
+        "every submenu depth must retain a unique overlay id"
     );
 }

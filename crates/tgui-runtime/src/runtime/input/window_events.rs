@@ -84,6 +84,10 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     button,
                     ..
                 } => {
+                    self.button_pressed_patch_pending = None;
+                    let pressed_widget_before = self.pressed_widget;
+                    let focused_widget_before = self.focused_widget_id();
+                    let focus_visible_before = self.focus_visible;
                     self.set_pointer_position(*position);
                     let is_touch = matches!(button, ButtonSource::Touch { .. });
                     let touch_finger_id = Self::gesture_finger_id_from_button(button);
@@ -109,6 +113,15 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                         } else {
                             self.handle_mouse_press(viewport, Instant::now(), canvas_button);
                         }
+                    }
+                    if matches!(button, ButtonSource::Mouse(MouseButton::Left)) {
+                        self.button_pressed_patch_pending = (self.focused_widget_id()
+                            == focused_widget_before
+                            && self.focus_visible == focus_visible_before)
+                            .then(|| {
+                                self.retained_button_pressed_patch_candidate(pressed_widget_before)
+                            })
+                            .flatten();
                     }
                 }
                 WindowEvent::KeyboardInput { event, .. } => {
@@ -169,7 +182,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
 
         match event {
             WindowEvent::CloseRequested => {
-                return self.close_policy() == super::super::WindowClosePolicy::Close
+                return self.close_policy() == super::super::WindowClosePolicy::Close;
             }
             WindowEvent::Focused(false) => {
                 self.update_accessibility_window_focus_state(false);
@@ -223,6 +236,9 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 button,
                 ..
             } => {
+                self.button_pressed_patch_pending = None;
+                let pressed_widget_before = self.pressed_widget;
+                let pointer_position_unchanged = self.physical_cursor_position() == Some(position);
                 self.set_pointer_position(position);
                 let touch_scroll_was_active = self.active_touch_scroll.is_some();
                 let is_touch = matches!(button, ButtonSource::Touch { .. });
@@ -307,6 +323,12 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 self.end_splitter_resize();
                 self.pressed_widget = None;
                 self.end_text_selection_drag();
+                if pointer_position_unchanged
+                    && matches!(button, ButtonSource::Mouse(MouseButton::Left))
+                {
+                    self.button_pressed_patch_pending =
+                        self.retained_button_pressed_patch_candidate(pressed_widget_before);
+                }
                 self.handle_hover(self.viewport_rect());
                 self.update_cursor_icon();
                 if let Some(window) = self.window.as_ref() {

@@ -42,6 +42,7 @@ pub(crate) enum PropertySlot {
     Offset,
     Scale,
     Texture,
+    TextureMaskTint,
     TextContent,
     TextColor,
     ProgressValue,

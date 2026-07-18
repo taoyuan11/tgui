@@ -43,6 +43,7 @@ impl Renderer {
                     clip_mask: None,
                     opacity: 1.0,
                     tint: [255; 4],
+                    mask_mode: 0.0,
                 },
                 self.vertex_viewport(),
             );

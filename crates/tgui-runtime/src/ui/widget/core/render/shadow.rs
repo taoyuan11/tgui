@@ -9,6 +9,41 @@ use crate::media::TextureFrame;
 
 use super::*;
 
+#[cfg(feature = "bench-support")]
+thread_local! {
+    static FORCE_LEGACY_WIDGET_SHADOW_OPACITY: std::cell::Cell<bool> =
+        const { std::cell::Cell::new(false) };
+}
+
+/// Benchmark-only A/B control for the former widget-shadow path, which baked the
+/// current visual opacity into every cached RGBA texture.
+#[cfg(feature = "bench-support")]
+pub(crate) fn with_legacy_widget_shadow_opacity<R>(legacy: bool, f: impl FnOnce() -> R) -> R {
+    FORCE_LEGACY_WIDGET_SHADOW_OPACITY.with(|flag| {
+        let previous = flag.replace(legacy);
+        struct Reset<'a> {
+            flag: &'a std::cell::Cell<bool>,
+            previous: bool,
+        }
+        impl Drop for Reset<'_> {
+            fn drop(&mut self) {
+                self.flag.set(self.previous);
+            }
+        }
+        let _reset = Reset { flag, previous };
+        f()
+    })
+}
+
+pub(crate) fn widget_shadow_opacity_legacy_enabled() -> bool {
+    #[cfg(feature = "bench-support")]
+    {
+        return FORCE_LEGACY_WIDGET_SHADOW_OPACITY.with(std::cell::Cell::get);
+    }
+    #[cfg(not(feature = "bench-support"))]
+    false
+}
+
 pub(super) fn rounded_rect_shadow_cache_key(
     frame: Rect,
     corner_radius: f32,
@@ -25,7 +60,9 @@ pub(super) fn rounded_rect_shadow_cache_key(
     hash_f32(shadow.blur.get(), &mut hasher);
     hash_f32(shadow.spread.get(), &mut hasher);
     shadow.color.hash(&mut hasher);
-    hash_f32(opacity, &mut hasher);
+    if widget_shadow_opacity_legacy_enabled() {
+        hash_f32(opacity, &mut hasher);
+    }
     hash_f32(scale_factor, &mut hasher);
     hasher.finish()
 }
@@ -73,7 +110,13 @@ pub(super) fn rasterize_rounded_rect_shadow(
     .fast_blur((shadow.blur.get() * scale_factor).max(0.0));
 
     let mut pixels = blurred.to_rgba8().into_raw();
-    let shadow_color = shadow.color.with_alpha_factor(opacity);
+    let shadow_color = shadow
+        .color
+        .with_alpha_factor(if widget_shadow_opacity_legacy_enabled() {
+            opacity
+        } else {
+            1.0
+        });
     for pixel in pixels.chunks_exact_mut(4) {
         let alpha = pixel[3] as f32 / 255.0;
         pixel[0] = ((shadow_color.r as f32) * alpha).round().clamp(0.0, 255.0) as u8;
@@ -186,6 +229,86 @@ fn append_tiny_skia_arc_segments(
             }
         } else {
             builder.line_to(px, py);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ui::unit::dp;
+
+    fn test_shadow() -> crate::theme::Shadow {
+        crate::theme::Shadow {
+            offset_x: dp(0.0),
+            offset_y: dp(3.0),
+            blur: dp(6.0),
+            spread: dp(-1.0),
+            color: Color::hexa(0x1122339B),
+        }
+    }
+
+    #[test]
+    fn canonical_widget_shadow_pixels_and_cache_key_ignore_visual_opacity() {
+        let frame = Rect::new(0.0, 0.0, 48.0, 32.0);
+        let shadow = test_shadow();
+        let low_key = rounded_rect_shadow_cache_key(frame, 8.0, shadow.clone(), 0.25, 1.0);
+        let high_key = rounded_rect_shadow_cache_key(frame, 8.0, shadow.clone(), 0.85, 1.0);
+        assert_eq!(low_key, high_key);
+
+        let low = rasterize_rounded_rect_shadow(
+            frame,
+            8.0,
+            shadow.clone(),
+            0.25,
+            -16.0,
+            -16.0,
+            80,
+            72,
+            1.0,
+        )
+        .expect("canonical low-opacity shadow");
+        let high =
+            rasterize_rounded_rect_shadow(frame, 8.0, shadow, 0.85, -16.0, -16.0, 80, 72, 1.0)
+                .expect("canonical high-opacity shadow");
+        assert_eq!(low.pixels(), high.pixels());
+    }
+
+    #[cfg(feature = "bench-support")]
+    #[test]
+    fn canonical_primitive_opacity_matches_legacy_baked_alpha_within_two_lsb() {
+        let frame = Rect::new(0.0, 0.0, 48.0, 32.0);
+        let shadow = test_shadow();
+        let opacity = 0.37;
+        let canonical = rasterize_rounded_rect_shadow(
+            frame,
+            8.0,
+            shadow.clone(),
+            opacity,
+            -16.0,
+            -16.0,
+            80,
+            72,
+            1.0,
+        )
+        .expect("canonical shadow");
+        let legacy = with_legacy_widget_shadow_opacity(true, || {
+            rasterize_rounded_rect_shadow(frame, 8.0, shadow, opacity, -16.0, -16.0, 80, 72, 1.0)
+        })
+        .expect("legacy shadow");
+        for (canonical, legacy) in canonical
+            .pixels()
+            .chunks_exact(4)
+            .zip(legacy.pixels().chunks_exact(4))
+        {
+            assert_eq!(&canonical[..3], &legacy[..3]);
+            let canonical_draw_alpha = canonical[3] as f32 * opacity;
+            assert!(
+                (canonical_draw_alpha - legacy[3] as f32).abs() <= 2.0,
+                "canonical={} legacy={}",
+                canonical_draw_alpha,
+                legacy[3]
+            );
         }
     }
 }

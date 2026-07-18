@@ -18,7 +18,8 @@ use crate::ui::widget::common::{
     TextPrimitive, TexturePrimitive,
 };
 use crate::ui::widget::menu::{
-    ContextMenuDescriptor, MenuDescriptor, MenuIcon, MenuItemKind, MenuItemState,
+    menu_item_state_owner, ContextMenuDescriptor, MenuDescriptor, MenuIcon, MenuItemKind,
+    MenuItemState,
 };
 use crate::ui::widget::overlay::{
     collect::emit_overlay, Alignment, Anchor, AnchorKey, FlipPolicy, Overlay, OverlayContent,
@@ -143,6 +144,8 @@ fn context_menu_as_menu_descriptor<VM>(menu: &ContextMenuDescriptor<VM>) -> Menu
     }
 }
 
+const SUBMENU_OVERLAY_TAG: u64 = 0x5342_4d45_4e55_4f56; // "SBMENUOV"
+
 /// 不被 Menu 修饰符限定的子流程——也供未来 ContextMenu / MenuBar 复用。
 pub(crate) fn emit_menu_layer<VM>(
     element: &ResolvedElement<VM>,
@@ -153,6 +156,31 @@ pub(crate) fn emit_menu_layer<VM>(
     style: &MenuStyle,
     anchor: Anchor,
     overlay_id_override: Option<OverlayId>,
+) {
+    emit_menu_layer_at_path(
+        element,
+        context,
+        computed,
+        visual,
+        menu,
+        style,
+        anchor,
+        overlay_id_override,
+        &[],
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+fn emit_menu_layer_at_path<VM>(
+    element: &ResolvedElement<VM>,
+    context: &mut CollectContext<'_, '_>,
+    computed: &mut ComputedScene<VM>,
+    visual: &CollectVisualState,
+    menu: &MenuDescriptor<VM>,
+    style: &MenuStyle,
+    anchor: Anchor,
+    overlay_id_override: Option<OverlayId>,
+    parent_path: &[usize],
 ) {
     if menu.items.is_empty() {
         return;
@@ -382,6 +410,7 @@ pub(crate) fn emit_menu_layer<VM>(
 
     let mut hits = Vec::with_capacity(menu.items.len());
     let menu_id = element.id;
+    let state_owner = menu_item_state_owner(menu_id, parent_path);
     let on_open_change = menu.on_open_change.clone();
     // 收集子菜单候选：(parent_item_index, item_rect)。emit_overlay 后用它递归 emit 子菜单。
     let mut submenu_candidates: Vec<(usize, Rect)> = Vec::new();
@@ -425,7 +454,7 @@ pub(crate) fn emit_menu_layer<VM>(
                     .as_ref()
                     .map(|c| c.resolve())
                     .unwrap_or(false);
-                let mut widget_state = context.widget_states.get_select_option(menu_id, index);
+                let mut widget_state = context.widget_states.get_select_option(state_owner, index);
                 widget_state.disabled = disabled;
                 widget_state.selected = is_checked;
                 widget_state.checked = is_checked;
@@ -650,6 +679,7 @@ pub(crate) fn emit_menu_layer<VM>(
                     } else {
                         HitInteraction::SelectOption {
                             id: menu_id,
+                            state_id: state_owner,
                             option_index: index,
                             interactions: Default::default(),
                             on_select,
@@ -715,6 +745,8 @@ pub(crate) fn emit_menu_layer<VM>(
         let origin_y = Dp::from(solved.rect.y);
         let parent_overlay_id = overlay_id.0;
         for (sub_idx, item_rect) in submenu_candidates {
+            let mut submenu_path = parent_path.to_vec();
+            submenu_path.push(sub_idx);
             let absolute_item_rect = Rect::new(
                 origin_x + item_rect.x,
                 origin_y + item_rect.y,
@@ -736,10 +768,14 @@ pub(crate) fn emit_menu_layer<VM>(
                 menubar_index: None,
                 menubar_set_active: None,
             };
-            // 唯一 overlay_id：父 id 与 sub_idx 组合，保证嵌套层级互不冲突。
-            let nested_overlay_id =
-                crate::ui::widget::OverlayId::new(parent_overlay_id ^ ((sub_idx as u64 + 1) << 32));
-            emit_menu_layer(
+            // The full submenu path participates in the id. The previous repeated XOR scheme
+            // cancelled itself for paths such as `[0, 0]`, aliasing a grandchild with an ancestor.
+            let nested_overlay_id = crate::ui::widget::OverlayId::new(
+                menu_item_state_owner(menu_id, &submenu_path).raw()
+                    ^ SUBMENU_OVERLAY_TAG
+                    ^ parent_overlay_id.rotate_left(17),
+            );
+            emit_menu_layer_at_path(
                 element,
                 context,
                 computed,
@@ -748,6 +784,7 @@ pub(crate) fn emit_menu_layer<VM>(
                 style,
                 crate::ui::widget::overlay::Anchor::Rect(absolute_item_rect),
                 Some(nested_overlay_id),
+                &submenu_path,
             );
         }
     }
@@ -802,6 +839,7 @@ fn svg_menu_icon_primitive(
             texture: std::sync::Arc::clone(texture),
             media_key: None,
             media_layout: None,
+            mask_tint: None,
             frame: target_frame,
             quad: None,
             uv_rect: None,

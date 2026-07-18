@@ -167,6 +167,9 @@ fn freeze_select_style(style: &mut WidgetSelectStyle) {
     freeze_stateful_value(&mut style.border);
     freeze_stateful_value(&mut style.arrow);
     freeze_value(&mut style.menu_background);
+    freeze_value(&mut style.menu_border);
+    freeze_value(&mut style.menu_border_width);
+    freeze_value(&mut style.menu_radius);
     freeze_stateful_value(&mut style.option_background);
     freeze_value(&mut style.selected_option_background);
     freeze_value(&mut style.border_width);

@@ -239,6 +239,7 @@ impl<VM: 'static> ResolvedElement<VM> {
                 if context.gpu_scroll_enabled {
                     context.gpu_scroll_container = Some(self.id);
                 }
+                let track_portal_geometry = context.portal_accessibility_geometry.is_some();
                 for child_index in child_range {
                     let child = &children[child_index];
                     let child_layout = &layout_node.children[child_index];
@@ -251,6 +252,13 @@ impl<VM: 'static> ResolvedElement<VM> {
                     ) {
                         continue;
                     }
+                    let accessibility_path_len = if track_portal_geometry {
+                        let len = context.portal_accessibility_path.len();
+                        context.portal_accessibility_path.push(child_index);
+                        len
+                    } else {
+                        0
+                    };
                     let child_id = child.collect_subtree_cache(
                         child_layout,
                         VisualContext {
@@ -266,6 +274,11 @@ impl<VM: 'static> ResolvedElement<VM> {
                         caches.chunk_parts,
                         caches.visual_contexts,
                     );
+                    if track_portal_geometry {
+                        context
+                            .portal_accessibility_path
+                            .truncate(accessibility_path_len);
+                    }
                     if let Some(child_chunk) = caches.chunks.get(&child_id) {
                         computed.extend(child_chunk);
                     }
@@ -429,10 +442,12 @@ impl<VM: 'static> ResolvedElement<VM> {
                 if context.gpu_scroll_enabled {
                     context.gpu_scroll_container = Some(self.id);
                 }
-                for ((child, child_layout), meta) in children
+                let track_portal_geometry = context.portal_accessibility_geometry.is_some();
+                for (child_index, ((child, child_layout), meta)) in children
                     .iter()
                     .zip(layout_node.children.iter())
                     .zip(child_meta.iter())
+                    .enumerate()
                 {
                     if !item_layout.is_measured()
                         && should_skip_fully_clipped_child(
@@ -445,6 +460,13 @@ impl<VM: 'static> ResolvedElement<VM> {
                     {
                         continue;
                     }
+                    let accessibility_path_len = if track_portal_geometry {
+                        let len = context.portal_accessibility_path.len();
+                        context.portal_accessibility_path.push(child_index);
+                        len
+                    } else {
+                        0
+                    };
                     let child_id = child.collect_subtree_cache(
                         child_layout,
                         VisualContext {
@@ -460,6 +482,11 @@ impl<VM: 'static> ResolvedElement<VM> {
                         caches.chunk_parts,
                         caches.visual_contexts,
                     );
+                    if track_portal_geometry {
+                        context
+                            .portal_accessibility_path
+                            .truncate(accessibility_path_len);
+                    }
                     if item_layout.is_measured() {
                         let layout = context
                             .taffy
@@ -617,6 +644,19 @@ impl<VM: 'static> ResolvedElement<VM> {
                         )
                     })
                     .unwrap_or(Color::rgba(255, 255, 255, 0));
+                let mask_tint = image.runtime_mask_tint.as_ref().map(|resolver| {
+                    track_property_scope(PropertySlot::TextureMaskTint, || {
+                        resolver(
+                            &context.style_context,
+                            context.style_sheet,
+                            &self.visual,
+                            visual.widget_state,
+                            context.animations,
+                            self.id,
+                            context.now,
+                        )
+                    })
+                });
                 push_media_texture_or_placeholder(
                     self.id,
                     &source,
@@ -627,6 +667,7 @@ impl<VM: 'static> ResolvedElement<VM> {
                     visual.primitive_clip,
                     visual.primitive_clip_mask,
                     visual.opacity,
+                    mask_tint,
                     loading_background,
                     context,
                     computed,

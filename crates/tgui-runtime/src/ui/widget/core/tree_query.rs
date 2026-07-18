@@ -189,26 +189,33 @@ impl<VM: 'static> WidgetTree<VM> {
         let mut path = HitPath::<VM>::new();
         let mut ids = smallvec::SmallVec::<[HitTargetId; 8]>::new();
 
-        if computed.transform_records.is_empty() {
-            if let Some(index) = allow_index.then(|| computed.hit_test_index()).flatten() {
-                index.for_each_normal_candidate(point.y, |hit_index| {
-                    let hit = &computed.hit_regions[hit_index];
-                    if hit.contains_without_transform(point) {
-                        push_hit_interaction(&mut path, &mut ids, hit.interaction.clone());
-                    }
-                });
-                // Overlay regions are a separate, later stream. Keeping this second pass is
-                // required for the same normal -> overlay z-order and occluder semantics as the
-                // original chained iterator.
-                index.for_each_overlay_candidate(point.y, |hit_index| {
-                    let hit = &computed.overlay_hit_regions[hit_index];
-                    if hit.contains_without_transform(point) {
-                        push_hit_interaction(&mut path, &mut ids, hit.interaction.clone());
-                    }
-                });
-                return path;
-            }
+        if let Some(index) = allow_index.then(|| computed.hit_test_index()).flatten() {
+            index.for_each_normal_candidate(point.y, |hit_index| {
+                push_hit_candidate(
+                    &mut path,
+                    &mut ids,
+                    &computed.hit_regions[hit_index],
+                    point,
+                    &computed.transform_records,
+                );
+            });
+            // Overlay regions are a separate, later stream. Keeping this second pass is required
+            // for the same normal -> overlay z-order and occluder semantics as the exact chained
+            // scan; each stream internally merges indexed, global, and transformed candidates in
+            // original hit-region order.
+            index.for_each_overlay_candidate(point.y, |hit_index| {
+                push_hit_candidate(
+                    &mut path,
+                    &mut ids,
+                    &computed.overlay_hit_regions[hit_index],
+                    point,
+                    &computed.transform_records,
+                );
+            });
+            return path;
+        }
 
+        if computed.transform_records.is_empty() {
             for hit in computed
                 .hit_regions
                 .iter()
@@ -459,6 +466,25 @@ impl<VM: 'static> WidgetTree<VM> {
     }
 }
 
+fn push_hit_candidate<VM>(
+    path: &mut HitPath<VM>,
+    ids: &mut smallvec::SmallVec<[HitTargetId; 8]>,
+    hit: &crate::ui::widget::HitRegion<VM>,
+    point: Point,
+    transform_records: &std::collections::HashMap<
+        WidgetId,
+        crate::ui::widget::common::TransformRecord,
+    >,
+) {
+    if hit.transform_chain.is_empty() {
+        if hit.contains_without_transform(point) {
+            push_hit_interaction(path, ids, hit.interaction.clone());
+        }
+    } else if let Some(delta) = hit.hit_delta_if_contains(point, transform_records) {
+        push_hit_interaction(path, ids, hit.interaction_translated(delta));
+    }
+}
+
 fn push_hit_interaction<VM>(
     path: &mut HitPath<VM>,
     ids: &mut smallvec::SmallVec<[HitTargetId; 8]>,
@@ -638,9 +664,9 @@ mod hit_test_index_tests {
     }
 
     #[test]
-    fn transform_records_force_exact_full_scan_fallback() {
+    fn sparse_transforms_merge_with_indexed_hits_and_overlays_exactly() {
         let mut scene = ComputedScene::<()>::default();
-        for index in 0..64_u64 {
+        for index in 0..96_u64 {
             scene.hit_regions.push(region(
                 Rect::new(0.0, index as f32 * 20.0, 100.0, 18.0),
                 HitGeometry::Rect,
@@ -649,6 +675,18 @@ mod hit_test_index_tests {
         }
         let transform_id = WidgetId::from_raw(500);
         scene.hit_regions[20].transform_chain.push(transform_id);
+        let mut transformed_quad = region(
+            Rect::new(0.0, 500.0, 100.0, 100.0),
+            HitGeometry::Quad([
+                Point::new(0.0, 500.0),
+                Point::new(100.0, 500.0),
+                Point::new(80.0, 600.0),
+                Point::new(20.0, 600.0),
+            ]),
+            widget(902),
+        );
+        transformed_quad.transform_chain.push(transform_id);
+        scene.hit_regions.push(transformed_quad);
         scene.transform_records.insert(
             transform_id,
             TransformRecord {
@@ -658,7 +696,115 @@ mod hit_test_index_tests {
             },
         );
 
-        assert!(scene.hit_test_index().is_none());
+        let mut transformed_overlay = region(
+            Rect::new(0.0, 400.0, 100.0, 18.0),
+            HitGeometry::Rect,
+            widget(900),
+        );
+        transformed_overlay.transform_chain.push(transform_id);
+        transformed_overlay.clip_rect = Some(Rect::new(300.0, 440.0, 100.0, 30.0));
+        scene.overlay_hit_regions.push(transformed_overlay);
+        scene.overlay_hit_regions.push(region(
+            Rect::new(300.0, 450.0, 100.0, 18.0),
+            HitGeometry::Rect,
+            HitInteraction::Occluder {
+                id: WidgetId::from_raw(901),
+            },
+        ));
+        scene.overlay_hit_regions.push(region(
+            Rect::new(300.0, 450.0, 100.0, 18.0),
+            HitGeometry::Rect,
+            HitInteraction::Disabled {
+                id: WidgetId::from_raw(900),
+            },
+        ));
+
+        assert!(
+            scene.hit_test_index().is_some(),
+            "a sparse transformed side stream should retain the spatial index"
+        );
+        for point in [
+            Point::new(20.0, 405.0),
+            Point::new(320.0, 455.0),
+            Point::new(320.0, 469.0),
+            Point::new(320.0, 471.0),
+            Point::new(350.0, 575.0),
+            Point::new(305.0, 630.0),
+        ] {
+            assert_index_matches_full_scan(&scene, point);
+        }
+
+        // Retained transform offsets update without rebuilding raw hit rects or this lazy index.
+        // The transformed side stream must therefore remain exact after an in-place record move.
+        scene
+            .transform_records
+            .get_mut(&transform_id)
+            .expect("transform record")
+            .current_offset = Point::new(420.0, 75.0);
+        for point in [
+            Point::new(320.0, 455.0),
+            Point::new(440.0, 480.0),
+            Point::new(440.0, 494.0),
+            Point::new(440.0, 496.0),
+            Point::new(470.0, 600.0),
+            Point::new(425.0, 655.0),
+        ] {
+            assert_index_matches_full_scan(&scene, point);
+        }
+    }
+
+    #[test]
+    fn unrelated_transform_record_does_not_disable_hit_index() {
+        let mut scene = ComputedScene::<()>::default();
+        for index in 0..96_u64 {
+            scene.hit_regions.push(region(
+                Rect::new(0.0, index as f32 * 20.0, 100.0, 18.0),
+                HitGeometry::Rect,
+                widget(index + 1),
+            ));
+        }
+        let transform_id = WidgetId::from_raw(700);
+        scene.transform_records.insert(
+            transform_id,
+            TransformRecord {
+                id: transform_id,
+                base_offset: Point::ZERO,
+                current_offset: Point::new(8.0, 4.0),
+            },
+        );
+
+        assert!(scene.hit_test_index().is_some());
+        assert_index_matches_full_scan(&scene, Point::new(20.0, 455.0));
+    }
+
+    #[test]
+    fn transform_heavy_scene_keeps_exact_full_scan_fallback() {
+        let mut scene = ComputedScene::<()>::default();
+        let transform_id = WidgetId::from_raw(800);
+        for index in 0..520_u64 {
+            let mut hit = region(
+                Rect::new(0.0, index as f32 * 20.0, 100.0, 18.0),
+                HitGeometry::Rect,
+                widget(index + 1),
+            );
+            if index < 456 {
+                hit.transform_chain.push(transform_id);
+            }
+            scene.hit_regions.push(hit);
+        }
+        scene.transform_records.insert(
+            transform_id,
+            TransformRecord {
+                id: transform_id,
+                base_offset: Point::ZERO,
+                current_offset: Point::new(300.0, 50.0),
+            },
+        );
+
+        assert!(
+            scene.hit_test_index().is_none(),
+            "transform-heavy scenes should fall back instead of merging almost a full scan"
+        );
         assert_index_matches_full_scan(&scene, Point::new(320.0, 455.0));
     }
 

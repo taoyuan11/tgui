@@ -1501,7 +1501,7 @@ fn color_picker_trigger<VM: 'static>(
         .align(Align::Center)
         .runtime_layout(move |_layout, container, context, _, _| {
             let metrics = advanced_input_metrics(context.theme);
-            let input = InputStyle::default_for_theme(context.theme);
+            let input = component_input_style(context);
             container.padding = Some(Value::Static(Insets::symmetric(input.padding_x, Dp::ZERO)));
             container.gap = Value::Static(Length::Px(metrics.control_gap));
         })
@@ -2833,11 +2833,29 @@ fn value_color(
     )
 }
 
+fn component_input_style(context: &StyleContext<'_>) -> InputStyle {
+    let mut style = InputStyle::default_for_density(context.theme, context.density);
+    context.theme.components.input.apply(&mut style, context);
+    style
+}
+
+fn component_button_style(context: &StyleContext<'_>, variant: ButtonVariantKind) -> ButtonStyle {
+    let mut style = ButtonStyle::default_for_density(context.theme, context.density, variant);
+    context.theme.components.button.apply(&mut style, context);
+    style
+}
+
+fn component_select_style(context: &StyleContext<'_>) -> SelectStyle {
+    let mut style = SelectStyle::default_for_density(context.theme, context.density);
+    context.theme.components.select.apply(&mut style, context);
+    style
+}
+
 fn mode_colors(context: &StyleContext<'_>) -> (bool, Color, Color, Color, Color, Color, Color) {
     let dark = matches!(context.mode, ResolvedThemeMode::Dark);
-    let input = InputStyle::default_for_theme(context.theme);
-    let select = SelectStyle::default_for_theme(context.theme);
-    let primary_button = ButtonStyle::default_for_theme(context.theme, ButtonVariantKind::Primary);
+    let input = component_input_style(context);
+    let select = component_select_style(context);
+    let primary_button = component_button_style(context, ButtonVariantKind::Primary);
     (
         dark,
         primary_button.background.normal.resolve(),
@@ -2850,7 +2868,7 @@ fn mode_colors(context: &StyleContext<'_>) -> (bool, Color, Color, Color, Color,
 }
 
 fn input_control_shell_style(context: &StyleContext<'_>) -> ContainerStyle {
-    let input = InputStyle::default_for_theme(context.theme);
+    let input = component_input_style(context);
     let mut style = ContainerStyle::default_for_theme(context.theme);
     style.surface.background = Some(input.background.normal);
     style.surface.border_color = Some(input.border.normal);
@@ -2861,7 +2879,7 @@ fn input_control_shell_style(context: &StyleContext<'_>) -> ContainerStyle {
 }
 
 fn input_panel_style(context: &StyleContext<'_>) -> ContainerStyle {
-    let input = InputStyle::default_for_theme(context.theme);
+    let input = component_input_style(context);
     let mut style = ContainerStyle::default_for_theme(context.theme);
     style.surface.background = Some(input.background.normal);
     style.surface.border_color = Some(input.border.normal);
@@ -2872,7 +2890,7 @@ fn input_panel_style(context: &StyleContext<'_>) -> ContainerStyle {
 }
 
 fn upload_drop_zone_style(context: &StyleContext<'_>, state: WidgetState) -> ContainerStyle {
-    let input = InputStyle::default_for_theme(context.theme);
+    let input = component_input_style(context);
     let background = if state.disabled {
         context.theme.colors.disabled
     } else if state.pressed {
@@ -2891,7 +2909,7 @@ fn upload_drop_zone_style(context: &StyleContext<'_>, state: WidgetState) -> Con
     style.surface.background = Some(Value::Static(background));
     style.surface.border_color = Some(Value::Static(border));
     style.surface.border_width = Some(input.border_width);
-    style.surface.border_radius = Some(Value::Static(context.theme.radius.xl));
+    style.surface.border_radius = Some(Value::Static(context.theme.radius.lg));
     style.surface.shadow = None;
     style
 }
@@ -2919,8 +2937,8 @@ fn input_icon_surface_style(context: &StyleContext<'_>) -> ContainerStyle {
 }
 
 fn number_stepper_surface_style(context: &StyleContext<'_>, state: WidgetState) -> ContainerStyle {
-    let button = ButtonStyle::default_for_theme(context.theme, ButtonVariantKind::Secondary);
-    let input = InputStyle::default_for_theme(context.theme);
+    let button = component_button_style(context, ButtonVariantKind::Secondary);
+    let input = component_input_style(context);
     let mut style = ContainerStyle::default_for_theme(context.theme);
     style.surface.background = Some(button.background.resolve(state));
     style.surface.border_color = Some(button.border.resolve(state));
@@ -2931,7 +2949,7 @@ fn number_stepper_surface_style(context: &StyleContext<'_>, state: WidgetState) 
 }
 
 fn ghost_action_surface_style(context: &StyleContext<'_>, state: WidgetState) -> ContainerStyle {
-    let button = ButtonStyle::default_for_theme(context.theme, ButtonVariantKind::Ghost);
+    let button = component_button_style(context, ButtonVariantKind::Ghost);
     let mut style = ContainerStyle::default_for_theme(context.theme);
     style.surface.background = Some(button.background.resolve(state));
     style.surface.border_color = Some(button.border.resolve(state));
@@ -2942,7 +2960,7 @@ fn ghost_action_surface_style(context: &StyleContext<'_>, state: WidgetState) ->
 }
 
 fn color_trigger_accessible_button_style(context: &StyleContext<'_>) -> ButtonStyle {
-    let mut style = ButtonStyle::default_for_theme(context.theme, ButtonVariantKind::Secondary);
+    let mut style = component_button_style(context, ButtonVariantKind::Secondary);
     style.foreground = value_color(
         Color::TRANSPARENT,
         Color::TRANSPARENT,
@@ -2957,15 +2975,16 @@ fn color_trigger_accessible_button_style(context: &StyleContext<'_>) -> ButtonSt
 
 fn picker_popover_content_style(context: &StyleContext<'_>) -> ContainerStyle {
     let popover = PopoverStyle::default_for_theme(context.theme);
+    let select = component_select_style(context);
     let mut style = ContainerStyle::default_for_theme(context.theme);
-    style.surface.background = Some(popover.background);
+    style.surface.background = Some(select.menu_background);
     style.surface.border_radius = Some(popover.radius);
     style.surface.shadow = None;
     style
 }
 
 fn icon_button_style(context: &StyleContext<'_>) -> ButtonStyle {
-    let mut style = ButtonStyle::default_for_theme(context.theme, ButtonVariantKind::Ghost);
+    let mut style = component_button_style(context, ButtonVariantKind::Ghost);
     style.radius = Value::Static(dp(8.0));
     style.padding_x = dp(0.0);
     style.padding_y = dp(0.0);
@@ -2974,8 +2993,8 @@ fn icon_button_style(context: &StyleContext<'_>) -> ButtonStyle {
 }
 
 fn input_icon_button_style(context: &StyleContext<'_>) -> ButtonStyle {
-    let mut style = ButtonStyle::default_for_theme(context.theme, ButtonVariantKind::Secondary);
-    style.radius = InputStyle::default_for_theme(context.theme).radius;
+    let mut style = component_button_style(context, ButtonVariantKind::Secondary);
+    style.radius = component_input_style(context).radius;
     style.padding_x = dp(0.0);
     style.padding_y = dp(0.0);
     style.min_height = advanced_input_metrics(context.theme).control_height;
@@ -2983,7 +3002,7 @@ fn input_icon_button_style(context: &StyleContext<'_>) -> ButtonStyle {
 }
 
 fn time_option_button_style(context: &StyleContext<'_>) -> ButtonStyle {
-    let mut style = ButtonStyle::default_for_theme(context.theme, ButtonVariantKind::Secondary);
+    let mut style = component_button_style(context, ButtonVariantKind::Secondary);
     style.radius = Value::Static(dp(8.0));
     style.padding_x = dp(10.0);
     style.padding_y = dp(4.0);
@@ -3002,7 +3021,8 @@ fn time_option_selected_button_style(context: &StyleContext<'_>) -> ButtonStyle 
     let (_, primary, _, muted, _, _, _) = mode_colors(context);
     let mut style = time_option_button_style(context);
     style.background = value_color(primary, primary.lighten(0.08), primary.darken(0.08), muted);
-    style.foreground = value_color(Color::WHITE, Color::WHITE, Color::WHITE, muted);
+    let on_primary = context.theme.colors.on_primary;
+    style.foreground = value_color(on_primary, on_primary, on_primary, muted);
     style.border = value_color(primary, primary.lighten(0.08), primary.darken(0.08), muted);
     style
 }
@@ -3055,7 +3075,7 @@ fn calendar_day_button_style(
     same_month: bool,
 ) -> ButtonStyle {
     let (_, primary, text, muted, _, _, outline) = mode_colors(context);
-    let mut style = ButtonStyle::default_for_theme(context.theme, ButtonVariantKind::Ghost);
+    let mut style = component_button_style(context, ButtonVariantKind::Ghost);
     let normal_bg = if selected {
         primary
     } else if today {
@@ -3069,11 +3089,11 @@ fn calendar_day_button_style(
         primary.with_alpha_factor(0.10)
     };
     let foreground = if selected {
-        Color::WHITE
+        context.theme.colors.on_primary
     } else if same_month {
         text
     } else {
-        muted.with_alpha_factor(0.72)
+        muted
     };
     let border = if today && !selected {
         primary.with_alpha_factor(0.62)
@@ -3200,6 +3220,27 @@ fn muted_text_style(context: &StyleContext<'_>) -> TextWidgetStyle {
 mod tests {
     use super::*;
 
+    fn relative_luminance(color: Color) -> f32 {
+        fn linear(channel: u8) -> f32 {
+            let channel = f32::from(channel) / 255.0;
+            if channel <= 0.04045 {
+                channel / 12.92
+            } else {
+                ((channel + 0.055) / 1.055).powf(2.4)
+            }
+        }
+        0.2126 * linear(color.r) + 0.7152 * linear(color.g) + 0.0722 * linear(color.b)
+    }
+
+    fn contrast_ratio(a: Color, b: Color) -> f32 {
+        let (lighter, darker) = {
+            let a = relative_luminance(a);
+            let b = relative_luminance(b);
+            (a.max(b), a.min(b))
+        };
+        (lighter + 0.05) / (darker + 0.05)
+    }
+
     #[test]
     fn calendar_month_has_six_weeks() {
         let days = calendar_days(NaiveDate::from_ymd_opt(2026, 6, 1).unwrap());
@@ -3247,5 +3288,50 @@ mod tests {
     #[test]
     fn color_label_formats_rgba_hex() {
         assert_eq!(format_color(Color::rgba(12, 34, 56, 78)), "#0C22384E");
+    }
+
+    #[test]
+    fn selected_time_and_calendar_controls_use_live_on_primary_token() {
+        let mut theme = Theme::dark();
+        theme.colors.primary = Color::hexa(0xF3F4F6FF);
+        theme.colors.on_primary = Color::hexa(0x111827FF);
+        let context = StyleContext::from_theme(&theme);
+
+        let time = time_option_selected_button_style(&context);
+        assert_eq!(time.foreground.normal.resolve(), theme.colors.on_primary);
+        assert_eq!(time.foreground.hovered.resolve(), theme.colors.on_primary);
+
+        let day = calendar_day_button_style(&context, true, false, true);
+        assert_eq!(day.foreground.normal.resolve(), theme.colors.on_primary);
+        assert_eq!(day.foreground.hovered.resolve(), theme.colors.on_primary);
+    }
+
+    #[test]
+    fn adjacent_month_calendar_days_keep_normal_text_contrast() {
+        for theme in [Theme::light(), Theme::dark()] {
+            let context = StyleContext::from_theme(&theme);
+            let style = calendar_day_button_style(&context, false, false, false);
+            let foreground = style.foreground.normal.resolve();
+            assert_eq!(foreground, theme.colors.on_surface_muted);
+            assert!(
+                contrast_ratio(foreground, theme.colors.surface) >= 4.5,
+                "adjacent month text must meet WCAG AA in {:?} mode",
+                theme.mode,
+            );
+        }
+    }
+
+    #[test]
+    fn upload_drop_zone_uses_regular_control_radius() {
+        let mut theme = Theme::light();
+        theme.radius.lg = dp(7.0);
+        theme.radius.xl = dp(13.0);
+        let context = StyleContext::from_theme(&theme);
+        let style = upload_drop_zone_style(&context, WidgetState::default());
+
+        assert_eq!(
+            style.surface.border_radius,
+            Some(Value::Static(theme.radius.lg))
+        );
     }
 }

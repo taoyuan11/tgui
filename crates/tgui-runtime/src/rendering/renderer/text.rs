@@ -717,6 +717,10 @@ impl TextAtlasAllocator {
         self.live_allocations == 0
     }
 
+    fn live_allocation_count(&self) -> usize {
+        self.live_allocations
+    }
+
     fn push_free(&mut self, rect: AtlasRect) {
         if rect.width > 0 && rect.height > 0 {
             self.free.push(rect);
@@ -808,6 +812,84 @@ pub(super) struct TextAtlas {
     shadow_budget_bytes: usize,
     #[cfg(any(test, feature = "bench-support"))]
     upload_stats: TextAtlasUploadStats,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(super) struct TextAtlasReleaseStats {
+    pub(super) released_allocations: usize,
+    pub(super) whole_pages: usize,
+    pub(super) whole_page_allocations: usize,
+    pub(super) individual_allocations: usize,
+}
+
+fn should_release_all_atlas_pages(
+    enabled: bool,
+    stale_allocations: usize,
+    live_allocations_by_page: impl Iterator<Item = usize>,
+) -> bool {
+    if !enabled || stale_allocations == 0 {
+        return false;
+    }
+    let live_allocations = live_allocations_by_page.sum::<usize>();
+    live_allocations != 0 && stale_allocations == live_allocations
+}
+
+#[cfg(any(test, debug_assertions))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct TextAtlasPageReleaseMetadata {
+    page_id: u64,
+    format: TextAtlasFormat,
+    live_allocations: usize,
+}
+
+#[cfg(any(test, debug_assertions))]
+fn all_stale_allocation_metadata_is_valid(
+    pages: &[TextAtlasPageReleaseMetadata],
+    allocations: &[TextAtlasAllocation],
+    page_width: u32,
+    page_height: u32,
+) -> bool {
+    if pages.iter().enumerate().any(|(index, page)| {
+        pages[..index]
+            .iter()
+            .any(|other| other.page_id == page.page_id)
+    }) || allocations.len()
+        != pages
+            .iter()
+            .map(|page| page.live_allocations)
+            .sum::<usize>()
+    {
+        return false;
+    }
+
+    for (index, allocation) in allocations.iter().enumerate() {
+        let Some(page) = pages.iter().find(|page| page.page_id == allocation.page_id) else {
+            return false;
+        };
+        if allocation.format != page.format
+            || allocation.width == 0
+            || allocation.height == 0
+            || allocation
+                .x
+                .checked_add(allocation.width)
+                .is_none_or(|right| right > page_width)
+            || allocation
+                .y
+                .checked_add(allocation.height)
+                .is_none_or(|bottom| bottom > page_height)
+            || allocations[..index].contains(allocation)
+        {
+            return false;
+        }
+    }
+
+    pages.iter().all(|page| {
+        allocations
+            .iter()
+            .filter(|allocation| allocation.page_id == page.page_id)
+            .count()
+            == page.live_allocations
+    })
 }
 
 #[cfg(any(test, feature = "bench-support"))]
@@ -1101,7 +1183,7 @@ impl TextAtlas {
         };
     }
 
-    pub(super) fn release(&mut self, allocation: TextAtlasAllocation) {
+    fn release_internal(&mut self, allocation: TextAtlasAllocation) -> bool {
         let Some(index) = self
             .pages
             .iter()
@@ -1111,7 +1193,7 @@ impl TextAtlas {
                 false,
                 "released text atlas allocation references a missing page"
             );
-            return;
+            return false;
         };
         let page = &mut self.pages[index];
         debug_assert_eq!(page.format, allocation.format);
@@ -1124,15 +1206,107 @@ impl TextAtlas {
         if page.allocator.is_empty() {
             self.pages.swap_remove(index);
         }
+        true
+    }
+
+    pub(super) fn release(&mut self, allocation: TextAtlasAllocation) {
+        if !self.release_internal(allocation) {
+            return;
+        }
         #[cfg(any(test, feature = "bench-support"))]
         {
             self.refresh_shadow_stats();
         }
     }
 
+    pub(super) fn release_many(
+        &mut self,
+        allocations: &[TextAtlasAllocation],
+        whole_page_fast_path: bool,
+    ) -> TextAtlasReleaseStats {
+        if allocations.is_empty() {
+            return TextAtlasReleaseStats::default();
+        }
+
+        // The common replacement workload evicts every atlas allocation at once. A
+        // single O(page-count) live sum proves that case under the cache's unique
+        // allocation invariant. Partial/mixed eviction deliberately performs no
+        // per-page stale counting or lookup probe and falls straight through to the
+        // former per-allocation release path.
+        let all_atlas_allocations_stale = should_release_all_atlas_pages(
+            whole_page_fast_path,
+            allocations.len(),
+            self.pages
+                .iter()
+                .map(|page| page.allocator.live_allocation_count()),
+        );
+        if all_atlas_allocations_stale {
+            #[cfg(debug_assertions)]
+            self.debug_assert_all_live_allocations_released_once(allocations);
+
+            let whole_pages = self.pages.len();
+            self.pages.clear();
+            let stats = TextAtlasReleaseStats {
+                released_allocations: allocations.len(),
+                whole_pages,
+                whole_page_allocations: allocations.len(),
+                individual_allocations: 0,
+            };
+            #[cfg(any(test, feature = "bench-support"))]
+            {
+                self.refresh_shadow_stats();
+            }
+            return stats;
+        }
+
+        let mut stats = TextAtlasReleaseStats::default();
+        for allocation in allocations.iter().copied() {
+            if self.release_internal(allocation) {
+                stats.released_allocations = stats.released_allocations.saturating_add(1);
+                stats.individual_allocations = stats.individual_allocations.saturating_add(1);
+            }
+        }
+        debug_assert_eq!(stats.released_allocations, allocations.len());
+        #[cfg(any(test, feature = "bench-support"))]
+        {
+            self.refresh_shadow_stats();
+        }
+        stats
+    }
+
+    #[cfg(debug_assertions)]
+    fn debug_assert_all_live_allocations_released_once(&self, allocations: &[TextAtlasAllocation]) {
+        let pages = self
+            .pages
+            .iter()
+            .map(|page| TextAtlasPageReleaseMetadata {
+                page_id: page.id,
+                format: page.format,
+                live_allocations: page.allocator.live_allocation_count(),
+            })
+            .collect::<Vec<_>>();
+        debug_assert!(
+            all_stale_allocation_metadata_is_valid(
+                &pages,
+                allocations,
+                self.page_width,
+                self.page_height,
+            ),
+            "all-stale text atlas release metadata is incomplete or duplicated"
+        );
+    }
+
     #[cfg(feature = "bench-support")]
     pub(super) fn page_count(&self) -> usize {
         self.pages.len()
+    }
+
+    #[cfg(feature = "bench-support")]
+    pub(super) fn live_allocation_count(&self) -> usize {
+        self.pages
+            .iter()
+            .map(|page| page.allocator.live_allocation_count())
+            .sum()
     }
 
     #[cfg(feature = "bench-support")]
@@ -2163,6 +2337,219 @@ mod tests {
         assert!(allocator.is_empty());
         assert_eq!(allocator.free.len(), 1);
         assert_eq!(allocator.free[0].area(), 257 * 193);
+    }
+
+    #[test]
+    fn text_atlas_whole_page_release_gate_handles_single_multi_mixed_and_zero() {
+        assert!(should_release_all_atlas_pages(true, 3, [3].into_iter()));
+        assert!(should_release_all_atlas_pages(true, 5, [2, 3].into_iter()));
+        assert!(!should_release_all_atlas_pages(true, 4, [2, 3].into_iter()));
+        assert!(!should_release_all_atlas_pages(true, 0, std::iter::empty()));
+        assert!(!should_release_all_atlas_pages(
+            false,
+            5,
+            [2, 3].into_iter()
+        ));
+    }
+
+    #[test]
+    fn text_atlas_all_stale_metadata_rejects_duplicate_missing_and_phantom_allocations() {
+        let pages = [
+            TextAtlasPageReleaseMetadata {
+                page_id: 11,
+                format: TextAtlasFormat::R8Coverage,
+                live_allocations: 2,
+            },
+            TextAtlasPageReleaseMetadata {
+                page_id: 22,
+                format: TextAtlasFormat::Rgba,
+                live_allocations: 3,
+            },
+        ];
+        let allocation = |page_id, format, x| TextAtlasAllocation {
+            page_id,
+            format,
+            x,
+            y: 0,
+            width: 8,
+            height: 10,
+        };
+        let allocations = vec![
+            allocation(11, TextAtlasFormat::R8Coverage, 0),
+            allocation(11, TextAtlasFormat::R8Coverage, 8),
+            allocation(22, TextAtlasFormat::Rgba, 0),
+            allocation(22, TextAtlasFormat::Rgba, 8),
+            allocation(22, TextAtlasFormat::Rgba, 16),
+        ];
+        assert!(all_stale_allocation_metadata_is_valid(
+            &pages,
+            &allocations,
+            64,
+            64,
+        ));
+
+        let mut duplicate = allocations.clone();
+        duplicate[4] = duplicate[3];
+        assert!(!all_stale_allocation_metadata_is_valid(
+            &pages, &duplicate, 64, 64,
+        ));
+        assert!(!all_stale_allocation_metadata_is_valid(
+            &pages,
+            &allocations[..4],
+            64,
+            64,
+        ));
+
+        let mut phantom = allocations.clone();
+        phantom[4].page_id = 99;
+        assert!(!all_stale_allocation_metadata_is_valid(
+            &pages, &phantom, 64, 64,
+        ));
+
+        let mut wrong_format = allocations.clone();
+        wrong_format[0].format = TextAtlasFormat::Rgba;
+        assert!(!all_stale_allocation_metadata_is_valid(
+            &pages,
+            &wrong_format,
+            64,
+            64,
+        ));
+
+        let mut out_of_bounds = allocations.clone();
+        out_of_bounds[0].x = 60;
+        assert!(!all_stale_allocation_metadata_is_valid(
+            &pages,
+            &out_of_bounds,
+            64,
+            64,
+        ));
+
+        let duplicate_pages = [pages[0], pages[0]];
+        assert!(!all_stale_allocation_metadata_is_valid(
+            &duplicate_pages,
+            &allocations[..4],
+            64,
+            64,
+        ));
+    }
+
+    #[cfg(feature = "bench-support")]
+    fn add_test_atlas_page(
+        renderer: &mut Renderer,
+        atlas: &mut TextAtlas,
+        format: TextAtlasFormat,
+        label: &'static str,
+    ) {
+        let texture = renderer.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some(label),
+            size: wgpu::Extent3d {
+                width: atlas.page_width,
+                height: atlas.page_height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: format.texture_format(),
+            usage: wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+        let binding = renderer.create_text_sprite_binding(&texture, label);
+        atlas.add_page(texture, binding, format);
+    }
+
+    #[cfg(feature = "bench-support")]
+    #[test]
+    fn text_atlas_global_all_stale_drop_skips_mixed_page_probe() {
+        let Ok((mut renderer, _)) = pollster::block_on(Renderer::new_headless_for_bench(
+            crate::platform::dpi::PhysicalSize::new(64, 64),
+            TguiColor::WHITE,
+        )) else {
+            return;
+        };
+        let mut atlas = TextAtlas::new(8192);
+        add_test_atlas_page(
+            &mut renderer,
+            &mut atlas,
+            TextAtlasFormat::R8Coverage,
+            "tgui-text-atlas-bulk-r8",
+        );
+        add_test_atlas_page(
+            &mut renderer,
+            &mut atlas,
+            TextAtlasFormat::Rgba,
+            "tgui-text-atlas-bulk-rgba",
+        );
+        let r8 = (0..4)
+            .map(|_| {
+                atlas
+                    .allocate_existing(20, 22, TextAtlasFormat::R8Coverage)
+                    .expect("R8 bulk fixture allocation")
+                    .allocation
+            })
+            .collect::<Vec<_>>();
+        let rgba = (0..4)
+            .map(|_| {
+                atlas
+                    .allocate_existing(20, 22, TextAtlasFormat::Rgba)
+                    .expect("RGBA mixed fixture allocation")
+                    .allocation
+            })
+            .collect::<Vec<_>>();
+        let releases = vec![r8[0], rgba[0], r8[1], rgba[1], r8[2], r8[3]];
+
+        let stats = atlas.release_many(&releases, true);
+
+        assert_eq!(
+            stats,
+            TextAtlasReleaseStats {
+                released_allocations: 6,
+                whole_pages: 0,
+                whole_page_allocations: 0,
+                individual_allocations: 6,
+            }
+        );
+        assert_eq!(atlas.page_counts_by_format(), (0, 1));
+        assert_eq!(atlas.live_allocation_count(), 2);
+        let reused = atlas
+            .allocate_existing(20, 22, TextAtlasFormat::Rgba)
+            .expect("partially released RGBA page remains reusable")
+            .allocation;
+        assert_eq!(reused.page_id, rgba[2].page_id);
+
+        let final_stats = atlas.release_many(&[rgba[2], rgba[3], reused], true);
+        assert_eq!(final_stats.whole_pages, 1);
+        assert_eq!(final_stats.whole_page_allocations, 3);
+        assert_eq!(final_stats.individual_allocations, 0);
+        assert_eq!(atlas.page_count(), 0);
+        assert_eq!(atlas.live_allocation_count(), 0);
+
+        add_test_atlas_page(
+            &mut renderer,
+            &mut atlas,
+            TextAtlasFormat::R8Coverage,
+            "tgui-text-atlas-legacy-r8",
+        );
+        add_test_atlas_page(
+            &mut renderer,
+            &mut atlas,
+            TextAtlasFormat::Rgba,
+            "tgui-text-atlas-legacy-rgba",
+        );
+        let legacy_r8 = atlas
+            .allocate_existing(20, 22, TextAtlasFormat::R8Coverage)
+            .expect("legacy R8 allocation")
+            .allocation;
+        let legacy_rgba = atlas
+            .allocate_existing(20, 22, TextAtlasFormat::Rgba)
+            .expect("legacy RGBA allocation")
+            .allocation;
+        let legacy_stats = atlas.release_many(&[legacy_r8, legacy_rgba], false);
+        assert_eq!(legacy_stats.whole_pages, 0);
+        assert_eq!(legacy_stats.whole_page_allocations, 0);
+        assert_eq!(legacy_stats.individual_allocations, 2);
+        assert_eq!(legacy_stats.released_allocations, 2);
+        assert_eq!(atlas.page_count(), 0);
     }
 
     #[cfg(feature = "bench-support")]

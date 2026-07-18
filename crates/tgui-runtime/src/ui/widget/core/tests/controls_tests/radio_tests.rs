@@ -156,6 +156,85 @@ fn checked_radio_renders_indicator() {
 }
 
 #[test]
+fn default_radio_uses_one_outline_shape_and_an_optional_indicator() {
+    let theme = Theme::default();
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let viewport = Rect::new(0.0, 0.0, 80.0, 40.0);
+
+    let mut unchecked_animations = AnimationEngine::default();
+    let unchecked: WidgetTree<()> = WidgetTree::new(Radio::new(false));
+    let unchecked = unchecked.render_output(
+        &font_manager,
+        &theme,
+        &media,
+        &mut unchecked_animations,
+        None,
+        None,
+        &HashMap::new(),
+        viewport,
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+    assert_eq!(unchecked.primitives.shapes.len(), 1);
+    assert_eq!(unchecked.primitives.overlay_shapes.len(), 0);
+
+    let mut checked_animations = AnimationEngine::default();
+    let checked: WidgetTree<()> = WidgetTree::new(Radio::new(true));
+    let checked = checked.render_output(
+        &font_manager,
+        &theme,
+        &media,
+        &mut checked_animations,
+        None,
+        None,
+        &HashMap::new(),
+        viewport,
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+    assert_eq!(checked.primitives.shapes.len(), 1);
+    assert_eq!(checked.primitives.overlay_shapes.len(), 1);
+}
+
+#[test]
+fn filled_radio_override_restores_the_background_shape() {
+    let theme = Theme::default();
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let fill = Color::hexa(0xE2E8F0FF);
+    let tree: WidgetTree<()> = WidgetTree::new(Radio::new(false).style(move |style, _| {
+        style.background = StateValue::new(fill.into());
+        style.background_checked = StateValue::new(fill.into());
+    }));
+    let mut animations = AnimationEngine::default();
+    let rendered = tree.render_output(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        None,
+        None,
+        &HashMap::new(),
+        Rect::new(0.0, 0.0, 80.0, 40.0),
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+
+    assert_eq!(rendered.primitives.shapes.len(), 2);
+    assert_eq!(rendered.primitives.shapes[0].color, fill);
+}
+
+#[test]
 fn disabled_radio_exposes_disabled_hit_for_cursor_only() {
     let theme = Theme::default();
     let font_manager = FontManager::new(&FontCatalog::default());

@@ -206,7 +206,9 @@ pub mod mvvm {
         ValidationVisualState,
     };
     pub use crate::foundation::task::Tasks;
-    pub use crate::foundation::view_model::{Command, CommandContext, ValueCommand, ViewModel};
+    pub use crate::foundation::view_model::{
+        Command, CommandContext, CommandEffect, ValueCommand, ViewModel,
+    };
     pub use crate::foundation::window_control::{WindowControl, WindowResizeDirection};
 }
 
@@ -250,15 +252,25 @@ pub mod prelude {
     pub use crate::logging::{tgui_log, Log, LogConfig, LogConfigError, LogFileConfig, LogLevel};
     pub use crate::media::{ContentFit, MediaBytes, MediaSource};
     pub use crate::mvvm::{
-        Command, CommandContext, Form, FormField, FormSnapshot, FormStatus, ScrollRequest,
-        ScrollRequestMode, ScrollViewController, Signal, State, Tasks, TextChange, TextChangeSet,
-        TextController, TextFormField, TextSnapshot, Toast, ToastAction, ToastId, ToastKind,
-        ToastPlacement, ToastQueue, ValidationErrors, ValidationVisualState, ValueCommand,
-        ViewModel, ViewModelContext, WindowControl, WindowResizeDirection,
+        Command, CommandContext, CommandEffect, Form, FormField, FormSnapshot, FormStatus,
+        ScrollRequest, ScrollRequestMode, ScrollViewController, Signal, State, Tasks, TextChange,
+        TextChangeSet, TextController, TextFormField, TextSnapshot, Toast, ToastAction, ToastId,
+        ToastKind, ToastPlacement, ToastQueue, ValidationErrors, ValidationVisualState,
+        ValueCommand, ViewModel, ViewModelContext, WindowControl, WindowResizeDirection,
     };
     pub use crate::notification::{
         NotificationAction, NotificationActionEvent, NotificationError, NotificationOptions,
         NotificationPermission, Notifications,
+    };
+    #[cfg(feature = "bench-support")]
+    pub use crate::runtime::{
+        RuntimeButtonHoverBenchmarkContext, RuntimeDataGridBenchmarkContext,
+        RuntimeDataGridHoverTarget, RuntimeFocusBenchmarkContext, RuntimeInteractionBenchmarkVm,
+        RuntimeInteractionFrameStats, RuntimeRowHoverBenchmarkContext, RuntimeRowHoverKind,
+        RuntimeRowSelectionBenchmarkContext, RuntimeRowSelectionKind, RuntimeRowSelectionMode,
+        RuntimeScrollBenchmarkContext, RuntimeScrollBenchmarkVm, RuntimeScrollFrameStats,
+        RuntimeSliderValueBenchmarkContext, RuntimeTextContentBenchmarkContext,
+        RuntimeToastBenchmarkContext, RuntimeTreeCheckedBenchmarkContext,
     };
     pub use crate::theme::{
         BorderScale, ColorScheme, ComponentStyle, ComponentThemes, ControlSize, Density,
@@ -268,9 +280,12 @@ pub mod prelude {
     };
     #[cfg(feature = "bench-support")]
     pub use crate::ui::widget::{
-        default_bench_viewport, GpuDrawStats, GpuGlyphRasterCacheStats, GpuTextCacheActivityStats,
-        GpuTextCacheStats, GpuTextureSceneStats, TextMeasureActivityStats, WidgetBenchmarkContext,
-        WidgetBenchmarkStats,
+        default_bench_viewport, widget_type_size_telemetry, ContainerOffsetResolveSnapshot,
+        ContainerScaleResolveSnapshot, GpuDrawStats, GpuGlyphRasterCacheStats,
+        GpuTextCacheActivityStats, GpuTextCacheStats, GpuTextureSceneStats,
+        ProgressValueLabelSnapshot, ProgressValueResolveSnapshot, SelectArrowBenchmarkContext,
+        SelectArrowBenchmarkStats, SliderValueResolveSnapshot, TextMeasureActivityStats,
+        WidgetBenchmarkContext, WidgetBenchmarkStats, WidgetTypeSizeEntry,
     };
     #[cfg(feature = "video")]
     pub use crate::video::{
@@ -347,11 +362,26 @@ pub mod widgets {
         ToastQueue,
     };
     #[cfg(feature = "bench-support")]
+    pub use crate::runtime::{
+        RuntimeButtonHoverBenchmarkContext, RuntimeDataGridBenchmarkContext,
+        RuntimeDataGridHoverTarget, RuntimeFocusBenchmarkContext, RuntimeInteractionBenchmarkVm,
+        RuntimeInteractionFrameStats, RuntimeRowHoverBenchmarkContext, RuntimeRowHoverKind,
+        RuntimeRowSelectionBenchmarkContext, RuntimeRowSelectionKind, RuntimeRowSelectionMode,
+        RuntimeScrollBenchmarkContext, RuntimeScrollBenchmarkVm, RuntimeScrollFrameStats,
+        RuntimeSliderValueBenchmarkContext, RuntimeTextContentBenchmarkContext,
+        RuntimeToastBenchmarkContext, RuntimeTreeCheckedBenchmarkContext,
+    };
+    #[cfg(feature = "bench-support")]
     pub use crate::ui::widget::{
-        bench_support_ext, default_bench_viewport, GpuBenchmarkAdapterInfo, GpuDrawStats,
-        GpuGlyphRasterCacheStats, GpuTextCacheActivityStats, GpuTextCacheStats,
-        GpuTextureSceneStats, TextMeasureActivityStats, WidgetBenchmarkContext,
-        WidgetBenchmarkStats,
+        bench_support_ext, default_bench_viewport, widget_type_size_telemetry,
+        AnimationFrameActivityStats, ContainerOffsetResolveSnapshot, ContainerScaleResolveSnapshot,
+        GpuBenchmarkAdapterInfo, GpuCacheLivenessStats, GpuCleanFrameCacheStats, GpuDrawStats,
+        GpuGlyphRasterCacheStats, GpuPrepareStats, GpuTextCacheActivityStats, GpuTextCacheStats,
+        GpuTextureRetainedState, GpuTextureSceneStats, ProgressValueLabelSnapshot,
+        ProgressValueResolveSnapshot, ScrollRegionLookupStats, ScrollTargetLookupStats,
+        SelectArrowBenchmarkContext, SelectArrowBenchmarkStats, SliderValueResolveSnapshot,
+        TextMeasureActivityStats, WidgetBenchmarkContext, WidgetBenchmarkStats,
+        WidgetTypeSizeEntry,
     };
     pub use crate::ui::widget::{
         rect, BackgroundBrush, BackgroundGradientStop, BackgroundImage, BackgroundLinearGradient,

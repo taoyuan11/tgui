@@ -4,13 +4,129 @@ use accesskit::{
     Action, Node, NodeId, Rect as AccessRect, Role, Toggled, Tree, TreeId, TreeUpdate,
 };
 
+use crate::runtime::overlay::OverlayId;
 use crate::ui::widget::{
-    ComputedScene, HitInteraction, HitRegion, Rect, ResolvedElement, ResolvedSceneLayout,
-    ResolvedWidgetKind, WidgetId,
+    AccessibilityFragment, ComputedScene, HitInteraction, HitRegion, Rect, ResolvedElement,
+    ResolvedSceneLayout, ResolvedWidgetKind, ScrollRegion, WidgetId,
 };
+use smallvec::SmallVec;
 
 pub(crate) const ROOT_NODE_ID: NodeId = NodeId(0);
 const WIDGET_NODE_OFFSET: u64 = 1;
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+struct PortalAccessibilityNodeKey {
+    target_window_instance_id: u64,
+    source_window_instance_id: u64,
+    source_publication_generation: Option<u64>,
+    owner_path: Vec<u64>,
+    widget_id: WidgetId,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct PortalAccessibilityNodeRoute {
+    pub(crate) source_window_instance_id: u64,
+    pub(crate) source_publication_generation: Option<u64>,
+    pub(crate) owner_path: SmallVec<[OverlayId; 2]>,
+    pub(crate) resolved_path: SmallVec<[usize; 4]>,
+    pub(crate) widget_id: WidgetId,
+}
+
+pub(crate) struct AccessibilityNodeRegistry {
+    active_by_key: HashMap<PortalAccessibilityNodeKey, NodeId>,
+    seen_keys: HashSet<PortalAccessibilityNodeKey>,
+    live_routes: HashMap<NodeId, PortalAccessibilityNodeRoute>,
+    live_local_node_ids: HashSet<NodeId>,
+    next_node_id: u64,
+}
+
+impl Default for AccessibilityNodeRegistry {
+    fn default() -> Self {
+        Self {
+            active_by_key: HashMap::new(),
+            seen_keys: HashSet::new(),
+            live_routes: HashMap::new(),
+            live_local_node_ids: HashSet::new(),
+            next_node_id: u64::MAX,
+        }
+    }
+}
+
+impl AccessibilityNodeRegistry {
+    pub(crate) fn begin_update(&mut self) {
+        self.seen_keys.clear();
+        self.live_routes.clear();
+    }
+
+    pub(crate) fn finish_update(&mut self, included: &HashSet<NodeId>) {
+        self.active_by_key
+            .retain(|key, _| self.seen_keys.contains(key));
+        self.live_local_node_ids.clear();
+        self.live_local_node_ids.extend(
+            included
+                .iter()
+                .copied()
+                .filter(|node_id| !self.live_routes.contains_key(node_id)),
+        );
+    }
+
+    pub(crate) fn live_route(&self, node_id: NodeId) -> Option<&PortalAccessibilityNodeRoute> {
+        self.live_routes.get(&node_id)
+    }
+
+    pub(crate) fn live_routes(
+        &self,
+    ) -> impl Iterator<Item = (NodeId, &PortalAccessibilityNodeRoute)> {
+        self.live_routes
+            .iter()
+            .map(|(node_id, route)| (*node_id, route))
+    }
+
+    pub(crate) fn is_live_local_node_id(&self, node_id: NodeId) -> bool {
+        self.live_local_node_ids.contains(&node_id)
+    }
+
+    fn node_id_for(
+        &mut self,
+        target_window_instance_id: u64,
+        route: PortalAccessibilityNodeRoute,
+        reserved_ids: &HashSet<NodeId>,
+    ) -> Option<NodeId> {
+        let key = PortalAccessibilityNodeKey {
+            target_window_instance_id,
+            source_window_instance_id: route.source_window_instance_id,
+            source_publication_generation: route.source_publication_generation,
+            owner_path: route.owner_path.iter().map(|id| id.0).collect(),
+            widget_id: route.widget_id,
+        };
+        if !self.seen_keys.insert(key.clone()) {
+            return None;
+        }
+        let node_id = if let Some(node_id) = self
+            .active_by_key
+            .get(&key)
+            .copied()
+            .filter(|node_id| !reserved_ids.contains(node_id))
+        {
+            node_id
+        } else {
+            let node_id = loop {
+                let candidate = NodeId(self.next_node_id);
+                self.next_node_id = self
+                    .next_node_id
+                    .checked_sub(1)
+                    .expect("Portal accessibility NodeId space exhausted");
+                if candidate != ROOT_NODE_ID && !reserved_ids.contains(&candidate) {
+                    break candidate;
+                }
+            };
+            self.active_by_key.insert(key.clone(), node_id);
+            node_id
+        };
+        self.live_routes.insert(node_id, route);
+        Some(node_id)
+    }
+}
 
 /// Runtime state that can change the contents or topology of the AccessKit tree.
 ///
@@ -43,24 +159,36 @@ pub(crate) fn widget_id_from_node(node_id: NodeId) -> Option<WidgetId> {
     (node_id.0 >= WIDGET_NODE_OFFSET).then(|| WidgetId::from_raw(node_id.0 - WIDGET_NODE_OFFSET))
 }
 
+#[cfg(test)]
 pub(crate) fn build_tree_update<VM: 'static>(
     layout: Option<&ResolvedSceneLayout<VM>>,
     computed: &ComputedScene<VM>,
     focused_widget: Option<WidgetId>,
     viewport: Rect,
 ) -> TreeUpdate {
+    let mut registry = AccessibilityNodeRegistry::default();
+    build_tree_update_with_registry(
+        layout,
+        computed,
+        focused_widget.map(node_id_from_widget),
+        viewport,
+        0,
+        &mut registry,
+    )
+}
+
+pub(crate) fn build_tree_update_with_registry<VM: 'static>(
+    layout: Option<&ResolvedSceneLayout<VM>>,
+    computed: &ComputedScene<VM>,
+    candidate_focus: Option<NodeId>,
+    viewport: Rect,
+    target_window_instance_id: u64,
+    registry: &mut AccessibilityNodeRegistry,
+) -> TreeUpdate {
+    registry.begin_update();
     let mut root = Node::new(Role::Window);
     root.set_bounds(access_rect(viewport));
     root.set_label("tgui window");
-
-    let Some(layout) = layout else {
-        return TreeUpdate {
-            nodes: vec![(ROOT_NODE_ID, root)],
-            tree: Some(tree_metadata()),
-            tree_id: TreeId::ROOT,
-            focus: ROOT_NODE_ID,
-        };
-    };
 
     let hit_regions = hit_regions_by_widget(computed);
     let trap_scope = computed
@@ -70,37 +198,88 @@ pub(crate) fn build_tree_update<VM: 'static>(
         .find(|scope| scope.active && scope.options.is_trap())
         .map(|scope| scope.path.clone());
     let trap_widget = trap_scope.as_ref().and_then(|path| path.last().copied());
-    let trap_path = trap_widget.and_then(|id| layout.path_for(id).map(|path| path.to_vec()));
+    let trap_path = trap_widget
+        .and_then(|id| layout.and_then(|layout| layout.path_for(id).map(|path| path.to_vec())));
 
     let mut nodes = Vec::new();
     let mut included = HashSet::new();
-    let root_children: Vec<NodeId> = collect_widget(
-        layout,
-        computed,
-        &hit_regions,
-        trap_scope.as_deref(),
-        trap_path.as_deref(),
-        layout.root_id(),
-        &mut nodes,
-        &mut included,
-    )
-    .into_iter()
-    .collect();
+    let mut root_children = layout
+        .and_then(|layout| {
+            if trap_scope.is_some() && trap_path.is_none() {
+                return None;
+            }
+            collect_widget(
+                layout,
+                computed,
+                &hit_regions,
+                trap_scope.as_deref(),
+                trap_path.as_deref(),
+                layout.root_id(),
+                &mut nodes,
+                &mut included,
+            )
+        })
+        .into_iter()
+        .collect::<Vec<_>>();
+    let mut fragment_owner_counts = HashMap::<(u64, Vec<u64>), usize>::new();
+    for fragment in &computed.accessibility_fragments {
+        if !accessibility_fragment_source_is_open(fragment) {
+            continue;
+        }
+        *fragment_owner_counts
+            .entry((
+                fragment
+                    .source_window_instance_id
+                    .unwrap_or(target_window_instance_id),
+                fragment.owner_path.iter().map(|id| id.0).collect(),
+            ))
+            .or_default() += 1;
+    }
+    for fragment in &computed.accessibility_fragments {
+        if !accessibility_fragment_source_is_open(fragment) {
+            continue;
+        }
+        let owner_key = (
+            fragment
+                .source_window_instance_id
+                .unwrap_or(target_window_instance_id),
+            fragment
+                .owner_path
+                .iter()
+                .map(|id| id.0)
+                .collect::<Vec<_>>(),
+        );
+        if fragment_owner_counts.get(&owner_key).copied() != Some(1) {
+            continue;
+        }
+        if let Some(node_id) = collect_accessibility_fragment(
+            fragment,
+            computed,
+            trap_scope.as_deref(),
+            target_window_instance_id,
+            registry,
+            &mut nodes,
+            &mut included,
+        ) {
+            root_children.push(node_id);
+        }
+    }
     root.set_children(root_children);
     nodes.push((ROOT_NODE_ID, root));
     included.insert(ROOT_NODE_ID);
 
-    let focus = focused_widget
-        .map(node_id_from_widget)
+    let focus = candidate_focus
         .filter(|node_id| included.contains(node_id))
         .unwrap_or(ROOT_NODE_ID);
 
-    TreeUpdate {
+    let update = TreeUpdate {
         nodes,
         tree: Some(tree_metadata()),
         tree_id: TreeId::ROOT,
         focus,
-    }
+    };
+    registry.finish_update(&included);
+    update
 }
 
 fn tree_metadata() -> Tree {
@@ -129,6 +308,7 @@ fn collect_widget<VM: 'static>(
         resolved,
         computed,
         hit_regions.get(&widget_id).map(Vec::as_slice),
+        None,
     );
     if let Some(bounds) = widget_bounds(
         layout,
@@ -160,6 +340,200 @@ fn collect_widget<VM: 'static>(
     Some(node_id)
 }
 
+fn collect_accessibility_fragment<VM: 'static>(
+    fragment: &AccessibilityFragment<VM>,
+    computed: &ComputedScene<VM>,
+    trap_scope: Option<&[WidgetId]>,
+    target_window_instance_id: u64,
+    registry: &mut AccessibilityNodeRegistry,
+    nodes: &mut Vec<(NodeId, Node)>,
+    included: &mut HashSet<NodeId>,
+) -> Option<NodeId> {
+    if !accessibility_fragment_source_is_open(fragment)
+        || fragment.has_duplicate_widget_ids
+        || fragment.clip_rect.is_some_and(Rect::is_empty)
+        || trap_scope.is_some_and(|trap| !fragment.scope_path.starts_with(trap))
+    {
+        return None;
+    }
+    collect_accessibility_fragment_node(
+        fragment,
+        computed,
+        0,
+        target_window_instance_id,
+        registry,
+        nodes,
+        included,
+    )
+}
+
+fn accessibility_fragment_source_is_open<VM>(fragment: &AccessibilityFragment<VM>) -> bool {
+    fragment
+        .source_open
+        .as_ref()
+        .map(crate::ui::layout::Value::resolve_untracked)
+        .unwrap_or(true)
+}
+
+fn collect_accessibility_fragment_node<VM: 'static>(
+    fragment: &AccessibilityFragment<VM>,
+    computed: &ComputedScene<VM>,
+    node_index: usize,
+    target_window_instance_id: u64,
+    registry: &mut AccessibilityNodeRegistry,
+    nodes: &mut Vec<(NodeId, Node)>,
+    included: &mut HashSet<NodeId>,
+) -> Option<NodeId> {
+    let fragment_node = fragment.nodes.get(node_index)?;
+    let resolved = resolved_at_fragment_path(
+        fragment.resolved_root.as_ref(),
+        &fragment_node.resolved_path,
+    )?;
+    let visible_bounds = accessibility_fragment_node_visible_bounds(fragment, node_index)?;
+    let route = PortalAccessibilityNodeRoute {
+        source_window_instance_id: fragment
+            .source_window_instance_id
+            .unwrap_or(target_window_instance_id),
+        source_publication_generation: fragment.source_publication_generation,
+        owner_path: fragment.owner_path.clone(),
+        resolved_path: fragment_node.resolved_path.clone(),
+        widget_id: fragment_node.widget_id,
+    };
+    let node_id = registry.node_id_for(target_window_instance_id, route, included)?;
+    let hit_regions = fragment_node
+        .hits
+        .iter()
+        .filter(|hit| {
+            accessibility_fragment_hit_visible_bounds(fragment, node_index, hit).is_some()
+        })
+        .collect::<Vec<_>>();
+    let mut node = node_for_widget(
+        resolved,
+        computed,
+        Some(hit_regions.as_slice()),
+        Some(fragment_node.scroll_regions.as_slice()),
+    );
+    node.set_bounds(access_rect(visible_bounds));
+    let children = fragment_node
+        .children
+        .iter()
+        .filter_map(|(_, child_index)| {
+            collect_accessibility_fragment_node(
+                fragment,
+                computed,
+                *child_index,
+                target_window_instance_id,
+                registry,
+                nodes,
+                included,
+            )
+        })
+        .collect::<Vec<_>>();
+    if !children.is_empty() {
+        node.set_children(children);
+    }
+    nodes.push((node_id, node));
+    included.insert(node_id);
+    Some(node_id)
+}
+
+pub(crate) fn accessibility_fragment_node_visible_bounds<VM>(
+    fragment: &AccessibilityFragment<VM>,
+    node_index: usize,
+) -> Option<Rect> {
+    let node = fragment.nodes.get(node_index)?;
+    if !node.hits.is_empty() {
+        return node
+            .hits
+            .iter()
+            .find_map(|hit| accessibility_fragment_hit_visible_bounds(fragment, node_index, hit));
+    }
+    let bounds = node.bounds;
+    if bounds.is_empty() {
+        return (node.clip_rect.is_none() && fragment.clip_rect.is_none()).then_some(bounds);
+    }
+    let mut visible = match node.clip_rect {
+        Some(clip) => bounds.intersect(clip)?,
+        None => bounds,
+    };
+    if let Some(clip) = fragment.clip_rect {
+        visible = visible.intersect(clip)?;
+    }
+    Some(visible)
+}
+
+pub(crate) fn accessibility_fragment_hit_visible_bounds<VM>(
+    fragment: &AccessibilityFragment<VM>,
+    node_index: usize,
+    hit: &HitRegion<VM>,
+) -> Option<Rect> {
+    if hit.rect.is_empty() {
+        return None;
+    }
+    let mut bounds = match hit.clip_rect {
+        Some(clip) => hit.rect.intersect(clip)?,
+        None => hit.rect,
+    };
+    if let Some(clip) = fragment.nodes.get(node_index)?.clip_rect {
+        bounds = bounds.intersect(clip)?;
+    }
+    if let Some(clip) = fragment.clip_rect {
+        bounds = bounds.intersect(clip)?;
+    }
+    Some(bounds)
+}
+
+/// Resolves a route against the current fragment and applies the same node/ancestor clipping
+/// rules as the tree builder. `resolved_path` is a fast exact lookup; the WidgetId fallback keeps
+/// a stable synthetic NodeId live when unrelated siblings move between two AccessKit updates.
+pub(crate) fn live_accessibility_fragment_node_index<VM>(
+    fragment: &AccessibilityFragment<VM>,
+    resolved_path: &[usize],
+    widget_id: WidgetId,
+) -> Option<usize> {
+    if fragment.has_duplicate_widget_ids || fragment.nodes.is_empty() {
+        return None;
+    }
+    let node_index = fragment
+        .nodes
+        .iter()
+        .position(|node| {
+            node.widget_id == widget_id && node.resolved_path.as_slice() == resolved_path
+        })
+        .or_else(|| {
+            fragment
+                .nodes
+                .iter()
+                .position(|node| node.widget_id == widget_id)
+        })?;
+    let target_path = fragment.nodes.get(node_index)?.resolved_path.as_slice();
+    let mut current_index = 0usize;
+    accessibility_fragment_node_visible_bounds(fragment, current_index)?;
+    for child_position in target_path {
+        current_index = fragment
+            .nodes
+            .get(current_index)?
+            .children
+            .iter()
+            .find_map(|(resolved_child_index, node_index)| {
+                (*resolved_child_index == *child_position).then_some(*node_index)
+            })?;
+        accessibility_fragment_node_visible_bounds(fragment, current_index)?;
+    }
+    (current_index == node_index).then_some(node_index)
+}
+
+fn resolved_at_fragment_path<'a, VM>(
+    root: &'a ResolvedElement<VM>,
+    path: &[usize],
+) -> Option<&'a ResolvedElement<VM>> {
+    let mut resolved = root;
+    for child_index in path {
+        resolved = children_of(&resolved.kind).get(*child_index)?;
+    }
+    Some(resolved)
+}
+
 fn is_visible_to_accessibility<VM: 'static>(
     layout: &ResolvedSceneLayout<VM>,
     trap_scope: Option<&[WidgetId]>,
@@ -185,6 +559,7 @@ fn node_for_widget<VM: 'static>(
     resolved: &ResolvedElement<VM>,
     computed: &ComputedScene<VM>,
     regions: Option<&[&HitRegion<VM>]>,
+    scroll_regions: Option<&[ScrollRegion]>,
 ) -> Node {
     let mut node = Node::new(role_for_widget(resolved));
     if let Some(key) = resolved.key.as_ref() {
@@ -197,7 +572,7 @@ fn node_for_widget<VM: 'static>(
     {
         node.add_action(Action::Focus);
     }
-    apply_widget_semantics(&mut node, resolved, computed);
+    apply_widget_semantics(&mut node, resolved, computed, scroll_regions);
     apply_hit_actions(&mut node, regions);
     node
 }
@@ -285,6 +660,7 @@ fn apply_widget_semantics<VM: 'static>(
     node: &mut Node,
     resolved: &ResolvedElement<VM>,
     computed: &ComputedScene<VM>,
+    scroll_regions: Option<&[ScrollRegion]>,
 ) {
     if resolved
         .modal
@@ -314,7 +690,7 @@ fn apply_widget_semantics<VM: 'static>(
     }
 
     if let Some(tree_node) = resolved.tree_node.as_ref() {
-        node.set_selected(tree_node.selected_keys.resolve().contains(&tree_node.key));
+        node.set_selected(tree_node.selected);
         node.set_level(tree_node.depth + 1);
         node.set_position_in_set(tree_node.position_in_set);
         node.set_size_of_set(tree_node.set_size);
@@ -359,7 +735,7 @@ fn apply_widget_semantics<VM: 'static>(
     if let Some(cell) = resolved.data_grid_cell.as_ref() {
         node.set_row_index(cell.row_index);
         node.set_column_index(cell.column_index);
-        node.set_selected(cell.selected_keys.resolve().contains(&cell.row_key));
+        node.set_selected(cell.selected);
         node.add_action(Action::Click);
         if cell.disabled.resolve() {
             node.set_disabled();
@@ -397,7 +773,11 @@ fn apply_widget_semantics<VM: 'static>(
 
     match &resolved.kind {
         ResolvedWidgetKind::Container { layout, .. } if layout.scroll_view.is_some() => {
-            apply_scroll_region(node, computed, resolved.id);
+            apply_scroll_region(
+                node,
+                scroll_regions.unwrap_or(computed.scroll_regions.as_slice()),
+                resolved.id,
+            );
         }
         ResolvedWidgetKind::Virtual { children, .. } => {
             if let Some(tree_node) = children.iter().find_map(|child| child.tree_node.as_ref()) {
@@ -583,12 +963,8 @@ fn apply_hit_actions<VM>(node: &mut Node, regions: Option<&[&HitRegion<VM>]>) {
     }
 }
 
-fn apply_scroll_region<VM>(node: &mut Node, computed: &ComputedScene<VM>, widget_id: WidgetId) {
-    let Some(region) = computed
-        .scroll_regions
-        .iter()
-        .find(|region| region.id == widget_id)
-    else {
+fn apply_scroll_region(node: &mut Node, regions: &[ScrollRegion], widget_id: WidgetId) {
+    let Some(region) = regions.iter().find(|region| region.id == widget_id) else {
         return;
     };
     let max = region.max_offset();
@@ -673,5 +1049,64 @@ fn access_rect(rect: Rect) -> AccessRect {
         y0: rect.y.get() as f64,
         x1: (rect.x + rect.width).get() as f64,
         y1: (rect.y + rect.height).get() as f64,
+    }
+}
+
+#[cfg(test)]
+mod registry_tests {
+    use super::*;
+
+    fn route(widget_id: u64) -> PortalAccessibilityNodeRoute {
+        PortalAccessibilityNodeRoute {
+            source_window_instance_id: 7,
+            source_publication_generation: None,
+            owner_path: SmallVec::from_slice(&[OverlayId::new(11)]),
+            resolved_path: SmallVec::new(),
+            widget_id: WidgetId::from_raw(widget_id),
+        }
+    }
+
+    #[test]
+    fn registry_classifies_local_nodes_by_membership_not_allocator_position() {
+        let mut registry = AccessibilityNodeRegistry::default();
+        registry.next_node_id = 10;
+        registry.begin_update();
+        let mut included = HashSet::from([NodeId(10), NodeId(9)]);
+        let portal_id = registry
+            .node_id_for(3, route(17), &included)
+            .expect("Portal route should allocate below reserved local ids");
+        assert_eq!(portal_id, NodeId(8));
+        included.insert(portal_id);
+        registry.finish_update(&included);
+
+        assert!(registry.is_live_local_node_id(NodeId(10)));
+        assert!(registry.is_live_local_node_id(NodeId(9)));
+        assert!(!registry.is_live_local_node_id(portal_id));
+        assert_eq!(registry.live_route(portal_id), Some(&route(17)));
+    }
+
+    #[test]
+    fn registry_rekeys_a_live_portal_route_that_collides_with_a_new_local_node() {
+        let mut registry = AccessibilityNodeRegistry::default();
+        registry.next_node_id = 10;
+        registry.begin_update();
+        let first = registry
+            .node_id_for(3, route(17), &HashSet::new())
+            .expect("initial Portal route");
+        assert_eq!(first, NodeId(10));
+        registry.finish_update(&HashSet::from([first]));
+
+        registry.begin_update();
+        let mut included = HashSet::from([first]);
+        let replacement = registry
+            .node_id_for(3, route(17), &included)
+            .expect("colliding route should get a new id");
+        assert_eq!(replacement, NodeId(9));
+        included.insert(replacement);
+        registry.finish_update(&included);
+
+        assert!(registry.is_live_local_node_id(first));
+        assert!(registry.live_route(first).is_none());
+        assert_eq!(registry.live_route(replacement), Some(&route(17)));
     }
 }

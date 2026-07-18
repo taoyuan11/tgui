@@ -23,6 +23,11 @@ pub(crate) struct HitTestIndex {
 struct HitTestGrid {
     cells: Vec<HitTestCell>,
     global: Vec<usize>,
+    /// Regions with a retained visual transform cannot be bucketed by their base `rect.y`: the
+    /// current transform offset can change without rebuilding this index. They remain a normally
+    /// tiny, ordered side stream and are merged with the exact indexed candidates at query time.
+    transformed: Vec<usize>,
+    region_count: usize,
 }
 
 #[derive(Debug)]
@@ -46,14 +51,29 @@ impl HitTestIndex {
     pub(crate) fn for_each_overlay_candidate(&self, y: Dp, visit: impl FnMut(usize)) {
         self.overlay.for_each_candidate(y, visit);
     }
+
+    fn is_selective(&self) -> bool {
+        let transformed = self.normal.transformed.len() + self.overlay.transformed.len();
+        let total = self.normal.region_count + self.overlay.region_count;
+        let indexed = total.saturating_sub(transformed);
+
+        // When most regions move together, merging a large transformed side stream would add
+        // bookkeeping without shortening the scan. Preserve the exact legacy full-scan fallback.
+        indexed >= HIT_TEST_INDEX_MIN_REGIONS && indexed.saturating_mul(8) >= total
+    }
 }
 
 impl HitTestGrid {
     fn build<VM>(regions: &[HitRegion<VM>]) -> Self {
         let mut cells = BTreeMap::<i64, SmallVec<[usize; 8]>>::new();
         let mut global = Vec::new();
+        let mut transformed = Vec::new();
 
         for (index, hit) in regions.iter().enumerate() {
+            if !hit.transform_chain.is_empty() {
+                transformed.push(index);
+                continue;
+            }
             let start = hit.rect.y.get();
             let end = hit.rect.bottom().get();
             if !start.is_finite() || !end.is_finite() || end < start {
@@ -83,6 +103,8 @@ impl HitTestGrid {
                 })
                 .collect(),
             global,
+            transformed,
+            region_count: regions.len(),
         }
     }
 
@@ -99,33 +121,30 @@ impl HitTestGrid {
             });
         let cell_indices = cell_indices.unwrap_or(&[]);
 
-        // Both streams are in original hit-region order. Merging them retains exact z-order;
-        // a region belongs either to the global stream or to cells, never both.
+        // All three streams are in original hit-region order. Merging them retains exact z-order;
+        // a region belongs to exactly one of global, the queried cell, or transformed.
         let mut global_index = 0;
         let mut cell_index = 0;
-        while global_index < self.global.len() || cell_index < cell_indices.len() {
-            let next = match (
-                self.global.get(global_index).copied(),
-                cell_indices.get(cell_index).copied(),
-            ) {
-                (Some(global), Some(cell)) if global < cell => {
-                    global_index += 1;
-                    global
-                }
-                (Some(_), Some(cell)) => {
-                    cell_index += 1;
-                    cell
-                }
-                (Some(global), None) => {
-                    global_index += 1;
-                    global
-                }
-                (None, Some(cell)) => {
-                    cell_index += 1;
-                    cell
-                }
-                (None, None) => break,
-            };
+        let mut transformed_index = 0;
+        loop {
+            let global = self.global.get(global_index).copied().unwrap_or(usize::MAX);
+            let cell = cell_indices.get(cell_index).copied().unwrap_or(usize::MAX);
+            let transformed = self
+                .transformed
+                .get(transformed_index)
+                .copied()
+                .unwrap_or(usize::MAX);
+            let next = global.min(cell).min(transformed);
+            if next == usize::MAX {
+                break;
+            }
+            if next == global {
+                global_index += 1;
+            } else if next == cell {
+                cell_index += 1;
+            } else {
+                transformed_index += 1;
+            }
             visit(next);
         }
     }
@@ -224,6 +243,7 @@ pub(crate) struct ComputedScene<VM> {
     pub overlay_close_handlers: SmallVec<[crate::runtime::overlay::OverlayCloseHandle<VM>; 1]>,
     pub portal_overlay_counts: PortalOverlayCounts,
     pub focus_scopes: SmallVec<[FocusScopeState; 1]>,
+    pub(crate) accessibility_fragments: SmallVec<[AccessibilityFragment<VM>; 1]>,
     pub carousel_auto_play: SmallVec<[CarouselAutoPlayState<VM>; 1]>,
     pub overlay_anchors: HashMap<AnchorKey, Rect>,
     pub portal_entries: SmallVec<[PortalEntry<VM>; 1]>,
@@ -256,6 +276,7 @@ pub(crate) struct ComputedSceneCursor {
     overlay_close_handlers: usize,
     portal_overlay_counts: PortalOverlayCounts,
     focus_scopes: usize,
+    accessibility_fragments: usize,
     carousel_auto_play: usize,
     overlay_anchors: HashMap<AnchorKey, Rect>,
     portal_entries: usize,
@@ -285,6 +306,7 @@ impl<VM> Clone for ComputedScene<VM> {
             overlay_close_handlers: self.overlay_close_handlers.clone(),
             portal_overlay_counts: self.portal_overlay_counts,
             focus_scopes: self.focus_scopes.clone(),
+            accessibility_fragments: self.accessibility_fragments.clone(),
             carousel_auto_play: self.carousel_auto_play.clone(),
             overlay_anchors: self.overlay_anchors.clone(),
             portal_entries: self.portal_entries.clone(),
@@ -465,6 +487,62 @@ pub(crate) struct PortalOverlayCounts {
     pub hits: usize,
     pub close_handlers: usize,
     pub focus_scopes: usize,
+    pub accessibility_fragments: usize,
+}
+
+pub(crate) struct AccessibilityFragmentNode<VM> {
+    pub(crate) widget_id: WidgetId,
+    pub(crate) resolved_path: SmallVec<[usize; 4]>,
+    pub(crate) bounds: Rect,
+    pub(crate) clip_rect: Option<Rect>,
+    pub(crate) hits: SmallVec<[HitRegion<VM>; 1]>,
+    pub(crate) scroll_regions: SmallVec<[ScrollRegion; 1]>,
+    pub(crate) children: SmallVec<[(usize, usize); 4]>,
+}
+
+impl<VM> Clone for AccessibilityFragmentNode<VM> {
+    fn clone(&self) -> Self {
+        Self {
+            widget_id: self.widget_id,
+            resolved_path: self.resolved_path.clone(),
+            bounds: self.bounds,
+            clip_rect: self.clip_rect,
+            hits: self.hits.clone(),
+            scroll_regions: self.scroll_regions.clone(),
+            children: self.children.clone(),
+        }
+    }
+}
+
+pub(crate) struct AccessibilityFragment<VM> {
+    pub(crate) source_window_instance_id: Option<u64>,
+    pub(crate) source_publication_generation: Option<u64>,
+    pub(crate) source_open: Option<crate::ui::layout::Value<bool>>,
+    pub(crate) owner_path: SmallVec<[crate::runtime::overlay::OverlayId; 2]>,
+    pub(crate) scope_path: Vec<WidgetId>,
+    pub(crate) clip_rect: Option<Rect>,
+    /// A cloned `Element` can repeat one raw `WidgetId` at multiple resolved paths. Until hit
+    /// metadata carries an occurrence path, publishing such a fragment would make actions
+    /// ambiguous, so accessibility conservatively omits it while visual rendering remains intact.
+    pub(crate) has_duplicate_widget_ids: bool,
+    pub(crate) resolved_root: std::sync::Arc<crate::ui::widget::ResolvedElement<VM>>,
+    pub(crate) nodes: Vec<AccessibilityFragmentNode<VM>>,
+}
+
+impl<VM> Clone for AccessibilityFragment<VM> {
+    fn clone(&self) -> Self {
+        Self {
+            source_window_instance_id: self.source_window_instance_id,
+            source_publication_generation: self.source_publication_generation,
+            source_open: self.source_open.clone(),
+            owner_path: self.owner_path.clone(),
+            scope_path: self.scope_path.clone(),
+            clip_rect: self.clip_rect,
+            has_duplicate_widget_ids: self.has_duplicate_widget_ids,
+            resolved_root: std::sync::Arc::clone(&self.resolved_root),
+            nodes: self.nodes.clone(),
+        }
+    }
 }
 
 /// 单个 `OverlayLayer` 的暂存桶。
@@ -480,6 +558,7 @@ pub(crate) struct OverlayLayerBucket<VM> {
     pub hits: SmallVec<[HitRegion<VM>; 1]>,
     pub close_handlers: SmallVec<[crate::runtime::overlay::OverlayCloseHandle<VM>; 1]>,
     pub focus_scopes: SmallVec<[FocusScopeState; 1]>,
+    pub accessibility_fragments: SmallVec<[AccessibilityFragment<VM>; 1]>,
 }
 
 impl<VM> Default for OverlayLayerBucket<VM> {
@@ -496,6 +575,7 @@ impl<VM> Default for OverlayLayerBucket<VM> {
             hits: SmallVec::new(),
             close_handlers: SmallVec::new(),
             focus_scopes: SmallVec::new(),
+            accessibility_fragments: SmallVec::new(),
         }
     }
 }
@@ -514,6 +594,7 @@ impl<VM> Clone for OverlayLayerBucket<VM> {
             hits: self.hits.clone(),
             close_handlers: self.close_handlers.clone(),
             focus_scopes: self.focus_scopes.clone(),
+            accessibility_fragments: self.accessibility_fragments.clone(),
         }
     }
 }
@@ -543,6 +624,7 @@ impl<VM> OverlayLayerBucket<VM> {
             hits: self.hits.len(),
             close_handlers: self.close_handlers.len(),
             focus_scopes: self.focus_scopes.len(),
+            accessibility_fragments: self.accessibility_fragments.len(),
         }
     }
 
@@ -591,6 +673,12 @@ impl<VM> OverlayLayerBucket<VM> {
         delta
             .focus_scopes
             .extend(self.focus_scopes.iter().skip(base.focus_scopes).cloned());
+        delta.accessibility_fragments.extend(
+            self.accessibility_fragments
+                .iter()
+                .skip(base.accessibility_fragments)
+                .cloned(),
+        );
         delta
     }
 
@@ -641,6 +729,12 @@ impl<VM> OverlayLayerBucket<VM> {
         prefix
             .focus_scopes
             .extend(self.focus_scopes.iter().take(cursor.focus_scopes).cloned());
+        prefix.accessibility_fragments.extend(
+            self.accessibility_fragments
+                .iter()
+                .take(cursor.accessibility_fragments)
+                .cloned(),
+        );
         prefix
     }
 
@@ -660,6 +754,8 @@ impl<VM> OverlayLayerBucket<VM> {
         self.close_handlers
             .extend(other.close_handlers.iter().cloned());
         self.focus_scopes.extend(other.focus_scopes.iter().cloned());
+        self.accessibility_fragments
+            .extend(other.accessibility_fragments.iter().cloned());
     }
 }
 
@@ -676,6 +772,7 @@ struct OverlayLayerBucketCursor {
     hits: usize,
     close_handlers: usize,
     focus_scopes: usize,
+    accessibility_fragments: usize,
 }
 
 #[derive(Clone, Default)]
@@ -724,6 +821,7 @@ impl<VM> Default for ComputedScene<VM> {
             overlay_close_handlers: SmallVec::new(),
             portal_overlay_counts: PortalOverlayCounts::default(),
             focus_scopes: SmallVec::new(),
+            accessibility_fragments: SmallVec::new(),
             carousel_auto_play: SmallVec::new(),
             overlay_anchors: HashMap::new(),
             portal_entries: SmallVec::new(),
@@ -743,21 +841,16 @@ impl<VM> Default for ComputedScene<VM> {
 
 impl<VM> ComputedScene<VM> {
     pub(crate) fn hit_test_index(&self) -> Option<&HitTestIndex> {
-        if !self.transform_records.is_empty()
-            || self.hit_regions.len() + self.overlay_hit_regions.len() < HIT_TEST_INDEX_MIN_REGIONS
-        {
+        if self.hit_regions.len() + self.overlay_hit_regions.len() < HIT_TEST_INDEX_MIN_REGIONS {
             return None;
         }
-        Some(
-            self.hit_test_index
-                .get_or_init(|| {
-                    Box::new(HitTestIndex::build(
-                        &self.hit_regions,
-                        &self.overlay_hit_regions,
-                    ))
-                })
-                .as_ref(),
-        )
+        let index = self.hit_test_index.get_or_init(|| {
+            Box::new(HitTestIndex::build(
+                &self.hit_regions,
+                &self.overlay_hit_regions,
+            ))
+        });
+        index.is_selective().then_some(index.as_ref())
     }
 
     pub(crate) fn invalidate_hit_test_index(&mut self) {
@@ -796,19 +889,22 @@ impl<VM> ComputedScene<VM> {
             })
     }
 
-    /// Reset a materialized ancestor chunk for recomposition while retaining all reusable
-    /// backing allocations.
+    /// Keep inline visual primitives but make a retained subtree completely
+    /// non-interactive. This is the logical half of a view transition: the old
+    /// panel may continue fading/sliding out, yet it must immediately release
+    /// pointer, keyboard focus, IME, scrolling, autoplay, and overlay ownership.
     ///
-    /// The subsequent `extend` sequence is exactly the same `before + children + after` order as
-    /// the legacy clone-based path. Only storage ownership changes: the old flat ancestor chunk is
-    /// moved out of the cache and becomes the output buffer for its replacement.
-    pub(crate) fn clear_for_recompose(&mut self, seed: &Self) {
-        self.scene.clear_for_recompose(&seed.scene);
+    /// The caller may restore its own inactive focus-scope sentinel afterwards;
+    /// keeping that sentinel makes scene-splice conservatively fall back to
+    /// ancestor recomposition, where this gate is applied again.
+    pub(crate) fn clear_interactive_subtree_channels(&mut self) {
+        self.scene.clear_overlay_streams();
         self.hit_regions.clear();
         self.overlay_hit_regions.clear();
         self.overlay_close_handlers.clear();
         self.portal_overlay_counts = PortalOverlayCounts::default();
         self.focus_scopes.clear();
+        self.accessibility_fragments.clear();
         self.carousel_auto_play.clear();
         self.overlay_anchors.clear();
         self.portal_entries.clear();
@@ -825,6 +921,47 @@ impl<VM> ComputedScene<VM> {
             layer.hits.clear();
             layer.close_handlers.clear();
             layer.focus_scopes.clear();
+            layer.accessibility_fragments.clear();
+        }
+        self.overlay_layer_graph.layers.clear();
+        self.overlay_layer_graph.anchor_slots.clear();
+        self.scroll_regions.clear();
+        self.ime_cursor_area = None;
+        self.invalidate_hit_test_index();
+        self.invalidate_scroll_region_lookup_index();
+    }
+
+    /// Reset a materialized ancestor chunk for recomposition while retaining all reusable
+    /// backing allocations.
+    ///
+    /// The subsequent `extend` sequence is exactly the same `before + children + after` order as
+    /// the legacy clone-based path. Only storage ownership changes: the old flat ancestor chunk is
+    /// moved out of the cache and becomes the output buffer for its replacement.
+    pub(crate) fn clear_for_recompose(&mut self, seed: &Self) {
+        self.scene.clear_for_recompose(&seed.scene);
+        self.hit_regions.clear();
+        self.overlay_hit_regions.clear();
+        self.overlay_close_handlers.clear();
+        self.portal_overlay_counts = PortalOverlayCounts::default();
+        self.focus_scopes.clear();
+        self.accessibility_fragments.clear();
+        self.carousel_auto_play.clear();
+        self.overlay_anchors.clear();
+        self.portal_entries.clear();
+        self.external_portal_requests.clear();
+        for layer in &mut self.overlay_layers {
+            layer.commands.clear();
+            layer.command_sources.clear();
+            layer.backdrop_blurs.clear();
+            layer.shapes.clear();
+            layer.textures.clear();
+            layer.meshes.clear();
+            layer.texts.clear();
+            layer.text_decorations.clear();
+            layer.hits.clear();
+            layer.close_handlers.clear();
+            layer.focus_scopes.clear();
+            layer.accessibility_fragments.clear();
         }
         self.overlay_layer_graph.layers.clear();
         self.overlay_layer_graph.anchor_slots.clear();
@@ -859,6 +996,7 @@ impl<VM> ComputedScene<VM> {
             overlay_close_handlers: self.overlay_close_handlers.len(),
             portal_overlay_counts: self.portal_overlay_counts,
             focus_scopes: self.focus_scopes.len(),
+            accessibility_fragments: self.accessibility_fragments.len(),
             carousel_auto_play: self.carousel_auto_play.len(),
             overlay_anchors: self.overlay_anchors.clone(),
             portal_entries: self.portal_entries.len(),
@@ -910,6 +1048,12 @@ impl<VM> ComputedScene<VM> {
         delta
             .focus_scopes
             .extend(self.focus_scopes.iter().skip(base.focus_scopes).cloned());
+        delta.accessibility_fragments.extend(
+            self.accessibility_fragments
+                .iter()
+                .skip(base.accessibility_fragments)
+                .cloned(),
+        );
         delta.carousel_auto_play.extend(
             self.carousel_auto_play
                 .iter()
@@ -970,6 +1114,10 @@ impl<VM> ComputedScene<VM> {
             .portal_overlay_counts
             .focus_scopes
             .saturating_sub(base.portal_overlay_counts.focus_scopes);
+        delta.portal_overlay_counts.accessibility_fragments = self
+            .portal_overlay_counts
+            .accessibility_fragments
+            .saturating_sub(base.portal_overlay_counts.accessibility_fragments);
         for i in 0..OVERLAY_LAYER_COUNT {
             delta.overlay_layers[i] =
                 self.overlay_layers[i].delta_since_cursor(&base.overlay_layers[i]);
@@ -1035,6 +1183,12 @@ impl<VM> ComputedScene<VM> {
         prefix
             .focus_scopes
             .extend(self.focus_scopes.iter().take(cursor.focus_scopes).cloned());
+        prefix.accessibility_fragments.extend(
+            self.accessibility_fragments
+                .iter()
+                .take(cursor.accessibility_fragments)
+                .cloned(),
+        );
         prefix.carousel_auto_play.extend(
             self.carousel_auto_play
                 .iter()
@@ -1088,6 +1242,8 @@ impl<VM> ComputedScene<VM> {
         self.overlay_close_handlers
             .extend(other.overlay_close_handlers.iter().cloned());
         self.focus_scopes.extend(other.focus_scopes.iter().cloned());
+        self.accessibility_fragments
+            .extend(other.accessibility_fragments.iter().cloned());
         self.carousel_auto_play
             .extend(other.carousel_auto_play.iter().cloned());
         self.overlay_anchors
@@ -1105,6 +1261,8 @@ impl<VM> ComputedScene<VM> {
         self.portal_overlay_counts.hits += other.portal_overlay_counts.hits;
         self.portal_overlay_counts.close_handlers += other.portal_overlay_counts.close_handlers;
         self.portal_overlay_counts.focus_scopes += other.portal_overlay_counts.focus_scopes;
+        self.portal_overlay_counts.accessibility_fragments +=
+            other.portal_overlay_counts.accessibility_fragments;
         for i in 0..OVERLAY_LAYER_COUNT {
             self.overlay_layers[i].extend_from(&other.overlay_layers[i]);
         }
@@ -1149,6 +1307,7 @@ impl<VM> ComputedScene<VM> {
                 hits,
                 close_handlers,
                 focus_scopes,
+                accessibility_fragments,
                 ..
             } = bucket;
             let mut command_sources = command_sources.into_iter();
@@ -1163,6 +1322,7 @@ impl<VM> ComputedScene<VM> {
             self.overlay_hit_regions.extend(hits);
             self.overlay_close_handlers.extend(close_handlers);
             self.focus_scopes.extend(focus_scopes);
+            self.accessibility_fragments.extend(accessibility_fragments);
         }
     }
 
@@ -1210,6 +1370,10 @@ impl<VM> ComputedScene<VM> {
             .focus_scopes
             .len()
             .saturating_sub(self.portal_overlay_counts.focus_scopes);
+        let base_accessibility_fragments = self
+            .accessibility_fragments
+            .len()
+            .saturating_sub(self.portal_overlay_counts.accessibility_fragments);
 
         self.scene.overlay_shapes.truncate(base_shapes);
         self.scene.overlay_textures.truncate(base_textures);
@@ -1223,6 +1387,8 @@ impl<VM> ComputedScene<VM> {
         self.overlay_hit_regions.truncate(base_hits);
         self.overlay_close_handlers.truncate(base_close_handlers);
         self.focus_scopes.truncate(base_focus_scopes);
+        self.accessibility_fragments
+            .truncate(base_accessibility_fragments);
         self.portal_overlay_counts = PortalOverlayCounts::default();
         self.overlay_layer_graph.retain_before(
             base_commands,
@@ -1258,6 +1424,10 @@ impl<VM> ComputedScene<VM> {
                 .len()
                 .saturating_sub(base_close_handlers),
             focus_scopes: self.focus_scopes.len().saturating_sub(base_focus_scopes),
+            accessibility_fragments: self
+                .accessibility_fragments
+                .len()
+                .saturating_sub(base_accessibility_fragments),
         };
     }
 
@@ -1276,6 +1446,7 @@ impl<VM> ComputedScene<VM> {
         let base_hits = self.overlay_hit_regions.len();
         let base_close_handlers = self.overlay_close_handlers.len();
         let base_focus_scopes = self.focus_scopes.len();
+        let base_accessibility_fragments = self.accessibility_fragments.len();
 
         self.portal_entries.extend(entries);
         crate::runtime::overlay::collect::finalize_portal_entries(self, viewport);
@@ -1309,6 +1480,10 @@ impl<VM> ComputedScene<VM> {
             .saturating_sub(base_close_handlers);
         self.portal_overlay_counts.focus_scopes +=
             self.focus_scopes.len().saturating_sub(base_focus_scopes);
+        self.portal_overlay_counts.accessibility_fragments += self
+            .accessibility_fragments
+            .len()
+            .saturating_sub(base_accessibility_fragments);
     }
 
     pub(crate) fn register_overlay_anchor(&mut self, key: AnchorKey, rect: Rect) {
@@ -1523,6 +1698,15 @@ impl<VM> ComputedScene<VM> {
         self.scene.write_texture_opacity_slot(offset, slot, opacity)
     }
 
+    pub(crate) fn write_texture_mask_tint_slot(
+        &mut self,
+        offset: &crate::ui::widget::common::SceneCounts,
+        slot: crate::ui::widget::common::TexturePrimitiveSlot,
+        color: Color,
+    ) -> bool {
+        self.scene.write_texture_mask_tint_slot(offset, slot, color)
+    }
+
     pub(crate) fn write_texture_slot(
         &mut self,
         offset: &crate::ui::widget::common::SceneCounts,
@@ -1552,6 +1736,7 @@ impl<VM> ComputedScene<VM> {
             && self.overlay_hit_regions.is_empty()
             && self.overlay_close_handlers.is_empty()
             && self.focus_scopes.is_empty()
+            && self.accessibility_fragments.is_empty()
             && self.carousel_auto_play.is_empty()
             && self.overlay_anchors.is_empty()
             && self.portal_entries.is_empty()
@@ -1567,6 +1752,7 @@ impl<VM> ComputedScene<VM> {
             && self.portal_overlay_counts.hits == 0
             && self.portal_overlay_counts.close_handlers == 0
             && self.portal_overlay_counts.focus_scopes == 0
+            && self.portal_overlay_counts.accessibility_fragments == 0
             && self.overlay_layers.iter().all(|bucket| {
                 bucket.commands.is_empty()
                     && bucket.backdrop_blurs.is_empty()
@@ -1577,6 +1763,49 @@ impl<VM> ComputedScene<VM> {
                     && bucket.hits.is_empty()
                     && bucket.close_handlers.is_empty()
                     && bucket.focus_scopes.is_empty()
+                    && bucket.accessibility_fragments.is_empty()
+            })
+    }
+
+    /// Button hover 子树 patch 的严格结构资格。
+    ///
+    /// 与 [`Self::is_simple_for_splice`] 相同地拒绝 overlay / portal / focus scope / anchor /
+    /// carousel / virtual / IME / transform 等结构性内容，但允许主场景 accessibility
+    /// fragment。普通 Button 必然产生 accessibility fragment；子树 patch 会通过既有
+    /// recompose 路径完整替换并向祖先合成这些 fragment，而底层原地 splice 仍继续使用
+    /// 更严格的 `is_simple_for_splice`，不会尝试原地覆盖无障碍元数据。
+    pub(crate) fn is_simple_for_button_hover_recompose(&self) -> bool {
+        self.scene.counts().has_no_overlay()
+            && self.overlay_hit_regions.is_empty()
+            && self.overlay_close_handlers.is_empty()
+            && self.focus_scopes.is_empty()
+            && self.carousel_auto_play.is_empty()
+            && self.overlay_anchors.is_empty()
+            && self.portal_entries.is_empty()
+            && self.external_portal_requests.is_empty()
+            && self.ime_cursor_area.is_none()
+            && self.virtual_state_updates.is_empty()
+            && self.transform_records.is_empty()
+            && self.portal_overlay_counts.commands == 0
+            && self.portal_overlay_counts.shapes == 0
+            && self.portal_overlay_counts.textures == 0
+            && self.portal_overlay_counts.meshes == 0
+            && self.portal_overlay_counts.texts == 0
+            && self.portal_overlay_counts.hits == 0
+            && self.portal_overlay_counts.close_handlers == 0
+            && self.portal_overlay_counts.focus_scopes == 0
+            && self.portal_overlay_counts.accessibility_fragments == 0
+            && self.overlay_layers.iter().all(|bucket| {
+                bucket.commands.is_empty()
+                    && bucket.backdrop_blurs.is_empty()
+                    && bucket.shapes.is_empty()
+                    && bucket.textures.is_empty()
+                    && bucket.meshes.is_empty()
+                    && bucket.texts.is_empty()
+                    && bucket.hits.is_empty()
+                    && bucket.close_handlers.is_empty()
+                    && bucket.focus_scopes.is_empty()
+                    && bucket.accessibility_fragments.is_empty()
             })
     }
 

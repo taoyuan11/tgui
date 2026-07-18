@@ -20,6 +20,10 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
     }
 
     pub(in crate::runtime) fn invalidate_scene_with_reason(&mut self, reason: &'static str) {
+        self.toast_motion_patch_pending = false;
+        self.button_hover_patch_pending = None;
+        self.button_pressed_patch_pending = None;
+        self.row_hover_patch_pending = None;
         if text_profile_enabled() {
             Log::with_tag("tgui-text-prof").debug(format_args!(
                 "textarea_invalidate_scene took 0.000ms reason={} had_cache={} focused_widget={:?} focused_input_region={} text_input_epoch={} hover_epoch={} animation_epoch={}",
@@ -42,6 +46,21 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
     }
 
     pub(in crate::runtime) fn invalidate_computed_scene(&mut self) {
+        self.toast_motion_patch_pending = false;
+        self.button_hover_patch_pending = None;
+        self.button_pressed_patch_pending = None;
+        self.row_hover_patch_pending = None;
+        if let Some(cached) = self.cached_scene.as_mut() {
+            cached.computed_valid = false;
+        }
+        self.text_input_regions.clear();
+    }
+
+    pub(in crate::runtime) fn invalidate_computed_scene_for_toast_motion(&mut self) {
+        let can_patch = self.cached_scene.as_ref().is_some_and(|cached| {
+            cached.layout_valid && cached.computed_valid && cached.layout.is_some()
+        });
+        self.toast_motion_patch_pending = can_patch;
         if let Some(cached) = self.cached_scene.as_mut() {
             cached.computed_valid = false;
         }
@@ -173,6 +192,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         self.initialize_platform_window_binding_state(window_theme);
         self.sync_theme_binding();
         self.invalidate_scene_with_reason("resume_existing_window");
+        self.refresh_frame_clock_from_monitor(Instant::now(), true);
         let clear_color =
             if self.window_bindings.clear_color.is_some() || self.config.clear_color_overridden {
                 self.config.clear_color

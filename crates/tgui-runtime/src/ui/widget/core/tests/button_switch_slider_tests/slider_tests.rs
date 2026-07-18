@@ -119,49 +119,70 @@ fn slider_thumb_shadow_renders_before_thumb_fill_without_changing_hit_geometry()
 }
 
 #[test]
-fn slider_default_uses_token_track_without_thumb_outline() {
-    let theme = Theme::light();
-    let style = SliderStyle::default_for_theme(&theme);
-    assert_eq!(style.track.normal.resolve(), theme.colors.surface_high);
-    assert_eq!(style.active_track.normal.resolve(), theme.colors.primary);
-    assert_eq!(style.border_width.resolve(), theme.border.none);
+fn slider_default_uses_flat_primary_thumb_without_texture_or_outline() {
+    for theme in [Theme::light(), Theme::dark()] {
+        let style = SliderStyle::default_for_theme(&theme);
+        assert_eq!(style.track.normal.resolve(), theme.colors.surface_high);
+        assert_eq!(style.active_track.normal.resolve(), theme.colors.primary);
+        assert_eq!(style.thumb.normal.resolve(), theme.colors.primary);
+        assert_eq!(
+            style.thumb.hovered.resolve(),
+            theme.colors.primary.lighten(0.08)
+        );
+        assert_eq!(
+            style.thumb.pressed.resolve(),
+            theme.colors.primary.darken(0.08)
+        );
+        assert_eq!(style.thumb.disabled.resolve(), theme.colors.on_disabled);
+        assert!(style.thumb_shadow.is_none());
+        assert_eq!(style.border_width.resolve(), theme.border.none);
 
-    let font_manager = FontManager::new(&FontCatalog::default());
-    let media = test_media();
-    let mut animations = AnimationEngine::default();
-    let tree: WidgetTree<()> = WidgetTree::new(Slider::new(50.0, 0.0, 100.0).width(dp(220.0)));
+        let font_manager = FontManager::new(&FontCatalog::default());
+        let media = test_media();
+        let mut animations = AnimationEngine::default();
+        let tree: WidgetTree<()> = WidgetTree::new(Slider::new(50.0, 0.0, 100.0).width(dp(220.0)));
 
-    let rendered = tree.render_output(
-        &font_manager,
-        &theme,
-        &media,
-        &mut animations,
-        None,
-        None,
-        &HashMap::new(),
-        Rect::new(0.0, 0.0, 240.0, 48.0),
-        None,
-        None,
-        None,
-        None,
-        false,
-    );
+        let rendered = tree.render_output(
+            &font_manager,
+            &theme,
+            &media,
+            &mut animations,
+            None,
+            None,
+            &HashMap::new(),
+            Rect::new(0.0, 0.0, 240.0, 48.0),
+            None,
+            None,
+            None,
+            None,
+            false,
+        );
 
-    assert!(!rendered
-        .primitives
-        .shapes
-        .iter()
-        .any(|shape| shape.stroke_width > 0.0));
-    assert!(rendered
-        .primitives
-        .shapes
-        .iter()
-        .any(|shape| shape.color == theme.colors.surface_high));
-    assert!(rendered
-        .primitives
-        .shapes
-        .iter()
-        .any(|shape| shape.color == theme.colors.primary));
+        assert!(
+            rendered.primitives.textures.is_empty(),
+            "default Slider should not allocate or draw a thumb shadow texture"
+        );
+        assert!(!rendered
+            .primitives
+            .shapes
+            .iter()
+            .any(|shape| shape.stroke_width > 0.0));
+        assert!(rendered
+            .primitives
+            .shapes
+            .iter()
+            .any(|shape| shape.color == theme.colors.surface_high));
+        assert!(
+            rendered
+                .primitives
+                .shapes
+                .iter()
+                .filter(|shape| shape.color == theme.colors.primary)
+                .count()
+                >= 2,
+            "active track and thumb should both use the primary token"
+        );
+    }
 }
 
 #[test]

@@ -75,6 +75,11 @@ impl<VM> Clone for Element<VM> {
 
 pub(crate) struct ResolvedElement<VM> {
     pub(crate) id: WidgetId,
+    /// Sticky negative cache for strict reactive direct resolvers.
+    ///
+    /// A set bit only skips a speculative fast path and therefore cannot change rendering. The
+    /// cache is recreated with the resolved element whenever layout/style structure is rebuilt.
+    pub(crate) reactive_direct_fallback_mask: std::cell::Cell<u16>,
     pub(crate) key: Option<WidgetKey>,
     pub(crate) layout: LayoutStyle,
     pub(crate) focus: FocusState,
@@ -103,7 +108,94 @@ pub(crate) struct ResolvedElement<VM> {
     pub(crate) kind: ResolvedWidgetKind<VM>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum RetainedHoverRowKind {
+    List,
+    Tree,
+    DataGrid,
+}
+
 impl<VM> ResolvedElement<VM> {
+    pub(crate) fn is_data_grid_row(&self) -> bool {
+        match &self.kind {
+            ResolvedWidgetKind::Container { children, .. } => children.iter().any(|child| {
+                child
+                    .data_grid_cell
+                    .as_ref()
+                    .is_some_and(|cell| cell.row_id == self.id)
+            }),
+            _ => false,
+        }
+    }
+
+    pub(crate) fn retained_hover_row_kind(&self) -> Option<RetainedHoverRowKind> {
+        if self.is_data_grid_row() {
+            return Some(RetainedHoverRowKind::DataGrid);
+        }
+        if self.tooltip.is_some()
+            || self.popover.is_some()
+            || self.menu.is_some()
+            || self.context_menu.is_some()
+            || self.modal.is_some()
+            || self.drawer.is_some()
+            || self.lifecycle_events.has_any()
+            || self.media_events.has_any()
+        {
+            return None;
+        }
+        if self.list_item.is_some() {
+            return (!self.descendants_block_retained_row_hover())
+                .then_some(RetainedHoverRowKind::List);
+        }
+        if let Some(tree_node) = self.tree_node.as_ref() {
+            return (!tree_node.has_children
+                && !tree_node.checkable.resolve_untracked()
+                && !tree_node.draggable
+                && !self.descendants_block_retained_row_hover())
+            .then_some(RetainedHoverRowKind::Tree);
+        }
+        None
+    }
+
+    fn descendants_block_retained_row_hover(&self) -> bool {
+        let children = match &self.kind {
+            ResolvedWidgetKind::Container { children, .. }
+            | ResolvedWidgetKind::Virtual { children, .. } => children,
+            _ => return false,
+        };
+        children.iter().any(Self::blocks_retained_row_hover)
+    }
+
+    fn blocks_retained_row_hover(&self) -> bool {
+        if self.tooltip.is_some()
+            || self.popover.is_some()
+            || self.menu.is_some()
+            || self.context_menu.is_some()
+            || self.modal.is_some()
+            || self.drawer.is_some()
+            || self.interactions.has_any()
+            || self.lifecycle_events.has_any()
+            || self.media_events.has_any()
+            || self.focus.focusable.unwrap_or(false)
+            || self.list_item.is_some()
+            || self.tree_node.is_some()
+            || self.data_grid_cell.is_some()
+            || self.data_grid_header.is_some()
+            || self.data_grid_resize_handle.is_some()
+        {
+            return true;
+        }
+        match &self.kind {
+            ResolvedWidgetKind::Container { children, .. }
+            | ResolvedWidgetKind::Virtual { children, .. } => {
+                children.iter().any(Self::blocks_retained_row_hover)
+            }
+            ResolvedWidgetKind::Text { text, .. } => text.user_select,
+            ResolvedWidgetKind::Image { .. } | ResolvedWidgetKind::Icon { .. } => false,
+            _ => true,
+        }
+    }
+
     pub(crate) fn contains_virtual(&self) -> bool {
         match &self.kind {
             ResolvedWidgetKind::Virtual { .. } => true,
@@ -273,6 +365,9 @@ pub(crate) enum ResolvedWidgetKind<VM> {
         placement: crate::foundation::binding::ToastPlacement,
         max_visible: Option<usize>,
         style: WidgetToastStyle,
+        prepared_cards: std::sync::Arc<
+            std::sync::Mutex<super::resolved::collect::toast::ToastPreparedCardCache<VM>>,
+        >,
     },
     Portal {
         content: Box<Element<VM>>,
@@ -293,6 +388,9 @@ impl<VM> Clone for ResolvedElement<VM> {
     fn clone(&self) -> Self {
         Self {
             id: self.id,
+            reactive_direct_fallback_mask: std::cell::Cell::new(
+                self.reactive_direct_fallback_mask.get(),
+            ),
             key: self.key.clone(),
             layout: self.layout.clone(),
             focus: self.focus.clone(),
@@ -700,11 +798,13 @@ impl<VM> Clone for ResolvedWidgetKind<VM> {
                 placement,
                 max_visible,
                 style,
+                prepared_cards,
             } => Self::ToastHost {
                 queue: queue.clone(),
                 placement: *placement,
                 max_visible: *max_visible,
                 style: style.clone(),
+                prepared_cards: prepared_cards.clone(),
             },
             Self::Portal {
                 content,

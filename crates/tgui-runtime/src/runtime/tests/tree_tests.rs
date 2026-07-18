@@ -125,6 +125,309 @@ fn visible_tree_keys(handler: &mut BoundRuntimeHandler<TestVm>) -> Vec<WidgetKey
 }
 
 #[test]
+fn tree_selected_keys_signal_updates_cached_scene_and_matches_full_recollect() {
+    let invalidation = InvalidationSignal::new();
+    let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+    let selected = context.state(vec![WidgetKey::from("a")]);
+    let selected_color = Color::hexa(0xD14B70FF);
+    let row_color = Color::hexa(0x102030FF);
+    let tree = WidgetTree::new(
+        Tree::<&'static str, TestVm>::new(
+            vec![TreeNode::keyed("a", "Alpha"), TreeNode::keyed("b", "Beta")],
+            |ctx| Text::new(format!("{} selected={}", ctx.item, ctx.selected)).into(),
+        )
+        .selected_keys(selected.signal())
+        .selection_mode(TreeSelectionMode::Multiple)
+        .item_layout(crate::ui::widget::ItemLayout::Fixed {
+            item_extent: dp(32.0),
+            spacing: Dp::ZERO,
+            overscan: 0,
+        })
+        .style(move |style, _| {
+            style.item_background = crate::ui::layout::Value::Static(row_color);
+            style.item_hover_background = crate::ui::layout::Value::Static(row_color);
+            style.item_selected_background = crate::ui::layout::Value::Static(selected_color);
+        })
+        .size(dp(220.0), dp(120.0)),
+    );
+    let mut config = test_config_with_size(220.0, 120.0);
+    config.reduced_motion = true;
+    let mut handler = test_handler_with_config(TestVm, Some(tree), invalidation, config);
+
+    let selected_rects = |scene: &crate::ui::widget::ComputedScene<TestVm>| {
+        scene
+            .scene
+            .shapes
+            .iter()
+            .filter_map(|shape| (shape.color == selected_color).then_some(shape.rect))
+            .collect::<Vec<_>>()
+    };
+    let text_contents = |scene: &crate::ui::widget::ComputedScene<TestVm>| {
+        scene
+            .scene
+            .texts
+            .iter()
+            .map(|text| text.content.to_string())
+            .collect::<Vec<_>>()
+    };
+
+    let initial = handler.computed_scene().clone();
+    assert_eq!(selected_rects(&initial).len(), 1);
+    assert!(text_contents(&initial)
+        .iter()
+        .any(|text| text == "Alpha selected=true"));
+    assert!(text_contents(&initial)
+        .iter()
+        .any(|text| text == "Beta selected=false"));
+
+    selected.set(vec![WidgetKey::from("b")]);
+    handler.request_redraw_if_dirty(Instant::now());
+
+    let (retained, retained_cache_dependencies) = {
+        let cached = handler
+            .cached_scene
+            .as_ref()
+            .expect("Tree selection invalidation should preserve the cache shell");
+        assert!(cached.layout_valid && cached.computed_valid);
+        (
+            cached.computed.clone(),
+            (
+                cached.dependencies.dependency_count(),
+                cached.dependencies.has_global_dependency(),
+                cached.dependencies.all_owners(),
+            ),
+        )
+    };
+    assert_eq!(selected_rects(&retained).len(), 1);
+    assert_ne!(selected_rects(&retained), selected_rects(&initial));
+    let retained_text = text_contents(&retained);
+    assert!(retained_text
+        .iter()
+        .any(|text| text == "Alpha selected=false"));
+    assert!(retained_text
+        .iter()
+        .any(|text| text == "Beta selected=true"));
+
+    let retained_b = retained
+        .hit_regions
+        .iter()
+        .find_map(|region| match &region.interaction {
+            HitInteraction::TreeNode { id, state, .. } if state.key == WidgetKey::from("b") => {
+                Some(*id)
+            }
+            _ => None,
+        })
+        .expect("selected Tree row b should expose a hit region");
+    let retained_accessibility = handler.accessibility_tree_update_for_test();
+    let retained_b_node_id = crate::accessibility::node_id_from_widget(retained_b);
+    let retained_b_node = retained_accessibility
+        .nodes
+        .iter()
+        .find_map(|(id, node)| (*id == retained_b_node_id).then_some(node))
+        .expect("selected Tree row b should expose an accessibility node");
+    assert_eq!(retained_b_node.is_selected(), Some(true));
+
+    handler.invalidate_scene_with_reason("tree_selection_equivalence_full_recollect");
+    let full = handler.computed_scene().clone();
+    let full_cache_dependencies = {
+        let cached = handler
+            .cached_scene
+            .as_ref()
+            .expect("full recollect should repopulate the cache");
+        (
+            cached.dependencies.dependency_count(),
+            cached.dependencies.has_global_dependency(),
+            cached.dependencies.all_owners(),
+        )
+    };
+    let full_accessibility = handler.accessibility_tree_update_for_test();
+
+    super::table_tests::assert_data_grid_scene_equivalent(&retained, &full);
+    assert_eq!(retained_accessibility, full_accessibility);
+    assert_eq!(retained_cache_dependencies, full_cache_dependencies);
+    assert_eq!(
+        (
+            retained.dependencies.dependency_count(),
+            retained.dependencies.has_global_dependency(),
+            retained.dependencies.all_owners(),
+        ),
+        (
+            full.dependencies.dependency_count(),
+            full.dependencies.has_global_dependency(),
+            full.dependencies.all_owners(),
+        )
+    );
+}
+
+#[test]
+fn tree_checked_keys_signal_updates_cached_scene_and_matches_full_recollect() {
+    let invalidation = InvalidationSignal::new();
+    let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+    let checked = context.state(vec![WidgetKey::from("a")]);
+    let tree = WidgetTree::new(
+        Tree::<&'static str, TestVm>::new(
+            vec![TreeNode::keyed("a", "Alpha"), TreeNode::keyed("b", "Beta")],
+            |ctx| Text::new(format!("{} check={:?}", ctx.item, ctx.check_state)).into(),
+        )
+        .checked_keys(checked.signal())
+        .checkable(true)
+        .item_layout(crate::ui::widget::ItemLayout::Fixed {
+            item_extent: dp(32.0),
+            spacing: Dp::ZERO,
+            overscan: 0,
+        })
+        .size(dp(220.0), dp(120.0)),
+    );
+    let mut config = test_config_with_size(220.0, 120.0);
+    config.reduced_motion = true;
+    let mut handler = test_handler_with_config(TestVm, Some(tree), invalidation, config);
+
+    let text_contents = |scene: &crate::ui::widget::ComputedScene<TestVm>| {
+        scene
+            .scene
+            .texts
+            .iter()
+            .map(|text| text.content.to_string())
+            .collect::<Vec<_>>()
+    };
+    let initial = handler.computed_scene().clone();
+    let initial_text = text_contents(&initial);
+    assert!(initial_text
+        .iter()
+        .any(|text| text == "Alpha check=Checked"));
+    assert!(initial_text
+        .iter()
+        .any(|text| text == "Beta check=Unchecked"));
+
+    checked.set(vec![WidgetKey::from("b")]);
+    handler.request_redraw_if_dirty(Instant::now());
+
+    let (retained, retained_cache_dependencies) = {
+        let cached = handler
+            .cached_scene
+            .as_ref()
+            .expect("Tree checked-keys invalidation should preserve the cache shell");
+        assert!(cached.layout_valid && cached.computed_valid);
+        (
+            cached.computed.clone(),
+            (
+                cached.dependencies.dependency_count(),
+                cached.dependencies.has_global_dependency(),
+                cached.dependencies.all_owners(),
+            ),
+        )
+    };
+    let retained_text = text_contents(&retained);
+    assert!(retained_text
+        .iter()
+        .any(|text| text == "Alpha check=Unchecked"));
+    assert!(retained_text
+        .iter()
+        .any(|text| text == "Beta check=Checked"));
+    let retained_b = retained
+        .hit_regions
+        .iter()
+        .find_map(|region| match &region.interaction {
+            HitInteraction::TreeNode { id, state, .. } if state.key == WidgetKey::from("b") => {
+                assert_eq!(
+                    state.check_state,
+                    crate::ui::widget::TreeCheckState::Checked
+                );
+                Some(*id)
+            }
+            _ => None,
+        })
+        .expect("checked Tree row b should expose a hit region");
+    let retained_accessibility = handler.accessibility_tree_update_for_test();
+    let retained_b_node_id = crate::accessibility::node_id_from_widget(retained_b);
+    let retained_b_node = retained_accessibility
+        .nodes
+        .iter()
+        .find_map(|(id, node)| (*id == retained_b_node_id).then_some(node))
+        .expect("checked Tree row b should expose an accessibility node");
+    assert_eq!(retained_b_node.toggled(), Some(accesskit::Toggled::True));
+
+    handler.invalidate_scene_with_reason("tree_checked_equivalence_full_recollect");
+    let full = handler.computed_scene().clone();
+    let full_cache_dependencies = {
+        let cached = handler
+            .cached_scene
+            .as_ref()
+            .expect("full recollect should repopulate the cache");
+        (
+            cached.dependencies.dependency_count(),
+            cached.dependencies.has_global_dependency(),
+            cached.dependencies.all_owners(),
+        )
+    };
+    let full_accessibility = handler.accessibility_tree_update_for_test();
+
+    super::table_tests::assert_data_grid_scene_equivalent(&retained, &full);
+    assert_eq!(retained_accessibility, full_accessibility);
+    assert_eq!(retained_cache_dependencies, full_cache_dependencies);
+    assert_eq!(
+        (
+            retained.dependencies.dependency_count(),
+            retained.dependencies.has_global_dependency(),
+            retained.dependencies.all_owners(),
+        ),
+        (
+            full.dependencies.dependency_count(),
+            full.dependencies.has_global_dependency(),
+            full.dependencies.all_owners(),
+        )
+    );
+}
+
+#[test]
+fn tree_expanded_keys_signal_updates_cached_scene_and_matches_full_recollect() {
+    let invalidation = InvalidationSignal::new();
+    let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+    let expanded = context.state(Vec::<WidgetKey>::new());
+    let tree = WidgetTree::new(
+        Tree::<&'static str, TestVm>::new(sample_nodes(), |ctx| Text::new(ctx.item).into())
+            .expanded_keys(expanded.signal())
+            .item_layout(crate::ui::widget::ItemLayout::Fixed {
+                item_extent: dp(32.0),
+                spacing: Dp::ZERO,
+                overscan: 0,
+            })
+            .size(dp(240.0), dp(180.0)),
+    );
+    let mut config = test_config_with_size(240.0, 180.0);
+    config.reduced_motion = true;
+    let mut handler = test_handler_with_config(TestVm, Some(tree), invalidation, config);
+    let initial = handler.computed_scene().clone();
+    assert!(!initial.hit_regions.iter().any(|region| {
+        matches!(
+            &region.interaction,
+            HitInteraction::TreeNode { state, .. }
+                if state.key == WidgetKey::from("child-a")
+        )
+    }));
+
+    expanded.set(vec![WidgetKey::from("root")]);
+    handler.request_redraw_if_dirty(Instant::now());
+    let retained = handler
+        .cached_scene
+        .as_ref()
+        .expect("Tree expanded-keys invalidation should preserve the cache shell")
+        .computed
+        .clone();
+    assert!(retained.hit_regions.iter().any(|region| {
+        matches!(
+            &region.interaction,
+            HitInteraction::TreeNode { state, .. }
+                if state.key == WidgetKey::from("child-a")
+        )
+    }));
+
+    handler.invalidate_scene_with_reason("tree_expanded_equivalence_full_recollect");
+    let full = handler.computed_scene().clone();
+    super::table_tests::assert_data_grid_scene_equivalent(&retained, &full);
+}
+
+#[test]
 fn tree_disclosure_click_dispatches_expand_change() {
     let invalidation = InvalidationSignal::new();
     let expanded = Arc::new(Mutex::new(Vec::<WidgetKey>::new()));
@@ -449,4 +752,423 @@ fn tree_drop_dispatches_inside_event_and_rejects_self_drop() {
     handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Left);
     pointer_release(&mut handler, child);
     assert_eq!(*latest.lock().unwrap(), None);
+}
+
+#[test]
+fn virtual_tree_arrow_down_crosses_materialized_window_boundary() {
+    let invalidation = InvalidationSignal::new();
+    let nodes = (0..64)
+        .map(|index| TreeNode::keyed(format!("row-{index}"), index))
+        .collect::<Vec<_>>();
+    let tree = WidgetTree::new(
+        Tree::<usize, TestVm>::new(nodes, |context| Text::new(context.item.to_string()).into())
+            .item_layout(crate::ui::widget::ItemLayout::Fixed {
+                item_extent: dp(28.0),
+                spacing: Dp::ZERO,
+                overscan: 0,
+            })
+            .size(dp(220.0), dp(84.0)),
+    );
+    let mut config = test_config_with_size(220.0, 84.0);
+    config.reduced_motion = true;
+    let mut handler = test_handler_with_config(TestVm, Some(tree), invalidation, config);
+
+    let (id, state, focus) = handler
+        .computed_scene()
+        .hit_regions
+        .iter()
+        .filter_map(|region| match &region.interaction {
+            HitInteraction::TreeNode { id, state, .. } => {
+                Some((*id, state.clone(), region.focus.clone()?))
+            }
+            _ => None,
+        })
+        .max_by_key(|(_, state, _)| state.row_index)
+        .expect("virtual Tree should materialize at least one row");
+    let next_index = state.row_index + 1;
+    let next_key = state
+        .visible_keys
+        .get(next_index)
+        .cloned()
+        .expect("test must stop before the visible source end");
+    handler.focused_widget = Some(FocusedWidget {
+        widget_id: id,
+        scope_path: focus.scope_path,
+        on_blur: focus.on_blur,
+    });
+    handler.tree_focus_state = Some((state.tree_id, state.key));
+    handler.focus_visible = true;
+
+    assert!(
+        handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::ArrowDown))),
+        "ArrowDown at the materialized boundary should schedule the next visible Tree row"
+    );
+    let _ = handler.computed_scene();
+    assert_eq!(
+        handler.tree_focus_state.as_ref().map(|(_, key)| key),
+        Some(&next_key),
+        "Tree focus should advance after the target row materializes"
+    );
+
+    let (id, state, focus) = handler
+        .computed_scene()
+        .hit_regions
+        .iter()
+        .filter_map(|region| match &region.interaction {
+            HitInteraction::TreeNode { id, state, .. } => {
+                Some((*id, state.clone(), region.focus.clone()?))
+            }
+            _ => None,
+        })
+        .min_by_key(|(_, state, _)| state.row_index)
+        .expect("scrolled Tree should materialize a first boundary row");
+    let previous_key = state
+        .row_index
+        .checked_sub(1)
+        .and_then(|index| state.visible_keys.get(index))
+        .cloned()
+        .expect("test must stop after the visible source start");
+    handler.focused_widget = Some(FocusedWidget {
+        widget_id: id,
+        scope_path: focus.scope_path,
+        on_blur: focus.on_blur,
+    });
+    handler.tree_focus_state = Some((state.tree_id, state.key));
+
+    let arrow_up = pressed_key_event(PhysicalKey::Code(KeyCode::ArrowUp));
+    assert!(handler.handle_keyboard_input(&arrow_up));
+    let focused_id = handler.focused_widget_id();
+    let focused_key = handler
+        .computed_scene()
+        .hit_regions
+        .iter()
+        .find_map(|region| match &region.interaction {
+            HitInteraction::TreeNode { id, state, .. } if Some(*id) == focused_id => {
+                Some(state.key.clone())
+            }
+            _ => None,
+        });
+    assert_eq!(focused_key.as_ref(), Some(&previous_key));
+}
+
+#[test]
+fn virtual_tree_home_end_and_page_use_full_visible_source() {
+    let invalidation = InvalidationSignal::new();
+    let nodes = (0..100)
+        .map(|index| TreeNode::keyed(format!("row-{index}"), index))
+        .collect::<Vec<_>>();
+    let tree = WidgetTree::new(
+        Tree::<usize, TestVm>::new(nodes, |context| Text::new(context.item.to_string()).into())
+            .item_layout(crate::ui::widget::ItemLayout::Fixed {
+                item_extent: dp(28.0),
+                spacing: Dp::ZERO,
+                overscan: 0,
+            })
+            .size(dp(220.0), dp(84.0)),
+    );
+    let mut handler = test_handler_with_config(
+        TestVm,
+        Some(tree),
+        invalidation,
+        test_config_with_size(220.0, 84.0),
+    );
+    let (id, state, focus) = handler
+        .computed_scene()
+        .hit_regions
+        .iter()
+        .filter_map(|region| match &region.interaction {
+            HitInteraction::TreeNode { id, state, .. } => {
+                Some((*id, state.clone(), region.focus.clone()?))
+            }
+            _ => None,
+        })
+        .min_by_key(|(_, state, _)| state.row_index)
+        .expect("virtual Tree should materialize a first row");
+    let tree_id = state.tree_id;
+    handler.focused_widget = Some(FocusedWidget {
+        widget_id: id,
+        scope_path: focus.scope_path,
+        on_blur: focus.on_blur,
+    });
+    handler.tree_focus_state = Some((tree_id, state.key));
+
+    assert!(handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::End))));
+    assert_eq!(
+        handler.tree_focus_state.as_ref().map(|(_, key)| key),
+        Some(&WidgetKey::from("row-99"))
+    );
+    assert!(handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::Home))));
+    assert_eq!(
+        handler.tree_focus_state.as_ref().map(|(_, key)| key),
+        Some(&WidgetKey::from("row-0"))
+    );
+
+    let (page, viewport_height) = handler
+        .computed_scene()
+        .scroll_regions
+        .iter()
+        .find(|region| region.id == tree_id)
+        .map(|region| {
+            (
+                ((region.content_viewport.height / dp(28.0)).ceil() as usize).max(1),
+                region.content_viewport.height,
+            )
+        })
+        .unwrap_or((1, dp(84.0)));
+    assert!(
+        handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::PageDown,)))
+    );
+    assert_eq!(
+        handler.tree_focus_state.as_ref().map(|(_, key)| key),
+        Some(&WidgetKey::from(format!("row-{page}")))
+    );
+    let page_offset = handler
+        .scroll_states
+        .get(&tree_id)
+        .map(|offset| offset.y)
+        .unwrap_or(Dp::ZERO);
+    assert!(
+        (page_offset - viewport_height).abs() <= 0.01,
+        "PageDown should advance one viewport ({viewport_height:?}), got {page_offset:?}"
+    );
+    assert!(handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::PageUp,))));
+    assert_eq!(
+        handler.tree_focus_state.as_ref().map(|(_, key)| key),
+        Some(&WidgetKey::from("row-0"))
+    );
+}
+
+#[test]
+fn virtual_tree_100k_materialization_bounds_disabled_signal_reads() {
+    let invalidation = InvalidationSignal::new();
+    let disabled_reads = Arc::new(AtomicUsize::new(0));
+    let nodes = (0..100_000)
+        .map(|index| {
+            let reads_for_signal = Arc::clone(&disabled_reads);
+            let disabled = Signal::new(
+                move || {
+                    reads_for_signal.fetch_add(1, Ordering::SeqCst);
+                    false
+                },
+                invalidation.clone(),
+            );
+            TreeNode::keyed(format!("row-{index}"), index).disable(disabled)
+        })
+        .collect::<Vec<_>>();
+    let tree = WidgetTree::new(
+        Tree::<usize, TestVm>::new(nodes, |context| Text::new(context.item.to_string()).into())
+            .item_layout(crate::ui::widget::ItemLayout::Fixed {
+                item_extent: dp(28.0),
+                spacing: Dp::ZERO,
+                overscan: 0,
+            })
+            .size(dp(220.0), dp(84.0)),
+    );
+    let mut handler = test_handler_with_config(
+        TestVm,
+        Some(tree),
+        invalidation,
+        test_config_with_size(220.0, 84.0),
+    );
+
+    let (materialized, first_target) = {
+        let computed = handler.computed_scene();
+        let materialized = computed
+            .hit_regions
+            .iter()
+            .filter(|region| matches!(region.interaction, HitInteraction::TreeNode { .. }))
+            .count();
+        let first_target =
+            computed
+                .hit_regions
+                .iter()
+                .find_map(|region| match &region.interaction {
+                    HitInteraction::TreeNode { id, state, .. } => {
+                        Some((*id, state.clone(), region.focus.clone()?))
+                    }
+                    _ => None,
+                });
+        (materialized, first_target)
+    };
+    assert!(
+        materialized <= 4,
+        "test viewport should stay tightly virtualized"
+    );
+    assert!(
+        disabled_reads.load(Ordering::SeqCst) <= 64,
+        "materializing {materialized} rows must not resolve disabled across the 100k source"
+    );
+
+    let (id, state, focus) = first_target.expect("first Tree row should be focusable");
+    handler.focused_widget = Some(FocusedWidget {
+        widget_id: id,
+        scope_path: focus.scope_path,
+        on_blur: focus.on_blur,
+    });
+    handler.tree_focus_state = Some((state.tree_id, state.key));
+    disabled_reads.store(0, Ordering::SeqCst);
+    assert!(handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::End))));
+    assert_eq!(
+        handler.tree_focus_state.as_ref().map(|(_, key)| key),
+        Some(&WidgetKey::from("row-99999"))
+    );
+    assert!(
+        disabled_reads.load(Ordering::SeqCst) <= 64,
+        "100k End navigation must resolve only a bounded visible slice"
+    );
+}
+
+#[test]
+fn virtual_tree_page_long_disabled_run_is_conservative() {
+    let invalidation = InvalidationSignal::new();
+    let nodes = (0..32)
+        .map(|index| {
+            let node = TreeNode::keyed(format!("row-{index}"), index);
+            if (1..=15).contains(&index) {
+                node.disable(true)
+            } else {
+                node
+            }
+        })
+        .collect::<Vec<_>>();
+    let tree = WidgetTree::new(
+        Tree::<usize, TestVm>::new(nodes, |context| Text::new(context.item.to_string()).into())
+            .item_layout(crate::ui::widget::ItemLayout::Fixed {
+                item_extent: dp(28.0),
+                spacing: Dp::ZERO,
+                overscan: 0,
+            })
+            .size(dp(200.0), dp(56.0)),
+    );
+    let mut handler = test_handler_with_config(
+        TestVm,
+        Some(tree),
+        invalidation,
+        test_config_with_size(200.0, 56.0),
+    );
+    let (id, state, focus) = handler
+        .computed_scene()
+        .hit_regions
+        .iter()
+        .find_map(|region| match &region.interaction {
+            HitInteraction::TreeNode { id, state, .. } if state.key == WidgetKey::from("row-0") => {
+                Some((*id, state.clone(), region.focus.clone()?))
+            }
+            _ => None,
+        })
+        .expect("first row should be materialized");
+    handler.focused_widget = Some(FocusedWidget {
+        widget_id: id,
+        scope_path: focus.scope_path,
+        on_blur: focus.on_blur,
+    });
+    handler.tree_focus_state = Some((state.tree_id, state.key));
+
+    assert!(
+        handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::PageDown,)))
+    );
+    assert_eq!(
+        handler.tree_focus_state.as_ref().map(|(_, key)| key),
+        Some(&WidgetKey::from("row-0"))
+    );
+    assert!(!handler.scroll_states.contains_key(&state.tree_id));
+}
+
+#[test]
+fn measured_virtual_tree_page_uses_sparse_prefix_bounds() {
+    let invalidation = InvalidationSignal::new();
+    let nodes = (0..64)
+        .map(|index| TreeNode::keyed(format!("row-{index}"), index))
+        .collect::<Vec<_>>();
+    let tree = WidgetTree::new(
+        Tree::<usize, TestVm>::new(nodes, |context| {
+            Stack::new()
+                .height(if context.item % 2 == 0 {
+                    dp(32.0)
+                } else {
+                    dp(52.0)
+                })
+                .child(Text::new(context.item.to_string()))
+                .into()
+        })
+        .item_layout(crate::ui::widget::ItemLayout::Measured {
+            estimate: dp(28.0),
+            spacing: dp(3.0),
+            overscan: 0,
+        })
+        .size(dp(220.0), dp(96.0)),
+    );
+    let mut handler = test_handler_with_config(
+        TestVm,
+        Some(tree),
+        invalidation,
+        test_config_with_size(220.0, 96.0),
+    );
+    let (id, state, focus) = handler
+        .computed_scene()
+        .hit_regions
+        .iter()
+        .filter_map(|region| match &region.interaction {
+            HitInteraction::TreeNode { id, state, .. } => {
+                Some((*id, state.clone(), region.focus.clone()?))
+            }
+            _ => None,
+        })
+        .min_by_key(|(_, state, _)| state.row_index)
+        .expect("measured Tree should materialize a first row");
+    let tree_id = state.tree_id;
+    let viewport_height = handler
+        .computed_scene()
+        .scroll_regions
+        .iter()
+        .find(|region| region.id == tree_id)
+        .map(|region| region.content_viewport.height)
+        .expect("measured Tree should scroll");
+    let current_top = handler
+        .virtual_states
+        .get(&tree_id)
+        .map(|cache| {
+            cache
+                .item_main_bounds(state.row_index, state.item_extent, state.item_spacing)
+                .0
+        })
+        .expect("measured prefix cache should exist");
+    handler.focused_widget = Some(FocusedWidget {
+        widget_id: id,
+        scope_path: focus.scope_path,
+        on_blur: focus.on_blur,
+    });
+    handler.tree_focus_state = Some((tree_id, state.key));
+
+    assert!(
+        handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::PageDown,)))
+    );
+    let focused_id = handler.focused_widget_id();
+    let focused_state = handler
+        .computed_scene()
+        .hit_regions
+        .iter()
+        .find_map(|region| match &region.interaction {
+            HitInteraction::TreeNode { id, state, .. } if Some(*id) == focused_id => {
+                Some(state.clone())
+            }
+            _ => None,
+        })
+        .expect("PageDown should focus a measured Tree row");
+    let focused_top = handler
+        .virtual_states
+        .get(&tree_id)
+        .map(|cache| {
+            cache
+                .item_main_bounds(
+                    focused_state.row_index,
+                    focused_state.item_extent,
+                    focused_state.item_spacing,
+                )
+                .0
+        })
+        .expect("measured prefix cache should remain available");
+    assert!(focused_state.row_index > state.row_index);
+    assert!(focused_top + dp(0.01) >= current_top + viewport_height);
+    assert!((handler.scroll_states[&tree_id].y - viewport_height).abs() <= 0.01);
 }

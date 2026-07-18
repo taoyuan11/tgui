@@ -37,6 +37,7 @@ use crate::ui::widget::StyleSheet;
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 struct MenuBarRuntimeMetrics {
     height: Dp,
+    entry_height: Dp,
     padding: crate::ui::layout::Insets,
     entry_min_width: Dp,
     entry_gap: Dp,
@@ -46,6 +47,7 @@ impl From<&MenuBarStyle> for MenuBarRuntimeMetrics {
     fn from(style: &MenuBarStyle) -> Self {
         Self {
             height: style.height,
+            entry_height: menu_bar_entry_height(style),
             padding: style.padding,
             entry_min_width: style.entry_min_width,
             entry_gap: style.entry_gap,
@@ -221,7 +223,7 @@ where
                 .disable(disabled.clone())
                 .runtime_layout(move |layout, _, _, _| {
                     let metrics = *entry_runtime_metrics.read();
-                    layout.height = Some(Value::Static(Length::Px(metrics.height)));
+                    layout.height = Some(Value::Static(Length::Px(metrics.entry_height)));
                     layout.min_width = Some(Value::Static(Length::Px(metrics.entry_min_width)));
                 })
                 .style_full_with_style_sheet(move |context, style_sheet, visual, state| {
@@ -352,6 +354,7 @@ fn menu_bar_container_style(style: MenuBarStyle, context: &StyleContext<'_>) -> 
 }
 
 fn menu_bar_entry_button_style(style: MenuBarStyle, context: &StyleContext<'_>) -> ButtonStyle {
+    let entry_height = menu_bar_entry_height(&style);
     let mut button = ButtonStyle::default_for_theme(context.theme, ButtonVariantKind::Ghost);
     button.background = style.entry_background;
     button.background.open = Some(style.entry_active_background);
@@ -361,7 +364,11 @@ fn menu_bar_entry_button_style(style: MenuBarStyle, context: &StyleContext<'_>) 
     button.radius = style.radius;
     button.padding_x = style.entry_padding_x;
     button.padding_y = crate::ui::unit::Dp::ZERO;
-    button.min_height = style.height;
+    button.min_height = entry_height;
     button.text_style = style.text_style;
     button
+}
+
+fn menu_bar_entry_height(style: &MenuBarStyle) -> Dp {
+    (style.height - style.padding.top - style.padding.bottom).max(Dp::ZERO)
 }

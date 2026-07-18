@@ -578,14 +578,17 @@ pub(crate) fn push_radio_primitives(
         now,
     );
 
-    scene.push_shape(RenderPrimitive {
-        rect: control_frame,
-        color: background.with_alpha_factor(opacity),
-        corner_radius: radius,
-        stroke_width: 0.0,
-        clip_rect,
-        clip_mask,
-    });
+    let background = background.with_alpha_factor(opacity);
+    if background.a > 0 {
+        scene.push_shape(RenderPrimitive {
+            rect: control_frame,
+            color: background,
+            corner_radius: radius,
+            stroke_width: 0.0,
+            clip_rect,
+            clip_mask,
+        });
+    }
     push_border_primitives(
         scene,
         control_frame,

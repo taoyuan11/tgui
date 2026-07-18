@@ -1,6 +1,45 @@
 use super::*;
 
+const FRAME_CLOCK_REFRESH_PROBE_INTERVAL: Duration = Duration::from_millis(250);
+
 impl<VM: 'static> BoundRuntimeHandler<VM> {
+    pub(super) fn refresh_frame_clock_from_monitor(&mut self, now: Instant, force: bool) -> bool {
+        if !force
+            && self.last_frame_clock_probe.is_some_and(|last| {
+                now.saturating_duration_since(last) < FRAME_CLOCK_REFRESH_PROBE_INTERVAL
+            })
+        {
+            return false;
+        }
+
+        self.last_frame_clock_probe = Some(now);
+        let refresh_rate_millihertz = self
+            .window
+            .as_ref()
+            .and_then(|window| window.current_monitor())
+            .and_then(|monitor| monitor.refresh_rate_millihertz());
+        let changed = self
+            .frame_clock
+            .update_refresh_rate(refresh_rate_millihertz, now);
+        if changed {
+            if let Some(layout) = self
+                .cached_scene
+                .as_mut()
+                .and_then(|cached| cached.layout.as_mut())
+            {
+                layout.set_frame_clock(self.frame_clock.snapshot());
+            }
+            // A retained Toast frame may have been collected on the old cadence.
+            // Recollect once so its nested overlay/portal deadline uses the new clock.
+            self.next_toast_wakeup_deadline = None;
+            self.invalidate_computed_scene();
+            if let Some(window) = self.window.as_ref() {
+                window.request_redraw();
+            }
+        }
+        changed
+    }
+
     pub(super) fn resolve_theme_color(
         &mut self,
         property: WindowProperty,
@@ -17,9 +56,17 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             .color_settled_at(AnimationKey::Window(property), target)
     }
 
-    pub(super) fn next_deadline(&self, now: Instant) -> Option<Instant> {
-        let animation_deadline = self.animation_engine.next_frame_deadline(now);
-        let controller_deadline = self.animations.next_frame_deadline(now);
+    pub(super) fn frame_clock_sources_active(&self) -> bool {
+        self.animation_engine.has_active_animations()
+            || self.animations.has_active_controllers()
+            || (!self.reduced_motion
+                && (!self.smooth_scroll_states.is_empty()
+                    || !self.touch_scroll_inertia_states.is_empty()))
+    }
+
+    pub(super) fn next_deadline(&mut self, now: Instant) -> Option<Instant> {
+        let frame_clock_active = self.frame_clock_sources_active();
+        let animation_deadline = self.frame_clock.set_active(frame_clock_active, now);
         let media_deadline = self.next_media_animation_deadline();
         let click_deadline = self.pending_click_deadline();
         let gesture_deadline = self
@@ -29,24 +76,17 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         let tooltip_release_deadline = self.tooltip_state.long_press_release_deadline;
         let caret_deadline = self.next_caret_blink_deadline(now);
         let key_repeat_deadline = self.next_key_repeat_deadline();
-        let smooth_scroll_deadline =
-            (!self.smooth_scroll_states.is_empty()).then_some(now + Duration::from_millis(16));
-        let touch_scroll_inertia_deadline = (!self.touch_scroll_inertia_states.is_empty())
-            .then_some(now + super::TOUCH_SCROLL_INERTIA_FRAME);
         let tooltip_deadline = self.next_tooltip_wakeup_deadline;
         let toast_deadline = self.next_toast_wakeup_deadline;
         let carousel_deadline = self.next_carousel_wakeup_deadline;
         earliest_deadline([
             animation_deadline,
-            controller_deadline,
             media_deadline,
             click_deadline,
             gesture_deadline,
             tooltip_release_deadline,
             caret_deadline,
             key_repeat_deadline,
-            smooth_scroll_deadline,
-            touch_scroll_inertia_deadline,
             tooltip_deadline,
             toast_deadline,
             carousel_deadline,
@@ -69,13 +109,22 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 }
             }
             event_loop.set_control_flow(ControlFlow::WaitUntil(deadline));
-        } else if !matches!(event_loop.control_flow(), ControlFlow::Wait) {
-            event_loop.set_control_flow(ControlFlow::Wait);
+        } else {
+            match event_loop.control_flow() {
+                // A future wake may belong to another window. Multi-window
+                // handlers share one event loop, so an idle window must not
+                // erase an active sibling's earlier deadline.
+                ControlFlow::WaitUntil(existing) if existing > now => {}
+                ControlFlow::Wait => {}
+                ControlFlow::WaitUntil(_) | ControlFlow::Poll => {
+                    event_loop.set_control_flow(ControlFlow::Wait);
+                }
+            }
         }
     }
 
     pub(super) fn schedule_next_deadline(
-        &self,
+        &mut self,
         event_loop: &dyn ActiveEventLoop,
         now: Instant,
     ) -> Option<Instant> {
@@ -99,8 +148,14 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 }
             }
             event_loop.set_control_flow(ControlFlow::WaitUntil(deadline));
-        } else if !matches!(event_loop.control_flow(), ControlFlow::Wait) {
-            event_loop.set_control_flow(ControlFlow::Wait);
+        } else {
+            match event_loop.control_flow() {
+                ControlFlow::WaitUntil(existing) if existing > Instant::now() => {}
+                ControlFlow::Wait => {}
+                ControlFlow::WaitUntil(_) | ControlFlow::Poll => {
+                    event_loop.set_control_flow(ControlFlow::Wait);
+                }
+            }
         }
     }
 
@@ -264,6 +319,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         self.renderer = Some(renderer);
         self.last_synced_clear_color = Some(clear_color);
         self.window = Some(window);
+        self.refresh_frame_clock_from_monitor(Instant::now(), true);
         self.initialize_platform_window_binding_state(window_theme);
         self.initialize_accessibility_adapter();
         #[cfg(feature = "video")]

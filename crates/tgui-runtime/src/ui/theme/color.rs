@@ -105,11 +105,15 @@ impl ColorScheme {
             on_success: Color::hexa(0x09090BFF),
             warning: Color::hexa(0xF59E0BFF),
             on_warning: Color::hexa(0x09090BFF),
-            error: Color::hexa(0xEF4444FF),
+            // Red 600 keeps the restrained neutral palette while meeting WCAG AA for normal
+            // `on_error` text. Red 500 only reaches roughly 3.6:1 against the light foreground.
+            error: Color::hexa(0xDC2626FF),
             on_error: Color::hexa(0xFAFAFAFF),
             outline: Color::hexa(0xD4D4D8FF),
             outline_muted: Color::hexa(0xE4E4E780),
-            focus_ring: primary.with_alpha_factor(0.40),
+            // The ring is composited over the surrounding surface. 75% keeps the accent soft
+            // while clearing the 3:1 non-text contrast threshold on both light background planes.
+            focus_ring: primary.with_alpha_factor(0.75),
             selection: primary.with_alpha_factor(0.18),
             disabled: Color::hexa(0xF4F4F5FF),
             on_disabled: Color::hexa(0xA1A1AAFF),
@@ -140,7 +144,7 @@ impl ColorScheme {
             on_error: Color::hexa(0x09090BFF),
             outline: Color::hexa(0x52525BFF),
             outline_muted: Color::hexa(0x3F3F4680),
-            focus_ring: primary.with_alpha_factor(0.50),
+            focus_ring: primary.with_alpha_factor(0.65),
             selection: primary.with_alpha_factor(0.24),
             disabled: Color::hexa(0x27272AFF),
             on_disabled: Color::hexa(0x71717AFF),
@@ -152,6 +156,37 @@ impl ColorScheme {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn relative_luminance(color: Color) -> f32 {
+        let linear = |channel: u8| {
+            let channel = channel as f32 / 255.0;
+            if channel <= 0.04045 {
+                channel / 12.92
+            } else {
+                ((channel + 0.055) / 1.055).powf(2.4)
+            }
+        };
+        0.2126 * linear(color.r) + 0.7152 * linear(color.g) + 0.0722 * linear(color.b)
+    }
+
+    fn contrast_ratio(a: Color, b: Color) -> f32 {
+        let a = relative_luminance(a);
+        let b = relative_luminance(b);
+        (a.max(b) + 0.05) / (a.min(b) + 0.05)
+    }
+
+    fn composite_over(foreground: Color, background: Color) -> Color {
+        let alpha = foreground.a as f32 / 255.0;
+        let blend = |foreground: u8, background: u8| {
+            (foreground as f32 * alpha + background as f32 * (1.0 - alpha)).round() as u8
+        };
+        Color::rgba(
+            blend(foreground.r, background.r),
+            blend(foreground.g, background.g),
+            blend(foreground.b, background.b),
+            255,
+        )
+    }
 
     #[test]
     fn default_schemes_match_neutral_token_table() {
@@ -166,7 +201,8 @@ mod tests {
         assert_eq!(light.on_primary, Color::WHITE);
         assert_eq!(light.primary_container, Color::hexa(0xDBEAFEFF));
         assert_eq!(light.on_primary_container, Color::hexa(0x1E3A8AFF));
-        assert_eq!(light.focus_ring, Color::hexa(0x2563EB66));
+        assert_eq!(light.error, Color::hexa(0xDC2626FF));
+        assert_eq!(light.focus_ring, Color::hexa(0x2563EBBF));
         assert_eq!(light.selection, Color::hexa(0x2563EB2E));
 
         let dark = ColorScheme::dark();
@@ -180,7 +216,41 @@ mod tests {
         assert_eq!(dark.on_primary, Color::hexa(0x08111FFF));
         assert_eq!(dark.primary_container, Color::hexa(0x172554FF));
         assert_eq!(dark.on_primary_container, Color::hexa(0xDBEAFEFF));
-        assert_eq!(dark.focus_ring, Color::hexa(0x60A5FA80));
+        assert_eq!(dark.focus_ring, Color::hexa(0x60A5FAA6));
         assert_eq!(dark.selection, Color::hexa(0x60A5FA3D));
+    }
+
+    #[test]
+    fn default_text_and_semantic_pairs_meet_wcag_aa_normal_text_contrast() {
+        for scheme in [ColorScheme::light(), ColorScheme::dark()] {
+            for (foreground, background) in [
+                (scheme.on_background, scheme.background),
+                (scheme.on_surface, scheme.surface),
+                (scheme.on_surface_muted, scheme.surface),
+                (scheme.on_primary, scheme.primary),
+                (scheme.on_primary_container, scheme.primary_container),
+                (scheme.on_success, scheme.success),
+                (scheme.on_warning, scheme.warning),
+                (scheme.on_error, scheme.error),
+            ] {
+                assert!(
+                    contrast_ratio(foreground, background) >= 4.5,
+                    "foreground {foreground:?} on {background:?} misses WCAG AA"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn default_focus_ring_meets_non_text_contrast_after_compositing() {
+        for scheme in [ColorScheme::light(), ColorScheme::dark()] {
+            for adjacent in [scheme.background, scheme.surface] {
+                let composited = composite_over(scheme.focus_ring, adjacent);
+                assert!(
+                    contrast_ratio(composited, adjacent) >= 3.0,
+                    "focus ring {composited:?} on {adjacent:?} misses 3:1 contrast"
+                );
+            }
+        }
     }
 }

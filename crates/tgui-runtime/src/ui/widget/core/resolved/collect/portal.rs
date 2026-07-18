@@ -9,10 +9,13 @@ use crate::runtime::portal::ExternalPortalRequest;
 use crate::ui::unit::Dp;
 use crate::ui::widget::core::compute_taffy_layout_with_measure;
 use crate::ui::widget::{
-    ComputedScene, Element, FocusScopeState, PortalAnchor, PortalTarget, Rect,
+    AccessibilityFragment, AccessibilityFragmentNode, ComputedScene, Element, FocusScopeState,
+    HitRegion, PortalAnchor, PortalTarget, Rect, ScrollRegion, WidgetId,
 };
 
-use super::super::scene::{CollectContext, VisualContext};
+use super::super::LayoutNode;
+
+use super::super::scene::{CollectContext, PortalAccessibilityGeometryRecord, VisualContext};
 use super::super::types::{ResolvedElement, ResolvedWidgetKind};
 use super::CollectVisualState;
 
@@ -78,6 +81,7 @@ impl<VM: 'static> ResolvedElement<VM> {
                     *close_on_outside_click,
                     *close_on_escape,
                     focus_scope.clone(),
+                    Some(self.id),
                 );
                 let _ = crate::runtime::overlay::collect::emit_overlay(
                     computed,
@@ -99,13 +103,17 @@ impl<VM: 'static> ResolvedElement<VM> {
                 computed
                     .external_portal_requests
                     .push(ExternalPortalRequest {
+                        source_window_instance_id: None,
+                        source_publication_generation: 0,
+                        source_open: open.clone(),
+                        focus_scope_instance_id: None,
                         source_widget_id: self.id,
                         overlay_id: OverlayId::new(self.id.raw() ^ PORTAL_OVERLAY_TAG),
                         target_window_key: target_window_key.clone(),
                         anchor,
                         options: options.clone(),
                         layer: *layer,
-                        content: content.clone(),
+                        content: std::sync::Arc::new(content.as_ref().clone()),
                         on_open_change: on_open_change.clone(),
                         return_focus_to: *return_focus_to,
                         close_on_outside_click: *close_on_outside_click,
@@ -126,7 +134,7 @@ pub(crate) fn collect_portal_content_scene<VM: 'static>(
             super::super::tree::with_widget_stack(|| {
                 let mut root = content.clone();
                 super::prepare_nested_scene_root(&mut root, context, context.viewport);
-                let resolved = root.resolve(context.theme);
+                let resolved = std::sync::Arc::new(root.resolve(context.theme));
                 let mut taffy = TaffyTree::new();
                 let layout_root = resolved
                     .build_layout_tree(
@@ -158,6 +166,7 @@ pub(crate) fn collect_portal_content_scene<VM: 'static>(
                 let mut chunks = std::collections::HashMap::new();
                 let mut chunk_parts = std::collections::HashMap::new();
                 let mut visual_contexts = std::collections::HashMap::new();
+                let mut accessibility_geometry = Vec::new();
                 let mut local_context = CollectContext {
                     taffy: &taffy,
                     font_manager: context.font_manager,
@@ -188,6 +197,7 @@ pub(crate) fn collect_portal_content_scene<VM: 'static>(
                     animations: context.animations,
                     reduced_motion: context.reduced_motion,
                     now: context.now,
+                    frame_clock: context.frame_clock,
                     focus: Default::default(),
                     tooltip_hover_started_at: context.tooltip_hover_started_at,
                     next_tooltip_wakeup: context.next_tooltip_wakeup,
@@ -197,6 +207,8 @@ pub(crate) fn collect_portal_content_scene<VM: 'static>(
                     gpu_scroll_enabled: false,
                     gpu_scroll_container: None,
                     transform_stack: context.transform_stack.clone(),
+                    portal_accessibility_geometry: Some(&mut accessibility_geometry),
+                    portal_accessibility_path: smallvec::SmallVec::new(),
                 };
                 let root_id = resolved.collect_subtree_cache(
                     &layout_root,
@@ -213,14 +225,178 @@ pub(crate) fn collect_portal_content_scene<VM: 'static>(
                     &mut chunk_parts,
                     &mut visual_contexts,
                 );
+                drop(local_context);
                 let mut computed = chunks.get(&root_id).cloned().unwrap_or_default();
+                if let Some(accessibility_fragment) = collect_accessibility_fragment(
+                    std::sync::Arc::clone(&resolved),
+                    &layout_root,
+                    &accessibility_geometry,
+                    &computed.hit_regions,
+                    &computed.scroll_regions,
+                ) {
+                    computed
+                        .accessibility_fragments
+                        .push(accessibility_fragment);
+                }
                 computed.finalize_portals(context.viewport);
                 Some((computed, size))
             })
         });
     let (mut computed, size) = result?;
     computed.dependencies = dependencies;
+    // Cross-window Portal transport is intentionally one hop. Nested external requests need a
+    // provenance/lease model (and cycle handling) before they can be forwarded safely; dropping
+    // only that metadata preserves the outer Portal's visuals, hits, and accessibility fragment.
+    computed.external_portal_requests.clear();
     Some((computed, size))
+}
+
+fn collect_accessibility_fragment<VM>(
+    resolved_root: std::sync::Arc<ResolvedElement<VM>>,
+    layout_node: &LayoutNode,
+    geometry: &[PortalAccessibilityGeometryRecord],
+    hits: &[HitRegion<VM>],
+    scroll_regions: &[ScrollRegion],
+) -> Option<AccessibilityFragment<VM>> {
+    let resolved = resolved_root.as_ref();
+    let mut hits_by_widget =
+        std::collections::HashMap::<WidgetId, smallvec::SmallVec<[HitRegion<VM>; 1]>>::new();
+    for hit in hits {
+        hits_by_widget
+            .entry(hit.interaction.widget_id())
+            .or_default()
+            .push(hit.clone());
+        if let Some(focus) = hit.focus.as_ref() {
+            if focus.widget_id != hit.interaction.widget_id() {
+                hits_by_widget
+                    .entry(focus.widget_id)
+                    .or_default()
+                    .push(hit.clone());
+            }
+        }
+    }
+    let scroll_regions_by_widget = scroll_regions.iter().copied().fold(
+        std::collections::HashMap::<WidgetId, smallvec::SmallVec<[ScrollRegion; 1]>>::new(),
+        |mut by_widget, region| {
+            by_widget.entry(region.id).or_default().push(region);
+            by_widget
+        },
+    );
+    let geometry_by_path = geometry
+        .iter()
+        .map(|record| (record.resolved_path.clone(), record))
+        .collect::<std::collections::HashMap<_, _>>();
+    let mut nodes = Vec::new();
+    let mut path = smallvec::SmallVec::<[usize; 4]>::new();
+    collect_accessibility_fragment_node(
+        resolved,
+        layout_node,
+        &mut path,
+        &geometry_by_path,
+        &hits_by_widget,
+        &scroll_regions_by_widget,
+        &mut nodes,
+    )?;
+    let has_duplicate_widget_ids = resolved_tree_has_duplicate_widget_ids(resolved);
+    Some(AccessibilityFragment {
+        source_window_instance_id: None,
+        source_publication_generation: None,
+        source_open: None,
+        owner_path: smallvec::SmallVec::new(),
+        scope_path: Vec::new(),
+        clip_rect: None,
+        has_duplicate_widget_ids,
+        resolved_root,
+        nodes,
+    })
+}
+
+fn resolved_tree_has_duplicate_widget_ids<VM>(root: &ResolvedElement<VM>) -> bool {
+    fn visit<VM>(
+        node: &ResolvedElement<VM>,
+        seen: &mut std::collections::HashSet<WidgetId>,
+    ) -> bool {
+        if !seen.insert(node.id) {
+            return true;
+        }
+        match &node.kind {
+            ResolvedWidgetKind::Container { children, .. }
+            | ResolvedWidgetKind::Virtual { children, .. } => {
+                children.iter().any(|child| visit(child, seen))
+            }
+            _ => false,
+        }
+    }
+
+    visit(root, &mut std::collections::HashSet::new())
+}
+
+fn collect_accessibility_fragment_node<VM>(
+    resolved: &ResolvedElement<VM>,
+    layout_node: &LayoutNode,
+    path: &mut smallvec::SmallVec<[usize; 4]>,
+    geometry_by_path: &std::collections::HashMap<
+        smallvec::SmallVec<[usize; 4]>,
+        &PortalAccessibilityGeometryRecord,
+    >,
+    hits_by_widget: &std::collections::HashMap<WidgetId, smallvec::SmallVec<[HitRegion<VM>; 1]>>,
+    scroll_regions_by_widget: &std::collections::HashMap<
+        WidgetId,
+        smallvec::SmallVec<[ScrollRegion; 1]>,
+    >,
+    nodes: &mut Vec<AccessibilityFragmentNode<VM>>,
+) -> Option<usize> {
+    let geometry = geometry_by_path.get(path)?;
+    if geometry.widget_id != resolved.id {
+        return None;
+    }
+    let resolved_children = match &resolved.kind {
+        ResolvedWidgetKind::Container { children, .. }
+        | ResolvedWidgetKind::Virtual { children, .. } => children.as_slice(),
+        _ => &[],
+    };
+    if resolved_children.len() != layout_node.children.len() {
+        return None;
+    }
+    let node_index = nodes.len();
+    nodes.push(AccessibilityFragmentNode {
+        widget_id: resolved.id,
+        resolved_path: path.clone(),
+        bounds: geometry.frame,
+        clip_rect: geometry.clip_rect,
+        hits: hits_by_widget
+            .get(&resolved.id)
+            .cloned()
+            .unwrap_or_default(),
+        scroll_regions: scroll_regions_by_widget
+            .get(&resolved.id)
+            .cloned()
+            .unwrap_or_default(),
+        children: smallvec::SmallVec::new(),
+    });
+    for (child_index, (child, child_layout)) in resolved_children
+        .iter()
+        .zip(layout_node.children.iter())
+        .enumerate()
+    {
+        path.push(child_index);
+        let result = collect_accessibility_fragment_node(
+            child,
+            child_layout,
+            path,
+            geometry_by_path,
+            hits_by_widget,
+            scroll_regions_by_widget,
+            nodes,
+        );
+        path.pop();
+        if let Some(child_node_index) = result {
+            nodes[node_index]
+                .children
+                .push((child_index, child_node_index));
+        }
+    }
+    Some(node_index)
 }
 
 pub(crate) fn resolve_external_portal_anchor<VM>(
@@ -249,10 +425,12 @@ pub(crate) fn build_external_portal_overlay<VM>(
         request.options.clone(),
         request.layer,
         request.on_open_change.clone(),
-        request.return_focus_to,
+        // Source-window WidgetIds are not valid focus targets in the host handler.
+        None,
         request.close_on_outside_click,
         request.close_on_escape,
         request.focus_scope.clone(),
+        request.focus_scope_instance_id,
     )
 }
 
@@ -288,6 +466,7 @@ fn build_overlay<VM>(
     close_on_outside_click: bool,
     close_on_escape: bool,
     focus_scope: Option<crate::ui::widget::FocusScopeOptions>,
+    focus_scope_instance_id: Option<crate::ui::widget::WidgetId>,
 ) -> Overlay<VM> {
     let mut overlay = Overlay::<VM>::new(overlay_id, anchor)
         .source_widget(widget_id)
@@ -302,10 +481,10 @@ fn build_overlay<VM>(
             overlay = overlay.return_focus_to(target);
         }
     }
-    if let Some(options) = focus_scope {
+    if let (Some(options), Some(scope_id)) = (focus_scope, focus_scope_instance_id) {
         overlay = overlay.focus_scope(FocusScopeState {
-            scope_id: widget_id,
-            path: vec![widget_id],
+            scope_id,
+            path: vec![scope_id],
             active: options.is_active(),
             options,
         });

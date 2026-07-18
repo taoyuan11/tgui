@@ -3,8 +3,6 @@ use crate::foundation::form::{Form, FormSnapshot, ValidationErrors};
 use crate::foundation::task::{async_task_channel, Tasks};
 use crate::foundation::view_model::{CommandContext, ValueCommand};
 use crate::{dialog::Dialogs, log::Log, notification::Notifications};
-use std::sync::atomic::AtomicBool;
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 fn context() -> ViewModelContext {
@@ -171,7 +169,7 @@ fn task_context_and_receiver<VM: 'static>() -> (
             Tasks::from_runtime("main".to_string(), 1, dispatcher),
             Default::default(),
             Log::default(),
-            Arc::new(AtomicBool::new(false)),
+            crate::foundation::binding::InvalidationSignal::new(),
         ),
         receiver,
     )

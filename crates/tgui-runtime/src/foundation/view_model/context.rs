@@ -1,7 +1,7 @@
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use crate::dialog::Dialogs;
+use crate::foundation::binding::InvalidationSignal;
 use crate::foundation::task::Tasks;
 use crate::foundation::window_control::WindowControl;
 use crate::log::Log;
@@ -16,7 +16,7 @@ pub struct CommandContext<T> {
     tasks: Tasks<T>,
     window: WindowControl,
     log: Log,
-    rebuild_requested: Arc<AtomicBool>,
+    invalidation: InvalidationSignal,
 }
 
 impl<T> Clone for CommandContext<T> {
@@ -27,7 +27,7 @@ impl<T> Clone for CommandContext<T> {
             tasks: self.tasks.clone(),
             window: self.window.clone(),
             log: self.log.clone(),
-            rebuild_requested: self.rebuild_requested.clone(),
+            invalidation: self.invalidation.clone(),
         }
     }
 }
@@ -80,7 +80,7 @@ impl<T: 'static> CommandContext<T> {
     /// data that affects structure, intrinsic layout, or primitive counts outside
     /// retained slots.
     pub fn request_rebuild(&self) {
-        self.rebuild_requested.store(true, Ordering::SeqCst);
+        self.invalidation.request_root_rebuild();
     }
 
     pub(crate) fn new(
@@ -89,7 +89,7 @@ impl<T: 'static> CommandContext<T> {
         tasks: Tasks<T>,
         window: WindowControl,
         log: Log,
-        rebuild_requested: Arc<AtomicBool>,
+        invalidation: InvalidationSignal,
     ) -> Self {
         Self {
             dialogs,
@@ -97,7 +97,7 @@ impl<T: 'static> CommandContext<T> {
             tasks,
             window,
             log,
-            rebuild_requested,
+            invalidation,
         }
     }
 
@@ -108,12 +108,12 @@ impl<T: 'static> CommandContext<T> {
             Tasks::detached(),
             WindowControl::default(),
             Log::default(),
-            Arc::new(AtomicBool::new(false)),
+            InvalidationSignal::new(),
         )
     }
 
-    pub(crate) fn take_rebuild_request(&self) -> bool {
-        self.rebuild_requested.swap(false, Ordering::SeqCst)
+    pub(crate) fn root_rebuild_revision(&self) -> u64 {
+        self.invalidation.root_rebuild_revision()
     }
 
     pub(crate) fn scope<ChildVm: 'static>(
@@ -128,7 +128,7 @@ impl<T: 'static> CommandContext<T> {
             self.tasks.scope(task_selector),
             self.window.clone(),
             self.log.clone(),
-            self.rebuild_requested.clone(),
+            self.invalidation.clone(),
         )
     }
 }

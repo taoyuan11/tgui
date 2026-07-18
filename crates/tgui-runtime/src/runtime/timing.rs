@@ -46,6 +46,12 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         self.hover_popover_anchor = None;
         let had_hovered_widgets = !self.hovered_widgets.is_empty();
         let previous_scrollbar = self.hovered_scrollbar;
+        self.button_hover_patch_pending = None;
+        self.button_pressed_patch_pending = None;
+        if had_hovered_widgets {
+            self.button_hover_patch_pending = self.retained_button_hover_patch_candidate(&[]);
+            self.row_hover_patch_pending = self.retained_row_hover_patch_candidate(&[]);
+        }
         for hovered in std::mem::take(&mut self.hovered_widgets).into_iter().rev() {
             if let Some(command) = hovered.on_mouse_leave {
                 self.execute_hover_transition_handler(&command, previous_position);
@@ -71,6 +77,26 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         let mut frame_advanced = false;
         let mut smooth_scroll_advanced = false;
         let mut touch_scroll_inertia_advanced = false;
+        if self.settle_scroll_motion_for_reduced_motion() {
+            frame_advanced = true;
+            if let Some(window) = self.window.as_ref() {
+                window.request_redraw();
+            }
+        }
+        let initial_clock_active = self.frame_clock_sources_active();
+        let clock_was_armed = self.frame_clock.is_armed();
+        let toast_clock_active = self.next_toast_wakeup_deadline.is_some_and(|deadline| {
+            deadline <= now + self.frame_clock.interval().saturating_mul(2)
+        });
+        if initial_clock_active && !clock_was_armed {
+            // Refresh once when motion starts after an idle period so a display
+            // mode change is observed before the first sampled frame.
+            self.refresh_frame_clock_from_monitor(now, true);
+        } else if clock_was_armed || toast_clock_active {
+            self.refresh_frame_clock_from_monitor(now, false);
+        }
+        self.frame_clock.set_active(initial_clock_active, now);
+        let frame_clock_due = self.frame_clock.consume_due_tick(now);
         // tooltip 唤醒到点：invalidate scene 让下一帧 collect 看到 elapsed >= delay。
         if let Some(deadline) = self.next_tooltip_wakeup_deadline {
             if deadline <= now {
@@ -85,25 +111,27 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         if let Some(deadline) = self.next_toast_wakeup_deadline {
             if deadline <= now {
                 self.next_toast_wakeup_deadline = None;
-                self.invalidate_computed_scene();
+                self.invalidate_computed_scene_for_toast_motion();
                 if let Some(window) = self.window.as_ref() {
                     window.request_redraw();
                 }
                 frame_advanced = true;
             }
         }
-        if self.advance_smooth_scroll() {
-            frame_advanced = true;
-            smooth_scroll_advanced = true;
-            if let Some(window) = self.window.as_ref() {
-                window.request_redraw();
+        if frame_clock_due {
+            if self.advance_smooth_scroll_at(now) {
+                frame_advanced = true;
+                smooth_scroll_advanced = true;
+                if let Some(window) = self.window.as_ref() {
+                    window.request_redraw();
+                }
             }
-        }
-        if self.advance_touch_scroll_inertia(now) {
-            frame_advanced = true;
-            touch_scroll_inertia_advanced = true;
-            if let Some(window) = self.window.as_ref() {
-                window.request_redraw();
+            if self.advance_touch_scroll_inertia(now) {
+                frame_advanced = true;
+                touch_scroll_inertia_advanced = true;
+                if let Some(window) = self.window.as_ref() {
+                    window.request_redraw();
+                }
             }
         }
         if self.drive_carousel_auto_play(now) {
@@ -118,13 +146,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 window.request_redraw();
             }
         }
-        let frame_clock_due = match event_loop.control_flow() {
-            ControlFlow::WaitUntil(deadline) => deadline <= now,
-            ControlFlow::Poll | ControlFlow::Wait => true,
-        };
-        let controller_frame = self
-            .animations
-            .refresh_and_next_frame_deadline(now, frame_clock_due);
+        let controller_frame = self.animations.refresh(now, frame_clock_due);
         let controller_changed = controller_frame.changed;
         if controller_changed {
             frame_advanced = true;
@@ -142,6 +164,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             Default::default()
         };
         if animation_refresh.changed {
+            self.toast_motion_patch_pending = false;
             frame_advanced = true;
             self.animation_epoch = self.animation_epoch.wrapping_add(1);
             if animation_refresh.accessibility_geometry_changed {
@@ -151,13 +174,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             if animation_refresh.layout_changed {
                 self.layout_animation_epoch = self.layout_animation_epoch.wrapping_add(1);
             }
-            let patched = if animation_refresh.layout_widget_ids.is_empty()
-                && !animation_refresh.scene_widget_ids.is_empty()
-            {
-                self.patch_animation_scene_widgets(&animation_refresh.scene_widget_ids, now)
-            } else {
-                false
-            };
+            let patched = self.patch_animation_refresh(&animation_refresh, now);
             if !patched {
                 self.invalidate_computed_scene();
             }
@@ -166,8 +183,12 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             }
         }
 
-        let animation_deadline = self.animation_engine.next_frame_deadline(now);
-        let controller_deadline = controller_frame.next_deadline;
+        let frame_clock_active = self.animation_engine.has_active_animations()
+            || controller_frame.active
+            || (!self.reduced_motion
+                && (!self.smooth_scroll_states.is_empty()
+                    || !self.touch_scroll_inertia_states.is_empty()));
+        let animation_deadline = self.frame_clock.set_active(frame_clock_active, now);
         let media_deadline = self.next_media_animation_deadline();
         let click_deadline = self.pending_click_deadline();
         let gesture_deadline = self
@@ -178,23 +199,16 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         let caret_deadline = self.next_caret_blink_deadline(now);
         let key_repeat_deadline = self.next_key_repeat_deadline();
         let carousel_deadline = self.next_carousel_wakeup_deadline;
-        let smooth_scroll_deadline =
-            (!self.smooth_scroll_states.is_empty()).then_some(now + Duration::from_millis(16));
-        let touch_scroll_inertia_deadline = (!self.touch_scroll_inertia_states.is_empty())
-            .then_some(now + super::TOUCH_SCROLL_INERTIA_FRAME);
         let tooltip_deadline = self.next_tooltip_wakeup_deadline;
         let toast_deadline = self.next_toast_wakeup_deadline;
         let next_deadline = super::handler_support::earliest_deadline([
             animation_deadline,
-            controller_deadline,
             media_deadline,
             click_deadline,
             gesture_deadline,
             tooltip_release_deadline,
             caret_deadline,
             key_repeat_deadline,
-            smooth_scroll_deadline,
-            touch_scroll_inertia_deadline,
             tooltip_deadline,
             toast_deadline,
             carousel_deadline,
@@ -227,7 +241,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     animation_refresh.layout_changed,
                     frame_advanced,
                     animation_deadline.is_some(),
-                    controller_deadline.is_some(),
+                    controller_frame.active,
                     media_deadline.is_some(),
                     click_deadline.is_some(),
                     gesture_deadline.is_some(),
@@ -235,8 +249,8 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     caret_deadline.is_some(),
                     key_repeat_deadline.is_some(),
                     carousel_deadline.is_some(),
-                    smooth_scroll_deadline.is_some(),
-                    touch_scroll_inertia_deadline.is_some(),
+                    !self.smooth_scroll_states.is_empty(),
+                    !self.touch_scroll_inertia_states.is_empty(),
                     next_deadline.is_some(),
                 ),
             );

@@ -24,6 +24,7 @@ struct VertexOutput {
     @location(7) clip_enabled: f32,
     @location(8) opacity: f32,
     @location(9) tint: vec4<f32>,
+    @location(10) mask_mode: f32,
 };
 
 @group(0) @binding(0) var text_texture: texture_2d<f32>;
@@ -78,23 +79,22 @@ fn vs_main(input: VertexInput) -> VertexOutput {
     output.corner_radius = input.corner_radius;
     output.clip_rect_size = input.clip_rect_size;
     output.clip_corner_radius = input.clip_corner_radius;
-    output.clip_enabled = input.clip_enabled;
+    let mask_mode = floor(input.clip_enabled / 2.0);
+    output.clip_enabled = input.clip_enabled - 2.0 * mask_mode;
     output.opacity = input.opacity;
     output.tint = input.tint;
+    output.mask_mode = mask_mode;
     return output;
 }
 
 @fragment
 fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let sampled = textureSample(text_texture, text_sampler, input.uv);
-    // Tint alpha is zero only for tintable paragraph quads backed by an R8
-    // coverage atlas. R8 sampling expands to (r, 0, 0, 1), while the legacy
-    // RGBA mask stores white RGB and coverage in alpha. Decode both through the
-    // same pipeline without adding a binding or fragment specialization.
-    let r8_coverage = input.tint.a < 0.5;
-    let sampled_rgb = select(sampled.rgb, vec3<f32>(1.0), r8_coverage);
+    // mask_mode: 0 = regular RGBA, 1 = RGBA alpha mask, 2 = R8 coverage mask.
+    let alpha_mask = input.mask_mode > 0.5;
+    let r8_coverage = input.mask_mode > 1.5;
+    let sampled_rgb = select(sampled.rgb, vec3<f32>(1.0), alpha_mask);
     let sampled_alpha = select(sampled.a, sampled.r, r8_coverage);
-    let tint_alpha = select(input.tint.a, 1.0, r8_coverage);
     var alpha = 1.0;
     if (input.corner_radius > 0.0) {
         let radius = min(input.corner_radius, min(input.rect_size.x, input.rect_size.y) * 0.5);
@@ -114,6 +114,6 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     }
     return vec4<f32>(
         sampled_rgb * srgb_to_linear(input.tint.rgb),
-        sampled_alpha * tint_alpha * combined_alpha * input.opacity,
+        sampled_alpha * combined_alpha * input.opacity,
     );
 }

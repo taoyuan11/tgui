@@ -660,6 +660,15 @@ where
             })
             .collect::<Vec<_>>()
             .into();
+        let row_virtual_indices: Arc<[usize]> = self
+            .rows
+            .iter()
+            .enumerate()
+            .filter_map(|(virtual_index, row)| {
+                matches!(row, ListRow::Item { .. }).then_some(virtual_index)
+            })
+            .collect::<Vec<_>>()
+            .into();
         let sibling_index_by_key = Arc::new(row_keys.iter().cloned().enumerate().fold(
             HashMap::with_capacity(row_keys.len()),
             |mut indexes, (index, key)| {
@@ -669,11 +678,11 @@ where
                 indexes
             },
         ));
-        let row_disabled: Arc<[bool]> = self
+        let row_disabled: Arc<[Value<bool>]> = self
             .rows
             .iter()
             .filter_map(|row| match row {
-                ListRow::Item { disabled, .. } => Some(disabled.resolve()),
+                ListRow::Item { disabled, .. } => Some(disabled.clone()),
                 ListRow::Header(_) => None,
             })
             .collect::<Vec<_>>()
@@ -693,6 +702,7 @@ where
             selected_keys,
             selected_key_membership,
             sibling_keys: row_keys,
+            sibling_virtual_row_indices: row_virtual_indices,
             sibling_index_by_key,
             sibling_disabled: row_disabled,
         });

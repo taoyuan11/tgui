@@ -115,11 +115,11 @@ pub(crate) enum ChildSource<VM> {
     Switch {
         index: Value<usize>,
         cases: Vec<Element<VM>>,
-        fallback: Option<Element<VM>>,
+        fallback: Option<Box<Element<VM>>>,
     },
     Show {
         visible: Value<bool>,
-        child: Element<VM>,
+        child: Box<Element<VM>>,
     },
 }
 
@@ -162,7 +162,7 @@ impl<VM> ChildSource<VM> {
                 };
                 cases
                     .get(index)
-                    .or(fallback.as_ref())
+                    .or(fallback.as_deref())
                     .cloned()
                     .into_iter()
                     .collect()
@@ -177,7 +177,7 @@ impl<VM> ChildSource<VM> {
                     visible.resolve()
                 };
                 if visible {
-                    vec![child.clone()]
+                    vec![child.as_ref().clone()]
                 } else {
                     Vec::new()
                 }
@@ -221,11 +221,11 @@ impl<VM> ChildSource<VM> {
                     .into_iter()
                     .map(|child| child.scope_with_selector(selector.clone()))
                     .collect(),
-                fallback: fallback.map(|child| child.scope_with_selector(selector)),
+                fallback: fallback.map(|child| Box::new((*child).scope_with_selector(selector))),
             },
             Self::Show { visible, child } => ChildSource::Show {
                 visible,
-                child: child.scope_with_selector(selector),
+                child: Box::new((*child).scope_with_selector(selector)),
             },
         }
     }
@@ -511,6 +511,7 @@ pub(crate) struct TabTriggerState<VM> {
     pub placement: TabPlacement,
     pub key: String,
     pub label: String,
+    pub selected: Value<String>,
     pub active: Value<bool>,
     pub on_change: Option<ValueCommand<VM, (String, String)>>,
     pub reorderable: Value<bool>,
@@ -525,6 +526,7 @@ impl<VM> Clone for TabTriggerState<VM> {
             placement: self.placement,
             key: self.key.clone(),
             label: self.label.clone(),
+            selected: self.selected.clone(),
             active: self.active.clone(),
             on_change: self.on_change.clone(),
             reorderable: self.reorderable.clone(),
@@ -544,6 +546,7 @@ impl<VM: 'static> TabTriggerState<VM> {
             placement: self.placement,
             key: self.key,
             label: self.label,
+            selected: self.selected,
             active: self.active,
             on_change: self
                 .on_change
@@ -558,8 +561,25 @@ pub(crate) struct ListSelectionMetadata {
     pub selected_keys: Value<std::sync::Arc<[WidgetKey]>>,
     pub selected_key_membership: Value<std::sync::Arc<std::collections::HashSet<WidgetKey>>>,
     pub sibling_keys: std::sync::Arc<[WidgetKey]>,
+    pub sibling_virtual_row_indices: std::sync::Arc<[usize]>,
     pub sibling_index_by_key: std::sync::Arc<std::collections::HashMap<WidgetKey, usize>>,
-    pub sibling_disabled: std::sync::Arc<[bool]>,
+    pub sibling_disabled: std::sync::Arc<[Value<bool>]>,
+}
+
+pub(crate) struct TreeSelectionMetadata {
+    pub selected_keys: Value<std::sync::Arc<[WidgetKey]>>,
+    pub selected_key_membership: Value<std::sync::Arc<std::collections::HashSet<WidgetKey>>>,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct TreeKeySnapshot {
+    pub ordered: std::sync::Arc<[WidgetKey]>,
+    pub membership: std::sync::Arc<std::collections::HashSet<WidgetKey>>,
+}
+
+pub(crate) struct TreeControlledKeyMetadata {
+    pub expanded: Value<std::sync::Arc<TreeKeySnapshot>>,
+    pub checked: Value<std::sync::Arc<TreeKeySnapshot>>,
 }
 
 pub(crate) struct ListItemState<VM> {
@@ -584,7 +604,7 @@ pub(crate) struct TreeRootState {
     pub tree_id: WidgetId,
     pub node_count: usize,
     pub selection_mode: crate::ui::widget::TreeSelectionMode,
-    pub selected_keys: crate::ui::layout::Value<Vec<WidgetKey>>,
+    pub selection: std::sync::Arc<TreeSelectionMetadata>,
     pub checkable: crate::ui::layout::Value<bool>,
 }
 
@@ -594,7 +614,7 @@ impl Clone for TreeRootState {
             tree_id: self.tree_id,
             node_count: self.node_count,
             selection_mode: self.selection_mode,
-            selected_keys: self.selected_keys.clone(),
+            selection: self.selection.clone(),
             checkable: self.checkable.clone(),
         }
     }
@@ -612,9 +632,9 @@ pub(crate) struct TreeNodeState<VM> {
     pub has_children: bool,
     pub expanded: bool,
     pub check_state: crate::ui::widget::TreeCheckState,
-    pub selected_keys: crate::ui::layout::Value<Vec<WidgetKey>>,
-    pub expanded_keys: crate::ui::layout::Value<Vec<WidgetKey>>,
-    pub checked_keys: crate::ui::layout::Value<Vec<WidgetKey>>,
+    pub selected: bool,
+    pub selection: std::sync::Arc<TreeSelectionMetadata>,
+    pub controlled_keys: std::sync::Arc<TreeControlledKeyMetadata>,
     pub selection_mode: crate::ui::widget::TreeSelectionMode,
     pub checkable: crate::ui::layout::Value<bool>,
     pub disabled: crate::ui::layout::Value<bool>,
@@ -643,13 +663,21 @@ pub(crate) struct TreeNodeState<VM> {
     pub on_node_action: Option<ValueCommand<VM, crate::ui::widget::TreeNodeAction>>,
     pub on_drop: Option<ValueCommand<VM, crate::ui::widget::TreeDropEvent>>,
     pub sibling_keys: std::sync::Arc<[WidgetKey]>,
-    pub sibling_disabled: std::sync::Arc<[bool]>,
+    pub sibling_disabled: std::sync::Arc<[Value<bool>]>,
     pub visible_keys: std::sync::Arc<[WidgetKey]>,
-    pub visible_disabled: std::sync::Arc<[bool]>,
+    pub visible_disabled: std::sync::Arc<[Value<bool>]>,
     pub child_keys: std::sync::Arc<[WidgetKey]>,
     pub descendant_keys: std::sync::Arc<[WidgetKey]>,
     pub check_target_keys: std::sync::Arc<[WidgetKey]>,
     pub draggable: bool,
+}
+
+pub(crate) struct DataGridSelectionMetadata {
+    pub selected_keys: Value<std::sync::Arc<[WidgetKey]>>,
+    pub selected_key_membership: Value<std::sync::Arc<std::collections::HashSet<WidgetKey>>>,
+    pub sibling_keys: std::sync::Arc<[WidgetKey]>,
+    pub sibling_virtual_row_indices: std::sync::Arc<[usize]>,
+    pub sibling_disabled: std::sync::Arc<[Value<bool>]>,
 }
 
 pub(crate) struct DataGridRootState {
@@ -657,7 +685,7 @@ pub(crate) struct DataGridRootState {
     pub row_count: usize,
     pub column_count: usize,
     pub selection_mode: crate::ui::widget::DataGridSelectionMode,
-    pub selected_keys: crate::ui::layout::Value<Vec<WidgetKey>>,
+    pub selection: std::sync::Arc<DataGridSelectionMetadata>,
 }
 
 impl Clone for DataGridRootState {
@@ -667,13 +695,16 @@ impl Clone for DataGridRootState {
             row_count: self.row_count,
             column_count: self.column_count,
             selection_mode: self.selection_mode,
-            selected_keys: self.selected_keys.clone(),
+            selection: self.selection.clone(),
         }
     }
 }
 
 pub(crate) struct DataGridCellState<VM> {
     pub grid_id: WidgetId,
+    /// Stable identity of the logical row shared by every visible cell.
+    /// It survives VirtualList window churn and is independent of pinning.
+    pub row_id: WidgetId,
     pub scroll_container_id: WidgetId,
     pub virtual_row_index: usize,
     pub row_index: usize,
@@ -684,22 +715,24 @@ pub(crate) struct DataGridCellState<VM> {
     pub pin_offset: Dp,
     pub start_pin_extent: Dp,
     pub end_pin_extent: Dp,
-    pub selected_keys: crate::ui::layout::Value<Vec<WidgetKey>>,
+    pub selected: bool,
+    pub selection: std::sync::Arc<DataGridSelectionMetadata>,
     pub selection_mode: crate::ui::widget::DataGridSelectionMode,
     pub disabled: crate::ui::layout::Value<bool>,
+    pub item_extent: Dp,
+    pub item_spacing: Dp,
     pub editable: bool,
     pub edit_value: String,
     pub on_selection_change: Option<ValueCommand<VM, crate::ui::widget::DataGridSelectionChange>>,
     pub on_cell_action: Option<ValueCommand<VM, crate::ui::widget::DataGridCellAction>>,
     pub on_cell_edit_commit: Option<ValueCommand<VM, crate::ui::widget::DataGridCellEditCommit>>,
-    pub sibling_keys: std::sync::Arc<[WidgetKey]>,
-    pub sibling_disabled: std::sync::Arc<[bool]>,
 }
 
 impl<VM> Clone for DataGridCellState<VM> {
     fn clone(&self) -> Self {
         Self {
             grid_id: self.grid_id,
+            row_id: self.row_id,
             scroll_container_id: self.scroll_container_id,
             virtual_row_index: self.virtual_row_index,
             row_index: self.row_index,
@@ -710,16 +743,17 @@ impl<VM> Clone for DataGridCellState<VM> {
             pin_offset: self.pin_offset,
             start_pin_extent: self.start_pin_extent,
             end_pin_extent: self.end_pin_extent,
-            selected_keys: self.selected_keys.clone(),
+            selected: self.selected,
+            selection: self.selection.clone(),
             selection_mode: self.selection_mode,
             disabled: self.disabled.clone(),
+            item_extent: self.item_extent,
+            item_spacing: self.item_spacing,
             editable: self.editable,
             edit_value: self.edit_value.clone(),
             on_selection_change: self.on_selection_change.clone(),
             on_cell_action: self.on_cell_action.clone(),
             on_cell_edit_commit: self.on_cell_edit_commit.clone(),
-            sibling_keys: self.sibling_keys.clone(),
-            sibling_disabled: self.sibling_disabled.clone(),
         }
     }
 }
@@ -731,6 +765,7 @@ impl<VM: 'static> DataGridCellState<VM> {
     ) -> DataGridCellState<RootVm> {
         DataGridCellState {
             grid_id: self.grid_id,
+            row_id: self.row_id,
             scroll_container_id: self.scroll_container_id,
             virtual_row_index: self.virtual_row_index,
             row_index: self.row_index,
@@ -741,9 +776,12 @@ impl<VM: 'static> DataGridCellState<VM> {
             pin_offset: self.pin_offset,
             start_pin_extent: self.start_pin_extent,
             end_pin_extent: self.end_pin_extent,
-            selected_keys: self.selected_keys,
+            selected: self.selected,
+            selection: self.selection,
             selection_mode: self.selection_mode,
             disabled: self.disabled,
+            item_extent: self.item_extent,
+            item_spacing: self.item_spacing,
             editable: self.editable,
             edit_value: self.edit_value,
             on_selection_change: self
@@ -755,8 +793,6 @@ impl<VM: 'static> DataGridCellState<VM> {
             on_cell_edit_commit: self
                 .on_cell_edit_commit
                 .map(|command| command.scope(selector)),
-            sibling_keys: self.sibling_keys,
-            sibling_disabled: self.sibling_disabled,
         }
     }
 }
@@ -938,7 +974,7 @@ impl<VM: 'static> SplitterHandleState<VM> {
 pub(crate) struct CarouselAutoPlayState<VM> {
     pub id: WidgetId,
     pub frame: Rect,
-    pub selected: usize,
+    pub selected: Value<usize>,
     pub count: usize,
     pub interval: std::time::Duration,
     pub on_change: Option<ValueCommand<VM, usize>>,
@@ -949,7 +985,7 @@ impl<VM> Clone for CarouselAutoPlayState<VM> {
         Self {
             id: self.id,
             frame: self.frame,
-            selected: self.selected,
+            selected: self.selected.clone(),
             count: self.count,
             interval: self.interval,
             on_change: self.on_change.clone(),
@@ -1009,9 +1045,9 @@ impl<VM> Clone for TreeNodeState<VM> {
             has_children: self.has_children,
             expanded: self.expanded,
             check_state: self.check_state,
-            selected_keys: self.selected_keys.clone(),
-            expanded_keys: self.expanded_keys.clone(),
-            checked_keys: self.checked_keys.clone(),
+            selected: self.selected,
+            selection: self.selection.clone(),
+            controlled_keys: self.controlled_keys.clone(),
             selection_mode: self.selection_mode,
             checkable: self.checkable.clone(),
             disabled: self.disabled.clone(),
@@ -1068,9 +1104,9 @@ impl<VM: 'static> TreeNodeState<VM> {
             has_children: self.has_children,
             expanded: self.expanded,
             check_state: self.check_state,
-            selected_keys: self.selected_keys,
-            expanded_keys: self.expanded_keys,
-            checked_keys: self.checked_keys,
+            selected: self.selected,
+            selection: self.selection,
+            controlled_keys: self.controlled_keys,
             selection_mode: self.selection_mode,
             checkable: self.checkable,
             disabled: self.disabled,

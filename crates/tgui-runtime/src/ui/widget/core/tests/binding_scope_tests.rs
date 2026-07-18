@@ -250,3 +250,59 @@ fn scoped_lifecycle_command_targets_child_view_model() {
     assert_eq!(vm.child.count, 1);
     assert_eq!(vm.root_count, 0);
 }
+
+#[test]
+fn scoped_show_and_view_switch_retain_commands_in_boxed_children() {
+    use crate::ui::widget::common::ChildSource;
+    use crate::ui::widget::{Show, ViewSwitch};
+
+    let child: Element<ScopeChildVm> = Stack::new()
+        .child(Show::new(
+            true,
+            Stack::new().on_click(Command::new(|vm: &mut ScopeChildVm| vm.count += 1)),
+        ))
+        .child(
+            ViewSwitch::new(0)
+                .case(Stack::new().on_click(Command::new(|vm: &mut ScopeChildVm| vm.count += 10)))
+                .fallback(
+                    Stack::new().on_click(Command::new(|vm: &mut ScopeChildVm| vm.count += 100)),
+                ),
+        )
+        .into();
+    let scoped = child.scope(scope_child);
+    let WidgetKind::Container { children, .. } = scoped.kind else {
+        panic!("scoped stack should remain a container");
+    };
+    let mut sources = children.into_iter();
+    let ChildSource::Show { child, .. } = sources.next().expect("show source") else {
+        panic!("first scoped source should remain Show");
+    };
+    let ChildSource::Switch {
+        mut cases,
+        fallback,
+        ..
+    } = sources.next().expect("switch source")
+    else {
+        panic!("second scoped source should remain Switch");
+    };
+    assert!(sources.next().is_none());
+
+    let show_command = child.interactions.on_click.expect("scoped Show command");
+    let case_command = cases
+        .remove(0)
+        .interactions
+        .on_click
+        .expect("scoped Switch case command");
+    let fallback_command = fallback
+        .expect("boxed Switch fallback")
+        .interactions
+        .on_click
+        .expect("scoped Switch fallback command");
+    let mut vm = ScopeRootVm::default();
+    show_command.execute(&mut vm);
+    case_command.execute(&mut vm);
+    fallback_command.execute(&mut vm);
+
+    assert_eq!(vm.child.count, 111);
+    assert_eq!(vm.root_count, 0);
+}

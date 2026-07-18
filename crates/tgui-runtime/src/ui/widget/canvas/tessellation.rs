@@ -12,6 +12,8 @@ pub(super) use self::effects::resolve_canvas_effects;
 pub(super) use self::mesh::CanvasBrushData;
 pub(super) use self::mesh::{tessellate_fill, tessellate_stroke};
 use self::shadow::shadow_texture_for_path;
+#[cfg(feature = "bench-support")]
+pub(crate) use self::shadow::with_legacy_canvas_shadow_opacity;
 pub(super) use self::shadow::{canvas_text_hit_cache_key, shadow_padding};
 use super::*;
 

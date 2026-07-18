@@ -43,7 +43,7 @@ impl<VM> IntoChildren<VM> for ViewSwitch<VM> {
         ChildSource::Switch {
             index: self.index,
             cases: self.cases,
-            fallback: self.fallback,
+            fallback: self.fallback.map(Box::new),
         }
     }
 }

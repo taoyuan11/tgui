@@ -26,7 +26,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     .map(|state| CarouselAutoPlaySnapshot {
                         id: state.id,
                         frame: state.frame,
-                        selected: state.selected,
+                        selected: state.selected.resolve_untracked(),
                         count: state.count,
                         interval: state.interval,
                         has_on_change: state.on_change.is_some(),

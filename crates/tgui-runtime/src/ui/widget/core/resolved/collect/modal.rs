@@ -11,9 +11,6 @@
 //! sentinel overlay 没有 primitives / hits，仅注册 close handler，不影响
 //! 主场景渲染。
 
-use std::time::Duration;
-
-use crate::animation::{AnimationKey, Transition, WidgetProperty};
 use crate::ui::unit::Dp;
 use crate::ui::widget::common::ComputedScene;
 use crate::ui::widget::overlay::{
@@ -76,19 +73,6 @@ impl<VM> ResolvedElement<VM> {
         if let Some(target) = modal.return_focus_to {
             overlay = overlay.return_focus_to(target);
         }
-
-        // 触发动画通道：用 ModalVisibility 让 AnimationEngine 保持一个解析任务，
-        // 即使本 emit 不主动消费 visibility 值。这样下次 open=false 时 collect
-        // 阶段仍能 schedule wakeup（fade-out 动画）。
-        let _ = context.animations.resolve_f32(
-            AnimationKey::Widget {
-                id: self.id.raw(),
-                property: WidgetProperty::ModalVisibility,
-            },
-            1.0,
-            Some(Transition::ease_in_out(Duration::from_millis(160))),
-            context.now,
-        );
 
         let _ = emit_overlay(
             computed,

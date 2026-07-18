@@ -62,7 +62,7 @@ pub(super) fn retained_prepare_stats(
     };
 
     let dirty = dirty_command_mask(scene_stream, command_count, dirty_ranges);
-    let rebuild = dirty.into_iter().filter(|dirty| *dirty).count();
+    let rebuild = dirty.dirty_count(command_count);
     PrepareReuseStats {
         total: command_count,
         rebuild,
@@ -70,23 +70,58 @@ pub(super) fn retained_prepare_stats(
     }
 }
 
+enum DirtyCommandMask {
+    Clean,
+    All,
+    Partial(Vec<bool>),
+}
+
+impl DirtyCommandMask {
+    fn is_dirty(&self, command_index: usize) -> bool {
+        match self {
+            Self::Clean => false,
+            Self::All => true,
+            Self::Partial(mask) => mask.get(command_index).copied().unwrap_or(true),
+        }
+    }
+
+    #[cfg(test)]
+    fn dirty_count(self, command_count: usize) -> usize {
+        match self {
+            Self::Clean => 0,
+            Self::All => command_count,
+            Self::Partial(mask) => mask.into_iter().filter(|dirty| *dirty).count(),
+        }
+    }
+}
+
 fn dirty_command_mask(
     scene_stream: SceneDrawStream,
     command_count: usize,
     dirty_ranges: &[DirtyDrawRange],
-) -> Vec<bool> {
-    let mut dirty = vec![false; command_count];
-    for range in dirty_ranges
+) -> DirtyCommandMask {
+    let matching = dirty_ranges
         .iter()
         .filter(|range| range.stream == scene_stream)
+        .collect::<SmallVec<[&DirtyDrawRange; 4]>>();
+    if matching.is_empty() {
+        return DirtyCommandMask::Clean;
+    }
+    if matching
+        .iter()
+        .any(|range| range.range.start == 0 && range.range.end >= command_count)
     {
+        return DirtyCommandMask::All;
+    }
+    let mut dirty = vec![false; command_count];
+    for range in matching {
         let start = range.range.start.min(command_count);
         let end = range.range.end.min(command_count);
         for slot in &mut dirty[start..end] {
             *slot = true;
         }
     }
-    dirty
+    DirtyCommandMask::Partial(dirty)
 }
 
 impl DrawStream {
@@ -264,6 +299,151 @@ fn compute_transform_translate(
     translate_from_logical_movement(movement, viewport)
 }
 
+/// Per-frame memoization for retained draw transform translations.
+///
+/// A translated container commonly owns hundreds or thousands of draw commands. Every command
+/// carries the same short transform chain, while transform records are immutable for one render
+/// call. Resolving that chain for every draw repeats the same hash-table lookups and viewport math.
+/// Keep the common small number of distinct chains inline and fall back to the direct computation
+/// once the cache is full, avoiding heap growth or quadratic scans for pathological scenes.
+#[derive(Default)]
+pub(super) struct TransformTranslateCache {
+    translations: SmallVec<[(TransformChain, Option<super::PushTranslate>); 8]>,
+    #[cfg(test)]
+    record_visits: usize,
+}
+
+impl TransformTranslateCache {
+    pub(super) fn begin_frame(&mut self) {
+        self.translations.clear();
+        #[cfg(test)]
+        {
+            self.record_visits = 0;
+        }
+    }
+
+    fn resolve(
+        &mut self,
+        transform_chain: Option<&TransformChain>,
+        transform_records: &HashMap<WidgetId, TransformRecord>,
+        viewport: VertexViewport,
+    ) -> Option<super::PushTranslate> {
+        let transform_chain = transform_chain?;
+        if transform_chain.is_empty() {
+            return None;
+        }
+        if let Some((_, translate)) = self
+            .translations
+            .iter()
+            .find(|(cached_chain, _)| cached_chain == transform_chain)
+        {
+            return *translate;
+        }
+
+        #[cfg(test)]
+        {
+            self.record_visits = self.record_visits.saturating_add(transform_chain.len());
+        }
+        let translate =
+            compute_transform_translate(Some(transform_chain), transform_records, viewport);
+        if self.translations.len() < self.translations.inline_size() {
+            self.translations.push((transform_chain.clone(), translate));
+        }
+        translate
+    }
+}
+
+#[cfg(feature = "bench-support")]
+pub(crate) struct TransformTranslatePrepareProbe {
+    chains: Vec<TransformChain>,
+    transform_records: HashMap<WidgetId, TransformRecord>,
+    viewport: VertexViewport,
+    cache: TransformTranslateCache,
+}
+
+#[cfg(feature = "bench-support")]
+impl TransformTranslatePrepareProbe {
+    pub(crate) fn new(draw_count: usize, chain_depth: usize, distinct_chains: usize) -> Self {
+        let chain_depth = chain_depth.max(1);
+        let distinct_chains = distinct_chains.max(1);
+        let mut unique_chains = Vec::with_capacity(distinct_chains);
+        let mut transform_records = HashMap::with_capacity(chain_depth * distinct_chains);
+        for chain_index in 0..distinct_chains {
+            let mut chain = TransformChain::new();
+            for depth in 0..chain_depth {
+                let raw_id = 1 + (chain_index * chain_depth + depth) as u64;
+                let id = WidgetId::from_raw(raw_id);
+                chain.push(id);
+                transform_records.insert(
+                    id,
+                    TransformRecord {
+                        id,
+                        base_offset: crate::ui::widget::Point::ZERO,
+                        current_offset: crate::ui::widget::Point::new(
+                            Dp::new(1.0 + depth as f32),
+                            Dp::new(2.0 + chain_index as f32),
+                        ),
+                    },
+                );
+            }
+            unique_chains.push(chain);
+        }
+        let chains = (0..draw_count)
+            .map(|draw_index| unique_chains[draw_index % distinct_chains].clone())
+            .collect();
+
+        Self {
+            chains,
+            transform_records,
+            viewport: VertexViewport::new(1280.0, 720.0, 2560.0, 1440.0, 2.0),
+            cache: TransformTranslateCache::default(),
+        }
+    }
+
+    pub(crate) fn run_cached(&mut self) -> f64 {
+        self.cache.begin_frame();
+        let mut checksum = 0.0_f64;
+        for command_index in 0..self.chains.len() {
+            let translate = combine_translates(
+                None,
+                self.cache.resolve(
+                    self.chains.get(command_index),
+                    &self.transform_records,
+                    self.viewport,
+                ),
+            );
+            if let Some(translate) = translate {
+                checksum += translate.offset_ndc[0] as f64
+                    + translate.offset_ndc[1] as f64
+                    + translate.offset_physical[0] as f64
+                    + translate.offset_physical[1] as f64;
+            }
+        }
+        checksum
+    }
+
+    pub(crate) fn run_direct(&self) -> f64 {
+        let mut checksum = 0.0_f64;
+        for command_index in 0..self.chains.len() {
+            let translate = combine_translates(
+                None,
+                compute_transform_translate(
+                    self.chains.get(command_index),
+                    &self.transform_records,
+                    self.viewport,
+                ),
+            );
+            if let Some(translate) = translate {
+                checksum += translate.offset_ndc[0] as f64
+                    + translate.offset_ndc[1] as f64
+                    + translate.offset_physical[0] as f64
+                    + translate.offset_physical[1] as f64;
+            }
+        }
+        checksum
+    }
+}
+
 fn translate_from_logical_movement(
     movement: crate::ui::widget::Point,
     viewport: VertexViewport,
@@ -311,6 +491,7 @@ fn texture_quad_vertices(
     clip_mask: Option<crate::ui::widget::ClipMask>,
     opacity: f32,
     tint: [u8; 4],
+    mask_mode: f32,
     viewport: VertexViewport,
 ) -> [TextVertex; 6] {
     match quad {
@@ -323,6 +504,7 @@ fn texture_quad_vertices(
                 clip_mask,
                 opacity,
                 tint,
+                mask_mode,
             },
             viewport,
         ),
@@ -334,6 +516,7 @@ fn texture_quad_vertices(
                 clip_mask,
                 opacity,
                 tint,
+                mask_mode,
             },
             viewport,
         ),
@@ -353,6 +536,17 @@ fn retained_prepare_cacheable(command: &RenderCommand) -> bool {
         #[cfg(feature = "video")]
         RenderCommand::VideoTexture(_) => false,
     }
+}
+
+fn command_clean_frame_cacheable(command: &RenderCommand) -> bool {
+    matches!(
+        command,
+        RenderCommand::Brush(_)
+            | RenderCommand::Shape(_)
+            | RenderCommand::TextDecoration(_)
+            | RenderCommand::Mesh(_)
+            | RenderCommand::Text(_)
+    )
 }
 
 fn should_prepare_shape(primitive: &RenderPrimitive, skip_transparent: bool) -> bool {
@@ -445,6 +639,71 @@ impl PreparedCommand {
 pub(super) struct PreparedCommands {
     pub(super) stream: DrawStream,
     pub(super) commands: Vec<PreparedCommand>,
+    pub(super) clean_frame_cacheable: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) struct CleanPreparedFrameSignature {
+    pub(super) scene_serial: u64,
+    pub(super) viewport: VertexViewport,
+    pub(super) main_command_count: usize,
+    pub(super) overlay_command_count: usize,
+    pub(super) font_identity: u64,
+    pub(super) resource_generation: u64,
+    pub(super) content_generation: u64,
+}
+
+struct CleanPreparedFrame {
+    signature: CleanPreparedFrameSignature,
+    vertex_generation: u64,
+    main: PreparedCommands,
+    overlay: PreparedCommands,
+}
+
+pub(super) struct CleanPreparedFrameCache {
+    slots: [Option<Box<CleanPreparedFrame>>; super::vertex_pool::POOL_FRAME_COUNT],
+}
+
+impl Default for CleanPreparedFrameCache {
+    fn default() -> Self {
+        Self {
+            slots: std::array::from_fn(|_| None),
+        }
+    }
+}
+
+impl CleanPreparedFrameCache {
+    pub(super) fn take(
+        &mut self,
+        slot: usize,
+        signature: CleanPreparedFrameSignature,
+        vertex_generation: u64,
+    ) -> Option<(PreparedCommands, PreparedCommands)> {
+        let entry = self.slots.get_mut(slot)?.take()?;
+        if entry.signature != signature || entry.vertex_generation != vertex_generation {
+            self.slots[slot] = Some(entry);
+            return None;
+        }
+        Some((entry.main, entry.overlay))
+    }
+
+    pub(super) fn store(
+        &mut self,
+        slot: usize,
+        signature: CleanPreparedFrameSignature,
+        vertex_generation: u64,
+        main: PreparedCommands,
+        overlay: PreparedCommands,
+    ) {
+        if let Some(target) = self.slots.get_mut(slot) {
+            *target = Some(Box::new(CleanPreparedFrame {
+                signature,
+                vertex_generation,
+                main,
+                overlay,
+            }));
+        }
+    }
 }
 
 /// Reusable output storage for the two top-level scene streams.
@@ -689,11 +948,17 @@ impl PrepareStreamCache {
 #[derive(Default)]
 pub(super) struct RetainedPrepareCache {
     streams: HashMap<DrawStream, PrepareStreamCache>,
+    generation: u64,
 }
 
 impl RetainedPrepareCache {
     pub(super) fn clear(&mut self) {
         self.streams.clear();
+        self.generation = self.generation.wrapping_add(1);
+    }
+
+    pub(super) fn generation(&self) -> u64 {
+        self.generation
     }
 
     fn stream_reusable(&self, stream: DrawStream, signature: PrepareStreamSignature) -> bool {
@@ -805,12 +1070,13 @@ impl Renderer {
         }
         let dirty_commands = scene_stream
             .map(|scene_stream| dirty_command_mask(scene_stream, commands.len(), dirty_ranges))
-            .unwrap_or_else(|| vec![true; commands.len()]);
+            .unwrap_or(DirtyCommandMask::All);
         let mut stats = PrepareReuseStats {
             total: commands.len(),
             rebuild: 0,
             reuse: 0,
         };
+        let mut clean_frame_cacheable = true;
         let mut prepared = self
             .prepared_command_scratch
             .acquire(stream, commands.len());
@@ -824,15 +1090,20 @@ impl Renderer {
             let draw_translate = combine_translates(
                 self.scroll_translate_cache
                     .resolve(gpu_scroll_container, scroll_regions, viewport),
-                compute_transform_translate(
+                self.transform_translate_cache.resolve(
                     command_transform_chains.get(command_index),
                     transform_records,
                     viewport,
                 ),
             );
+            clean_frame_cacheable &= command_clean_frame_cacheable(command)
+                && gpu_scroll_container.is_none()
+                && command_transform_chains
+                    .get(command_index)
+                    .is_none_or(|chain| chain.is_empty());
 
             if stream_reusable
-                && !dirty_commands.get(command_index).copied().unwrap_or(true)
+                && !dirty_commands.is_dirty(command_index)
                 && retained_prepare_cacheable(command)
             {
                 let reused = {
@@ -882,6 +1153,7 @@ impl Renderer {
         Ok(PreparedCommands {
             stream,
             commands: prepared,
+            clean_frame_cacheable,
         })
     }
 
@@ -917,6 +1189,7 @@ impl Renderer {
                         clip_mask: None,
                         opacity: 1.0,
                         tint: [255; 4],
+                        mask_mode: 0.0,
                     },
                     viewport,
                 );
@@ -1060,14 +1333,26 @@ impl Renderer {
                 let Some(binding) = self.texture_bind_group_for(&texture.texture)? else {
                     return Ok(None);
                 };
+                let (tint, mask_mode, opacity) = match texture.mask_tint {
+                    Some(color) => {
+                        let [red, green, blue, alpha] = color.to_rgba8();
+                        (
+                            [red, green, blue, 255],
+                            1.0,
+                            texture.opacity * (alpha as f32 / 255.0),
+                        )
+                    }
+                    None => ([255; 4], 0.0, texture.opacity),
+                };
                 let vertices = texture_quad_vertices(
                     texture.frame,
                     texture.quad,
                     texture.uv_rect,
                     texture.corner_radius,
                     texture.clip_mask,
-                    texture.opacity,
-                    [255; 4],
+                    opacity,
+                    tint,
+                    mask_mode,
                     viewport,
                 );
                 PreparedTemplateBuild {
@@ -1108,6 +1393,7 @@ impl Renderer {
                     texture.clip_mask,
                     texture.opacity,
                     [255; 4],
+                    0.0,
                     viewport,
                 );
                 PreparedTemplateBuild {
@@ -1139,12 +1425,18 @@ impl Renderer {
                     opacity,
                     if draw.tintable_mask {
                         let [red, green, blue, _] = text.color.to_rgba8();
-                        // Tint alpha is otherwise redundant with the dedicated opacity
-                        // attribute, so zero encodes an R8 coverage sample without growing
-                        // TextVertex or selecting a second render pipeline.
-                        [red, green, blue, if draw.r8_coverage { 0 } else { 255 }]
+                        [red, green, blue, 255]
                     } else {
                         [255; 4]
+                    },
+                    if draw.tintable_mask {
+                        if draw.r8_coverage {
+                            2.0
+                        } else {
+                            1.0
+                        }
+                    } else {
+                        0.0
                     },
                     viewport,
                 );
@@ -1505,6 +1797,158 @@ mod tests {
         assert!((result.offset_physical[1] - 30.0).abs() < 0.001);
     }
 
+    fn assert_translate_eq(
+        actual: Option<super::super::PushTranslate>,
+        expected: Option<super::super::PushTranslate>,
+    ) {
+        match (actual, expected) {
+            (None, None) => {}
+            (Some(actual), Some(expected)) => {
+                assert_eq!(actual.offset_ndc, expected.offset_ndc);
+                assert_eq!(actual.offset_physical, expected.offset_physical);
+            }
+            (actual, expected) => panic!("translate mismatch: {actual:?} != {expected:?}"),
+        }
+    }
+
+    #[test]
+    fn transform_translate_cache_matches_direct_for_zero_missing_and_nested_chains() {
+        let viewport = make_viewport(800.0, 600.0, 2.0);
+        let first_id = WidgetId::from_raw(20);
+        let second_id = WidgetId::from_raw(21);
+        let missing_id = WidgetId::from_raw(22);
+        let records = HashMap::from([
+            (
+                first_id,
+                TransformRecord {
+                    id: first_id,
+                    base_offset: Point::ZERO,
+                    current_offset: Point::new(Dp::new(8.0), Dp::new(-3.0)),
+                },
+            ),
+            (
+                second_id,
+                TransformRecord {
+                    id: second_id,
+                    base_offset: Point::new(Dp::new(1.0), Dp::new(2.0)),
+                    current_offset: Point::new(Dp::new(5.0), Dp::new(7.0)),
+                },
+            ),
+        ]);
+        let cases = [
+            TransformChain::new(),
+            TransformChain::from_slice(&[missing_id]),
+            TransformChain::from_slice(&[first_id]),
+            TransformChain::from_slice(&[first_id, second_id]),
+        ];
+        let mut cache = TransformTranslateCache::default();
+        cache.begin_frame();
+
+        assert_translate_eq(
+            cache.resolve(None, &records, viewport),
+            compute_transform_translate(None, &records, viewport),
+        );
+        for chain in &cases {
+            assert_translate_eq(
+                cache.resolve(Some(chain), &records, viewport),
+                compute_transform_translate(Some(chain), &records, viewport),
+            );
+        }
+    }
+
+    #[test]
+    fn transform_translate_cache_resolves_shared_chain_once_without_spilling() {
+        let viewport = make_viewport(800.0, 600.0, 2.0);
+        let ids = [WidgetId::from_raw(30), WidgetId::from_raw(31)];
+        let chain = TransformChain::from_slice(&ids);
+        let records = HashMap::from(ids.map(|id| {
+            (
+                id,
+                TransformRecord {
+                    id,
+                    base_offset: Point::ZERO,
+                    current_offset: Point::new(Dp::new(4.0), Dp::new(6.0)),
+                },
+            )
+        }));
+        let expected = compute_transform_translate(Some(&chain), &records, viewport);
+        let mut cache = TransformTranslateCache::default();
+        cache.begin_frame();
+
+        for _ in 0..10_000 {
+            assert_translate_eq(cache.resolve(Some(&chain), &records, viewport), expected);
+        }
+
+        assert_eq!(cache.record_visits, chain.len());
+        assert_eq!(cache.translations.len(), 1);
+        assert!(!cache.translations.spilled());
+    }
+
+    #[test]
+    fn transform_translate_cache_refreshes_records_at_frame_boundary() {
+        let viewport = make_viewport(800.0, 600.0, 2.0);
+        let id = WidgetId::from_raw(40);
+        let chain = TransformChain::from_slice(&[id]);
+        let mut records = HashMap::from([(
+            id,
+            TransformRecord {
+                id,
+                base_offset: Point::ZERO,
+                current_offset: Point::new(Dp::new(2.0), Dp::ZERO),
+            },
+        )]);
+        let mut cache = TransformTranslateCache::default();
+        cache.begin_frame();
+        let before = cache
+            .resolve(Some(&chain), &records, viewport)
+            .expect("first frame translate");
+
+        records.get_mut(&id).expect("record").current_offset.x = Dp::new(12.0);
+        let same_frame = cache
+            .resolve(Some(&chain), &records, viewport)
+            .expect("same-frame cached translate");
+        assert_eq!(before.offset_physical, same_frame.offset_physical);
+
+        cache.begin_frame();
+        let next_frame = cache
+            .resolve(Some(&chain), &records, viewport)
+            .expect("next-frame refreshed translate");
+        assert_ne!(before.offset_physical, next_frame.offset_physical);
+        assert_eq!(cache.record_visits, 1);
+    }
+
+    #[test]
+    fn transform_translate_cache_falls_back_to_direct_after_inline_capacity() {
+        let viewport = make_viewport(800.0, 600.0, 2.0);
+        let mut records = HashMap::new();
+        let chains = (0..12)
+            .map(|index| {
+                let id = WidgetId::from_raw(100 + index);
+                records.insert(
+                    id,
+                    TransformRecord {
+                        id,
+                        base_offset: Point::ZERO,
+                        current_offset: Point::new(Dp::new(index as f32 + 1.0), Dp::ZERO),
+                    },
+                );
+                TransformChain::from_slice(&[id])
+            })
+            .collect::<Vec<_>>();
+        let mut cache = TransformTranslateCache::default();
+        cache.begin_frame();
+
+        for chain in &chains {
+            assert_translate_eq(
+                cache.resolve(Some(chain), &records, viewport),
+                compute_transform_translate(Some(chain), &records, viewport),
+            );
+        }
+
+        assert_eq!(cache.translations.len(), 8);
+        assert!(!cache.translations.spilled());
+    }
+
     #[test]
     fn test_combine_translates_adds_scroll_and_transform() {
         let scroll = super::super::PushTranslate {
@@ -1522,5 +1966,49 @@ mod tests {
         assert!((result.offset_ndc[1] - 0.15).abs() < 0.001);
         assert!((result.offset_physical[0] - (-15.0)).abs() < 0.001);
         assert!((result.offset_physical[1] - (-20.0)).abs() < 0.001);
+    }
+
+    #[test]
+    fn clean_prepared_frame_cache_requires_matching_slot_generation_and_signature() {
+        let signature = CleanPreparedFrameSignature {
+            scene_serial: 7,
+            viewport: make_viewport(800.0, 600.0, 2.0),
+            main_command_count: 0,
+            overlay_command_count: 0,
+            font_identity: 11,
+            resource_generation: 13,
+            content_generation: 17,
+        };
+        let prepared = |stream| PreparedCommands {
+            stream,
+            commands: Vec::new(),
+            clean_frame_cacheable: true,
+        };
+        let mut cache = CleanPreparedFrameCache::default();
+        cache.store(
+            1,
+            signature,
+            23,
+            prepared(DrawStream::Main),
+            prepared(DrawStream::Overlay),
+        );
+
+        assert!(cache.take(0, signature, 23).is_none());
+        assert!(cache.take(1, signature, 24).is_none());
+        assert!(cache.take(1, signature, 23).is_some());
+
+        let changed = CleanPreparedFrameSignature {
+            content_generation: 18,
+            ..signature
+        };
+        cache.store(
+            1,
+            signature,
+            29,
+            prepared(DrawStream::Main),
+            prepared(DrawStream::Overlay),
+        );
+        assert!(cache.take(1, changed, 29).is_none());
+        assert!(cache.take(1, signature, 29).is_some());
     }
 }

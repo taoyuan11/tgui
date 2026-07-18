@@ -57,6 +57,10 @@ fn build_virtual_select_menu_overlay<VM: 'static>(
 
     let menu_width = trigger_frame.width;
     let menu_corner_radius = context.units.resolve_dp(select_style.menu_radius);
+    let menu_border_width = context
+        .units
+        .resolve_dp(select_style.menu_border_width)
+        .max(0.0);
     if open_progress <= f32::EPSILON {
         return Some((
             OverlayContent::Batch {
@@ -84,18 +88,86 @@ fn build_virtual_select_menu_overlay<VM: 'static>(
             rect: Rect::new(0.0, 0.0, menu_width, full_height),
             corner_radius: menu_corner_radius,
         });
-        return Some((
-            OverlayContent::Batch {
-                primitives: vec![OverlayPrimitive::Shape(RenderPrimitive {
-                    rect: menu_clip_rect.unwrap_or(Rect::new(0.0, 0.0, menu_width, full_height)),
-                    color: select_style.menu_background.with_alpha_factor(opacity),
-                    corner_radius: menu_corner_radius,
+        let mut primitives = vec![OverlayPrimitive::Shape(RenderPrimitive {
+            rect: Rect::new(0.0, 0.0, menu_width, full_height),
+            color: select_style.menu_background.with_alpha_factor(opacity),
+            corner_radius: menu_corner_radius,
+            stroke_width: 0.0,
+            clip_rect: None,
+            clip_mask: menu_clip_mask,
+        })];
+        let menu_clip_rect = menu_clip_rect.expect("partial select menu must have a clip");
+        let row_padding = Insets::symmetric(select_style.padding_x, Dp::ZERO);
+        let content_opacity = opacity * open_progress;
+        let row_height = option_height.get().max(f32::EPSILON);
+        let first_visible = (menu_clip_rect.y.get() / row_height).floor().max(0.0) as usize;
+        let visible_end = (menu_clip_rect.bottom().get() / row_height).ceil().max(0.0) as usize;
+        let visible_end = visible_end.min(options.len());
+        let disabled_text = default_select_disabled_text_color(context.theme);
+        for (offset, option) in options[first_visible.min(visible_end)..visible_end]
+            .iter()
+            .enumerate()
+        {
+            let index = first_visible + offset;
+            let row_frame = Rect::new(
+                Dp::ZERO,
+                option_height * index as f32,
+                menu_width,
+                option_height,
+            );
+            if row_frame.intersect(menu_clip_rect).is_none() {
+                continue;
+            }
+            if option.selected.resolve() {
+                primitives.push(OverlayPrimitive::Shape(RenderPrimitive {
+                    rect: row_frame,
+                    color: select_style
+                        .selected_option_background
+                        .with_alpha_factor(content_opacity),
+                    corner_radius: 0.0,
                     stroke_width: 0.0,
                     clip_rect: None,
                     clip_mask: menu_clip_mask,
-                })],
+                }));
+            }
+            let label =
+                select_display_text(text_from_content(option.label.resolve()), select_style);
+            let color = if option.disabled.resolve() {
+                disabled_text
+            } else {
+                select_style.text
+            };
+            primitives.push(OverlayPrimitive::Text(build_select_text_primitive(
+                &label,
+                row_frame,
+                context.font_manager,
+                context.theme,
+                context.units,
+                context.animations,
+                context.now,
+                row_padding,
+                color,
+                content_opacity,
+                widget_id,
+                None,
+                menu_clip_mask,
+            )));
+        }
+        if menu_border_width > 0.0 && select_style.menu_border.a > 0 {
+            primitives.push(OverlayPrimitive::Shape(RenderPrimitive {
+                rect: Rect::new(0.0, 0.0, menu_width, full_height),
+                color: select_style.menu_border.with_alpha_factor(opacity),
+                corner_radius: menu_corner_radius,
+                stroke_width: menu_border_width,
+                clip_rect: None,
+                clip_mask: None,
+            }));
+        }
+        return Some((
+            OverlayContent::Batch {
+                primitives,
                 hits: Vec::new(),
-                clip_rect: menu_clip_rect,
+                clip_rect: Some(menu_clip_rect),
             },
             (menu_width, full_height),
             open_down,
@@ -219,6 +291,7 @@ fn build_virtual_select_menu_overlay<VM: 'static>(
         animations: context.animations,
         reduced_motion: context.reduced_motion,
         now: context.now,
+        frame_clock: context.frame_clock,
         focus: context.focus.clone(),
         tooltip_hover_started_at: context.tooltip_hover_started_at,
         next_tooltip_wakeup: context.next_tooltip_wakeup,
@@ -228,6 +301,8 @@ fn build_virtual_select_menu_overlay<VM: 'static>(
         gpu_scroll_enabled: false,
         gpu_scroll_container: None,
         transform_stack: context.transform_stack.clone(),
+        portal_accessibility_geometry: None,
+        portal_accessibility_path: smallvec::SmallVec::new(),
     };
     let root_id = resolved.collect_subtree_cache(
         &layout_root,
@@ -258,6 +333,16 @@ fn build_virtual_select_menu_overlay<VM: 'static>(
         .scene
         .commands
         .insert(0, common::RenderCommand::Shape(menu_background));
+    if menu_border_width > 0.0 && select_style.menu_border.a > 0 {
+        scene.scene.push_shape(RenderPrimitive {
+            rect: Rect::new(Dp::ZERO, Dp::ZERO, menu_width, full_height),
+            color: select_style.menu_border.with_alpha_factor(opacity),
+            corner_radius: menu_corner_radius,
+            stroke_width: menu_border_width,
+            clip_rect: None,
+            clip_mask: None,
+        });
+    }
     Some((
         OverlayContent::Scene(Box::new(scene)),
         (menu_width, full_height),
@@ -585,7 +670,7 @@ impl<VM: 'static> ResolvedElement<VM> {
             context.now,
             &mut computed.scene,
             context.media,
-            default_state_transition(context.theme, context.reduced_motion),
+            default_state_transition(context.style_context),
         );
         if !visual.disabled {
             let focus = context.build_focus_meta(self.id, &self.focus, &self.interactions, true);
@@ -644,7 +729,7 @@ impl<VM: 'static> ResolvedElement<VM> {
                 property: WidgetProperty::SelectMenuOpen,
             },
             if active { 1.0 } else { 0.0 },
-            default_motion_transition(context.theme, context.reduced_motion),
+            default_motion_transition(context.style_context),
             context.now,
         );
         let select_style = visual
@@ -670,7 +755,7 @@ impl<VM: 'static> ResolvedElement<VM> {
             self.id,
             visual.primitive_clip,
             visual.primitive_clip_mask,
-            default_state_transition(context.theme, context.reduced_motion),
+            default_state_transition(context.style_context),
         );
         if (active || menu_progress > f32::EPSILON) && !visual.disabled {
             computed.register_widget_overlay_anchor(self.id, visual.frame);
@@ -834,6 +919,7 @@ impl<VM: 'static> ResolvedElement<VM> {
             } else {
                 HitInteraction::SelectOption {
                     id: *owner_id,
+                    state_id: *owner_id,
                     option_index: *option_index,
                     interactions: option_interactions,
                     on_select: option.on_select.clone(),
@@ -925,7 +1011,7 @@ impl<VM: 'static> ResolvedElement<VM> {
             } else {
                 input_style.text
             },
-            default_state_transition(context.theme, context.reduced_motion),
+            default_state_transition(context.style_context),
             context.now,
         );
         let precomputed_layout = if resolved_value.is_empty() {

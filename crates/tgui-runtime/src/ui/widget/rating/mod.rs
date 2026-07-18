@@ -131,7 +131,7 @@ impl<VM: 'static> From<Rating<VM>> for Element<VM> {
         let runtime_style = rating.style.clone();
         let star_row: Element<VM> = Flex::horizontal()
             .align(Align::Center)
-            .runtime_layout(move |_layout, container, context, style_sheet, visual| {
+            .runtime_layout(move |layout, container, context, style_sheet, visual| {
                 // Rating is composed from a Flex row, but its spacing is a
                 // component token rather than user-authored container layout.
                 // Resolve it at runtime so a retained tree follows density and
@@ -144,6 +144,11 @@ impl<VM: 'static> From<Rating<VM>> for Element<VM> {
                     WidgetState::default(),
                 );
                 container.gap = Value::Static(Length::Px(resolved.gap));
+                if layout.min_height.is_none() {
+                    layout.min_height = Some(Value::Static(Length::Px(
+                        SliderStyle::default_for_theme(context.theme).min_height,
+                    )));
+                }
             })
             .child(stars)
             .into();

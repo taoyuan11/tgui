@@ -872,6 +872,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 interactions,
                 on_select,
                 ref on_open_change,
+                ..
             } => (
                 id,
                 interactions.clone(),

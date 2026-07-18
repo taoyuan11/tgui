@@ -1,5 +1,7 @@
 use crate::foundation::task::Tasks;
-use crate::foundation::view_model::{Command, CommandContext, ValueCommand, ViewModel};
+use crate::foundation::view_model::{
+    Command, CommandContext, CommandEffect, ValueCommand, ViewModel,
+};
 use crate::foundation::window_control::{WindowControl, WindowRequest};
 use crate::log::{log_text_profile, text_profile_enabled, Log};
 use crate::notification::Notifications;
@@ -43,7 +45,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     .unwrap_or(false)
             }),
             Log::default(),
-            self.rebuild_requested.clone(),
+            self.invalidation.clone(),
         )
     }
 
@@ -58,15 +60,33 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
     fn execute_command_internal(&mut self, command: &Command<VM>, invalidate_scene: bool) {
         let started_at = text_profile_enabled().then_some(Instant::now());
         let context = self.command_context();
+        let invalidation_revision_before = self.invalidation.revision();
+        let rebuild_revision_before = context.root_rebuild_revision();
+        let last_observed_rebuild_revision_before = self.last_root_rebuild_revision;
         let _wake_guard = if invalidate_scene {
             None
         } else {
             Some(self.invalidation.suppress_wakeups())
         };
         self.with_view_model(|view_model| command.execute_with_context(view_model, &context));
-        let rebuild_requested = context.take_rebuild_request();
-        let rebuilt_tree = rebuild_requested && self.rebuild_widget_tree_from_root_view();
-        if invalidate_scene || rebuild_requested {
+        let invalidation_revision_after = self.invalidation.revision();
+        let rebuild_revision_after = context.root_rebuild_revision();
+        let rebuild_requested = rebuild_revision_after != rebuild_revision_before;
+        let had_pending_rebuild = rebuild_revision_before != last_observed_rebuild_revision_before;
+        let rebuilt_tree = self.observe_root_rebuild_request();
+        let effect = command.declared_effect();
+        let retained_no_ui_change = invalidate_scene
+            && effect == CommandEffect::NoUiChange
+            && invalidation_revision_after == invalidation_revision_before
+            && rebuild_revision_after == rebuild_revision_before
+            && !had_pending_rebuild
+            && !rebuilt_tree;
+        let should_invalidate_scene = invalidate_scene
+            && match effect {
+                CommandEffect::Conservative => true,
+                CommandEffect::NoUiChange => !retained_no_ui_change,
+            };
+        if should_invalidate_scene || rebuild_requested {
             if !rebuilt_tree {
                 self.invalidate_scene_with_reason(if rebuild_requested {
                     "request_rebuild"
@@ -74,14 +94,16 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     "execute_command"
                 });
             }
-            self.invalidation.mark_dirty();
+            if !rebuild_requested {
+                self.invalidation.mark_dirty();
+            }
         }
         if let Some(started_at) = started_at {
             log_text_profile(
                 "execute_command",
                 started_at.elapsed(),
                 format!(
-                    "invalidated_scene={invalidate_scene} rebuild_requested={rebuild_requested}"
+                    "invalidated_scene={should_invalidate_scene} rebuild_requested={rebuild_requested} retained_no_ui_change={retained_no_ui_change}"
                 ),
             );
         }
@@ -95,6 +117,9 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
     ) {
         let started_at = text_profile_enabled().then_some(Instant::now());
         let context = self.command_context();
+        let invalidation_revision_before = self.invalidation.revision();
+        let rebuild_revision_before = context.root_rebuild_revision();
+        let last_observed_rebuild_revision_before = self.last_root_rebuild_revision;
         let _wake_guard = if invalidate_scene {
             None
         } else {
@@ -103,9 +128,24 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         self.with_view_model(|view_model| {
             command.execute_with_context(view_model, value, &context)
         });
-        let rebuild_requested = context.take_rebuild_request();
-        let rebuilt_tree = rebuild_requested && self.rebuild_widget_tree_from_root_view();
-        if invalidate_scene || rebuild_requested {
+        let invalidation_revision_after = self.invalidation.revision();
+        let rebuild_revision_after = context.root_rebuild_revision();
+        let rebuild_requested = rebuild_revision_after != rebuild_revision_before;
+        let had_pending_rebuild = rebuild_revision_before != last_observed_rebuild_revision_before;
+        let rebuilt_tree = self.observe_root_rebuild_request();
+        let effect = command.declared_effect();
+        let retained_no_ui_change = invalidate_scene
+            && effect == CommandEffect::NoUiChange
+            && invalidation_revision_after == invalidation_revision_before
+            && rebuild_revision_after == rebuild_revision_before
+            && !had_pending_rebuild
+            && !rebuilt_tree;
+        let should_invalidate_scene = invalidate_scene
+            && match effect {
+                CommandEffect::Conservative => true,
+                CommandEffect::NoUiChange => !retained_no_ui_change,
+            };
+        if should_invalidate_scene || rebuild_requested {
             if !rebuilt_tree {
                 self.invalidate_scene_with_reason(if rebuild_requested {
                     "request_rebuild"
@@ -113,14 +153,16 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     "execute_value_command"
                 });
             }
-            self.invalidation.mark_dirty();
+            if !rebuild_requested {
+                self.invalidation.mark_dirty();
+            }
         }
         if let Some(started_at) = started_at {
             log_text_profile(
                 "execute_value_command",
                 started_at.elapsed(),
                 format!(
-                    "invalidated_scene={invalidate_scene} rebuild_requested={rebuild_requested}"
+                    "invalidated_scene={should_invalidate_scene} rebuild_requested={rebuild_requested} retained_no_ui_change={retained_no_ui_change}"
                 ),
             );
         }

@@ -139,6 +139,43 @@ fn insert_seen_focus(
 }
 
 impl<VM: 'static> BoundRuntimeHandler<VM> {
+    pub(in crate::runtime) fn clear_focus_after_scene_target_removed(&mut self) {
+        self.accessibility_focused_node = None;
+        self.active_key_repeat = None;
+        let previous = self.focused_widget.take();
+        self.focus_visible = false;
+        let Some(previous) = previous else {
+            return;
+        };
+
+        self.clear_tooltip_focus_suppression_if_needed(previous.widget_id);
+        let cached_region = self.cached_text_input_region_data(previous.widget_id);
+        let cached_flush = self.cached_text_input_flush_data(previous.widget_id);
+        let controller = cached_region
+            .as_ref()
+            .map(|region| region.controller.clone())
+            .or_else(|| cached_flush.map(|flush| flush.controller));
+        if controller.is_some() {
+            let flushed = self.flush_text_input_session(previous.widget_id);
+            if cached_region
+                .as_ref()
+                .is_some_and(|region| !region.multiline)
+            {
+                let controller = controller.expect("cached text input controller");
+                let current_value = self.text_input_current_value(previous.widget_id, &controller);
+                self.reset_single_line_input_focus_state(previous.widget_id, &current_value);
+            }
+            if flushed.requires_global_invalidation {
+                self.invalidation.mark_dirty();
+            }
+        }
+        if let Some(command) = previous.on_blur {
+            self.execute_command(&command);
+        }
+        self.invalidate_text_input_scene();
+        self.sync_ime_state();
+    }
+
     pub(super) fn focused_scroll_region(&mut self) -> Option<ScrollRegion> {
         let focused_id = self.focused_widget_id()?;
         // CRITICAL: Use cached scroll_regions to avoid stack overflow
@@ -265,99 +302,51 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
     }
 
     pub(in crate::runtime) fn activate_focused_widget(&mut self, enter: bool, space: bool) -> bool {
+        if let Some(handled) = self.activate_focused_portal_accessibility_node(enter, space) {
+            return handled;
+        }
         let Some(focused_id) = self.focused_widget_id() else {
             return false;
         };
-        let computed = self.computed_scene().clone();
-        for region in computed
-            .hit_regions
-            .iter()
-            .chain(computed.overlay_hit_regions.iter())
-        {
-            let handles_key = match &region.interaction {
-                HitInteraction::Widget {
-                    id,
-                    interactions,
-                    default_activation,
-                    ..
-                } if *id == focused_id => {
-                    if (enter && default_activation.handles_enter())
-                        || (space && default_activation.handles_space())
+        let interaction = {
+            let computed = self.computed_scene();
+            computed
+                .hit_regions
+                .iter()
+                .chain(computed.overlay_hit_regions.iter())
+                .find_map(|region| match &region.interaction {
+                    HitInteraction::Widget {
+                        id,
+                        interactions,
+                        default_activation,
+                        ..
+                    } if *id == focused_id
+                        && interactions.on_click.is_some()
+                        && ((enter && default_activation.handles_enter())
+                            || (space && default_activation.handles_space())) =>
                     {
-                        if let Some(command) = interactions.on_click.as_ref() {
-                            self.execute_command(command);
-                            return true;
-                        }
+                        Some(region.interaction.clone())
                     }
-                    false
-                }
-                HitInteraction::Checkbox {
-                    id,
-                    on_change,
-                    current,
-                    ..
-                } if *id == focused_id && space => {
-                    if let Some(command) = on_change.as_ref() {
-                        self.execute_value_command(command, !current);
-                        return true;
+                    HitInteraction::Checkbox { id, on_change, .. }
+                    | HitInteraction::Radio { id, on_change, .. }
+                    | HitInteraction::Switch { id, on_change, .. }
+                        if *id == focused_id && space && on_change.is_some() =>
+                    {
+                        Some(region.interaction.clone())
                     }
-                    false
-                }
-                HitInteraction::Radio {
-                    id,
-                    on_change,
-                    current,
-                    ..
-                } if *id == focused_id && space => {
-                    if let Some(command) = on_change.as_ref() {
-                        self.execute_value_command(command, !current);
-                        return true;
+                    HitInteraction::SelectTrigger { id, .. } if *id == focused_id && enter => {
+                        Some(region.interaction.clone())
                     }
-                    false
-                }
-                HitInteraction::Switch {
-                    id,
-                    on_change,
-                    current,
-                    ..
-                } if *id == focused_id && space => {
-                    if let Some(command) = on_change.as_ref() {
-                        self.execute_value_command(command, !current);
-                        return true;
+                    HitInteraction::TabTrigger { id, on_change, .. }
+                        if *id == focused_id && (enter || space) && on_change.is_some() =>
+                    {
+                        Some(region.interaction.clone())
                     }
-                    false
-                }
-                HitInteraction::SelectTrigger {
-                    id,
-                    on_open_change,
-                    is_open,
-                    ..
-                } if *id == focused_id && enter => {
-                    let next_open = !is_open;
-                    self.close_all_open_selects_except(next_open.then_some(*id));
-                    let _ = self.set_select_open_state(*id, next_open, on_open_change.as_ref());
-                    true
-                }
-                HitInteraction::TabTrigger {
-                    id,
-                    key,
-                    label,
-                    on_change,
-                    ..
-                } if *id == focused_id && (enter || space) => {
-                    if let Some(command) = on_change.as_ref() {
-                        self.execute_value_command(command, (key.clone(), label.clone()));
-                        return true;
-                    }
-                    false
-                }
-                _ => false,
-            };
-            if handles_key {
-                return true;
-            }
-        }
-        false
+                    _ => None,
+                })
+        };
+        interaction
+            .is_some_and(|interaction| self.dispatch_accessibility_click_interaction(interaction))
     }
 
     pub(super) fn selected_text_content(&mut self, widget_id: WidgetId) -> Option<String> {
@@ -559,6 +548,17 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         on_focus: Option<Command<VM>>,
         focus_visible: bool,
     ) {
+        self.update_focus_with_accessibility_node(next_widget, on_focus, focus_visible, None);
+    }
+
+    pub(in crate::runtime) fn update_focus_with_accessibility_node(
+        &mut self,
+        next_widget: Option<FocusedWidget<VM>>,
+        on_focus: Option<Command<VM>>,
+        focus_visible: bool,
+        accessibility_node: Option<accesskit::NodeId>,
+    ) {
+        self.accessibility_focused_node = accessibility_node;
         let current_id = self
             .focused_widget
             .as_ref()

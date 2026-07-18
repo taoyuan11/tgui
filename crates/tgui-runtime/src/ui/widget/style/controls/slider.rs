@@ -44,13 +44,16 @@ impl SliderStyle {
                 palette.primary.darken(hover_lighten()),
                 palette.disabled_surface,
             ),
-            thumb: stateful_single(
-                palette.surface,
-                palette.surface,
-                palette.surface_high,
+            thumb: stateful_colors(
+                palette.primary,
+                palette.primary.lighten(hover_lighten()),
+                palette.primary.darken(hover_lighten()),
                 palette.disabled_content,
             ),
-            thumb_shadow: Some(theme.elevation.sm.clone()),
+            // A flat accent thumb remains clear on both theme surfaces without paying for a
+            // shadow texture per Slider. Keeping shadows opt-in also lets value-only signal
+            // updates use the retained SliderValue property-slot path.
+            thumb_shadow: None,
             tick: stateful_single(
                 palette.outline,
                 palette.outline,

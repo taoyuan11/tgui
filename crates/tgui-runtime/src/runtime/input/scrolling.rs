@@ -1,4 +1,4 @@
-use super::super::state::{SMOOTH_SCROLL_EPSILON, SMOOTH_SCROLL_FRAMES};
+use super::super::state::{SMOOTH_SCROLL_DURATION, SMOOTH_SCROLL_EPSILON};
 use super::*;
 use smallvec::SmallVec;
 
@@ -163,7 +163,39 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         self.touch_scroll_inertia_states.remove(&widget_id);
     }
 
+    pub(in crate::runtime) fn settle_scroll_motion_for_reduced_motion(&mut self) -> bool {
+        if !self.reduced_motion
+            || (self.smooth_scroll_states.is_empty() && self.touch_scroll_inertia_states.is_empty())
+        {
+            return false;
+        }
+
+        let targets = self
+            .smooth_scroll_states
+            .iter()
+            .map(|(widget_id, state)| (*widget_id, state.target))
+            .collect::<SmallVec<[(WidgetId, Point); 8]>>();
+        self.smooth_scroll_states.clear();
+        self.touch_scroll_inertia_states.clear();
+        let mut changed = false;
+        for (widget_id, target) in targets {
+            let current = self
+                .scroll_states
+                .get(&widget_id)
+                .copied()
+                .unwrap_or(Point::ZERO);
+            if (target.x - current.x).abs() > 0.01 || (target.y - current.y).abs() > 0.01 {
+                self.set_scroll_offset(widget_id, target);
+                changed = true;
+            }
+        }
+        changed
+    }
+
     fn start_touch_scroll_inertia(&mut self, drag: TouchScrollDrag) {
+        if self.reduced_motion {
+            return;
+        }
         let velocity = Point::new(
             if drag.can_scroll_x {
                 drag.velocity.x.clamp(
@@ -390,24 +422,51 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         widget_id: WidgetId,
         target: Point,
     ) {
+        if self.reduced_motion {
+            self.cancel_scroll_motion(widget_id);
+            self.set_scroll_offset(widget_id, target);
+            return;
+        }
+
         let start = self
             .scroll_states
             .get(&widget_id)
             .copied()
             .unwrap_or(Point::ZERO);
+        let now = Instant::now();
+        let started_at = now.checked_sub(self.frame_clock.interval()).unwrap_or(now);
         self.smooth_scroll_states.insert(
             widget_id,
             SmoothScrollState {
                 start,
                 target,
-                frame: 0,
+                started_at,
+                last_advanced_at: now,
             },
         );
         self.touch_scroll_inertia_states.remove(&widget_id);
-        let _ = self.advance_smooth_scroll();
+        let _ = self.advance_smooth_scroll_at(now);
     }
 
+    /// Test/compatibility stepping helper. Production scheduling calls
+    /// `advance_smooth_scroll_at` with the per-window absolute frame tick.
+    #[cfg(test)]
     pub(in crate::runtime) fn advance_smooth_scroll(&mut self) -> bool {
+        let Some(last_advanced_at) = self
+            .smooth_scroll_states
+            .values()
+            .map(|state| state.last_advanced_at)
+            .max()
+        else {
+            return false;
+        };
+        let now = last_advanced_at
+            .checked_add(self.frame_clock.interval())
+            .unwrap_or(last_advanced_at);
+        self.advance_smooth_scroll_at(now)
+    }
+
+    pub(in crate::runtime) fn advance_smooth_scroll_at(&mut self, now: Instant) -> bool {
         if self.smooth_scroll_states.is_empty() {
             return false;
         }
@@ -435,16 +494,22 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 continue;
             }
 
-            state.frame = state.frame.saturating_add(1).min(SMOOTH_SCROLL_FRAMES);
-            let progress = f32::from(state.frame) / f32::from(SMOOTH_SCROLL_FRAMES);
+            let progress = (now
+                .saturating_duration_since(state.started_at)
+                .as_secs_f32()
+                / SMOOTH_SCROLL_DURATION.as_secs_f32())
+            .clamp(0.0, 1.0);
             let next = Point::new(
                 state.start.x + (state.target.x - state.start.x) * progress,
                 state.start.y + (state.target.y - state.start.y) * progress,
             );
-            self.set_scroll_offset(widget_id, next);
-            changed = true;
+            if (next.x - current.x).abs() > 0.01 || (next.y - current.y).abs() > 0.01 {
+                self.set_scroll_offset(widget_id, next);
+                changed = true;
+            }
+            state.last_advanced_at = now;
 
-            if state.frame >= SMOOTH_SCROLL_FRAMES {
+            if progress >= 1.0 {
                 self.set_scroll_offset(widget_id, state.target);
                 finished.push(widget_id);
             } else {

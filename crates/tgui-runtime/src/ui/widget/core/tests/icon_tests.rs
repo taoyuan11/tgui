@@ -3,6 +3,8 @@ use super::*;
 use crate::ui::layout::Value;
 use crate::ui::widget::{BuiltinIcon, Icon, IconStyle};
 
+const MONOCHROME_SVG: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16"><path fill="#000" d="M2 2h12v12H2z"/></svg>"##;
+
 #[test]
 fn builtin_icon_renders_as_svg_texture_without_material_text() {
     let theme = Theme::default();
@@ -169,6 +171,80 @@ fn public_svg_icon_size_tracks_runtime_style_without_freezing_default_theme() {
             Some(Value::Static(crate::ui::layout::Length::Px(expected)))
         );
     }
+}
+
+#[test]
+fn monochrome_svg_icon_uses_live_theme_tint_while_regular_svg_stays_original() {
+    let tinted: WidgetTree<()> = WidgetTree::new(Icon::monochrome_svg(MONOCHROME_SVG).style_full(
+        |context| IconStyle {
+            color: Value::Static(context.theme.colors.on_surface),
+            size: dp(20.0),
+        },
+    ));
+    let original: WidgetTree<()> = WidgetTree::new(Icon::svg(MONOCHROME_SVG).size(dp(20.0)));
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+
+    for theme in [Theme::light(), Theme::dark()] {
+        let render = |tree: &WidgetTree<()>| {
+            let mut animations = AnimationEngine::default();
+            tree.render_output(
+                &font_manager,
+                &theme,
+                &media,
+                &mut animations,
+                None,
+                None,
+                &HashMap::new(),
+                Rect::new(0.0, 0.0, 48.0, 48.0),
+                None,
+                None,
+                None,
+                None,
+                false,
+            )
+        };
+        let tinted_output = render(&tinted);
+        assert_eq!(tinted_output.primitives.textures.len(), 1);
+        assert_eq!(
+            tinted_output.primitives.textures[0].mask_tint,
+            Some(theme.colors.on_surface)
+        );
+
+        let original_output = render(&original);
+        assert_eq!(original_output.primitives.textures.len(), 1);
+        assert_eq!(original_output.primitives.textures[0].mask_tint, None);
+    }
+}
+
+#[test]
+fn monochrome_svg_icon_honors_explicit_style_color() {
+    let expected = Color::hexa(0xE11D48B3);
+    let tree: WidgetTree<()> = WidgetTree::new(
+        Icon::monochrome_svg(MONOCHROME_SVG)
+            .size(dp(20.0))
+            .style(move |style, _| style.color = Value::Static(expected)),
+    );
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let mut animations = AnimationEngine::default();
+    let output = tree.render_output(
+        &font_manager,
+        &Theme::dark(),
+        &media,
+        &mut animations,
+        None,
+        None,
+        &HashMap::new(),
+        Rect::new(0.0, 0.0, 48.0, 48.0),
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+    assert_eq!(output.primitives.textures.len(), 1);
+    assert_eq!(output.primitives.textures[0].mask_tint, Some(expected));
 }
 
 #[test]

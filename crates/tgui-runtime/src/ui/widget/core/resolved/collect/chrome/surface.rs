@@ -3,10 +3,6 @@ use crate::ui::widget::common::TreeNodeState;
 use crate::ui::widget::icon::SvgIconId;
 use crate::ui::widget::DefaultActivation;
 use crate::ui::widget::TreeCheckState;
-use std::time::Duration;
-
-const TREE_DISCLOSURE_TRANSITION_MS: u64 = 160;
-const TREE_CHECKBOX_TRANSITION_MS: u64 = 140;
 
 impl<VM> ResolvedElement<VM> {
     pub(in super::super) fn push_surface_primitives_and_base_hit_regions(
@@ -15,6 +11,16 @@ impl<VM> ResolvedElement<VM> {
         context: &mut CollectContext<'_, '_>,
         visual: &CollectVisualState,
     ) {
+        // Tab selection affects the resolved ButtonStyle rather than a field on
+        // VisualStyle. Read the semantic active value in the trigger's own scene
+        // scope so a retained selection update recollects this small button
+        // subtree and advances its indicator target instead of leaving the
+        // build-time style snapshot in place.
+        if let Some(trigger) = self.tab_trigger.as_ref() {
+            let _ = trigger
+                .selected
+                .resolve_ref(|selected| selected == &trigger.key);
+        }
         let background_blur = track_property_scope(PropertySlot::BackgroundBlur, || {
             visual
                 .runtime_visual
@@ -37,6 +43,7 @@ impl<VM> ResolvedElement<VM> {
             .as_ref()
             .map(|brush| {
                 track_property_scope(PropertySlot::BackgroundBrush, || brush.resolve_widget())
+                    .with_alpha_factor(visual.opacity)
             });
         let background_image = visual
             .runtime_visual
@@ -144,6 +151,11 @@ impl<VM> ResolvedElement<VM> {
                 .slider_style
                 .as_ref()
                 .and_then(|style| style.focus_ring.clone()),
+            ResolvedWidgetKind::TextEditor { .. } | ResolvedWidgetKind::Container { .. }
+                if visual.widget_state.focus_visible =>
+            {
+                Some(context.theme.focus_ring.clone())
+            }
             ResolvedWidgetKind::TextEditor { .. } => None,
             ResolvedWidgetKind::Switch { .. } => {
                 visual.styles.switch_style.as_ref().and_then(|style| {
@@ -436,12 +448,13 @@ fn push_tree_node_chrome_primitives<VM>(
         } else {
             0.0
         };
+        let transition = context.style_context.motion_normal_transition();
         let rotation = resolve_tree_icon_f32(
             context,
             widget_id,
             WidgetProperty::TreeDisclosureRotation,
             target_rotation,
-            TREE_DISCLOSURE_TRANSITION_MS,
+            transition,
         );
         push_tree_svg_icon(
             SvgIconId::ChevronRight,
@@ -490,12 +503,13 @@ fn push_tree_node_chrome_primitives<VM>(
                 tree_node.checkbox_unchecked_color.resolve(),
             ),
         };
+        let transition = context.style_context.motion_fast_transition();
         let checkbox_state = resolve_tree_icon_f32(
             context,
             widget_id,
             WidgetProperty::TreeCheckboxState,
             target_state,
-            TREE_CHECKBOX_TRANSITION_MS,
+            transition,
         )
         .clamp(0.0, 1.0);
         let scale = match tree_node.check_state {
@@ -648,22 +662,13 @@ fn resolve_tree_icon_f32(
     widget_id: WidgetId,
     property: WidgetProperty,
     target: f32,
-    duration_ms: u64,
+    transition: Option<Transition>,
 ) -> f32 {
     let key = crate::animation::AnimationKey::Widget {
         id: widget_id.raw(),
         property,
     };
-    if context.reduced_motion {
-        context
-            .animations
-            .resolve_f32(key, target, None, context.now)
-    } else {
-        context.animations.resolve_f32(
-            key,
-            target,
-            Some(Transition::ease_out(Duration::from_millis(duration_ms))),
-            context.now,
-        )
-    }
+    context
+        .animations
+        .resolve_f32(key, target, transition, context.now)
 }

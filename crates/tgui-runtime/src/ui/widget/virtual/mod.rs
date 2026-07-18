@@ -636,6 +636,66 @@ pub(crate) struct VirtualCacheState {
     pub(crate) widget_ids_by_key: HashMap<WidgetKey, WidgetId>,
 }
 
+impl VirtualCacheState {
+    /// Returns the retained main-axis bounds for one virtual item.
+    ///
+    /// Fixed/estimated lists do not populate the measured index and use the
+    /// caller's uniform fallback. Measured lists reuse the sparse prefix tree,
+    /// keeping keyboard navigation to an off-window item O(log N) without
+    /// walking the source.
+    pub(crate) fn item_main_bounds(
+        &self,
+        item_index: usize,
+        fallback_extent: Dp,
+        spacing: Dp,
+    ) -> (Dp, Dp) {
+        let fallback_extent = fallback_extent.max(Dp::ZERO);
+        let spacing = spacing.max(Dp::ZERO);
+        let index = self.measurements.inner.read();
+        let Some(signature) = index.signature else {
+            let start = (fallback_extent + spacing) * item_index as f32;
+            return (start, start + fallback_extent);
+        };
+        let stripe_index = item_index / signature.lanes.max(1);
+        let start = index.stripe_offset(stripe_index, spacing);
+        (start, start + index.stripe_extent(stripe_index))
+    }
+
+    /// Resolves the virtual item covering `main_offset` without materializing
+    /// intervening source items. Uniform layouts are O(1); measured layouts
+    /// reuse the sparse correction tree and remain O(log N).
+    pub(crate) fn item_index_at_main_offset(
+        &self,
+        main_offset: Dp,
+        fallback_extent: Dp,
+        spacing: Dp,
+        max_item_index: usize,
+    ) -> usize {
+        let main_offset = main_offset.max(Dp::ZERO);
+        let fallback_extent = fallback_extent.max(Dp::ZERO);
+        let spacing = spacing.max(Dp::ZERO);
+        let index = self.measurements.inner.read();
+        let Some(signature) = index.signature else {
+            let step = fallback_extent + spacing;
+            if step <= Dp::ZERO {
+                return 0;
+            }
+            return ((main_offset / step).floor() as usize).min(max_item_index);
+        };
+        let stripe_count = signature.stripe_count();
+        if stripe_count == 0 {
+            return 0;
+        }
+        let stripe_index = index
+            .first_stripe_after(spacing, main_offset, false)
+            .unwrap_or(stripe_count - 1)
+            .min(stripe_count - 1);
+        stripe_index
+            .saturating_mul(signature.lanes.max(1))
+            .min(max_item_index)
+    }
+}
+
 impl Default for VirtualRuntimeState {
     fn default() -> Self {
         Self {

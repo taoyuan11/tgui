@@ -21,6 +21,20 @@ type RuntimeImageLayoutResolver = std::sync::Arc<
         + Sync,
 >;
 
+type RuntimeImageMaskTintResolver = std::sync::Arc<
+    dyn Fn(
+            &StyleContext<'_>,
+            &crate::ui::widget::StyleSheet,
+            &VisualStyle,
+            WidgetState,
+            &mut crate::animation::AnimationEngine,
+            WidgetId,
+            std::time::Instant,
+        ) -> Color
+        + Send
+        + Sync,
+>;
+
 /// 图片组件。
 #[derive(Clone)]
 pub struct Image {
@@ -33,6 +47,7 @@ pub struct Image {
     pub(crate) cursor_style: Option<Value<CursorStyle>>,
     pub(crate) style: Option<StyleResolver<ImageStyle>>,
     pub(crate) runtime_layout: Option<RuntimeImageLayoutResolver>,
+    pub(crate) runtime_mask_tint: Option<RuntimeImageMaskTintResolver>,
 }
 
 macro_rules! impl_image_layout_api {
@@ -211,6 +226,7 @@ impl Image {
             cursor_style: None,
             style: None,
             runtime_layout: None,
+            runtime_mask_tint: None,
         }
     }
 
@@ -284,6 +300,25 @@ impl Image {
             + 'static,
     ) -> Self {
         self.runtime_layout = Some(std::sync::Arc::new(resolver));
+        self
+    }
+
+    pub(crate) fn runtime_mask_tint(
+        mut self,
+        resolver: impl Fn(
+                &StyleContext<'_>,
+                &crate::ui::widget::StyleSheet,
+                &VisualStyle,
+                WidgetState,
+                &mut crate::animation::AnimationEngine,
+                WidgetId,
+                std::time::Instant,
+            ) -> Color
+            + Send
+            + Sync
+            + 'static,
+    ) -> Self {
+        self.runtime_mask_tint = Some(std::sync::Arc::new(resolver));
         self
     }
 

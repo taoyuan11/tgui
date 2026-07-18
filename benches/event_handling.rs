@@ -12,11 +12,11 @@ use tgui::core::{dp, Point, Rect};
 #[cfg(feature = "bench-support")]
 use tgui::layout::{Axis, Insets, Overflow};
 #[cfg(feature = "bench-support")]
-use tgui::mvvm::{Command, ValueCommand};
+use tgui::mvvm::{Command, ValueCommand, ViewModelContext};
 #[cfg(feature = "bench-support")]
 use tgui::widgets::bench_support_ext::{scope_bench_command, scope_bench_value_command};
 #[cfg(feature = "bench-support")]
-use tgui::widgets::{Button, Flex, Text, WidgetBenchmarkContext, WidgetTree};
+use tgui::widgets::{Button, Flex, Stack, Text, WidgetBenchmarkContext, WidgetTree};
 
 #[cfg(feature = "bench-support")]
 #[derive(Default)]
@@ -61,6 +61,44 @@ fn build_flat_interactive_tree(count: usize) -> WidgetTree<()> {
             .height(dp(720.0))
             .padding(Insets::all(dp(16.0)))
             .child(list),
+    )
+}
+
+#[cfg(feature = "bench-support")]
+fn build_flat_interactive_tree_with_isolated_transform(count: usize) -> WidgetTree<()> {
+    let view_model = ViewModelContext::for_benchmarks();
+    let marker_offset = view_model.state(Point::new(dp(12.0), dp(12.0)));
+    let mut list = Flex::new(Axis::Vertical)
+        .width(dp(960.0))
+        .gap(dp(4.0))
+        .padding(Insets::all(dp(8.0)));
+
+    for index in 0..count {
+        list = list.child(
+            Flex::new(Axis::Horizontal)
+                .width(dp(920.0))
+                .height(dp(34.0))
+                .gap(dp(8.0))
+                .padding(Insets::symmetric(dp(8.0), dp(4.0)))
+                .child(Text::new(format!("Target {index:04}")))
+                .child(Button::new("Open").size(dp(84.0), dp(26.0))),
+        );
+    }
+
+    WidgetTree::new(
+        Stack::new()
+            .size(dp(1000.0), dp(720.0))
+            .child(list)
+            // This tiny reactive-offset subtree is intentionally independent from the dense
+            // list. It models a badge/indicator animation that must not disable indexed hit
+            // testing for every unrelated row in the same scene.
+            .child(
+                Flex::new(Axis::Horizontal)
+                    .size(dp(80.0), dp(24.0))
+                    .overflow(Overflow::Visible)
+                    .offset(marker_offset.signal())
+                    .child(Text::new("Live").size(dp(48.0), dp(20.0))),
+            ),
     )
 }
 
@@ -178,6 +216,58 @@ fn bench_hit_test_flat_full_scan(c: &mut Criterion) {
     }
 
     group.finish();
+}
+
+#[cfg(feature = "bench-support")]
+fn bench_hit_test_isolated_transform(c: &mut Criterion) {
+    let mut indexed = c.benchmark_group("event_cached_hit_path_isolated_transform");
+    for widget_count in [1_000_usize, 10_000] {
+        let tree = build_flat_interactive_tree_with_isolated_transform(widget_count);
+        indexed.bench_with_input(
+            BenchmarkId::from_parameter(widget_count),
+            &widget_count,
+            |b, _| {
+                let mut ctx = WidgetBenchmarkContext::new().with_viewport(viewport());
+                let now = Instant::now();
+                let _ = ctx.run_layout_and_scene(&tree, now);
+                assert!(
+                    ctx.cached_transform_record_count(&tree, now) > 0,
+                    "fixture must contain a retained transform"
+                );
+                b.iter(|| {
+                    black_box(ctx.cached_hit_path_len(
+                        black_box(&tree),
+                        black_box(Point::new(720.0, 360.0)),
+                        Instant::now(),
+                    ));
+                });
+            },
+        );
+    }
+    indexed.finish();
+
+    let mut full_scan = c.benchmark_group("event_cached_hit_path_isolated_transform_full_scan");
+    for widget_count in [1_000_usize, 10_000] {
+        let tree = build_flat_interactive_tree_with_isolated_transform(widget_count);
+        full_scan.bench_with_input(
+            BenchmarkId::from_parameter(widget_count),
+            &widget_count,
+            |b, _| {
+                let mut ctx = WidgetBenchmarkContext::new().with_viewport(viewport());
+                let now = Instant::now();
+                let _ = ctx.run_layout_and_scene(&tree, now);
+                assert!(ctx.cached_transform_record_count(&tree, now) > 0);
+                b.iter(|| {
+                    black_box(ctx.cached_hit_path_len_full_scan(
+                        black_box(&tree),
+                        black_box(Point::new(720.0, 360.0)),
+                        Instant::now(),
+                    ));
+                });
+            },
+        );
+    }
+    full_scan.finish();
 }
 
 #[cfg(feature = "bench-support")]
@@ -375,6 +465,65 @@ fn bench_scroll_region_target_lookup(c: &mut Criterion) {
             &widget_count,
             |b, _| {
                 let mut ctx = WidgetBenchmarkContext::new().with_viewport(viewport());
+                let scene_stats = ctx.run_layout_and_scene(&tree, Instant::now());
+                let point = Point::new(40.0, 40.0);
+                let delta = Point::new(0.0, -48.0);
+                let lookup_stats = ctx.prepared_scroll_region_lookup_stats();
+                let indexed_probe = ctx.prepared_scroll_target_stats(point, delta, true);
+                let full_scan_probe = ctx.prepared_scroll_target_stats(point, delta, false);
+                assert_eq!(lookup_stats.region_count, scene_stats.scroll_region_count);
+                assert!(lookup_stats.uses_index);
+                assert_eq!(lookup_stats.scrollable_candidate_count, 1);
+                assert_eq!(indexed_probe.candidate_visits, 1);
+                assert!(indexed_probe.found_target);
+                assert!(full_scan_probe.candidate_visits > indexed_probe.candidate_visits);
+                assert_eq!(
+                    ctx.prepared_scroll_target(point, delta),
+                    ctx.prepared_scroll_target_full_scan(point, delta)
+                );
+                b.iter(|| {
+                    black_box(ctx.prepared_scroll_target(black_box(point), black_box(delta)));
+                });
+            },
+        );
+    }
+    indexed.finish();
+
+    let mut full_scan = c.benchmark_group("event_scroll_region_target_full_scan");
+    for widget_count in [1_000_usize, 10_000] {
+        let tree = build_scrollable_interactive_tree(widget_count);
+        full_scan.bench_with_input(
+            BenchmarkId::from_parameter(widget_count),
+            &widget_count,
+            |b, _| {
+                let mut ctx = WidgetBenchmarkContext::new().with_viewport(viewport());
+                let scene_stats = ctx.run_layout_and_scene(&tree, Instant::now());
+                let point = Point::new(40.0, 40.0);
+                let delta = Point::new(0.0, -48.0);
+                let lookup_stats = ctx.prepared_scroll_region_lookup_stats();
+                assert_eq!(lookup_stats.region_count, scene_stats.scroll_region_count);
+                assert!(lookup_stats.uses_index);
+                b.iter(|| {
+                    black_box(
+                        ctx.prepared_scroll_target_full_scan(black_box(point), black_box(delta)),
+                    );
+                });
+            },
+        );
+    }
+    full_scan.finish();
+
+    // Diagnostic control: this intentionally includes WidgetBenchmarkContext cache synchronization
+    // and animation-cache maintenance. Keeping it separate prevents the 8,192-slot animation GC
+    // threshold from being attributed to the production scroll-region lookup itself.
+    let mut cached_sync = c.benchmark_group("event_scroll_region_target_cached_sync");
+    for widget_count in [1_000_usize, 10_000] {
+        let tree = build_scrollable_interactive_tree(widget_count);
+        cached_sync.bench_with_input(
+            BenchmarkId::from_parameter(widget_count),
+            &widget_count,
+            |b, _| {
+                let mut ctx = WidgetBenchmarkContext::new().with_viewport(viewport());
                 let _ = ctx.run_layout_and_scene(&tree, Instant::now());
                 let point = Point::new(40.0, 40.0);
                 let delta = Point::new(0.0, -48.0);
@@ -390,31 +539,7 @@ fn bench_scroll_region_target_lookup(c: &mut Criterion) {
             },
         );
     }
-    indexed.finish();
-
-    let mut full_scan = c.benchmark_group("event_scroll_region_target_full_scan");
-    for widget_count in [1_000_usize, 10_000] {
-        let tree = build_scrollable_interactive_tree(widget_count);
-        full_scan.bench_with_input(
-            BenchmarkId::from_parameter(widget_count),
-            &widget_count,
-            |b, _| {
-                let mut ctx = WidgetBenchmarkContext::new().with_viewport(viewport());
-                let _ = ctx.run_layout_and_scene(&tree, Instant::now());
-                let point = Point::new(40.0, 40.0);
-                let delta = Point::new(0.0, -48.0);
-                b.iter(|| {
-                    black_box(ctx.cached_scroll_target_full_scan(
-                        black_box(&tree),
-                        black_box(point),
-                        black_box(delta),
-                        Instant::now(),
-                    ));
-                });
-            },
-        );
-    }
-    full_scan.finish();
+    cached_sync.finish();
 }
 
 #[cfg(feature = "bench-support")]
@@ -487,6 +612,9 @@ fn bench_hit_test_flat(_c: &mut Criterion) {
 fn bench_hit_test_flat_full_scan(_c: &mut Criterion) {}
 
 #[cfg(not(feature = "bench-support"))]
+fn bench_hit_test_isolated_transform(_c: &mut Criterion) {}
+
+#[cfg(not(feature = "bench-support"))]
 fn bench_hit_test_nested(_c: &mut Criterion) {}
 
 #[cfg(not(feature = "bench-support"))]
@@ -529,6 +657,7 @@ criterion_group!(
     benches,
     bench_hit_test_flat,
     bench_hit_test_flat_full_scan,
+    bench_hit_test_isolated_transform,
     bench_hit_test_nested,
     bench_hover_state_update,
     bench_focus_navigation,

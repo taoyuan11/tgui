@@ -13,9 +13,6 @@
 //! sentinel overlay 没有 primitives / hits，仅注册 close handler，不影响
 //! 主场景渲染。
 
-use std::time::Duration;
-
-use crate::animation::{AnimationKey, Transition, WidgetProperty};
 use crate::foundation::view_model::Command;
 use crate::ui::unit::Dp;
 use crate::ui::widget::common::{
@@ -162,6 +159,23 @@ fn emit_drawer_backdrop_hit_regions<VM: 'static>(
 }
 
 impl<VM: 'static> ResolvedElement<VM> {
+    pub(super) fn clear_closed_drawer_interactions(&self, computed: &mut ComputedScene<VM>) {
+        let Some(drawer) = &self.drawer else { return };
+        if drawer.open.resolve() {
+            return;
+        }
+
+        // A closing drawer may keep its visual subtree alive for the exit motion, but it must
+        // stop intercepting input and focus as soon as its logical state becomes closed.
+        computed.hit_regions.clear();
+        computed.overlay_hit_regions.clear();
+        computed.overlay_close_handlers.clear();
+        computed.scroll_regions.clear();
+        computed.focus_scopes.clear();
+        computed.ime_cursor_area = None;
+        computed.overlay_layers = crate::ui::widget::common::fresh_overlay_layers();
+    }
+
     pub(super) fn emit_drawer_close_overlay_if_open(
         &self,
         context: &mut CollectContext<'_, '_>,
@@ -195,19 +209,6 @@ impl<VM: 'static> ResolvedElement<VM> {
             overlay = overlay.return_focus_to(target);
         }
         emit_drawer_backdrop_hit_regions(computed, context, drawer);
-
-        // 触发动画通道：用 DrawerVisibility 让 AnimationEngine 保持一个解析任务，
-        // 即使本 emit 不主动消费 visibility 值。这样下次 open=false 时 collect
-        // 阶段仍能 schedule wakeup（slide-out 动画）。
-        let _ = context.animations.resolve_f32(
-            AnimationKey::Widget {
-                id: self.id.raw(),
-                property: WidgetProperty::DrawerVisibility,
-            },
-            1.0,
-            Some(Transition::ease_in_out(Duration::from_millis(250))),
-            context.now,
-        );
 
         let _ = emit_overlay(
             computed,

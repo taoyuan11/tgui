@@ -1,7 +1,14 @@
 use super::*;
 #[cfg(feature = "bench-support")]
+use crate::animation::{AnimationKey, AnimationRefresh, Transition, WidgetProperty};
+#[cfg(feature = "bench-support")]
+use crate::foundation::binding::PropertySlot;
+use crate::foundation::view_model::CommandEffect;
+#[cfg(feature = "bench-support")]
 use crate::runtime::state::StrictCapabilityKind;
 use crate::ui::widget::ItemLayout;
+#[cfg(feature = "bench-support")]
+use crate::ui::widget::ResolvedSceneLayout;
 #[cfg(feature = "bench-support")]
 use crate::ui::widget::{For, Show, ViewSwitch};
 
@@ -166,6 +173,150 @@ fn outer_scroll_with_virtual_descendant_preserves_layout_cache_for_non_virtual_s
 }
 
 #[test]
+fn conservative_command_keeps_existing_full_invalidation_semantics() {
+    let invalidation = InvalidationSignal::new();
+    let tree = WidgetTree::new(Text::new("static"));
+    let mut handler = test_handler(Some(tree), invalidation);
+    let _ = handler.computed_scene();
+    let before_revision = handler.invalidation.revision();
+
+    handler.execute_command(&Command::new(|_: &mut TestVm| {}));
+
+    let cached = handler.cached_scene.as_ref().expect("cached scene shell");
+    assert!(!cached.layout_valid);
+    assert!(!cached.computed_valid);
+    assert!(handler.invalidation.revision() > before_revision);
+}
+
+#[test]
+fn no_ui_change_command_preserves_valid_scene_when_revisions_stay_stable() {
+    let invalidation = InvalidationSignal::new();
+    let tree = WidgetTree::new(Text::new("static"));
+    let mut handler = test_handler(Some(tree), invalidation);
+    let _ = handler.computed_scene();
+    let before_revision = handler.invalidation.revision();
+    let calls = Arc::new(AtomicUsize::new(0));
+    let command = Command::new({
+        let calls = Arc::clone(&calls);
+        move |_: &mut TestVm| {
+            calls.fetch_add(1, Ordering::SeqCst);
+        }
+    })
+    .effect(CommandEffect::NoUiChange);
+
+    handler.execute_command(&command);
+
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    assert_eq!(handler.invalidation.revision(), before_revision);
+    let cached = handler
+        .cached_scene
+        .as_ref()
+        .expect("retained cached scene");
+    assert!(cached.layout_valid);
+    assert!(cached.computed_valid);
+}
+
+#[test]
+fn no_ui_change_value_command_preserves_valid_scene_when_revisions_stay_stable() {
+    let invalidation = InvalidationSignal::new();
+    let tree = WidgetTree::new(Text::new("static"));
+    let mut handler = test_handler(Some(tree), invalidation);
+    let _ = handler.computed_scene();
+    let before_revision = handler.invalidation.revision();
+    let total = Arc::new(AtomicUsize::new(0));
+    let command = ValueCommand::new({
+        let total = Arc::clone(&total);
+        move |_: &mut TestVm, value: usize| {
+            total.fetch_add(value, Ordering::SeqCst);
+        }
+    })
+    .effect(CommandEffect::NoUiChange);
+
+    handler.execute_value_command(&command, 7);
+
+    assert_eq!(total.load(Ordering::SeqCst), 7);
+    assert_eq!(handler.invalidation.revision(), before_revision);
+    let cached = handler
+        .cached_scene
+        .as_ref()
+        .expect("retained cached scene");
+    assert!(cached.layout_valid);
+    assert!(cached.computed_valid);
+}
+
+#[test]
+fn no_ui_change_value_command_falls_back_when_global_dirty_is_marked() {
+    let invalidation = InvalidationSignal::new();
+    let tree = WidgetTree::new(Text::new("static"));
+    let mut handler = test_handler(Some(tree), invalidation.clone());
+    let _ = handler.computed_scene();
+    let before_revision = handler.invalidation.revision();
+    let command = ValueCommand::new({
+        let invalidation = invalidation.clone();
+        move |_: &mut TestVm, _: ()| invalidation.mark_dirty()
+    })
+    .effect(CommandEffect::NoUiChange);
+
+    handler.execute_value_command(&command, ());
+
+    assert!(handler.invalidation.revision() > before_revision);
+    let cached = handler
+        .cached_scene
+        .as_ref()
+        .expect("fallback should preserve cache shell");
+    assert!(!cached.layout_valid);
+    assert!(!cached.computed_valid);
+}
+
+#[test]
+fn no_ui_change_command_falls_back_when_reactive_state_changes() {
+    let invalidation = InvalidationSignal::new();
+    let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+    let state = context.state(false);
+    let tree = WidgetTree::new(Text::new("static"));
+    let mut handler = test_handler(Some(tree), invalidation);
+    let _ = handler.computed_scene();
+    let before_revision = handler.invalidation.revision();
+    let command = Command::new({
+        let state = state.clone();
+        move |_: &mut TestVm| state.set(true)
+    })
+    .effect(CommandEffect::NoUiChange);
+
+    handler.execute_command(&command);
+
+    assert!(state.get());
+    assert!(handler.invalidation.revision() > before_revision);
+    let cached = handler
+        .cached_scene
+        .as_ref()
+        .expect("fallback should preserve cache shell");
+    assert!(!cached.layout_valid);
+    assert!(!cached.computed_valid);
+}
+
+#[test]
+fn no_ui_change_command_falls_back_for_pending_root_rebuild() {
+    let invalidation = InvalidationSignal::new();
+    let tree = WidgetTree::new(Text::new("static"));
+    let mut handler = test_handler(Some(tree), invalidation.clone());
+    let _ = handler.computed_scene();
+    invalidation.request_root_rebuild();
+    let pending_root_revision = invalidation.root_rebuild_revision();
+    assert_ne!(pending_root_revision, handler.last_root_rebuild_revision);
+
+    handler.execute_command(&Command::new(|_: &mut TestVm| {}).effect(CommandEffect::NoUiChange));
+
+    assert_eq!(handler.last_root_rebuild_revision, pending_root_revision);
+    let cached = handler
+        .cached_scene
+        .as_ref()
+        .expect("fallback should preserve cache shell without a root factory");
+    assert!(!cached.layout_valid);
+    assert!(!cached.computed_valid);
+}
+
+#[test]
 fn command_context_request_rebuild_invalidates_cached_scene_explicitly() {
     let invalidation = InvalidationSignal::new();
     let tree = WidgetTree::new(Text::new("static"));
@@ -175,8 +326,9 @@ fn command_context_request_rebuild_invalidates_cached_scene_explicitly() {
 
     let command = Command::new_with_context(|_vm: &mut TestVm, context| {
         context.request_rebuild();
-    });
-    handler.execute_command_without_invalidation(&command);
+    })
+    .effect(CommandEffect::NoUiChange);
+    handler.execute_command(&command);
 
     let cached = handler
         .cached_scene
@@ -240,8 +392,9 @@ fn command_context_request_rebuild_replaces_root_tree_when_factory_is_available(
     let command = Command::new_with_context(|vm: &mut RebuildRootVm, context| {
         vm.page = "second";
         context.request_rebuild();
-    });
-    handler.execute_command_without_invalidation(&command);
+    })
+    .effect(CommandEffect::NoUiChange);
+    handler.execute_command(&command);
     let computed = handler.computed_scene();
 
     assert!(
@@ -801,6 +954,15 @@ fn image_source_tree(source_state: &State<crate::media::MediaSource>) -> WidgetT
     WidgetTree::new(crate::ui::widget::Image::new(source).size(dp(48.0), dp(48.0)))
 }
 
+fn tinted_image_source_tree(source_state: &State<crate::media::MediaSource>) -> WidgetTree<TestVm> {
+    let source = source_state.signal();
+    WidgetTree::new(
+        crate::ui::widget::Image::new(source)
+            .size(dp(48.0), dp(48.0))
+            .runtime_mask_tint(|_, _, _, _, _, _, _| Color::hexa(0x22C55EFF)),
+    )
+}
+
 fn background_image_source_tree(
     image_state: &State<crate::ui::widget::BackgroundImage>,
 ) -> WidgetTree<TestVm> {
@@ -846,6 +1008,36 @@ fn background_blur_tree(blur_state: &State<Dp>) -> WidgetTree<TestVm> {
     )
 }
 
+fn background_blur_with_stable_background_tree(blur_state: &State<Dp>) -> WidgetTree<TestVm> {
+    let blur = blur_state.signal();
+    WidgetTree::new(
+        Stack::<TestVm>::new()
+            .size(dp(48.0), dp(48.0))
+            .style_full(move |ctx| {
+                let mut style = ContainerStyle::default_for_theme(ctx.theme);
+                style.surface.background = Some(Color::hexa(0x0F172AFF).into());
+                style.surface.background_blur = blur.clone().into();
+                style.surface.border_radius = Some(crate::ui::layout::Value::Static(dp(6.0)));
+                style
+            }),
+    )
+}
+
+fn background_blur_with_semantic_hit_tree(blur_state: &State<Dp>) -> WidgetTree<TestVm> {
+    let blur = blur_state.signal();
+    WidgetTree::new(
+        Stack::<TestVm>::new()
+            .size(dp(48.0), dp(48.0))
+            .focusable(true)
+            .style_full(move |ctx| {
+                let mut style = ContainerStyle::default_for_theme(ctx.theme);
+                style.surface.background_blur = blur.clone().into();
+                style.surface.border_radius = Some(crate::ui::layout::Value::Static(dp(6.0)));
+                style
+            }),
+    )
+}
+
 fn background_brush_offset_tree(offset_state: &State<Point>) -> WidgetTree<TestVm> {
     let offset = offset_state.signal();
     WidgetTree::new(
@@ -862,6 +1054,21 @@ fn background_brush_offset_tree(offset_state: &State<Point>) -> WidgetTree<TestV
     )
 }
 
+fn background_blur_offset_tree(offset_state: &State<Point>) -> WidgetTree<TestVm> {
+    let offset = offset_state.signal();
+    WidgetTree::new(
+        Stack::<TestVm>::new()
+            .size(dp(48.0), dp(48.0))
+            .offset(offset)
+            .style_full(move |ctx| {
+                let mut style = ContainerStyle::default_for_theme(ctx.theme);
+                style.surface.background_blur = crate::ui::layout::Value::Static(dp(8.0));
+                style.surface.border_radius = Some(crate::ui::layout::Value::Static(dp(6.0)));
+                style
+            }),
+    )
+}
+
 fn background_blur_scale_tree(scale_state: &State<f32>) -> WidgetTree<TestVm> {
     let scale = scale_state.signal();
     WidgetTree::new(
@@ -871,6 +1078,38 @@ fn background_blur_scale_tree(scale_state: &State<f32>) -> WidgetTree<TestVm> {
             .style_full(move |ctx| {
                 let mut style = ContainerStyle::default_for_theme(ctx.theme);
                 style.surface.background_blur = crate::ui::layout::Value::Static(dp(8.0));
+                style.surface.border_radius = Some(crate::ui::layout::Value::Static(dp(6.0)));
+                style
+            }),
+    )
+}
+
+fn background_brush_scale_tree(scale_state: &State<f32>) -> WidgetTree<TestVm> {
+    let scale = scale_state.signal();
+    WidgetTree::new(
+        Stack::<TestVm>::new()
+            .size(dp(48.0), dp(48.0))
+            .scale(scale)
+            .style_full(move |ctx| {
+                let mut style = ContainerStyle::default_for_theme(ctx.theme);
+                style.surface.background_brush =
+                    Some(crate::ui::widget::BackgroundBrush::Solid(Color::hexa(0x22C55EFF)).into());
+                style.surface.border_radius = Some(crate::ui::layout::Value::Static(dp(6.0)));
+                style
+            }),
+    )
+}
+
+fn background_image_scale_bytes_tree(scale_state: &State<f32>) -> WidgetTree<TestVm> {
+    let scale = scale_state.signal();
+    WidgetTree::new(
+        Stack::<TestVm>::new()
+            .size(dp(48.0), dp(48.0))
+            .scale(scale)
+            .style_full(move |ctx| {
+                let mut style = ContainerStyle::default_for_theme(ctx.theme);
+                style.surface.background_image =
+                    Some(crate::ui::widget::BackgroundImage::from_bytes(SIMPLE_SVG).into());
                 style.surface.border_radius = Some(crate::ui::layout::Value::Static(dp(6.0)));
                 style
             }),
@@ -940,6 +1179,150 @@ fn surface_opacity_tree(opacity_state: &State<f32>) -> WidgetTree<TestVm> {
     )
 }
 
+fn brush_surface_opacity_tree(opacity_state: &State<f32>) -> WidgetTree<TestVm> {
+    let opacity = opacity_state.signal();
+    WidgetTree::new(
+        Stack::<TestVm>::new()
+            .size(dp(72.0), dp(48.0))
+            .style_full(move |ctx| {
+                let mut style = ContainerStyle::default_for_theme(ctx.theme);
+                style.surface.background_brush = Some(
+                    crate::ui::widget::BackgroundLinearGradient::new(
+                        Point::new(dp(0.0), dp(0.0)),
+                        Point::new(dp(72.0), dp(0.0)),
+                        vec![
+                            crate::ui::widget::BackgroundGradientStop::new(
+                                0.0,
+                                Color::hexa(0x38BDF8FF),
+                            ),
+                            crate::ui::widget::BackgroundGradientStop::new(
+                                1.0,
+                                Color::hexa(0x7C3AEDC0),
+                            ),
+                        ],
+                    )
+                    .into(),
+                );
+                style.surface.border_radius = Some(dp(8.0).into());
+                style.surface.opacity = opacity.clone().into();
+                style
+            }),
+    )
+}
+
+fn shadow_surface_opacity_tree(opacity_state: &State<f32>) -> WidgetTree<TestVm> {
+    let opacity = opacity_state.signal();
+    WidgetTree::new(
+        Stack::<TestVm>::new()
+            .size(dp(96.0), dp(56.0))
+            .style_full(move |ctx| {
+                let mut style = ContainerStyle::default_for_theme(ctx.theme);
+                style.surface.background = Some(Color::hexa(0x111827FF).into());
+                style.surface.border_radius = Some(crate::ui::layout::Value::Static(dp(8.0)));
+                style.surface.shadow = Some(ctx.theme.elevation.md.clone().into());
+                style.surface.opacity = opacity.clone().into();
+                style
+            }),
+    )
+}
+
+fn canvas_surface_opacity_tree(opacity_state: &State<f32>) -> WidgetTree<TestVm> {
+    let opacity = opacity_state.signal();
+    WidgetTree::new(
+        Canvas::new(CanvasRecorder::build(|canvas| {
+            canvas
+                .set_fill(Color::hexa(0x38BDF8FF))
+                .set_shadow(CanvasShadow::new(
+                    Color::hexa(0x020617A8),
+                    Point::new(2.0, 3.0),
+                    dp(4.0),
+                ))
+                .fill_round_rect(4.0, 4.0, 48.0, 24.0, 6.0);
+            canvas.draw_text(Rect::new(6.0, 8.0, 44.0, 18.0), "Canvas");
+        }))
+        .size(dp(72.0), dp(48.0))
+        .style_full(move |ctx| {
+            let mut style = crate::ui::widget::CanvasStyle::default_for_theme(ctx.theme);
+            style.surface.background = Some(Color::hexa(0x0F172AFF).into());
+            style.surface.border_radius = Some(crate::ui::layout::Value::Static(dp(8.0)));
+            style.surface.shadow = Some(ctx.theme.elevation.sm.clone().into());
+            style.surface.opacity = opacity.clone().into();
+            style
+        }),
+    )
+}
+
+fn decorated_text_opacity_tree(opacity_state: &State<f32>) -> WidgetTree<TestVm> {
+    let opacity = opacity_state.signal();
+    WidgetTree::new(
+        Text::new("Decorated text")
+            .size(dp(160.0), dp(36.0))
+            .style_full(move |ctx| {
+                let mut style = crate::ui::widget::TextWidgetStyle::default_for_theme(ctx.theme);
+                style.color = Color::hexa(0xF8FAFCFF).into();
+                style.surface.background = Some(Color::hexa(0x0F172AFF).into());
+                style.surface.border_color = Some(Color::hexa(0x38BDF8FF).into());
+                style.surface.border_width = Some(dp(2.0).into());
+                style.surface.border_radius = Some(dp(8.0).into());
+                style.surface.shadow = Some(ctx.theme.elevation.sm.clone().into());
+                style.surface.opacity = opacity.clone().into();
+                style
+            }),
+    )
+}
+
+fn image_surface_border_tree(
+    border_width_state: &State<Dp>,
+    border_radius_state: &State<Dp>,
+) -> WidgetTree<TestVm> {
+    let border_width = border_width_state.signal();
+    let border_radius = border_radius_state.signal();
+    WidgetTree::new(
+        crate::ui::widget::Image::from_bytes(SIMPLE_SVG)
+            .size(dp(64.0), dp(48.0))
+            .style_full(move |ctx| {
+                let mut style = crate::ui::widget::ImageStyle::default_for_theme(ctx.theme);
+                style.surface.background = Some(Color::hexa(0x0F172AFF).into());
+                style.surface.border_color = Some(Color::hexa(0x38BDF8FF).into());
+                style.surface.border_width = Some(border_width.clone().into());
+                style.surface.border_radius = Some(border_radius.clone().into());
+                style
+            }),
+    )
+}
+
+fn canvas_surface_border_tree(
+    border_width_state: &State<Dp>,
+    border_radius_state: &State<Dp>,
+) -> WidgetTree<TestVm> {
+    let border_width = border_width_state.signal();
+    let border_radius = border_radius_state.signal();
+    let scene = CanvasRecorder::build(|canvas| {
+        canvas
+            .next_item_id(7_u64)
+            .set_fill(Color::hexa(0x22C55EFF))
+            .set_shadow(CanvasShadow::new(
+                Color::hexa(0x020617A8),
+                Point::new(2.0, 3.0),
+                dp(4.0),
+            ))
+            .fill_round_rect(4.0, 4.0, 44.0, 24.0, 6.0);
+    });
+    WidgetTree::new(
+        Canvas::new(scene)
+            .size(dp(72.0), dp(48.0))
+            .on_item_click(ValueCommand::new(|_, _| {}))
+            .style_full(move |ctx| {
+                let mut style = crate::ui::widget::CanvasStyle::default_for_theme(ctx.theme);
+                style.surface.background = Some(Color::hexa(0x0F172AFF).into());
+                style.surface.border_color = Some(Color::hexa(0x38BDF8FF).into());
+                style.surface.border_width = Some(border_width.clone().into());
+                style.surface.border_radius = Some(border_radius.clone().into());
+                style
+            }),
+    )
+}
+
 fn surface_offset_tree(offset_state: &State<Point>) -> WidgetTree<TestVm> {
     let offset = offset_state.signal();
     WidgetTree::new(
@@ -951,6 +1334,39 @@ fn surface_offset_tree(offset_state: &State<Point>) -> WidgetTree<TestVm> {
                 style.surface.background = Some(Color::hexa(0x111827FF).into());
                 style.surface.border_color = Some(Color::hexa(0x38BDF8FF).into());
                 style.surface.border_width = Some(crate::ui::layout::Value::Static(dp(2.0)));
+                style.surface.border_radius = Some(crate::ui::layout::Value::Static(dp(6.0)));
+                style
+            }),
+    )
+}
+
+#[cfg(feature = "bench-support")]
+fn plain_hidden_surface_offset_tree(offset_state: &State<Point>) -> (WidgetTree<TestVm>, WidgetId) {
+    let offset = offset_state.signal();
+    let moving: Element<TestVm> = Stack::<TestVm>::new()
+        .size(dp(48.0), dp(32.0))
+        .offset(offset)
+        .style_full(move |ctx| {
+            let mut style = ContainerStyle::default_for_theme(ctx.theme);
+            style.surface.background = Some(Color::hexa(0x111827FF).into());
+            style.surface.border_radius = Some(crate::ui::layout::Value::Static(dp(6.0)));
+            style
+        })
+        .into();
+    let moving_id = moving.id;
+    (WidgetTree::new(moving), moving_id)
+}
+
+fn semantic_surface_offset_tree(offset_state: &State<Point>) -> WidgetTree<TestVm> {
+    let offset = offset_state.signal();
+    WidgetTree::new(
+        Stack::<TestVm>::new()
+            .size(dp(48.0), dp(48.0))
+            .offset(offset)
+            .focusable(true)
+            .style_full(move |ctx| {
+                let mut style = ContainerStyle::default_for_theme(ctx.theme);
+                style.surface.background = Some(Color::hexa(0x111827FF).into());
                 style.surface.border_radius = Some(crate::ui::layout::Value::Static(dp(6.0)));
                 style
             }),
@@ -1033,12 +1449,27 @@ fn surface_scale_tree(scale_state: &State<f32>) -> WidgetTree<TestVm> {
     WidgetTree::new(
         Stack::<TestVm>::new()
             .size(dp(48.0), dp(48.0))
+            .overflow(Overflow::Hidden)
             .scale(scale)
             .style_full(move |ctx| {
                 let mut style = ContainerStyle::default_for_theme(ctx.theme);
                 style.surface.background = Some(Color::hexa(0x111827FF).into());
-                style.surface.border_color = Some(Color::hexa(0x38BDF8FF).into());
-                style.surface.border_width = Some(crate::ui::layout::Value::Static(dp(2.0)));
+                style.surface.border_radius = Some(crate::ui::layout::Value::Static(dp(6.0)));
+                style
+            }),
+    )
+}
+
+fn semantic_surface_scale_tree(scale_state: &State<f32>) -> WidgetTree<TestVm> {
+    let scale = scale_state.signal();
+    WidgetTree::new(
+        Stack::<TestVm>::new()
+            .size(dp(48.0), dp(48.0))
+            .scale(scale)
+            .focusable(true)
+            .style_full(move |ctx| {
+                let mut style = ContainerStyle::default_for_theme(ctx.theme);
+                style.surface.background = Some(Color::hexa(0x111827FF).into());
                 style.surface.border_radius = Some(crate::ui::layout::Value::Static(dp(6.0)));
                 style
             }),
@@ -1053,6 +1484,21 @@ fn border_color_tree(color_state: &State<Color>) -> WidgetTree<TestVm> {
             .style_full(move |ctx| {
                 let mut style = ContainerStyle::default_for_theme(ctx.theme);
                 style.surface.background = Some(Color::hexa(0x111827FF).into());
+                style.surface.border_color = Some(color.clone().into());
+                style.surface.border_width = Some(crate::ui::layout::Value::Static(dp(2.0)));
+                style.surface.border_radius = Some(crate::ui::layout::Value::Static(dp(6.0)));
+                style
+            }),
+    )
+}
+
+fn border_only_color_tree(color_state: &State<Color>) -> WidgetTree<TestVm> {
+    let color = color_state.signal();
+    WidgetTree::new(
+        Stack::<TestVm>::new()
+            .size(dp(48.0), dp(48.0))
+            .style_full(move |ctx| {
+                let mut style = ContainerStyle::default_for_theme(ctx.theme);
                 style.surface.border_color = Some(color.clone().into());
                 style.surface.border_width = Some(crate::ui::layout::Value::Static(dp(2.0)));
                 style.surface.border_radius = Some(crate::ui::layout::Value::Static(dp(6.0)));
@@ -1129,23 +1575,7 @@ fn slider_tree(value_state: &State<f32>) -> WidgetTree<TestVm> {
     WidgetTree::new(
         Slider::<TestVm>::new(value, 0.0, 1.0)
             .step(0.01)
-            .size(dp(220.0), dp(32.0))
-            .style(|style, _| {
-                style.track = crate::ui::theme::StateValue::new(crate::ui::layout::Value::Static(
-                    Color::hexa(0x1F2937FF),
-                ));
-                style.active_track = crate::ui::theme::StateValue::new(
-                    crate::ui::layout::Value::Static(Color::hexa(0x22C55EFF)),
-                );
-                style.thumb = crate::ui::theme::StateValue::new(crate::ui::layout::Value::Static(
-                    Color::hexa(0xF8FAFCFF),
-                ));
-                style.thumb_shadow = None;
-                style.border_width = crate::ui::layout::Value::Static(dp(0.0));
-                style.track_height = dp(6.0);
-                style.thumb_size = dp(20.0);
-                style.radius = crate::ui::layout::Value::Static(dp(0.0));
-            }),
+            .size(dp(220.0), dp(32.0)),
     )
 }
 
@@ -1155,26 +1585,7 @@ fn labeled_slider_tree(value_state: &State<f32>) -> WidgetTree<TestVm> {
         Slider::<TestVm>::new(value, 0.0, 1.0)
             .step(0.01)
             .show_value_label(true)
-            .size(dp(220.0), dp(52.0))
-            .style(|style, _| {
-                style.track = crate::ui::theme::StateValue::new(crate::ui::layout::Value::Static(
-                    Color::hexa(0x1F2937FF),
-                ));
-                style.active_track = crate::ui::theme::StateValue::new(
-                    crate::ui::layout::Value::Static(Color::hexa(0x22C55EFF)),
-                );
-                style.thumb = crate::ui::theme::StateValue::new(crate::ui::layout::Value::Static(
-                    Color::hexa(0xF8FAFCFF),
-                ));
-                style.label = crate::ui::theme::StateValue::new(crate::ui::layout::Value::Static(
-                    Color::hexa(0xF8FAFCFF),
-                ));
-                style.thumb_shadow = None;
-                style.border_width = crate::ui::layout::Value::Static(dp(0.0));
-                style.track_height = dp(6.0);
-                style.thumb_size = dp(20.0);
-                style.radius = crate::ui::layout::Value::Static(dp(0.0));
-            }),
+            .size(dp(220.0), dp(52.0)),
     )
 }
 
@@ -1193,6 +1604,26 @@ fn slider_hit_fingerprint<VM>(
             } => Some((*value, *track_rect, *thumb_rect)),
             _ => None,
         })
+}
+
+fn occluder_hit_fingerprints<VM>(
+    computed: &crate::ui::widget::ComputedScene<VM>,
+) -> Vec<(u64, Rect, Option<Rect>, Vec<u64>, Vec<u64>, Option<u64>)> {
+    computed
+        .hit_regions
+        .iter()
+        .filter_map(|hit| match hit.interaction {
+            HitInteraction::Occluder { id } => Some((
+                id.raw(),
+                hit.rect,
+                hit.clip_rect,
+                hit.transform_chain.iter().map(|id| id.raw()).collect(),
+                hit.scope_path.iter().map(|id| id.raw()).collect(),
+                hit.gpu_scroll_container.map(|id| id.raw()),
+            )),
+            _ => None,
+        })
+        .collect()
 }
 
 fn apply_legacy_scene_dependency_invalidation(
@@ -1590,9 +2021,18 @@ fn reactive_property_slot_write_color_matches_full_recollect() {
     let _ = handler.computed_scene();
     let before = shape_fingerprints(handler.computed_scene());
 
+    #[cfg(feature = "bench-support")]
+    crate::runtime::action_stats::reset();
     crate::runtime::scene_patch::splice_probe::reset();
     color.set(Color::hexa(0x00FF00FF));
     handler.request_redraw_if_dirty(Instant::now());
+    #[cfg(feature = "bench-support")]
+    assert!(
+        crate::runtime::action_stats::snapshot()
+            .iter()
+            .any(|(action, count)| *action == "reactive_property_slot_write" && *count == 1),
+        "opaque-to-opaque background keeps Container hit topology stable and should retain its slot write"
+    );
     assert_eq!(
         crate::runtime::scene_patch::splice_probe::hits(),
         0,
@@ -1626,13 +2066,31 @@ fn reactive_property_slot_write_color_matches_full_recollect() {
 }
 
 #[test]
-fn reactive_background_transparent_uses_retained_slot_write() {
+fn reactive_background_alpha_transition_falls_back_and_matches_full_hit_topology() {
+    fn hit_fingerprints<VM>(
+        scene: &crate::ui::widget::ComputedScene<VM>,
+    ) -> Vec<(crate::ui::widget::HitTargetId, Rect, Option<Rect>, bool)> {
+        scene
+            .hit_regions
+            .iter()
+            .map(|hit| {
+                (
+                    hit.interaction.target_id(),
+                    hit.rect,
+                    hit.clip_rect,
+                    matches!(hit.interaction, HitInteraction::Occluder { .. }),
+                )
+            })
+            .collect()
+    }
+
     let invalidation = InvalidationSignal::new();
     let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
     let color = context.state(Color::rgba(255, 0, 0, 0));
     let tree = nested_color_tree(&color);
     let mut handler = test_handler(Some(tree), invalidation);
     let before = shape_fingerprints(handler.computed_scene());
+    let before_hits = hit_fingerprints(handler.computed_scene());
     assert!(
         before
             .iter()
@@ -1640,50 +2098,196 @@ fn reactive_background_transparent_uses_retained_slot_write() {
         "reactive transparent background should keep a retained shape slot: {before:?}"
     );
 
+    #[cfg(feature = "bench-support")]
+    crate::runtime::action_stats::reset();
     crate::runtime::scene_patch::splice_probe::reset();
     color.set(Color::hexa(0x00FF00FF));
     handler.request_redraw_if_dirty(Instant::now());
-    assert_eq!(
-        crate::runtime::scene_patch::splice_probe::hits(),
-        0,
-        "transparent-to-opaque background should not enter scene splice"
+    #[cfg(feature = "bench-support")]
+    assert!(
+        crate::runtime::action_stats::snapshot()
+            .iter()
+            .all(|(action, _)| *action != "reactive_property_slot_write"),
+        "transparent-to-visible Container background must not retain stale hit topology"
     );
     let cached = handler
         .cached_scene
         .as_ref()
-        .expect("slot write keeps cache shell");
+        .expect("bounded background subtree patch keeps cache shell");
     assert!(cached.computed_valid);
-    let after_opaque_slot_write = shape_fingerprints(&cached.computed);
+    let after_opaque_patch = shape_fingerprints(&cached.computed);
+    let after_opaque_patch_hits = hit_fingerprints(&cached.computed);
+    assert_eq!(
+        after_opaque_patch_hits.len(),
+        before_hits.len() + 1,
+        "making the target surface visible should add exactly its Container occluder"
+    );
 
     handler.invalidate_computed_scene();
     let after_opaque_full = shape_fingerprints(handler.computed_scene());
+    let after_opaque_full_hits = hit_fingerprints(handler.computed_scene());
     assert_eq!(
-        after_opaque_slot_write, after_opaque_full,
-        "transparent-to-opaque slot write must match a fresh full recollect"
+        after_opaque_patch, after_opaque_full,
+        "transparent-to-visible bounded patch must match a fresh full recollect"
+    );
+    assert_eq!(
+        after_opaque_patch_hits, after_opaque_full_hits,
+        "transparent-to-visible bounded patch must reproduce full hit topology"
     );
 
+    #[cfg(feature = "bench-support")]
+    crate::runtime::action_stats::reset();
     crate::runtime::scene_patch::splice_probe::reset();
     color.set(Color::rgba(255, 0, 0, 0));
     handler.request_redraw_if_dirty(Instant::now());
-    assert_eq!(
-        crate::runtime::scene_patch::splice_probe::hits(),
-        0,
-        "opaque-to-transparent background should not enter scene splice"
+    #[cfg(feature = "bench-support")]
+    assert!(
+        crate::runtime::action_stats::snapshot()
+            .iter()
+            .all(|(action, _)| *action != "reactive_property_slot_write"),
+        "visible-to-transparent Container background must not retain a stale occluder"
     );
-    let after_transparent_slot_write = shape_fingerprints(
-        &handler
-            .cached_scene
-            .as_ref()
-            .expect("slot write keeps cache shell")
-            .computed,
-    );
+    let transparent_patch = handler
+        .cached_scene
+        .as_ref()
+        .expect("bounded background subtree patch keeps cache shell")
+        .computed
+        .clone();
+    let after_transparent_patch = shape_fingerprints(&transparent_patch);
+    let after_transparent_patch_hits = hit_fingerprints(&transparent_patch);
+    assert_eq!(after_transparent_patch_hits, before_hits);
 
     handler.invalidate_computed_scene();
     let after_transparent_full = shape_fingerprints(handler.computed_scene());
+    let after_transparent_full_hits = hit_fingerprints(handler.computed_scene());
     assert_eq!(
-        after_transparent_slot_write, after_transparent_full,
-        "opaque-to-transparent slot write must match a fresh full recollect"
+        after_transparent_patch, after_transparent_full,
+        "visible-to-transparent bounded patch must match a fresh full recollect"
     );
+    assert_eq!(
+        after_transparent_patch_hits, after_transparent_full_hits,
+        "visible-to-transparent bounded patch must reproduce full hit topology"
+    );
+}
+
+#[test]
+#[cfg(feature = "bench-support")]
+fn strict_reactive_background_alpha_transition_uses_bounded_scene_patch() {
+    let invalidation = InvalidationSignal::new();
+    let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+    let color = context.state(Color::TRANSPARENT);
+    let background = color.signal();
+    let tree =
+        WidgetTree::try_new_strict(Stack::<TestVm>::new().size(dp(48.0), dp(48.0)).style_full(
+            move |ctx| {
+                let mut style = ContainerStyle::default_for_theme(ctx.theme);
+                style.surface.background = Some(background.clone().into());
+                style
+            },
+        ))
+        .expect("strict reactive background tree");
+    let mut handler = test_handler(Some(tree), invalidation);
+    assert!(handler.computed_scene().hit_regions.is_empty());
+
+    crate::runtime::action_stats::reset();
+    color.set(Color::hexa(0x0EA5E9FF));
+    handler.request_redraw_if_dirty(Instant::now());
+    let actions = crate::runtime::action_stats::snapshot();
+    assert!(
+        actions
+            .iter()
+            .any(|(action, count)| *action == "reactive_property_scene_patch" && *count == 1),
+        "strict mode should allow the explicit bounded Background topology fallback: {actions:?}"
+    );
+    assert!(
+        actions
+            .iter()
+            .all(|(action, _)| *action != "strict_reactive_scene_rejected"),
+        "the explicit Background fallback must not be rejected in strict mode: {actions:?}"
+    );
+    let patch = handler
+        .cached_scene
+        .as_ref()
+        .expect("strict bounded patch keeps cache shell")
+        .computed
+        .clone();
+    assert!(patch
+        .hit_regions
+        .iter()
+        .any(|hit| matches!(hit.interaction, HitInteraction::Occluder { .. })));
+
+    handler.invalidate_computed_scene();
+    let full = handler.computed_scene();
+    assert_eq!(
+        shape_detail_fingerprints(&patch),
+        shape_detail_fingerprints(full)
+    );
+    assert_eq!(patch.hit_regions.len(), full.hit_regions.len());
+    assert!(full
+        .hit_regions
+        .iter()
+        .any(|hit| matches!(hit.interaction, HitInteraction::Occluder { .. })));
+}
+
+#[test]
+#[cfg(feature = "bench-support")]
+fn semantic_container_background_alpha_transition_keeps_retained_slot() {
+    let invalidation = InvalidationSignal::new();
+    let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+    let color = context.state(Color::TRANSPARENT);
+    let background = color.signal();
+    let tree = WidgetTree::new(
+        Stack::<TestVm>::new()
+            .size(dp(48.0), dp(48.0))
+            .focusable(true)
+            .style_full(move |ctx| {
+                let mut style = ContainerStyle::default_for_theme(ctx.theme);
+                style.surface.background = Some(background.clone().into());
+                style
+            }),
+    );
+    let mut handler = test_handler(Some(tree), invalidation);
+    let _ = handler.computed_scene();
+    let initial_hit_count = handler.computed_scene().hit_regions.len();
+    assert_eq!(
+        initial_hit_count, 1,
+        "focusable Container owns a stable widget hit"
+    );
+    assert!(handler
+        .computed_scene()
+        .hit_regions
+        .iter()
+        .all(|hit| !matches!(hit.interaction, HitInteraction::Occluder { .. })));
+
+    crate::runtime::action_stats::reset();
+    color.set(Color::hexa(0x0EA5E9FF));
+    handler.request_redraw_if_dirty(Instant::now());
+    let actions = crate::runtime::action_stats::snapshot();
+    assert!(
+        actions
+            .iter()
+            .any(|(action, count)| *action == "reactive_property_slot_write" && *count == 1),
+        "a stable semantic hit should preserve the Background slot across alpha zero: {actions:?}"
+    );
+    let patch = handler
+        .cached_scene
+        .as_ref()
+        .expect("retained background slot keeps cache shell")
+        .computed
+        .clone();
+    assert_eq!(patch.hit_regions.len(), initial_hit_count);
+    assert!(patch
+        .hit_regions
+        .iter()
+        .all(|hit| !matches!(hit.interaction, HitInteraction::Occluder { .. })));
+
+    handler.invalidate_computed_scene();
+    let full = handler.computed_scene();
+    assert_eq!(
+        shape_detail_fingerprints(&patch),
+        shape_detail_fingerprints(full)
+    );
+    assert_eq!(patch.hit_regions.len(), full.hit_regions.len());
 }
 
 #[test]
@@ -1779,6 +2383,45 @@ fn reactive_property_slot_write_text_content_matches_full_recollect() {
     assert_eq!(before[changed].2, after_slot_write[changed].2);
     assert_eq!(before[changed].3, after_slot_write[changed].3);
     assert_eq!(before[changed].4, after_slot_write[changed].4);
+}
+
+#[test]
+#[cfg(feature = "bench-support")]
+fn fixed_text_content_direct_resolve_matches_legacy_and_full_runtime_scene() {
+    let viewport = Rect::new(0.0, 0.0, 640.0, 480.0);
+    let mut direct = crate::runtime::RuntimeTextContentBenchmarkContext::new(32, viewport)
+        .expect("direct fixed-Text runtime context");
+    let mut legacy = crate::runtime::RuntimeTextContentBenchmarkContext::new(32, viewport)
+        .expect("legacy fixed-Text runtime context");
+
+    let direct_stats = direct.set_content("Frame 111111");
+    let legacy_stats = legacy.set_content_legacy_full_visual("Frame 111111");
+    for (label, stats) in [("direct", direct_stats), ("legacy", legacy_stats)] {
+        assert!(
+            stats.event_changed,
+            "{label} signal update should be observed"
+        );
+        assert!(stats.rendered, "{label} signal update should render");
+        assert_eq!(
+            stats.reactive_property_slot_writes, 1,
+            "{label} update should use one batched retained slot write"
+        );
+        assert_eq!(
+            stats.scene_recollects, 0,
+            "{label} update recollected scene"
+        );
+        assert_eq!(stats.layout_builds, 0, "{label} update rebuilt layout");
+    }
+
+    direct
+        .assert_scene_equivalent(&mut legacy)
+        .expect("direct and legacy TextContent values/scenes must match");
+    direct
+        .assert_full_recollect_equivalent()
+        .expect("direct TextContent retained scene must match full recollect");
+    legacy
+        .assert_full_recollect_equivalent()
+        .expect("legacy TextContent retained scene must match full recollect");
 }
 
 #[test]
@@ -2243,6 +2886,79 @@ fn reactive_property_slot_write_image_source_matches_full_recollect() {
 }
 
 #[test]
+fn reactive_property_slot_write_tinted_image_source_preserves_mask_and_matches_full_recollect() {
+    let invalidation = InvalidationSignal::new();
+    let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+    let source = context.state(crate::media::MediaSource::bytes(SIMPLE_SVG));
+    let tree = tinted_image_source_tree(&source);
+    let mut handler = test_handler(Some(tree), invalidation);
+    let _ = handler.computed_scene();
+    let expected_tint = Color::hexa(0x22C55EFF);
+    assert_eq!(
+        handler.computed_scene().scene.textures[0].mask_tint,
+        Some(expected_tint),
+        "initial tinted image should retain its mask color"
+    );
+    let before_texture = {
+        let texture = &handler.computed_scene().scene.textures[0].texture;
+        (texture.id(), texture.revision())
+    };
+
+    #[cfg(feature = "bench-support")]
+    crate::runtime::action_stats::reset();
+    source.set(crate::media::MediaSource::bytes(ALT_SVG));
+    handler.request_redraw_if_dirty(Instant::now());
+    #[cfg(feature = "bench-support")]
+    {
+        let snapshot = crate::runtime::action_stats::snapshot();
+        assert!(
+            snapshot
+                .iter()
+                .any(|(action, count)| *action == "reactive_property_slot_write" && *count == 1),
+            "strict tinted image source update should use its retained texture slot: {snapshot:?}"
+        );
+        assert!(
+            !snapshot
+                .iter()
+                .any(|(action, _)| *action == "strict_reactive_scene_rejected"),
+            "strict tinted image source update must not reject its supported slot: {snapshot:?}"
+        );
+    }
+    let (after_slot_tint, after_slot_texture) = {
+        let texture = &handler
+            .cached_scene
+            .as_ref()
+            .expect("slot write keeps cache shell")
+            .computed
+            .scene
+            .textures[0];
+        (
+            texture.mask_tint,
+            (texture.texture.id(), texture.texture.revision()),
+        )
+    };
+
+    handler.invalidate_computed_scene();
+    let (after_full_tint, after_full_texture) = {
+        let texture = &handler.computed_scene().scene.textures[0];
+        (
+            texture.mask_tint,
+            (texture.texture.id(), texture.texture.revision()),
+        )
+    };
+    assert_eq!(after_slot_tint, after_full_tint);
+    assert_eq!(after_slot_tint, Some(expected_tint));
+    assert_ne!(
+        after_slot_texture.0, before_texture.0,
+        "source replacement should install the new cached texture identity"
+    );
+    assert_eq!(
+        after_slot_texture, after_full_texture,
+        "slot-written texture identity/revision must match a full recollect"
+    );
+}
+
+#[test]
 fn reactive_property_slot_write_background_image_source_matches_full_recollect() {
     let invalidation = InvalidationSignal::new();
     let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
@@ -2398,6 +3114,41 @@ fn reactive_property_slot_write_background_brush_matches_full_recollect() {
         before[0].5, after_slot_write[0].5,
         "background brush payload should be replaced in place"
     );
+
+    brush.set(crate::ui::widget::BackgroundBrush::RadialGradient(
+        crate::ui::widget::BackgroundRadialGradient::new(
+            Point::new(dp(24.0), dp(24.0)),
+            dp(24.0),
+            vec![
+                crate::ui::widget::BackgroundGradientStop::new(0.0, Color::hexa(0xF43F5EFF)),
+                crate::ui::widget::BackgroundGradientStop::new(1.0, Color::hexa(0x1D4ED880)),
+            ],
+        ),
+    ));
+    handler.request_redraw_if_dirty(Instant::now());
+    let cached = handler
+        .cached_scene
+        .as_ref()
+        .expect("second slot write keeps cache shell");
+    assert!(cached.computed_valid);
+    let after_radial_slot_write = brush_fingerprints(&cached.computed);
+
+    handler.invalidate_computed_scene();
+    let after_radial_full = brush_fingerprints(handler.computed_scene());
+    assert_eq!(
+        after_radial_slot_write, after_radial_full,
+        "Solid -> Linear -> Radial retained brush writes must match each fresh full recollect"
+    );
+    assert_eq!(after_slot_write.len(), after_radial_slot_write.len());
+    assert_eq!(after_slot_write[0].0, after_radial_slot_write[0].0);
+    assert_eq!(after_slot_write[0].1, after_radial_slot_write[0].1);
+    assert_eq!(after_slot_write[0].2, after_radial_slot_write[0].2);
+    assert_eq!(after_slot_write[0].3, after_radial_slot_write[0].3);
+    assert_eq!(after_slot_write[0].4, after_radial_slot_write[0].4);
+    assert!(matches!(
+        after_radial_slot_write[0].5,
+        crate::ui::widget::BackgroundBrush::RadialGradient(_)
+    ));
 }
 
 #[test]
@@ -2446,7 +3197,24 @@ fn reactive_property_slot_write_background_blur_matches_full_recollect() {
 }
 
 #[test]
-fn reactive_background_blur_zero_uses_retained_slot_write() {
+fn reactive_background_blur_zero_crossing_falls_back_and_matches_full_hit_topology() {
+    fn hit_fingerprints<VM>(
+        scene: &crate::ui::widget::ComputedScene<VM>,
+    ) -> Vec<(crate::ui::widget::HitTargetId, Rect, Option<Rect>, bool)> {
+        scene
+            .hit_regions
+            .iter()
+            .map(|hit| {
+                (
+                    hit.interaction.target_id(),
+                    hit.rect,
+                    hit.clip_rect,
+                    matches!(hit.interaction, HitInteraction::Occluder { .. }),
+                )
+            })
+            .collect()
+    }
+
     let invalidation = InvalidationSignal::new();
     let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
     let blur = context.state(dp(0.0));
@@ -2460,34 +3228,182 @@ fn reactive_background_blur_zero_uses_retained_slot_write() {
         "zero reactive background blur should keep a retained backdrop blur slot"
     );
     assert_eq!(before[0].5, 0.0);
+    assert!(
+        hit_fingerprints(handler.computed_scene()).is_empty(),
+        "zero blur on an otherwise transparent Container must not occlude input"
+    );
 
+    #[cfg(feature = "bench-support")]
+    crate::runtime::action_stats::reset();
     crate::runtime::scene_patch::splice_probe::reset();
     blur.set(dp(12.0));
     handler.request_redraw_if_dirty(Instant::now());
+    #[cfg(feature = "bench-support")]
+    let positive_actions = crate::runtime::action_stats::snapshot();
+    #[cfg(feature = "bench-support")]
+    assert!(
+        positive_actions
+            .iter()
+            .all(|(action, _)| *action != "reactive_property_slot_write"),
+        "zero-to-positive blur must recollect when it adds a Container occluder: {positive_actions:?}"
+    );
+    #[cfg(feature = "bench-support")]
+    assert!(
+        positive_actions
+            .iter()
+            .any(|(action, count)| { *action == "reactive_property_scene_patch" && *count == 1 }),
+        "zero-to-positive blur should use one bounded property scene patch: {positive_actions:?}"
+    );
     assert_eq!(
         crate::runtime::scene_patch::splice_probe::hits(),
         0,
-        "zero-to-positive background blur slot write should not hit splice"
+        "zero-to-positive background blur fallback should not hit splice"
     );
-    let cached = handler
+    let positive_patch = handler
         .cached_scene
         .as_ref()
-        .expect("slot write keeps cache shell");
-    assert!(cached.computed_valid);
-    let after_slot_write = backdrop_blur_fingerprints(&cached.computed);
+        .expect("bounded subtree fallback keeps cache shell")
+        .computed
+        .clone();
+    assert!(
+        positive_patch
+            .hit_regions
+            .iter()
+            .any(|hit| matches!(hit.interaction, HitInteraction::Occluder { .. })),
+        "positive blur patch should add an occluder; actions={:?} computed_valid={}",
+        {
+            #[cfg(feature = "bench-support")]
+            {
+                &positive_actions
+            }
+            #[cfg(not(feature = "bench-support"))]
+            {
+                &[] as &[(&'static str, u64)]
+            }
+        },
+        handler
+            .cached_scene
+            .as_ref()
+            .is_some_and(|cached| cached.computed_valid)
+    );
 
     handler.invalidate_computed_scene();
-    let after_full = backdrop_blur_fingerprints(handler.computed_scene());
+    let positive_full = handler.computed_scene();
     assert_eq!(
-        after_slot_write, after_full,
-        "zero-to-positive background blur slot write must match a fresh full recollect"
+        backdrop_blur_fingerprints(&positive_patch),
+        backdrop_blur_fingerprints(positive_full),
+        "zero-to-positive background blur fallback must match a fresh full recollect"
     );
     assert_eq!(
-        after_slot_write.len(),
+        hit_fingerprints(&positive_patch),
+        hit_fingerprints(positive_full),
+        "zero-to-positive background blur hit topology must match full recollection"
+    );
+    assert_eq!(
+        backdrop_blur_fingerprints(&positive_patch).len(),
         1,
-        "background blur slot write must keep primitive count fixed"
+        "reactive background blur must keep primitive count fixed"
     );
-    assert_eq!(after_slot_write[0].5, 12.0);
+    assert_eq!(backdrop_blur_fingerprints(&positive_patch)[0].5, 12.0);
+
+    #[cfg(feature = "bench-support")]
+    crate::runtime::action_stats::reset();
+    blur.set(dp(0.0));
+    handler.request_redraw_if_dirty(Instant::now());
+    #[cfg(feature = "bench-support")]
+    let zero_actions = crate::runtime::action_stats::snapshot();
+    #[cfg(feature = "bench-support")]
+    assert!(
+        zero_actions
+            .iter()
+            .all(|(action, _)| *action != "reactive_property_slot_write"),
+        "positive-to-zero blur must recollect when it removes a Container occluder: {zero_actions:?}"
+    );
+    #[cfg(feature = "bench-support")]
+    assert!(
+        zero_actions
+            .iter()
+            .any(|(action, count)| { *action == "reactive_property_scene_patch" && *count == 1 }),
+        "positive-to-zero blur should use one bounded property scene patch: {zero_actions:?}"
+    );
+    let zero_patch = handler
+        .cached_scene
+        .as_ref()
+        .expect("bounded subtree fallback keeps cache shell")
+        .computed
+        .clone();
+    assert!(hit_fingerprints(&zero_patch).is_empty());
+    handler.invalidate_computed_scene();
+    let zero_full = handler.computed_scene();
+    assert_eq!(
+        backdrop_blur_fingerprints(&zero_patch),
+        backdrop_blur_fingerprints(zero_full)
+    );
+    assert_eq!(hit_fingerprints(&zero_patch), hit_fingerprints(zero_full));
+}
+
+#[test]
+fn reactive_background_blur_crossing_keeps_slot_with_stable_surface_or_semantic_hit() {
+    for (label, tree_builder) in [
+        (
+            "stable background",
+            background_blur_with_stable_background_tree as fn(&State<Dp>) -> WidgetTree<TestVm>,
+        ),
+        (
+            "semantic hit",
+            background_blur_with_semantic_hit_tree as fn(&State<Dp>) -> WidgetTree<TestVm>,
+        ),
+    ] {
+        let invalidation = InvalidationSignal::new();
+        let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+        let blur = context.state(dp(0.0));
+        let mut handler = test_handler(Some(tree_builder(&blur)), invalidation);
+        let initial_hits = handler.computed_scene().hit_regions.len();
+        assert_eq!(
+            initial_hits, 1,
+            "{label} should contribute one stable hit region"
+        );
+
+        #[cfg(feature = "bench-support")]
+        crate::runtime::action_stats::reset();
+        blur.set(dp(12.0));
+        handler.request_redraw_if_dirty(Instant::now());
+        #[cfg(feature = "bench-support")]
+        assert!(
+            crate::runtime::action_stats::snapshot()
+                .iter()
+                .any(|(action, count)| {
+                    *action == "reactive_property_slot_write" && *count == 1
+                }),
+            "{label} should preserve the retained blur slot across zero"
+        );
+        let patched = handler
+            .cached_scene
+            .as_ref()
+            .expect("retained slot write keeps cache shell")
+            .computed
+            .clone();
+        assert_eq!(patched.hit_regions.len(), initial_hits);
+        handler.invalidate_computed_scene();
+        let full = handler.computed_scene();
+        assert_eq!(
+            backdrop_blur_fingerprints(&patched),
+            backdrop_blur_fingerprints(full),
+            "{label} retained blur primitive must match full recollection"
+        );
+        assert_eq!(
+            patched
+                .hit_regions
+                .iter()
+                .map(|hit| (hit.interaction.target_id(), hit.rect, hit.clip_rect))
+                .collect::<Vec<_>>(),
+            full.hit_regions
+                .iter()
+                .map(|hit| (hit.interaction.target_id(), hit.rect, hit.clip_rect))
+                .collect::<Vec<_>>(),
+            "{label} retained blur hit topology must match full recollection"
+        );
+    }
 }
 
 #[test]
@@ -2499,15 +3415,29 @@ fn reactive_property_slot_write_background_brush_offset_matches_full_recollect()
     let mut handler = test_handler(Some(tree), invalidation);
     let _ = handler.computed_scene();
     let before = brush_fingerprints(handler.computed_scene());
+    let before_hits = occluder_hit_fingerprints(handler.computed_scene());
     assert_eq!(
         before.len(),
         1,
         "brush surface should emit one brush primitive"
     );
+    assert_eq!(before_hits.len(), 1, "brush surface should occlude once");
 
+    #[cfg(feature = "bench-support")]
+    crate::runtime::action_stats::reset();
     crate::runtime::scene_patch::splice_probe::reset();
     offset.set(Point::new(dp(6.0), dp(8.0)));
     handler.request_redraw_if_dirty(Instant::now());
+    #[cfg(feature = "bench-support")]
+    {
+        let snapshot = crate::runtime::action_stats::snapshot();
+        assert!(
+            snapshot.iter().any(|(action, count)| {
+                *action == "reactive_property_slot_write" && *count == 1
+            }),
+            "brush Offset should retain its slot: {snapshot:?}"
+        );
+    }
     assert_eq!(
         crate::runtime::scene_patch::splice_probe::hits(),
         0,
@@ -2519,13 +3449,20 @@ fn reactive_property_slot_write_background_brush_offset_matches_full_recollect()
         .expect("slot write keeps cache shell");
     assert!(cached.computed_valid);
     let after_slot_write = brush_fingerprints(&cached.computed);
+    let after_slot_hits = occluder_hit_fingerprints(&cached.computed);
 
     handler.invalidate_computed_scene();
     let after_full = brush_fingerprints(handler.computed_scene());
+    let after_full_hits = occluder_hit_fingerprints(handler.computed_scene());
     assert_eq!(
         after_slot_write, after_full,
         "slot-written brush offset scene must match a fresh full recollect"
     );
+    assert_eq!(
+        after_slot_hits, after_full_hits,
+        "slot-written brush offset hit metadata must match a fresh full recollect"
+    );
+    assert_ne!(before_hits[0].1, after_slot_hits[0].1);
     assert_eq!(before.len(), after_slot_write.len());
     assert_eq!(after_slot_write[0].0 - before[0].0, dp(6.0));
     assert_eq!(after_slot_write[0].1 - before[0].1, dp(8.0));
@@ -2533,6 +3470,48 @@ fn reactive_property_slot_write_background_brush_offset_matches_full_recollect()
     assert_eq!(before[0].3, after_slot_write[0].3);
     assert_eq!(before[0].4, after_slot_write[0].4);
     assert_eq!(before[0].5, after_slot_write[0].5);
+}
+
+#[test]
+fn reactive_property_slot_write_background_blur_offset_updates_occluder_and_matches_full_recollect()
+{
+    let invalidation = InvalidationSignal::new();
+    let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+    let offset = context.state(Point::ZERO);
+    let tree = background_blur_offset_tree(&offset);
+    let mut handler = test_handler(Some(tree), invalidation);
+    let before = backdrop_blur_fingerprints(handler.computed_scene());
+    let before_hits = occluder_hit_fingerprints(handler.computed_scene());
+    assert_eq!(before.len(), 1, "blur surface should emit one primitive");
+    assert_eq!(before_hits.len(), 1, "blur surface should occlude once");
+
+    #[cfg(feature = "bench-support")]
+    crate::runtime::action_stats::reset();
+    offset.set(Point::new(dp(6.0), dp(8.0)));
+    handler.request_redraw_if_dirty(Instant::now());
+    #[cfg(feature = "bench-support")]
+    assert!(crate::runtime::action_stats::snapshot()
+        .iter()
+        .any(|(action, count)| *action == "reactive_property_slot_write" && *count == 1));
+    let (after_slot_scene, after_slot_hits) = {
+        let cached = handler
+            .cached_scene
+            .as_ref()
+            .expect("slot write keeps cache shell");
+        (
+            backdrop_blur_fingerprints(&cached.computed),
+            occluder_hit_fingerprints(&cached.computed),
+        )
+    };
+
+    handler.invalidate_computed_scene();
+    let after_full_scene = backdrop_blur_fingerprints(handler.computed_scene());
+    let after_full_hits = occluder_hit_fingerprints(handler.computed_scene());
+    assert_eq!(after_slot_scene, after_full_scene);
+    assert_eq!(after_slot_hits, after_full_hits);
+    assert_ne!(before_hits[0].1, after_slot_hits[0].1);
+    assert_eq!(after_slot_scene[0].0 - before[0].0, dp(6.0));
+    assert_eq!(after_slot_scene[0].1 - before[0].1, dp(8.0));
 }
 
 #[test]
@@ -2544,11 +3523,13 @@ fn reactive_property_slot_write_background_blur_scale_matches_full_recollect() {
     let mut handler = test_handler(Some(tree), invalidation);
     let _ = handler.computed_scene();
     let before = backdrop_blur_fingerprints(handler.computed_scene());
+    let before_hits = occluder_hit_fingerprints(handler.computed_scene());
     assert_eq!(
         before.len(),
         1,
         "blur surface should emit one backdrop blur primitive"
     );
+    assert_eq!(before_hits.len(), 1, "blur surface should occlude once");
 
     crate::runtime::scene_patch::splice_probe::reset();
     scale.set(1.25);
@@ -2564,13 +3545,20 @@ fn reactive_property_slot_write_background_blur_scale_matches_full_recollect() {
         .expect("slot write keeps cache shell");
     assert!(cached.computed_valid);
     let after_slot_write = backdrop_blur_fingerprints(&cached.computed);
+    let after_slot_hits = occluder_hit_fingerprints(&cached.computed);
 
     handler.invalidate_computed_scene();
     let after_full = backdrop_blur_fingerprints(handler.computed_scene());
+    let after_full_hits = occluder_hit_fingerprints(handler.computed_scene());
     assert_eq!(
         after_slot_write, after_full,
         "slot-written blur scale scene must match a fresh full recollect"
     );
+    assert_eq!(
+        after_slot_hits, after_full_hits,
+        "slot-written blur scale hit metadata must match a fresh full recollect"
+    );
+    assert_ne!(before_hits[0].1, after_slot_hits[0].1);
     assert_eq!(before.len(), after_slot_write.len());
     assert!(after_slot_write[0].0 < before[0].0);
     assert!(after_slot_write[0].1 < before[0].1);
@@ -2578,6 +3566,86 @@ fn reactive_property_slot_write_background_blur_scale_matches_full_recollect() {
     assert!(after_slot_write[0].3 > before[0].3);
     assert_eq!(before[0].4, after_slot_write[0].4);
     assert_eq!(before[0].5, after_slot_write[0].5);
+}
+
+#[test]
+fn reactive_property_slot_write_background_brush_scale_updates_occluder_and_matches_full_recollect()
+{
+    let invalidation = InvalidationSignal::new();
+    let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+    let scale = context.state(1.0_f32);
+    let tree = background_brush_scale_tree(&scale);
+    let mut handler = test_handler(Some(tree), invalidation);
+    let before = brush_fingerprints(handler.computed_scene());
+    let before_hits = occluder_hit_fingerprints(handler.computed_scene());
+    assert_eq!(before.len(), 1);
+    assert_eq!(before_hits.len(), 1);
+
+    #[cfg(feature = "bench-support")]
+    crate::runtime::action_stats::reset();
+    scale.set(1.25);
+    handler.request_redraw_if_dirty(Instant::now());
+    #[cfg(feature = "bench-support")]
+    assert!(crate::runtime::action_stats::snapshot()
+        .iter()
+        .any(|(action, count)| *action == "reactive_property_slot_write" && *count == 1));
+    let (after_slot_scene, after_slot_hits) = {
+        let cached = handler
+            .cached_scene
+            .as_ref()
+            .expect("slot write keeps cache");
+        (
+            brush_fingerprints(&cached.computed),
+            occluder_hit_fingerprints(&cached.computed),
+        )
+    };
+
+    handler.invalidate_computed_scene();
+    let after_full_scene = brush_fingerprints(handler.computed_scene());
+    let after_full_hits = occluder_hit_fingerprints(handler.computed_scene());
+    assert_eq!(after_slot_scene, after_full_scene);
+    assert_eq!(after_slot_hits, after_full_hits);
+    assert_ne!(before_hits[0].1, after_slot_hits[0].1);
+}
+
+#[test]
+fn reactive_property_slot_write_background_image_scale_updates_occluder_and_matches_full_recollect()
+{
+    let invalidation = InvalidationSignal::new();
+    let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+    let scale = context.state(1.0_f32);
+    let tree = background_image_scale_bytes_tree(&scale);
+    let mut handler = test_handler(Some(tree), invalidation);
+    let before = texture_source_fingerprints(handler.computed_scene());
+    let before_hits = occluder_hit_fingerprints(handler.computed_scene());
+    assert_eq!(before.len(), 1);
+    assert_eq!(before_hits.len(), 1);
+
+    #[cfg(feature = "bench-support")]
+    crate::runtime::action_stats::reset();
+    scale.set(1.25);
+    handler.request_redraw_if_dirty(Instant::now());
+    #[cfg(feature = "bench-support")]
+    assert!(crate::runtime::action_stats::snapshot()
+        .iter()
+        .any(|(action, count)| *action == "reactive_property_slot_write" && *count == 1));
+    let (after_slot_scene, after_slot_hits) = {
+        let cached = handler
+            .cached_scene
+            .as_ref()
+            .expect("slot write keeps cache");
+        (
+            texture_source_fingerprints(&cached.computed),
+            occluder_hit_fingerprints(&cached.computed),
+        )
+    };
+
+    handler.invalidate_computed_scene();
+    let after_full_scene = texture_source_fingerprints(handler.computed_scene());
+    let after_full_hits = occluder_hit_fingerprints(handler.computed_scene());
+    assert_eq!(after_slot_scene, after_full_scene);
+    assert_eq!(after_slot_hits, after_full_hits);
+    assert_ne!(before_hits[0].1, after_slot_hits[0].1);
 }
 
 #[test]
@@ -2589,15 +3657,27 @@ fn reactive_property_slot_write_background_image_offset_matches_full_recollect()
     let mut handler = test_handler(Some(tree), invalidation);
     let _ = handler.computed_scene();
     let before = texture_source_fingerprints(handler.computed_scene());
+    let before_hits = occluder_hit_fingerprints(handler.computed_scene());
     assert_eq!(
         before.len(),
         1,
         "background image surface should emit one texture primitive"
     );
+    assert_eq!(
+        before_hits.len(),
+        1,
+        "background image surface should occlude once"
+    );
 
+    #[cfg(feature = "bench-support")]
+    crate::runtime::action_stats::reset();
     crate::runtime::scene_patch::splice_probe::reset();
     offset.set(Point::new(dp(6.0), dp(8.0)));
     handler.request_redraw_if_dirty(Instant::now());
+    #[cfg(feature = "bench-support")]
+    assert!(crate::runtime::action_stats::snapshot()
+        .iter()
+        .any(|(action, count)| *action == "reactive_property_slot_write" && *count == 1));
     assert_eq!(
         crate::runtime::scene_patch::splice_probe::hits(),
         0,
@@ -2609,13 +3689,20 @@ fn reactive_property_slot_write_background_image_offset_matches_full_recollect()
         .expect("slot write keeps cache shell");
     assert!(cached.computed_valid);
     let after_slot_write = texture_source_fingerprints(&cached.computed);
+    let after_slot_hits = occluder_hit_fingerprints(&cached.computed);
 
     handler.invalidate_computed_scene();
     let after_full = texture_source_fingerprints(handler.computed_scene());
+    let after_full_hits = occluder_hit_fingerprints(handler.computed_scene());
     assert_eq!(
         after_slot_write, after_full,
         "slot-written background image offset scene must match a fresh full recollect"
     );
+    assert_eq!(
+        after_slot_hits, after_full_hits,
+        "slot-written background image offset hit metadata must match a fresh full recollect"
+    );
+    assert_ne!(before_hits[0].1, after_slot_hits[0].1);
     assert_eq!(before.len(), after_slot_write.len());
     assert_eq!(before[0].0, after_slot_write[0].0);
     assert_eq!(after_slot_write[0].1 - before[0].1, dp(6.0));
@@ -2664,6 +3751,11 @@ fn reactive_property_slot_write_surface_opacity_matches_full_recollect() {
     let mut handler = test_handler(Some(tree), invalidation);
     let _ = handler.computed_scene();
     let before = shape_detail_fingerprints(handler.computed_scene());
+    assert!(handler
+        .computed_scene()
+        .hit_regions
+        .iter()
+        .any(|hit| matches!(hit.interaction, HitInteraction::Occluder { .. })));
     assert_eq!(
         before.len(),
         2,
@@ -2718,8 +3810,17 @@ fn reactive_property_slot_write_surface_opacity_matches_full_recollect() {
     }
 
     crate::runtime::scene_patch::splice_probe::reset();
+    #[cfg(feature = "bench-support")]
+    crate::runtime::action_stats::reset();
     opacity.set(0.0);
     handler.request_redraw_if_dirty(Instant::now());
+    #[cfg(feature = "bench-support")]
+    assert!(
+        crate::runtime::action_stats::snapshot()
+            .iter()
+            .all(|(action, _)| *action != "reactive_property_slot_write"),
+        "visible-to-transparent Container opacity must not retain a stale occluder"
+    );
     assert_eq!(
         crate::runtime::scene_patch::splice_probe::hits(),
         0,
@@ -2732,12 +3833,51 @@ fn reactive_property_slot_write_surface_opacity_matches_full_recollect() {
             .expect("slot write keeps cache shell")
             .computed,
     );
+    let after_zero_patch_hits = handler
+        .cached_scene
+        .as_ref()
+        .expect("bounded opacity subtree patch keeps cache shell")
+        .computed
+        .hit_regions
+        .iter()
+        .map(|hit| {
+            (
+                hit.interaction.target_id(),
+                hit.rect,
+                hit.clip_rect,
+                matches!(hit.interaction, HitInteraction::Occluder { .. }),
+            )
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        after_zero_patch_hits
+            .iter()
+            .all(|(_, _, _, occluder)| !occluder),
+        "opacity zero must remove the fallback Container occluder: {after_zero_patch_hits:?}"
+    );
 
     handler.invalidate_computed_scene();
     let after_zero_full = shape_detail_fingerprints(handler.computed_scene());
+    let after_zero_full_hits = handler
+        .computed_scene()
+        .hit_regions
+        .iter()
+        .map(|hit| {
+            (
+                hit.interaction.target_id(),
+                hit.rect,
+                hit.clip_rect,
+                matches!(hit.interaction, HitInteraction::Occluder { .. }),
+            )
+        })
+        .collect::<Vec<_>>();
     assert_eq!(
         after_zero_slot_write, after_zero_full,
         "opacity-to-zero slot write must match a fresh full recollect"
+    );
+    assert_eq!(
+        after_zero_patch_hits, after_zero_full_hits,
+        "opacity-to-zero bounded patch must match full hit topology"
     );
     assert_eq!(
         after_zero_slot_write.len(),
@@ -2753,7 +3893,760 @@ fn reactive_property_slot_write_surface_opacity_matches_full_recollect() {
 }
 
 #[test]
-fn reactive_surface_initial_zero_opacity_uses_retained_slot_write() {
+#[cfg(feature = "bench-support")]
+fn reactive_surface_opacity_repeated_updates_preserve_the_direct_slot_binding() {
+    let invalidation = InvalidationSignal::new();
+    let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+    let opacity = context.state(0.35_f32);
+    let tree = surface_opacity_tree(&opacity);
+    let mut handler = test_handler(Some(tree), invalidation);
+    let _ = handler.computed_scene();
+
+    for value in [0.60_f32, 0.85_f32] {
+        crate::runtime::action_stats::reset();
+        opacity.set(value);
+        handler.request_redraw_if_dirty(Instant::now());
+        let actions = crate::runtime::action_stats::snapshot();
+        assert!(
+            actions
+                .iter()
+                .any(|(action, count)| *action == "reactive_property_slot_write" && *count == 1),
+            "each update must reuse the retained opacity binding: {actions:?}"
+        );
+        assert!(
+            actions
+                .iter()
+                .all(|(action, _)| *action != "reactive_property_scene_patch"),
+            "positive-opacity updates must not recollect the subtree: {actions:?}"
+        );
+    }
+
+    let patched = handler
+        .cached_scene
+        .as_ref()
+        .expect("repeated slot writes keep the cache shell")
+        .computed
+        .clone();
+    handler.invalidate_computed_scene();
+    let full = handler.computed_scene();
+    assert_eq!(
+        shape_detail_fingerprints(&patched),
+        shape_detail_fingerprints(full),
+        "two consecutive direct writes must match a fresh full recollect"
+    );
+    assert_eq!(
+        occluder_hit_fingerprints(&patched),
+        occluder_hit_fingerprints(full)
+    );
+}
+
+#[test]
+#[cfg(feature = "bench-support")]
+fn reactive_surface_opacity_alpha_quantization_crossing_uses_bounded_patches_both_ways() {
+    let invalidation = InvalidationSignal::new();
+    let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+    let opacity = context.state(0.49_f32);
+    let opacity_signal = opacity.signal();
+    let tree =
+        WidgetTree::try_new_strict(Stack::<TestVm>::new().size(dp(48.0), dp(48.0)).style_full(
+            move |ctx| {
+                let mut style = ContainerStyle::default_for_theme(ctx.theme);
+                // Alpha 1 quantizes to 0 below opacity 0.5 and to 1 above it. Both opacity
+                // values are positive, so this catches topology changes hidden by a naive
+                // `opacity > 0` guard.
+                style.surface.background = Some(Color::rgba(17, 24, 39, 1).into());
+                style.surface.opacity = opacity_signal.clone().into();
+                style
+            },
+        ))
+        .expect("strict low-alpha opacity tree");
+    let mut handler = test_handler(Some(tree), invalidation);
+    assert!(handler.computed_scene().hit_regions.is_empty());
+
+    for (value, expected_alpha, expected_occluder) in
+        [(0.51_f32, 1_u8, true), (0.49_f32, 0_u8, false)]
+    {
+        crate::runtime::action_stats::reset();
+        opacity.set(value);
+        handler.request_redraw_if_dirty(Instant::now());
+        let actions = crate::runtime::action_stats::snapshot();
+        assert!(
+            actions.iter().any(|(action, count)| {
+                *action == "reactive_property_scene_patch" && *count == 1
+            }),
+            "alpha quantization topology changes require a bounded patch: {actions:?}"
+        );
+        assert!(
+            actions
+                .iter()
+                .all(|(action, _)| *action != "reactive_property_slot_write"),
+            "the occluder guard must reject a color-only slot write: {actions:?}"
+        );
+
+        let computed = &handler
+            .cached_scene
+            .as_ref()
+            .expect("bounded opacity patch keeps the cache shell")
+            .computed;
+        assert!(shape_detail_fingerprints(computed)
+            .iter()
+            .all(|(_, _, _, _, color, _, _)| color.a == expected_alpha));
+        assert_eq!(
+            computed
+                .hit_regions
+                .iter()
+                .any(|hit| matches!(hit.interaction, HitInteraction::Occluder { .. })),
+            expected_occluder
+        );
+    }
+
+    let patched = handler
+        .cached_scene
+        .as_ref()
+        .expect("second bounded patch keeps the cache shell")
+        .computed
+        .clone();
+    handler.invalidate_computed_scene();
+    let full = handler.computed_scene();
+    assert_eq!(
+        shape_detail_fingerprints(&patched),
+        shape_detail_fingerprints(full)
+    );
+    assert_eq!(
+        occluder_hit_fingerprints(&patched),
+        occluder_hit_fingerprints(full)
+    );
+}
+
+#[test]
+fn reactive_brush_surface_opacity_falls_back_and_matches_full_recollect() {
+    let invalidation = InvalidationSignal::new();
+    let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+    let opacity = context.state(0.35_f32);
+    let tree = brush_surface_opacity_tree(&opacity);
+    let mut handler = test_handler(Some(tree), invalidation);
+    let before = brush_fingerprints(handler.computed_scene());
+    assert_eq!(before.len(), 1);
+
+    #[cfg(feature = "bench-support")]
+    crate::runtime::action_stats::reset();
+    opacity.set(0.85);
+    handler.request_redraw_if_dirty(Instant::now());
+    #[cfg(feature = "bench-support")]
+    assert!(
+        crate::runtime::action_stats::snapshot()
+            .iter()
+            .all(|(action, _)| *action != "reactive_property_slot_write"),
+        "brush opacity owns the complete brush payload and must use bounded subtree recollection"
+    );
+
+    let patched = handler
+        .cached_scene
+        .as_ref()
+        .expect("brush opacity fallback keeps cache shell")
+        .computed
+        .clone();
+    let after_patch = brush_fingerprints(&patched);
+    assert_eq!(after_patch.len(), 1);
+    let (
+        crate::ui::widget::BackgroundBrush::LinearGradient(before_gradient),
+        crate::ui::widget::BackgroundBrush::LinearGradient(after_gradient),
+    ) = (&before[0].5, &after_patch[0].5)
+    else {
+        panic!("fixture must retain one linear-gradient brush");
+    };
+    assert!(
+        after_gradient.stops[0].color.a > before_gradient.stops[0].color.a,
+        "increasing effective surface opacity must increase gradient alpha"
+    );
+    assert_eq!(
+        after_gradient.stops[0].color,
+        Color::hexa(0x38BDF8FF).with_alpha_factor(0.85)
+    );
+    assert_eq!(
+        after_gradient.stops[1].color,
+        Color::hexa(0x7C3AEDC0).with_alpha_factor(0.85)
+    );
+
+    handler.invalidate_computed_scene();
+    let full = handler.computed_scene();
+    assert_eq!(
+        brush_fingerprints(&patched),
+        brush_fingerprints(full),
+        "brush-opacity bounded patch must match a fresh full recollect"
+    );
+    assert_eq!(
+        occluder_hit_fingerprints(&patched),
+        occluder_hit_fingerprints(full),
+        "brush-opacity fallback must preserve full hit metadata"
+    );
+}
+
+#[test]
+fn reactive_shadow_surface_opacity_reuses_texture_and_matches_full_recollect() {
+    let invalidation = InvalidationSignal::new();
+    let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+    let opacity = context.state(0.35_f32);
+    let tree = shadow_surface_opacity_tree(&opacity);
+    let mut handler = test_handler(Some(tree), invalidation);
+    let before = texture_source_fingerprints(handler.computed_scene());
+    assert_eq!(
+        before.len(),
+        1,
+        "fixture should emit one widget-shadow texture"
+    );
+    assert!((before[0].6 - 0.35).abs() <= f32::EPSILON);
+
+    crate::runtime::scene_patch::splice_probe::reset();
+    opacity.set(0.85);
+    handler.request_redraw_if_dirty(Instant::now());
+    assert_eq!(crate::runtime::scene_patch::splice_probe::hits(), 0);
+    let after_slot = texture_source_fingerprints(
+        &handler
+            .cached_scene
+            .as_ref()
+            .expect("shadow opacity slot keeps cache shell")
+            .computed,
+    );
+    assert_eq!(after_slot.len(), 1);
+    assert_eq!(
+        after_slot[0].0, before[0].0,
+        "shadow texture id must stay stable"
+    );
+    assert_eq!(after_slot[0].1, before[0].1);
+    assert_eq!(after_slot[0].2, before[0].2);
+    assert_eq!(after_slot[0].3, before[0].3);
+    assert_eq!(after_slot[0].4, before[0].4);
+    assert_eq!(after_slot[0].5, before[0].5);
+    assert!((after_slot[0].6 - 0.85).abs() <= f32::EPSILON);
+
+    handler.invalidate_computed_scene();
+    let after_full = texture_source_fingerprints(handler.computed_scene());
+    assert_eq!(after_slot, after_full);
+
+    #[cfg(feature = "bench-support")]
+    crate::runtime::action_stats::reset();
+    opacity.set(0.0);
+    handler.request_redraw_if_dirty(Instant::now());
+    #[cfg(feature = "bench-support")]
+    assert!(
+        crate::runtime::action_stats::snapshot()
+            .iter()
+            .all(|(action, _)| *action != "reactive_property_slot_write"),
+        "shadow opacity crossing zero must remove the Container occluder through a bounded patch"
+    );
+    let zero_slot = texture_source_fingerprints(
+        &handler
+            .cached_scene
+            .as_ref()
+            .expect("zero opacity shadow retains texture slot")
+            .computed,
+    );
+    assert_eq!(zero_slot.len(), 1);
+    assert_eq!(zero_slot[0].0, before[0].0);
+    assert_eq!(zero_slot[0].6, 0.0);
+    assert!(handler
+        .cached_scene
+        .as_ref()
+        .expect("zero opacity shadow patch keeps cache shell")
+        .computed
+        .hit_regions
+        .iter()
+        .all(|hit| !matches!(hit.interaction, HitInteraction::Occluder { .. })));
+    handler.invalidate_computed_scene();
+    assert_eq!(
+        zero_slot,
+        texture_source_fingerprints(handler.computed_scene())
+    );
+    assert!(handler
+        .computed_scene()
+        .hit_regions
+        .iter()
+        .all(|hit| !matches!(hit.interaction, HitInteraction::Occluder { .. })));
+}
+
+#[test]
+#[cfg(feature = "bench-support")]
+fn semantic_container_opacity_crossing_zero_keeps_retained_slot() {
+    let invalidation = InvalidationSignal::new();
+    let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+    let opacity = context.state(0.0_f32);
+    let opacity_signal = opacity.signal();
+    let tree = WidgetTree::new(
+        Stack::<TestVm>::new()
+            .size(dp(48.0), dp(48.0))
+            .focusable(true)
+            .style_full(move |ctx| {
+                let mut style = ContainerStyle::default_for_theme(ctx.theme);
+                style.surface.background = Some(Color::hexa(0x111827FF).into());
+                style.surface.opacity = opacity_signal.clone().into();
+                style
+            }),
+    );
+    let mut handler = test_handler(Some(tree), invalidation);
+    let _ = handler.computed_scene();
+    assert_eq!(handler.computed_scene().hit_regions.len(), 1);
+    assert!(handler
+        .computed_scene()
+        .hit_regions
+        .iter()
+        .all(|hit| !matches!(hit.interaction, HitInteraction::Occluder { .. })));
+
+    crate::runtime::action_stats::reset();
+    opacity.set(0.85);
+    handler.request_redraw_if_dirty(Instant::now());
+    let actions = crate::runtime::action_stats::snapshot();
+    assert!(
+        actions
+            .iter()
+            .any(|(action, count)| *action == "reactive_property_slot_write" && *count == 1),
+        "stable semantic hit should preserve the opacity slot across zero: {actions:?}"
+    );
+    let patched = handler
+        .cached_scene
+        .as_ref()
+        .expect("retained opacity slot keeps cache shell")
+        .computed
+        .clone();
+    assert_eq!(patched.hit_regions.len(), 1);
+    assert!(patched
+        .hit_regions
+        .iter()
+        .all(|hit| !matches!(hit.interaction, HitInteraction::Occluder { .. })));
+
+    handler.invalidate_computed_scene();
+    let full = handler.computed_scene();
+    assert_eq!(
+        shape_detail_fingerprints(&patched),
+        shape_detail_fingerprints(full)
+    );
+    assert_eq!(patched.hit_regions.len(), full.hit_regions.len());
+}
+
+#[test]
+#[cfg(feature = "bench-support")]
+fn strict_container_opacity_zero_crossing_uses_bounded_scene_patch() {
+    let invalidation = InvalidationSignal::new();
+    let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+    let opacity = context.state(0.0_f32);
+    let opacity_signal = opacity.signal();
+    let tree =
+        WidgetTree::try_new_strict(Stack::<TestVm>::new().size(dp(48.0), dp(48.0)).style_full(
+            move |ctx| {
+                let mut style = ContainerStyle::default_for_theme(ctx.theme);
+                style.surface.background = Some(Color::hexa(0x111827FF).into());
+                style.surface.opacity = opacity_signal.clone().into();
+                style
+            },
+        ))
+        .expect("strict reactive opacity tree");
+    let mut handler = test_handler(Some(tree), invalidation);
+    assert!(handler.computed_scene().hit_regions.is_empty());
+
+    crate::runtime::action_stats::reset();
+    opacity.set(0.85);
+    handler.request_redraw_if_dirty(Instant::now());
+    let actions = crate::runtime::action_stats::snapshot();
+    assert!(
+        actions.iter().any(|(action, count)| {
+            *action == "reactive_property_scene_patch" && *count == 1
+        }),
+        "strict Container opacity topology fallback should recollect one bounded subtree: {actions:?}"
+    );
+    assert!(
+        actions
+            .iter()
+            .all(|(action, _)| *action != "strict_reactive_scene_rejected"),
+        "explicit strict opacity fallback must not be rejected: {actions:?}"
+    );
+    let patched = handler
+        .cached_scene
+        .as_ref()
+        .expect("strict bounded patch keeps cache shell")
+        .computed
+        .clone();
+    assert!(patched
+        .hit_regions
+        .iter()
+        .any(|hit| matches!(hit.interaction, HitInteraction::Occluder { .. })));
+
+    handler.invalidate_computed_scene();
+    let full = handler.computed_scene();
+    assert_eq!(
+        shape_detail_fingerprints(&patched),
+        shape_detail_fingerprints(full)
+    );
+    assert_eq!(patched.hit_regions.len(), full.hit_regions.len());
+}
+
+#[test]
+fn reactive_canvas_surface_opacity_recollects_subtree_and_reuses_shadow_textures() {
+    let invalidation = InvalidationSignal::new();
+    let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+    let opacity = context.state(0.35_f32);
+    let tree = canvas_surface_opacity_tree(&opacity);
+    let mut handler = test_handler(Some(tree), invalidation);
+
+    let before = handler.computed_scene().clone();
+    let before_shapes = shape_detail_fingerprints(&before);
+    let before_textures = texture_source_fingerprints(&before);
+    let before_texts = text_fingerprints(&before);
+    assert!(
+        before_textures.len() >= 1,
+        "canvas scene should emit a shadow texture (shapes={}, textures={before_textures:?}, texts={})",
+        before_shapes.len(),
+        before_texts.len()
+    );
+
+    #[cfg(feature = "bench-support")]
+    crate::runtime::action_stats::reset();
+    opacity.set(0.85);
+    handler.request_redraw_if_dirty(Instant::now());
+
+    #[cfg(feature = "bench-support")]
+    {
+        let actions = crate::runtime::action_stats::snapshot();
+        assert!(
+            actions.iter().all(|(action, _)| {
+                *action != "strict_reactive_scene_rejected"
+                    && *action != "reactive_scene_full_recollect"
+            }),
+            "Canvas opacity should use its bounded subtree patch, got {actions:?}"
+        );
+        assert_eq!(
+            actions.iter().find_map(
+                |(action, count)| (*action == "reactive_property_scene_patch").then_some(*count)
+            ),
+            Some(1),
+            "Canvas opacity should recollect exactly one bounded subtree: {actions:?}"
+        );
+    }
+
+    let cached = handler
+        .cached_scene
+        .as_ref()
+        .expect("Canvas opacity patch should retain cache shell");
+    assert!(cached.layout_valid && cached.computed_valid);
+    let after_patch_shapes = shape_detail_fingerprints(&cached.computed);
+    let after_patch_textures = texture_source_fingerprints(&cached.computed);
+    let after_patch_texts = text_fingerprints(&cached.computed);
+    assert_eq!(after_patch_shapes.len(), before_shapes.len());
+    assert_eq!(after_patch_textures.len(), before_textures.len());
+    assert_eq!(
+        after_patch_texts
+            .iter()
+            .map(|text| (&text.0, text.1, text.2, text.3, text.4))
+            .collect::<Vec<_>>(),
+        before_texts
+            .iter()
+            .map(|text| (&text.0, text.1, text.2, text.3, text.4))
+            .collect::<Vec<_>>()
+    );
+    assert!(
+        after_patch_texts
+            .iter()
+            .all(|text| (text.5.a as f32 - (255.0f32 * 0.85).round()).abs() <= 1.0),
+        "canvas text should reflect the new opacity: {after_patch_texts:?}"
+    );
+    assert_eq!(
+        after_patch_textures
+            .iter()
+            .map(|texture| texture.0)
+            .collect::<Vec<_>>(),
+        before_textures
+            .iter()
+            .map(|texture| texture.0)
+            .collect::<Vec<_>>(),
+        "canonical widget/canvas shadow texture identities must remain stable"
+    );
+    assert!(
+        after_patch_textures
+            .iter()
+            .all(|texture| (texture.6 - 0.85).abs() <= f32::EPSILON),
+        "all retained canvas opacity textures should receive the new alpha: {after_patch_textures:?}"
+    );
+    assert!(
+        after_patch_shapes
+            .iter()
+            .any(|shape| shape.4.a > 0 && shape.4.a < 255),
+        "canvas surface/content shapes should reflect the new opacity"
+    );
+
+    let patched = cached.computed.clone();
+    handler.invalidate_computed_scene();
+    let full = handler.computed_scene();
+    assert_eq!(
+        shape_detail_fingerprints(&patched),
+        shape_detail_fingerprints(full),
+        "Canvas opacity subtree patch must match full recollection"
+    );
+    assert_eq!(
+        texture_source_fingerprints(&patched),
+        texture_source_fingerprints(full),
+        "Canvas opacity subtree patch must match full texture output"
+    );
+    assert_eq!(text_fingerprints(&patched), text_fingerprints(full));
+    assert_eq!(patched.scene.commands.len(), full.scene.commands.len());
+    assert_eq!(
+        patched
+            .hit_regions
+            .iter()
+            .map(|hit| (hit.interaction.target_id(), hit.rect, hit.clip_rect))
+            .collect::<Vec<_>>(),
+        full.hit_regions
+            .iter()
+            .map(|hit| (hit.interaction.target_id(), hit.rect, hit.clip_rect))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn decorated_text_opacity_uses_subtree_fallback_and_matches_full_recollect() {
+    let invalidation = InvalidationSignal::new();
+    let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+    let opacity = context.state(0.35_f32);
+    let tree = decorated_text_opacity_tree(&opacity);
+    let mut handler = test_handler(Some(tree), invalidation);
+    let _ = handler.computed_scene();
+
+    #[cfg(feature = "bench-support")]
+    crate::runtime::action_stats::reset();
+    opacity.set(0.85);
+    handler.request_redraw_if_dirty(Instant::now());
+    #[cfg(feature = "bench-support")]
+    assert!(
+        crate::runtime::action_stats::snapshot()
+            .iter()
+            .all(|(action, _)| *action != "reactive_property_slot_write"),
+        "decorated Text opacity must not use the text-only retained slot"
+    );
+
+    let patched = handler
+        .cached_scene
+        .as_ref()
+        .expect("decorated Text patch keeps cache shell")
+        .computed
+        .clone();
+    handler.invalidate_computed_scene();
+    let full = handler.computed_scene();
+    assert_eq!(
+        shape_detail_fingerprints(&patched),
+        shape_detail_fingerprints(full)
+    );
+    assert_eq!(text_fingerprints(&patched), text_fingerprints(full));
+    assert_eq!(
+        texture_source_fingerprints(&patched),
+        texture_source_fingerprints(full)
+    );
+    assert!(
+        shape_detail_fingerprints(&patched)
+            .iter()
+            .all(|shape| shape.4.a > 0 && shape.4.a < 255),
+        "background and border must both receive the new opacity"
+    );
+}
+
+#[test]
+fn image_border_width_and_radius_fallback_match_full_recollect() {
+    let invalidation = InvalidationSignal::new();
+    let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+    let border_width = context.state(dp(1.0));
+    let border_radius = context.state(dp(4.0));
+    let tree = image_surface_border_tree(&border_width, &border_radius);
+    let mut handler = test_handler(Some(tree), invalidation);
+    assert_eq!(texture_fingerprints(handler.computed_scene()).len(), 1);
+
+    border_width.set(dp(4.0));
+    handler.request_redraw_if_dirty(Instant::now());
+    let width_patch = handler.cached_scene.as_ref().unwrap().computed.clone();
+    handler.invalidate_computed_scene();
+    let width_full = handler.computed_scene();
+    assert_eq!(
+        shape_detail_fingerprints(&width_patch),
+        shape_detail_fingerprints(width_full)
+    );
+    assert_eq!(
+        texture_fingerprints(&width_patch),
+        texture_fingerprints(width_full),
+        "Image border width changes its media frame inset"
+    );
+
+    border_radius.set(dp(12.0));
+    handler.request_redraw_if_dirty(Instant::now());
+    let radius_patch = handler.cached_scene.as_ref().unwrap().computed.clone();
+    handler.invalidate_computed_scene();
+    let radius_full = handler.computed_scene();
+    assert_eq!(
+        shape_detail_fingerprints(&radius_patch),
+        shape_detail_fingerprints(radius_full)
+    );
+    assert_eq!(
+        texture_fingerprints(&radius_patch),
+        texture_fingerprints(radius_full),
+        "Image border radius changes the media texture corner radius"
+    );
+}
+
+#[test]
+fn canvas_border_width_and_radius_fallback_match_scene_and_hit_metadata() {
+    fn canvas_shape_fingerprints<VM>(
+        scene: &crate::ui::widget::ComputedScene<VM>,
+    ) -> Vec<(
+        Rect,
+        Color,
+        f32,
+        f32,
+        Option<Rect>,
+        Option<crate::ui::widget::ClipMask>,
+    )> {
+        scene
+            .scene
+            .shapes
+            .iter()
+            .map(|shape| {
+                (
+                    shape.rect,
+                    shape.color,
+                    shape.corner_radius,
+                    shape.stroke_width,
+                    shape.clip_rect,
+                    shape.clip_mask,
+                )
+            })
+            .collect()
+    }
+    fn canvas_texture_fingerprints<VM>(
+        scene: &crate::ui::widget::ComputedScene<VM>,
+    ) -> Vec<(
+        Dp,
+        Dp,
+        Dp,
+        Dp,
+        f32,
+        Option<Rect>,
+        Option<crate::ui::widget::ClipMask>,
+    )> {
+        scene
+            .scene
+            .textures
+            .iter()
+            .map(|texture| {
+                (
+                    texture.frame.x,
+                    texture.frame.y,
+                    texture.frame.width,
+                    texture.frame.height,
+                    texture.corner_radius,
+                    texture.clip_rect,
+                    texture.clip_mask,
+                )
+            })
+            .collect()
+    }
+    fn hit_fingerprints<VM>(
+        scene: &crate::ui::widget::ComputedScene<VM>,
+    ) -> Vec<(String, Rect, Option<Rect>)> {
+        scene
+            .hit_regions
+            .iter()
+            .map(|hit| {
+                (
+                    format!("{:?}", hit.interaction.target_id()),
+                    hit.rect,
+                    hit.clip_rect,
+                )
+            })
+            .collect()
+    }
+
+    let invalidation = InvalidationSignal::new();
+    let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+    let border_width = context.state(dp(1.0));
+    let border_radius = context.state(dp(4.0));
+    let tree = canvas_surface_border_tree(&border_width, &border_radius);
+    let mut handler = test_handler(Some(tree), invalidation);
+    let initial = handler.computed_scene();
+    assert!(
+        !initial.scene.shapes.is_empty()
+            || !initial.scene.meshes.is_empty()
+            || !initial.scene.textures.is_empty(),
+        "Canvas fixture must emit visible primitives"
+    );
+    assert!(initial
+        .hit_regions
+        .iter()
+        .any(|hit| matches!(hit.interaction, HitInteraction::CanvasItem { .. })));
+
+    border_width.set(dp(4.0));
+    handler.request_redraw_if_dirty(Instant::now());
+    let width_patch = handler.cached_scene.as_ref().unwrap().computed.clone();
+    handler.invalidate_computed_scene();
+    let width_full = handler.computed_scene();
+    assert_eq!(
+        canvas_shape_fingerprints(&width_patch),
+        canvas_shape_fingerprints(width_full)
+    );
+    assert_eq!(
+        canvas_texture_fingerprints(&width_patch),
+        canvas_texture_fingerprints(width_full)
+    );
+    assert_eq!(hit_fingerprints(&width_patch), hit_fingerprints(width_full));
+
+    border_radius.set(dp(12.0));
+    handler.request_redraw_if_dirty(Instant::now());
+    let radius_patch = handler.cached_scene.as_ref().unwrap().computed.clone();
+    handler.invalidate_computed_scene();
+    let radius_full = handler.computed_scene();
+    assert_eq!(
+        canvas_shape_fingerprints(&radius_patch),
+        canvas_shape_fingerprints(radius_full)
+    );
+    assert_eq!(
+        canvas_texture_fingerprints(&radius_patch),
+        canvas_texture_fingerprints(radius_full)
+    );
+    assert_eq!(
+        hit_fingerprints(&radius_patch),
+        hit_fingerprints(radius_full)
+    );
+}
+
+#[test]
+#[cfg(feature = "bench-support")]
+fn reactive_shadow_parent_with_child_keeps_conservative_subtree_fallback() {
+    let invalidation = InvalidationSignal::new();
+    let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+    let opacity = context.state(0.35_f32);
+    let signal = opacity.signal();
+    let tree = WidgetTree::new(
+        Stack::<TestVm>::new()
+            .size(dp(96.0), dp(56.0))
+            .opacity(signal)
+            .style_full(|ctx| {
+                let mut style = ContainerStyle::default_for_theme(ctx.theme);
+                style.surface.background = Some(Color::hexa(0x111827FF).into());
+                style.surface.shadow = Some(ctx.theme.elevation.md.clone().into());
+                style
+            })
+            .child(Text::new("child")),
+    );
+    let mut handler = test_handler(Some(tree), invalidation);
+    let _ = handler.computed_scene();
+
+    crate::runtime::action_stats::reset();
+    opacity.set(0.85);
+    handler.request_redraw_if_dirty(Instant::now());
+    let snapshot = crate::runtime::action_stats::snapshot();
+    assert!(
+        !snapshot
+            .iter()
+            .any(|(action, _)| *action == "reactive_property_slot_write"),
+        "parent opacity must still recollect descendants: {snapshot:?}"
+    );
+}
+
+#[test]
+fn reactive_surface_initial_zero_opacity_falls_back_for_hit_topology() {
     let invalidation = InvalidationSignal::new();
     let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
     let opacity = context.state(0.0_f32);
@@ -2769,10 +4662,20 @@ fn reactive_surface_initial_zero_opacity_uses_retained_slot_write() {
         before.iter().all(|(_, _, _, _, color, _, _)| color.a == 0),
         "initial zero opacity should render retained transparent shapes: {before:?}"
     );
+    assert!(handler.computed_scene().hit_regions.is_empty());
 
     crate::runtime::scene_patch::splice_probe::reset();
+    #[cfg(feature = "bench-support")]
+    crate::runtime::action_stats::reset();
     opacity.set(0.85);
     handler.request_redraw_if_dirty(Instant::now());
+    #[cfg(feature = "bench-support")]
+    assert!(
+        crate::runtime::action_stats::snapshot()
+            .iter()
+            .all(|(action, _)| *action != "reactive_property_slot_write"),
+        "transparent-to-visible Container opacity must add its occluder through a bounded patch"
+    );
     assert_eq!(
         crate::runtime::scene_patch::splice_probe::hits(),
         0,
@@ -2785,13 +4688,44 @@ fn reactive_surface_initial_zero_opacity_uses_retained_slot_write() {
             .expect("slot write keeps cache shell")
             .computed,
     );
+    let patched_hits = handler
+        .cached_scene
+        .as_ref()
+        .expect("bounded opacity subtree patch keeps cache shell")
+        .computed
+        .hit_regions
+        .iter()
+        .map(|hit| {
+            (
+                hit.interaction.target_id(),
+                hit.rect,
+                hit.clip_rect,
+                matches!(hit.interaction, HitInteraction::Occluder { .. }),
+            )
+        })
+        .collect::<Vec<_>>();
+    assert!(patched_hits.iter().any(|(_, _, _, occluder)| *occluder));
 
     handler.invalidate_computed_scene();
     let after_full = shape_detail_fingerprints(handler.computed_scene());
+    let full_hits = handler
+        .computed_scene()
+        .hit_regions
+        .iter()
+        .map(|hit| {
+            (
+                hit.interaction.target_id(),
+                hit.rect,
+                hit.clip_rect,
+                matches!(hit.interaction, HitInteraction::Occluder { .. }),
+            )
+        })
+        .collect::<Vec<_>>();
     assert_eq!(
         after_slot_write, after_full,
         "zero-to-visible opacity slot write must match a fresh full recollect"
     );
+    assert_eq!(patched_hits, full_hits);
     assert!(
         after_slot_write
             .iter()
@@ -2809,15 +4743,23 @@ fn reactive_property_slot_write_surface_offset_matches_full_recollect() {
     let mut handler = test_handler(Some(tree), invalidation);
     let _ = handler.computed_scene();
     let before = shape_detail_fingerprints(handler.computed_scene());
+    let before_hits = occluder_hit_fingerprints(handler.computed_scene());
     assert_eq!(
         before.len(),
         2,
         "solid bordered surface should emit background + border shapes"
     );
+    assert_eq!(before_hits.len(), 1, "solid surface should occlude once");
 
+    #[cfg(feature = "bench-support")]
+    crate::runtime::action_stats::reset();
     crate::runtime::scene_patch::splice_probe::reset();
     offset.set(Point::new(dp(6.0), dp(8.0)));
     handler.request_redraw_if_dirty(Instant::now());
+    #[cfg(feature = "bench-support")]
+    assert!(crate::runtime::action_stats::snapshot()
+        .iter()
+        .any(|(action, count)| *action == "reactive_property_slot_write" && *count == 1));
     assert_eq!(
         crate::runtime::scene_patch::splice_probe::hits(),
         0,
@@ -2829,13 +4771,20 @@ fn reactive_property_slot_write_surface_offset_matches_full_recollect() {
         .expect("slot write keeps cache shell");
     assert!(cached.computed_valid);
     let after_slot_write = shape_detail_fingerprints(&cached.computed);
+    let after_slot_hits = occluder_hit_fingerprints(&cached.computed);
 
     handler.invalidate_computed_scene();
     let after_full = shape_detail_fingerprints(handler.computed_scene());
+    let after_full_hits = occluder_hit_fingerprints(handler.computed_scene());
     assert_eq!(
         after_slot_write, after_full,
         "slot-written surface offset scene must match a fresh full recollect"
     );
+    assert_eq!(
+        after_slot_hits, after_full_hits,
+        "slot-written surface offset hit metadata must match a fresh full recollect"
+    );
+    assert_ne!(before_hits[0].1, after_slot_hits[0].1);
 
     let diffs: Vec<usize> = before
         .iter()
@@ -2858,6 +4807,165 @@ fn reactive_property_slot_write_surface_offset_matches_full_recollect() {
         assert_eq!(before[changed].5, after_slot_write[changed].5);
         assert_eq!(before[changed].6, after_slot_write[changed].6);
     }
+}
+
+#[test]
+#[cfg(feature = "bench-support")]
+fn reactive_plain_hidden_offset_uses_direct_property_slot_without_transform_record() {
+    let invalidation = InvalidationSignal::new();
+    let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+    let offset = context.state(Point::ZERO);
+    let (tree, moving_id) = plain_hidden_surface_offset_tree(&offset);
+    let mut handler = test_handler(Some(tree), invalidation);
+    let _ = handler.computed_scene();
+    let cached = handler
+        .cached_scene
+        .as_ref()
+        .expect("initial collect should populate cache");
+    assert!(
+        !cached.computed.transform_records.contains_key(&moving_id),
+        "default Hidden overflow must keep this fixture on the property-slot path"
+    );
+    let before = shape_detail_fingerprints(&cached.computed);
+    let before_hits = occluder_hit_fingerprints(&cached.computed);
+    assert_eq!(before.len(), 1);
+    assert_eq!(before_hits.len(), 1);
+
+    crate::ui::widget::offset_direct_probe::reset();
+    crate::runtime::action_stats::reset();
+    crate::runtime::scene_patch::splice_probe::reset();
+    let next_offset = Point::new(dp(9.0), dp(7.0));
+    offset.set(next_offset);
+    handler.request_redraw_if_dirty(Instant::now());
+
+    assert_eq!(
+        crate::ui::widget::offset_direct_probe::hits(),
+        1,
+        "property-slot update must resolve through the strict Offset direct path"
+    );
+    let actions = crate::runtime::action_stats::snapshot();
+    assert!(actions
+        .iter()
+        .any(|(action, count)| *action == "reactive_property_slot_write" && *count == 1));
+    assert!(actions
+        .iter()
+        .all(|(action, _)| *action != "reactive_transform_record_update"));
+    assert_eq!(crate::runtime::scene_patch::splice_probe::hits(), 0);
+
+    let cached = handler
+        .cached_scene
+        .as_ref()
+        .expect("slot write keeps cache shell");
+    assert!(cached.computed_valid);
+    assert!(!cached.computed.transform_records.contains_key(&moving_id));
+    let after_slot_write = shape_detail_fingerprints(&cached.computed);
+    let after_slot_hits = occluder_hit_fingerprints(&cached.computed);
+
+    handler.invalidate_computed_scene();
+    let after_full = shape_detail_fingerprints(handler.computed_scene());
+    let after_full_hits = occluder_hit_fingerprints(handler.computed_scene());
+    assert_eq!(after_slot_write, after_full);
+    assert_eq!(after_slot_hits, after_full_hits);
+    assert_eq!(after_slot_write.len(), 1);
+    assert_eq!(after_slot_write[0].0, before[0].0 + next_offset.x);
+    assert_eq!(after_slot_write[0].1, before[0].1 + next_offset.y);
+    assert_eq!(after_slot_write[0].2, before[0].2);
+    assert_eq!(after_slot_write[0].3, before[0].3);
+    assert_eq!(after_slot_write[0].4, before[0].4);
+    assert_eq!(after_slot_write[0].5, before[0].5);
+    assert_eq!(after_slot_write[0].6, before[0].6);
+    assert_eq!(after_slot_hits[0].1.x, before_hits[0].1.x + next_offset.x);
+    assert_eq!(after_slot_hits[0].1.y, before_hits[0].1.y + next_offset.y);
+    assert_eq!(after_slot_hits[0].1.width, before_hits[0].1.width);
+    assert_eq!(after_slot_hits[0].1.height, before_hits[0].1.height);
+    assert_eq!(after_slot_hits[0].2, before_hits[0].2);
+}
+
+#[test]
+fn reactive_surface_offset_with_semantic_hit_uses_bounded_patch_and_matches_full_recollect() {
+    let invalidation = InvalidationSignal::new();
+    let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+    let offset = context.state(Point::ZERO);
+    let tree = semantic_surface_offset_tree(&offset);
+    let mut handler = test_handler(Some(tree), invalidation);
+    let _ = handler.computed_scene();
+
+    #[cfg(feature = "bench-support")]
+    crate::runtime::action_stats::reset();
+    offset.set(Point::new(dp(6.0), dp(8.0)));
+    handler.request_redraw_if_dirty(Instant::now());
+    #[cfg(feature = "bench-support")]
+    {
+        let snapshot = crate::runtime::action_stats::snapshot();
+        assert!(
+            snapshot.iter().any(|(action, count)| {
+                *action == "reactive_property_scene_patch" && *count == 1
+            }),
+            "semantic Offset must use its bounded Container subtree patch: {snapshot:?}"
+        );
+        assert!(
+            !snapshot
+                .iter()
+                .any(|(action, _)| *action == "reactive_property_slot_write"),
+            "semantic hit geometry must not use the Occluder-only Offset slot: {snapshot:?}"
+        );
+        assert!(
+            !snapshot
+                .iter()
+                .any(|(action, _)| *action == "strict_reactive_scene_rejected"),
+            "strict semantic Offset has an explicit bounded fallback: {snapshot:?}"
+        );
+    }
+    let (after_patch_scene, after_patch_hits) = {
+        let cached = handler
+            .cached_scene
+            .as_ref()
+            .expect("bounded patch keeps cache shell");
+        (
+            shape_detail_fingerprints(&cached.computed),
+            cached
+                .computed
+                .hit_regions
+                .iter()
+                .map(|hit| {
+                    (
+                        hit.interaction.target_id(),
+                        hit.rect,
+                        hit.clip_rect,
+                        hit.transform_chain
+                            .iter()
+                            .map(|id| id.raw())
+                            .collect::<Vec<_>>(),
+                        hit.scope_path.iter().map(|id| id.raw()).collect::<Vec<_>>(),
+                        hit.gpu_scroll_container.map(|id| id.raw()),
+                    )
+                })
+                .collect::<Vec<_>>(),
+        )
+    };
+
+    handler.invalidate_computed_scene();
+    let after_full_scene = shape_detail_fingerprints(handler.computed_scene());
+    let after_full_hits = handler
+        .computed_scene()
+        .hit_regions
+        .iter()
+        .map(|hit| {
+            (
+                hit.interaction.target_id(),
+                hit.rect,
+                hit.clip_rect,
+                hit.transform_chain
+                    .iter()
+                    .map(|id| id.raw())
+                    .collect::<Vec<_>>(),
+                hit.scope_path.iter().map(|id| id.raw()).collect::<Vec<_>>(),
+                hit.gpu_scroll_container.map(|id| id.raw()),
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(after_patch_scene, after_full_scene);
+    assert_eq!(after_patch_hits, after_full_hits);
 }
 
 #[test]
@@ -3118,7 +5226,7 @@ fn reactive_transform_record_offset_moves_simple_hit_regions_without_recollect()
 
 #[test]
 #[cfg(feature = "bench-support")]
-fn strict_reactive_tree_rejects_retained_transform_with_inherited_clip_mask() {
+fn inherited_clip_mask_offset_uses_bounded_scene_patch_instead_of_retained_transform() {
     let invalidation = InvalidationSignal::new();
     let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
     let offset = context.state(Point::ZERO);
@@ -3151,14 +5259,14 @@ fn strict_reactive_tree_rejects_retained_transform_with_inherited_clip_mask() {
 
     assert_eq!(
         crate::runtime::scene_patch::splice_probe::hits(),
-        0,
-        "strict rejection must not enter scene splice"
+        1,
+        "stable bounded recollection should splice the refreshed clip-mask subtree"
     );
     assert!(
         snapshot
             .iter()
-            .any(|(action, count)| action.starts_with("strict_reactive") && *count == 1),
-        "strict tree should reject unsupported clip-mask transform fallback: {snapshot:?}"
+            .any(|(action, count)| *action == "reactive_property_scene_patch" && *count == 1),
+        "inherited clip masks must use a bounded scene recollect: {snapshot:?}"
     );
     assert!(
         !snapshot
@@ -3166,6 +5274,58 @@ fn strict_reactive_tree_rejects_retained_transform_with_inherited_clip_mask() {
             .any(|(action, _)| *action == "reactive_transform_record_update"),
         "clip-mask transform must not be reported as a retained transform update: {snapshot:?}"
     );
+
+    let patched = handler
+        .cached_scene
+        .as_ref()
+        .expect("bounded scene patch should retain the cache")
+        .computed
+        .clone();
+    let patched_shapes = patched
+        .scene
+        .shapes
+        .iter()
+        .map(|shape| {
+            (
+                shape.rect,
+                shape.color,
+                shape.corner_radius,
+                shape.stroke_width,
+                shape.clip_rect,
+                shape.clip_mask,
+            )
+        })
+        .collect::<Vec<_>>();
+    let patched_hits = patched
+        .hit_regions
+        .iter()
+        .map(|hit| (hit.interaction.target_id(), hit.rect, hit.clip_rect))
+        .collect::<Vec<_>>();
+
+    handler.invalidate_computed_scene();
+    let full = handler.computed_scene();
+    let full_shapes = full
+        .scene
+        .shapes
+        .iter()
+        .map(|shape| {
+            (
+                shape.rect,
+                shape.color,
+                shape.corner_radius,
+                shape.stroke_width,
+                shape.clip_rect,
+                shape.clip_mask,
+            )
+        })
+        .collect::<Vec<_>>();
+    let full_hits = full
+        .hit_regions
+        .iter()
+        .map(|hit| (hit.interaction.target_id(), hit.rect, hit.clip_rect))
+        .collect::<Vec<_>>();
+    assert_eq!(patched_shapes, full_shapes);
+    assert_eq!(patched_hits, full_hits);
 }
 
 #[test]
@@ -3224,17 +5384,46 @@ fn reactive_property_slot_write_surface_scale_matches_full_recollect() {
     let scale = context.state(1.0_f32);
     let tree = surface_scale_tree(&scale);
     let mut handler = test_handler(Some(tree), invalidation);
+    #[cfg(feature = "bench-support")]
+    crate::ui::widget::scale_direct_probe::reset();
     let _ = handler.computed_scene();
     let before = shape_detail_fingerprints(handler.computed_scene());
+    let before_hits = occluder_hit_fingerprints(handler.computed_scene());
     assert_eq!(
         before.len(),
-        2,
-        "solid bordered surface should emit background + border shapes"
+        1,
+        "solid surface should emit one background shape"
     );
+    assert_eq!(before_hits.len(), 1, "solid surface should occlude once");
+    #[cfg(feature = "bench-support")]
+    {
+        assert_eq!(
+            crate::ui::widget::scale_direct_probe::hits(),
+            1,
+            "initial slot planning should use the strict Scale resolver"
+        );
+        crate::ui::widget::scale_direct_probe::reset();
+    }
 
+    #[cfg(feature = "bench-support")]
+    crate::runtime::action_stats::reset();
     crate::runtime::scene_patch::splice_probe::reset();
     scale.set(1.25);
     handler.request_redraw_if_dirty(Instant::now());
+    #[cfg(feature = "bench-support")]
+    {
+        assert!(
+            crate::ui::widget::scale_direct_probe::hits() > 0,
+            "plain surface Scale update should use the strict direct resolver"
+        );
+        let snapshot = crate::runtime::action_stats::snapshot();
+        assert!(
+            snapshot
+                .iter()
+                .any(|(action, count)| *action == "reactive_property_slot_write" && *count == 1),
+            "plain Scale should update its retained shape and Occluder slots: {snapshot:?}"
+        );
+    }
     assert_eq!(
         crate::runtime::scene_patch::splice_probe::hits(),
         0,
@@ -3246,13 +5435,20 @@ fn reactive_property_slot_write_surface_scale_matches_full_recollect() {
         .expect("slot write keeps cache shell");
     assert!(cached.computed_valid);
     let after_slot_write = shape_detail_fingerprints(&cached.computed);
+    let after_slot_hits = occluder_hit_fingerprints(&cached.computed);
 
     handler.invalidate_computed_scene();
     let after_full = shape_detail_fingerprints(handler.computed_scene());
+    let after_full_hits = occluder_hit_fingerprints(handler.computed_scene());
     assert_eq!(
         after_slot_write, after_full,
         "slot-written surface scale scene must match a fresh full recollect"
     );
+    assert_eq!(
+        after_slot_hits, after_full_hits,
+        "slot-written surface scale hit metadata must match a fresh full recollect"
+    );
+    assert_ne!(before_hits[0].1, after_slot_hits[0].1);
 
     let diffs: Vec<usize> = before
         .iter()
@@ -3263,8 +5459,8 @@ fn reactive_property_slot_write_surface_scale_matches_full_recollect() {
         .collect();
     assert_eq!(
         diffs.len(),
-        2,
-        "background and border rects should be the only changed shapes"
+        1,
+        "the background rect should be the only changed shape"
     );
     for changed in diffs {
         assert!(after_slot_write[changed].0 < before[changed].0);
@@ -3273,6 +5469,93 @@ fn reactive_property_slot_write_surface_scale_matches_full_recollect() {
         assert!(after_slot_write[changed].3 > before[changed].3);
         assert_eq!(before[changed].4, after_slot_write[changed].4);
     }
+}
+
+#[test]
+fn reactive_surface_scale_with_semantic_hit_uses_bounded_patch_and_matches_full_recollect() {
+    let invalidation = InvalidationSignal::new();
+    let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+    let scale = context.state(1.0_f32);
+    let tree = semantic_surface_scale_tree(&scale);
+    let mut handler = test_handler(Some(tree), invalidation);
+    let _ = handler.computed_scene();
+
+    #[cfg(feature = "bench-support")]
+    crate::runtime::action_stats::reset();
+    scale.set(1.25);
+    handler.request_redraw_if_dirty(Instant::now());
+    #[cfg(feature = "bench-support")]
+    {
+        let snapshot = crate::runtime::action_stats::snapshot();
+        assert!(
+            snapshot.iter().any(|(action, count)| {
+                *action == "reactive_property_scene_patch" && *count == 1
+            }),
+            "semantic Scale must use its bounded Container subtree patch: {snapshot:?}"
+        );
+        assert!(
+            !snapshot
+                .iter()
+                .any(|(action, _)| *action == "reactive_property_slot_write"),
+            "semantic hit geometry must not use the Occluder-only slot: {snapshot:?}"
+        );
+        assert!(
+            !snapshot
+                .iter()
+                .any(|(action, _)| *action == "strict_reactive_scene_rejected"),
+            "strict semantic Scale has an explicit bounded fallback: {snapshot:?}"
+        );
+    }
+    let (after_patch_scene, after_patch_hits) = {
+        let cached = handler
+            .cached_scene
+            .as_ref()
+            .expect("bounded patch keeps cache shell");
+        (
+            shape_detail_fingerprints(&cached.computed),
+            cached
+                .computed
+                .hit_regions
+                .iter()
+                .map(|hit| {
+                    (
+                        hit.interaction.target_id(),
+                        hit.rect,
+                        hit.clip_rect,
+                        hit.transform_chain
+                            .iter()
+                            .map(|id| id.raw())
+                            .collect::<Vec<_>>(),
+                        hit.scope_path.iter().map(|id| id.raw()).collect::<Vec<_>>(),
+                        hit.gpu_scroll_container.map(|id| id.raw()),
+                    )
+                })
+                .collect::<Vec<_>>(),
+        )
+    };
+
+    handler.invalidate_computed_scene();
+    let after_full_scene = shape_detail_fingerprints(handler.computed_scene());
+    let after_full_hits = handler
+        .computed_scene()
+        .hit_regions
+        .iter()
+        .map(|hit| {
+            (
+                hit.interaction.target_id(),
+                hit.rect,
+                hit.clip_rect,
+                hit.transform_chain
+                    .iter()
+                    .map(|id| id.raw())
+                    .collect::<Vec<_>>(),
+                hit.scope_path.iter().map(|id| id.raw()).collect::<Vec<_>>(),
+                hit.gpu_scroll_container.map(|id| id.raw()),
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(after_patch_scene, after_full_scene);
+    assert_eq!(after_patch_hits, after_full_hits);
 }
 
 #[test]
@@ -3295,9 +5578,18 @@ fn reactive_border_color_transparent_uses_retained_slot_write() {
         "initial transparent border should keep a retained stroke slot: {before:?}"
     );
 
+    #[cfg(feature = "bench-support")]
+    crate::runtime::action_stats::reset();
     crate::runtime::scene_patch::splice_probe::reset();
     color.set(Color::hexa(0x38BDF8FF));
     handler.request_redraw_if_dirty(Instant::now());
+    #[cfg(feature = "bench-support")]
+    assert!(
+        crate::runtime::action_stats::snapshot()
+            .iter()
+            .any(|(action, _)| *action == "reactive_property_slot_write"),
+        "an opaque background keeps Container hit topology stable, so BorderColor should retain its slot write"
+    );
     assert_eq!(
         crate::runtime::scene_patch::splice_probe::hits(),
         0,
@@ -3344,6 +5636,100 @@ fn reactive_border_color_transparent_uses_retained_slot_write() {
         after_transparent_slot_write.len(),
         before.len(),
         "reactive border color keeps retained stroke slots"
+    );
+}
+
+#[test]
+fn border_only_reactive_color_falls_back_and_matches_full_scene_and_hit_topology() {
+    fn hit_fingerprints<VM>(
+        scene: &crate::ui::widget::ComputedScene<VM>,
+    ) -> Vec<(crate::ui::widget::HitTargetId, Rect, Option<Rect>, bool)> {
+        scene
+            .hit_regions
+            .iter()
+            .map(|hit| {
+                (
+                    hit.interaction.target_id(),
+                    hit.rect,
+                    hit.clip_rect,
+                    matches!(hit.interaction, HitInteraction::Occluder { .. }),
+                )
+            })
+            .collect()
+    }
+
+    let invalidation = InvalidationSignal::new();
+    let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+    let color = context.state(Color::rgba(56, 189, 248, 0));
+    let tree = border_only_color_tree(&color);
+    let mut handler = test_handler(Some(tree), invalidation);
+    let initial = handler.computed_scene();
+    assert!(initial
+        .scene
+        .shapes
+        .iter()
+        .any(|shape| { shape.stroke_width > 0.0 && shape.color == Color::rgba(56, 189, 248, 0) }));
+    assert!(
+        hit_fingerprints(initial).is_empty(),
+        "a transparent border-only Container must not occlude input"
+    );
+
+    #[cfg(feature = "bench-support")]
+    crate::runtime::action_stats::reset();
+    color.set(Color::hexa(0x38BDF8FF));
+    handler.request_redraw_if_dirty(Instant::now());
+    #[cfg(feature = "bench-support")]
+    assert!(
+        crate::runtime::action_stats::snapshot()
+            .iter()
+            .all(|(action, _)| *action != "reactive_property_slot_write"),
+        "border-only Container must recollect its subtree when border alpha changes occluder topology"
+    );
+    let visible_patch = handler
+        .cached_scene
+        .as_ref()
+        .expect("bounded subtree fallback keeps cache shell")
+        .computed
+        .clone();
+    assert!(visible_patch
+        .hit_regions
+        .iter()
+        .any(|hit| matches!(hit.interaction, HitInteraction::Occluder { .. })));
+    handler.invalidate_computed_scene();
+    let visible_full = handler.computed_scene();
+    assert_eq!(
+        shape_detail_fingerprints(&visible_patch),
+        shape_detail_fingerprints(visible_full)
+    );
+    assert_eq!(
+        hit_fingerprints(&visible_patch),
+        hit_fingerprints(visible_full)
+    );
+
+    #[cfg(feature = "bench-support")]
+    crate::runtime::action_stats::reset();
+    color.set(Color::rgba(56, 189, 248, 0));
+    handler.request_redraw_if_dirty(Instant::now());
+    #[cfg(feature = "bench-support")]
+    assert!(crate::runtime::action_stats::snapshot()
+        .iter()
+        .all(|(action, _)| *action != "reactive_property_slot_write"));
+    let transparent_patch = handler
+        .cached_scene
+        .as_ref()
+        .expect("bounded subtree fallback keeps cache shell")
+        .computed
+        .clone();
+    assert!(hit_fingerprints(&transparent_patch).is_empty());
+    handler.invalidate_computed_scene();
+    let transparent_full = handler.computed_scene();
+    assert_eq!(
+        shape_detail_fingerprints(&transparent_patch),
+        shape_detail_fingerprints(transparent_full)
+    );
+    assert_eq!(
+        hit_fingerprints(&transparent_patch),
+        hit_fingerprints(transparent_full)
     );
 }
 
@@ -3644,7 +6030,7 @@ fn reactive_labeled_progress_value_updates_fill_and_label_slots() {
 }
 
 #[test]
-fn reactive_property_slot_write_slider_value_matches_full_recollect() {
+fn default_slider_reactive_property_slot_write_matches_full_recollect() {
     let invalidation = InvalidationSignal::new();
     let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
     let value = context.state(0.25_f32);
@@ -3661,8 +6047,16 @@ fn reactive_property_slot_write_slider_value_matches_full_recollect() {
     );
 
     crate::runtime::scene_patch::splice_probe::reset();
+    #[cfg(feature = "bench-support")]
+    crate::runtime::action_stats::reset();
     value.set(0.75);
     handler.request_redraw_if_dirty(Instant::now());
+    #[cfg(feature = "bench-support")]
+    assert_action_count(
+        &crate::runtime::action_stats::snapshot(),
+        "reactive_property_slot_write",
+        1,
+    );
     assert_eq!(
         crate::runtime::scene_patch::splice_probe::hits(),
         0,
@@ -3717,7 +6111,7 @@ fn reactive_property_slot_write_slider_value_matches_full_recollect() {
 }
 
 #[test]
-fn reactive_property_slot_write_labeled_slider_value_matches_full_recollect() {
+fn default_labeled_slider_reactive_property_slot_write_matches_full_recollect() {
     let invalidation = InvalidationSignal::new();
     let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
     let value = context.state(0.25_f32);
@@ -3736,8 +6130,16 @@ fn reactive_property_slot_write_labeled_slider_value_matches_full_recollect() {
     assert_eq!(before_texts[0].0, "0.25");
 
     crate::runtime::scene_patch::splice_probe::reset();
+    #[cfg(feature = "bench-support")]
+    crate::runtime::action_stats::reset();
     value.set(0.75);
     handler.request_redraw_if_dirty(Instant::now());
+    #[cfg(feature = "bench-support")]
+    assert_action_count(
+        &crate::runtime::action_stats::snapshot(),
+        "reactive_property_slot_write",
+        1,
+    );
     assert_eq!(
         crate::runtime::scene_patch::splice_probe::hits(),
         0,
@@ -3873,6 +6275,821 @@ fn action_stats_records_reactive_property_slot_write_for_color_change() {
             ("reactive_slot_update", 1)
         ],
         "single deep-leaf color change should be driven by retained reactive property slot targets"
+    );
+}
+
+#[test]
+#[cfg(feature = "bench-support")]
+fn animation_refresh_routes_opacity_through_retained_property_slot_and_matches_static_scene() {
+    let invalidation = InvalidationSignal::new();
+    let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+    let opacity = context.state(0.35_f32);
+    let animated_opacity = opacity
+        .signal()
+        .animated(Transition::linear(Duration::from_millis(100)));
+    let tree = WidgetTree::new(
+        Stack::<TestVm>::new()
+            .size(dp(48.0), dp(48.0))
+            .opacity(animated_opacity)
+            .style_full(|ctx| {
+                let mut style = ContainerStyle::default_for_theme(ctx.theme);
+                style.surface.background = Some(Color::hexa(0x111827FF).into());
+                style
+            }),
+    );
+    let mut handler = test_handler(Some(tree), invalidation);
+    let _ = handler.computed_scene();
+
+    let start = Instant::now();
+    opacity.set(0.85);
+    handler.request_redraw_if_dirty(start);
+    assert!(handler.animation_engine.has_active_animations());
+
+    let mid = start + Duration::from_millis(50);
+    let refresh = handler.animation_engine.refresh(mid);
+    assert_eq!(refresh.scene_widget_ids.len(), 1);
+    assert_eq!(refresh.scene_property_targets.len(), 1);
+    handler.animation_epoch = handler.animation_epoch.wrapping_add(1);
+    crate::runtime::action_stats::reset();
+    assert!(handler.patch_animation_refresh(&refresh, mid));
+    assert_eq!(
+        crate::runtime::action_stats::snapshot(),
+        vec![("animation_reactive_property_slot_write", 1)]
+    );
+    let actual = shape_detail_fingerprints(
+        &handler
+            .cached_scene
+            .as_ref()
+            .expect("animation slot write keeps cache")
+            .computed,
+    );
+
+    let expected_invalidation = InvalidationSignal::new();
+    let expected_context = ViewModelContext::new(
+        expected_invalidation.clone(),
+        AnimationCoordinator::default(),
+    );
+    let expected_opacity = expected_context.state(0.60_f32);
+    let expected_tree = WidgetTree::new(
+        Stack::<TestVm>::new()
+            .size(dp(48.0), dp(48.0))
+            .opacity(expected_opacity.signal())
+            .style_full(|ctx| {
+                let mut style = ContainerStyle::default_for_theme(ctx.theme);
+                style.surface.background = Some(Color::hexa(0x111827FF).into());
+                style
+            }),
+    );
+    let mut expected_handler = test_handler(Some(expected_tree), expected_invalidation);
+    let expected = shape_detail_fingerprints(expected_handler.computed_scene());
+    assert_eq!(actual, expected);
+}
+
+#[test]
+#[cfg(feature = "bench-support")]
+fn animation_refresh_routes_width_through_batched_layout_slot_and_matches_static_scene() {
+    let invalidation = InvalidationSignal::new();
+    let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+    let width = context.state(dp(48.0));
+    let animated_width = width
+        .signal()
+        .animated(Transition::linear(Duration::from_millis(100)));
+    let tree = WidgetTree::new(
+        Flex::<TestVm>::new(Axis::Vertical)
+            .size(dp(220.0), dp(80.0))
+            .child(
+                Flex::<TestVm>::new(Axis::Horizontal)
+                    .size(dp(180.0), dp(48.0))
+                    .child(
+                        filled_stack(Color::hexa(0x111827FF))
+                            .width(animated_width)
+                            .height(dp(24.0)),
+                    )
+                    .child(filled_stack(Color::hexa(0x38BDF8FF)).size(dp(24.0), dp(24.0))),
+            ),
+    );
+    let mut handler = test_handler(Some(tree), invalidation);
+    let _ = handler.computed_scene();
+
+    let start = Instant::now();
+    width.set(dp(96.0));
+    handler.request_redraw_if_dirty(start);
+    assert!(handler.animation_engine.has_active_animations());
+
+    let mid = start + Duration::from_millis(50);
+    let refresh = handler.animation_engine.refresh(mid);
+    assert_eq!(refresh.layout_widget_ids.len(), 1);
+    assert_eq!(refresh.layout_property_targets.len(), 1);
+    handler.animation_epoch = handler.animation_epoch.wrapping_add(1);
+    handler.layout_animation_epoch = handler.layout_animation_epoch.wrapping_add(1);
+    crate::runtime::action_stats::reset();
+    assert!(handler.patch_animation_refresh(&refresh, mid));
+    assert_eq!(
+        crate::runtime::action_stats::snapshot(),
+        vec![("animation_reactive_layout_slot_update", 1)]
+    );
+    let actual = shape_fingerprints(
+        &handler
+            .cached_scene
+            .as_ref()
+            .expect("animation layout slot keeps cache")
+            .computed,
+    );
+
+    let expected_invalidation = InvalidationSignal::new();
+    let expected_context = ViewModelContext::new(
+        expected_invalidation.clone(),
+        AnimationCoordinator::default(),
+    );
+    let expected_width = expected_context.state(dp(72.0));
+    let expected_tree = WidgetTree::new(
+        Flex::<TestVm>::new(Axis::Vertical)
+            .size(dp(220.0), dp(80.0))
+            .child(
+                Flex::<TestVm>::new(Axis::Horizontal)
+                    .size(dp(180.0), dp(48.0))
+                    .child(
+                        filled_stack(Color::hexa(0x111827FF))
+                            .width(expected_width.signal())
+                            .height(dp(24.0)),
+                    )
+                    .child(filled_stack(Color::hexa(0x38BDF8FF)).size(dp(24.0), dp(24.0))),
+            ),
+    );
+    let mut expected_handler = test_handler(Some(expected_tree), expected_invalidation);
+    let expected = shape_fingerprints(expected_handler.computed_scene());
+    assert_eq!(actual, expected);
+}
+
+#[test]
+#[cfg(feature = "bench-support")]
+fn dense_layout_animation_refresh_uses_full_rebuild_fallback_and_matches_static_scene() {
+    let invalidation = InvalidationSignal::new();
+    let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+    let width = context.state(dp(48.0));
+    let tree = WidgetTree::new(
+        Flex::<TestVm>::new(Axis::Vertical)
+            .size(dp(220.0), dp(80.0))
+            .child(
+                Flex::<TestVm>::new(Axis::Horizontal)
+                    .size(dp(180.0), dp(48.0))
+                    .child(
+                        filled_stack(Color::hexa(0x111827FF))
+                            .width(
+                                width
+                                    .signal()
+                                    .animated(Transition::linear(Duration::from_millis(100))),
+                            )
+                            .height(dp(24.0)),
+                    )
+                    .child(filled_stack(Color::hexa(0x38BDF8FF)).size(dp(24.0), dp(24.0))),
+            ),
+    );
+    let mut handler = test_handler(Some(tree), invalidation);
+    let before = shape_fingerprints(handler.computed_scene());
+
+    let start = Instant::now();
+    width.set(dp(96.0));
+    handler.request_redraw_if_dirty(start);
+    let mid = start + Duration::from_millis(50);
+    let mut refresh = handler.animation_engine.refresh(mid);
+    let &(target_widget_id, property) = refresh
+        .layout_property_targets
+        .first()
+        .expect("width animation layout target");
+    assert_eq!(property, PropertySlot::Width);
+
+    // Exercise the large-dense branch without constructing a thousand-node unit-test tree. The
+    // exact measured 1,000-of-1,027 and sparse boundary ratios are covered by the predicate test;
+    // slot validation still uses the real target above if this guard regresses.
+    while refresh.layout_widget_ids.len() < 512 {
+        refresh
+            .layout_widget_ids
+            .push(u64::MAX - refresh.layout_widget_ids.len() as u64);
+    }
+    refresh.layout_widget_ids.sort_unstable();
+    refresh.layout_widget_ids.dedup();
+    assert!(handler.animation_layout_refresh_is_dense(&refresh.layout_widget_ids));
+
+    handler.animation_epoch = handler.animation_epoch.wrapping_add(1);
+    handler.layout_animation_epoch = handler.layout_animation_epoch.wrapping_add(1);
+    assert!(
+        !handler.patch_animation_refresh(&refresh, mid),
+        "a dense layout-animation frame must select the normal full-layout fallback"
+    );
+    assert_eq!(
+        before,
+        shape_fingerprints(
+            &handler
+                .cached_scene
+                .as_ref()
+                .expect("dense guard must reject before mutating the cache")
+                .computed
+        )
+    );
+
+    handler.invalidate_computed_scene();
+    let key = AnimationKey::Widget {
+        id: target_widget_id.raw(),
+        property: WidgetProperty::Width,
+    };
+    assert_eq!(
+        handler
+            .animation_engine
+            .resolve_dp(key, dp(96.0), None, mid),
+        dp(96.0)
+    );
+    let actual = shape_fingerprints(handler.computed_scene());
+
+    let expected_invalidation = InvalidationSignal::new();
+    let expected_tree = WidgetTree::new(
+        Flex::<TestVm>::new(Axis::Vertical)
+            .size(dp(220.0), dp(80.0))
+            .child(
+                Flex::<TestVm>::new(Axis::Horizontal)
+                    .size(dp(180.0), dp(48.0))
+                    .child(
+                        filled_stack(Color::hexa(0x111827FF))
+                            .width(dp(96.0))
+                            .height(dp(24.0)),
+                    )
+                    .child(filled_stack(Color::hexa(0x38BDF8FF)).size(dp(24.0), dp(24.0))),
+            ),
+    );
+    let mut expected_handler = test_handler(Some(expected_tree), expected_invalidation);
+    assert_eq!(
+        actual,
+        shape_fingerprints(expected_handler.computed_scene())
+    );
+}
+
+#[test]
+#[cfg(feature = "bench-support")]
+fn animation_refresh_unscoped_property_keeps_scene_patch_fallback() {
+    let invalidation = InvalidationSignal::new();
+    let tree = WidgetTree::new(
+        Stack::<TestVm>::new()
+            .size(dp(48.0), dp(48.0))
+            .style_full(|ctx| {
+                let mut style = ContainerStyle::default_for_theme(ctx.theme);
+                style.surface.background = Some(Color::hexa(0x111827FF).into());
+                style
+            }),
+    );
+    let mut handler = test_handler(Some(tree), invalidation);
+    let _ = handler.computed_scene();
+    let root_id = handler
+        .cached_scene
+        .as_ref()
+        .and_then(|cached| cached.layout.as_ref())
+        .map(ResolvedSceneLayout::root_id)
+        .expect("cached animation fallback root");
+    let mut refresh = AnimationRefresh::default();
+    refresh.changed = true;
+    refresh.scene_widget_ids.push(root_id.raw());
+    refresh.has_unscoped_scene_changes = true;
+
+    crate::runtime::action_stats::reset();
+    assert!(handler.patch_animation_refresh(&refresh, Instant::now()));
+    assert!(
+        crate::runtime::action_stats::snapshot()
+            .iter()
+            .all(|(action, _)| *action != "animation_reactive_property_slot_write"),
+        "unscoped animation property must retain the subtree scene-patch fallback"
+    );
+    assert!(
+        handler
+            .cached_scene
+            .as_ref()
+            .is_some_and(|cached| cached.computed_valid),
+        "fallback patch must leave a valid computed scene"
+    );
+}
+
+#[test]
+#[cfg(feature = "bench-support")]
+fn animation_refresh_batches_multiple_scene_slots_and_matches_static_scene() {
+    let invalidation = InvalidationSignal::new();
+    let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+    let opacity = context.state(0.35_f32);
+    let color = context.state(Color::BLACK);
+    let transition = Transition::linear(Duration::from_millis(100));
+    let animated_opacity = opacity.signal().animated(transition);
+    let animated_color = color.signal().animated(transition);
+    let tree = WidgetTree::new(
+        Flex::<TestVm>::new(Axis::Horizontal)
+            .size(dp(180.0), dp(72.0))
+            .gap(dp(12.0))
+            .child(
+                filled_stack(Color::hexa(0x0F172AFF))
+                    .size(dp(48.0), dp(32.0))
+                    .opacity(animated_opacity),
+            )
+            .child(
+                Stack::<TestVm>::new()
+                    .size(dp(48.0), dp(32.0))
+                    .style(move |style, _| {
+                        style.surface.background = Some(animated_color.clone().into());
+                    }),
+            ),
+    );
+    let mut handler = test_handler(Some(tree), invalidation);
+    let _ = handler.computed_scene();
+
+    let start = Instant::now();
+    opacity.set(0.85);
+    color.set(Color::WHITE);
+    handler.request_redraw_if_dirty(start);
+    let mid = start + Duration::from_millis(50);
+    let refresh = handler.animation_engine.refresh(mid);
+    assert_eq!(refresh.scene_widget_ids.len(), 2);
+    assert_eq!(refresh.scene_property_targets.len(), 2);
+    assert!(!refresh.has_unscoped_scene_changes);
+
+    let property_targets = refresh.scene_property_targets.to_vec();
+    let batch_values = handler
+        .resolve_reactive_slot_values(&property_targets, mid)
+        .expect("batched retained-property resolve context");
+    let individual_values = handler
+        .resolve_reactive_slot_values_individually(&property_targets, mid)
+        .expect("one-context-per-property control resolve");
+    assert_eq!(
+        batch_values, individual_values,
+        "shared-context batch resolution must preserve per-property values"
+    );
+
+    handler.animation_epoch = handler.animation_epoch.wrapping_add(1);
+    crate::runtime::action_stats::reset();
+    assert!(handler.patch_animation_refresh(&refresh, mid));
+    assert_eq!(
+        crate::runtime::action_stats::snapshot(),
+        vec![("animation_reactive_property_slot_write", 1)]
+    );
+    let actual = shape_detail_fingerprints(
+        &handler
+            .cached_scene
+            .as_ref()
+            .expect("batched scene slot write keeps cache")
+            .computed,
+    );
+
+    let expected_invalidation = InvalidationSignal::new();
+    let expected_tree = WidgetTree::new(
+        Flex::<TestVm>::new(Axis::Horizontal)
+            .size(dp(180.0), dp(72.0))
+            .gap(dp(12.0))
+            .child(
+                filled_stack(Color::hexa(0x0F172AFF))
+                    .size(dp(48.0), dp(32.0))
+                    .opacity(0.60_f32),
+            )
+            .child(filled_stack(Color::rgba(128, 128, 128, 255)).size(dp(48.0), dp(32.0))),
+    );
+    let mut expected_handler = test_handler(Some(expected_tree), expected_invalidation);
+    assert_eq!(
+        actual,
+        shape_detail_fingerprints(expected_handler.computed_scene())
+    );
+}
+
+#[test]
+#[cfg(feature = "bench-support")]
+fn animation_refresh_missing_scene_slot_binding_uses_subtree_fallback_and_matches_static_scene() {
+    let invalidation = InvalidationSignal::new();
+    let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+    let opacity = context.state(0.35_f32);
+    let tree = WidgetTree::new(
+        filled_stack(Color::hexa(0x111827FF))
+            .size(dp(48.0), dp(48.0))
+            .opacity(
+                opacity
+                    .signal()
+                    .animated(Transition::linear(Duration::from_millis(100))),
+            ),
+    );
+    let mut handler = test_handler(Some(tree), invalidation);
+    let _ = handler.computed_scene();
+
+    let start = Instant::now();
+    opacity.set(0.85);
+    handler.request_redraw_if_dirty(start);
+    let mid = start + Duration::from_millis(50);
+    let refresh = handler.animation_engine.refresh(mid);
+    let &(widget_id, property) = refresh
+        .scene_property_targets
+        .first()
+        .expect("opacity animation property target");
+    assert_eq!(property, PropertySlot::Opacity);
+    assert!(handler
+        .cached_scene
+        .as_mut()
+        .expect("cached scene")
+        .reactive_slot_bindings
+        .remove(&(widget_id, property))
+        .is_some());
+
+    handler.animation_epoch = handler.animation_epoch.wrapping_add(1);
+    crate::runtime::action_stats::reset();
+    assert!(
+        handler.patch_animation_refresh(&refresh, mid),
+        "a missing retained binding must fall back to the existing subtree patch"
+    );
+    assert!(crate::runtime::action_stats::snapshot()
+        .iter()
+        .all(|(action, _)| *action != "animation_reactive_property_slot_write"));
+    let cached = handler.cached_scene.as_ref().expect("fallback keeps cache");
+    assert!(cached.computed_valid);
+    assert_eq!(cached.animation_epoch, handler.animation_epoch);
+    let actual = shape_detail_fingerprints(&cached.computed);
+
+    let expected_invalidation = InvalidationSignal::new();
+    let expected_tree = WidgetTree::new(
+        filled_stack(Color::hexa(0x111827FF))
+            .size(dp(48.0), dp(48.0))
+            .opacity(0.60_f32),
+    );
+    let mut expected_handler = test_handler(Some(expected_tree), expected_invalidation);
+    assert_eq!(
+        actual,
+        shape_detail_fingerprints(expected_handler.computed_scene())
+    );
+}
+
+#[test]
+#[cfg(feature = "bench-support")]
+fn border_width_animation_topology_fallback_preserves_signal_dependency() {
+    let invalidation = InvalidationSignal::new();
+    let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+    let width = context.state(dp(14.0));
+    let animated_width = width
+        .signal()
+        .animated(Transition::linear(Duration::from_millis(100)));
+    let tree = WidgetTree::new(Stack::<TestVm>::new().size(dp(24.0), dp(24.0)).style(
+        move |style, _| {
+            style.surface.background = Some(Color::hexa(0x0F172AFF).into());
+            style.surface.border_width = Some(animated_width.clone().into());
+            style.surface.border_color = Some(Color::hexa(0x38BDF8FF).into());
+            style.surface.border_radius = Some(dp(10.0).into());
+        },
+    ));
+    let mut handler = test_handler(Some(tree), invalidation);
+    let _ = handler.computed_scene();
+    assert_eq!(
+        handler
+            .cached_scene
+            .as_ref()
+            .expect("initial scene")
+            .dependencies
+            .dependency_count(),
+        1
+    );
+
+    let start = Instant::now();
+    width.set(dp(0.0));
+    handler.request_redraw_if_dirty(start);
+    assert!(handler.animation_engine.has_active_animations());
+
+    let mid = start + Duration::from_millis(50);
+    let refresh = handler.animation_engine.refresh(mid);
+    assert_eq!(refresh.scene_property_targets.len(), 1);
+    assert_eq!(
+        refresh.scene_property_targets[0].1,
+        PropertySlot::BorderWidth
+    );
+    handler.animation_epoch = handler.animation_epoch.wrapping_add(1);
+    crate::runtime::action_stats::reset();
+    assert!(handler.patch_animation_refresh(&refresh, mid));
+    assert!(
+        crate::runtime::action_stats::snapshot()
+            .iter()
+            .all(|(action, _)| *action != "animation_reactive_property_slot_write"),
+        "the inset background appearing at 7dp must use the bounded topology fallback"
+    );
+    let cached = handler.cached_scene.as_ref().expect("fallback keeps cache");
+    assert_eq!(
+        cached.dependencies.dependency_count(),
+        1,
+        "bounded animation recollection must retain the BorderWidth Signal owner"
+    );
+
+    let expected_tree = WidgetTree::new(Stack::<TestVm>::new().size(dp(24.0), dp(24.0)).style(
+        |style, _| {
+            style.surface.background = Some(Color::hexa(0x0F172AFF).into());
+            style.surface.border_width = Some(dp(7.0).into());
+            style.surface.border_color = Some(Color::hexa(0x38BDF8FF).into());
+            style.surface.border_radius = Some(dp(10.0).into());
+        },
+    ));
+    let expected_invalidation = InvalidationSignal::new();
+    let mut expected_handler = test_handler(Some(expected_tree), expected_invalidation);
+    assert_eq!(
+        shape_detail_fingerprints(&cached.computed),
+        shape_detail_fingerprints(expected_handler.computed_scene())
+    );
+
+    let end = start + Duration::from_millis(100);
+    let refresh = handler.animation_engine.refresh(end);
+    handler.animation_epoch = handler.animation_epoch.wrapping_add(1);
+    assert!(handler.patch_animation_refresh(&refresh, end));
+    assert_eq!(
+        handler
+            .cached_scene
+            .as_ref()
+            .expect("settled fallback scene")
+            .dependencies
+            .dependency_count(),
+        1
+    );
+
+    width.set(dp(4.0));
+    let restart = end + Duration::from_millis(1);
+    handler.request_redraw_if_dirty(restart);
+    assert!(
+        handler.animation_engine.has_active_animations(),
+        "a post-fallback State change must still reach the retained Signal owner"
+    );
+}
+
+#[test]
+#[cfg(feature = "bench-support")]
+fn animation_refresh_batches_multiple_layout_slots_and_matches_static_scene() {
+    let invalidation = InvalidationSignal::new();
+    let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+    let first_width = context.state(dp(48.0));
+    let second_width = context.state(dp(36.0));
+    let transition = Transition::linear(Duration::from_millis(100));
+    let tree = WidgetTree::new(
+        Flex::<TestVm>::new(Axis::Vertical)
+            .size(dp(240.0), dp(80.0))
+            .child(
+                Flex::<TestVm>::new(Axis::Horizontal)
+                    .size(dp(200.0), dp(48.0))
+                    .gap(dp(8.0))
+                    .child(
+                        filled_stack(Color::hexa(0x111827FF))
+                            .width(first_width.signal().animated(transition))
+                            .height(dp(24.0)),
+                    )
+                    .child(
+                        filled_stack(Color::hexa(0x38BDF8FF))
+                            .width(second_width.signal().animated(transition))
+                            .height(dp(24.0)),
+                    ),
+            ),
+    );
+    let mut handler = test_handler(Some(tree), invalidation);
+    let _ = handler.computed_scene();
+
+    let start = Instant::now();
+    first_width.set(dp(72.0));
+    second_width.set(dp(60.0));
+    handler.request_redraw_if_dirty(start);
+    let mid = start + Duration::from_millis(50);
+    let refresh = handler.animation_engine.refresh(mid);
+    assert_eq!(refresh.layout_widget_ids.len(), 2);
+    assert_eq!(refresh.layout_property_targets.len(), 2);
+    assert!(!refresh.has_unscoped_layout_changes);
+
+    handler.animation_epoch = handler.animation_epoch.wrapping_add(1);
+    handler.layout_animation_epoch = handler.layout_animation_epoch.wrapping_add(1);
+    crate::runtime::action_stats::reset();
+    assert!(handler.patch_animation_refresh(&refresh, mid));
+    assert_eq!(
+        crate::runtime::action_stats::snapshot(),
+        vec![("animation_reactive_layout_slot_update", 1)]
+    );
+    let actual = shape_fingerprints(
+        &handler
+            .cached_scene
+            .as_ref()
+            .expect("batched layout slot update keeps cache")
+            .computed,
+    );
+
+    let expected_invalidation = InvalidationSignal::new();
+    let expected_tree = WidgetTree::new(
+        Flex::<TestVm>::new(Axis::Vertical)
+            .size(dp(240.0), dp(80.0))
+            .child(
+                Flex::<TestVm>::new(Axis::Horizontal)
+                    .size(dp(200.0), dp(48.0))
+                    .gap(dp(8.0))
+                    .child(
+                        filled_stack(Color::hexa(0x111827FF))
+                            .width(dp(60.0))
+                            .height(dp(24.0)),
+                    )
+                    .child(
+                        filled_stack(Color::hexa(0x38BDF8FF))
+                            .width(dp(48.0))
+                            .height(dp(24.0)),
+                    ),
+            ),
+    );
+    let mut expected_handler = test_handler(Some(expected_tree), expected_invalidation);
+    assert_eq!(
+        actual,
+        shape_fingerprints(expected_handler.computed_scene())
+    );
+}
+
+#[test]
+#[cfg(feature = "bench-support")]
+fn animation_layout_slot_whole_root_candidate_uses_full_recollect_fallback() {
+    let invalidation = InvalidationSignal::new();
+    let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+    let width = context.state(dp(48.0));
+    let tree = WidgetTree::new(
+        Flex::<TestVm>::new(Axis::Horizontal)
+            .size(dp(220.0), dp(80.0))
+            .child(
+                filled_stack(Color::hexa(0x111827FF))
+                    .width(
+                        width
+                            .signal()
+                            .animated(Transition::linear(Duration::from_millis(100))),
+                    )
+                    .height(dp(24.0)),
+            )
+            .child(filled_stack(Color::hexa(0x38BDF8FF)).size(dp(24.0), dp(24.0))),
+    );
+    let mut handler = test_handler(Some(tree), invalidation);
+    let before = shape_fingerprints(handler.computed_scene());
+    let (widget_id, _) = handler
+        .cached_scene
+        .as_ref()
+        .expect("cached scene")
+        .layout_slot_bindings
+        .keys()
+        .copied()
+        .find(|(_, property)| *property == PropertySlot::Width)
+        .expect("width layout slot binding");
+
+    let start = Instant::now();
+    width.set(dp(96.0));
+    let key = AnimationKey::Widget {
+        id: widget_id.raw(),
+        property: WidgetProperty::Width,
+    };
+    let _ = handler.animation_engine.resolve_dp(
+        key,
+        dp(96.0),
+        Some(Transition::linear(Duration::from_millis(100))),
+        start,
+    );
+    let mid = start + Duration::from_millis(50);
+    let refresh = handler.animation_engine.refresh(mid);
+    let &(target_widget_id, property) = refresh
+        .layout_property_targets
+        .first()
+        .expect("width animation layout target");
+    assert_eq!(target_widget_id, widget_id);
+    assert!(handler
+        .cached_scene
+        .as_ref()
+        .expect("cached scene")
+        .layout_slot_bindings
+        .contains_key(&(target_widget_id, property)));
+
+    handler.animation_epoch = handler.animation_epoch.wrapping_add(1);
+    handler.layout_animation_epoch = handler.layout_animation_epoch.wrapping_add(1);
+    crate::runtime::action_stats::reset();
+    assert!(
+        !handler.patch_animation_refresh(&refresh, mid),
+        "a whole-root scene candidate must use the cheaper full-recollect fallback"
+    );
+    assert!(crate::runtime::action_stats::snapshot()
+        .iter()
+        .all(|(action, _)| *action != "animation_reactive_layout_slot_update"));
+    assert_eq!(
+        before,
+        shape_fingerprints(
+            &handler
+                .cached_scene
+                .as_ref()
+                .expect("rejected root patch must preserve cache")
+                .computed
+        ),
+        "the fast-path precondition must fail before mutating retained layout or scene state"
+    );
+
+    handler.invalidate_computed_scene();
+    assert_eq!(
+        handler
+            .animation_engine
+            .resolve_dp(key, dp(96.0), None, mid),
+        dp(96.0)
+    );
+    let actual = shape_fingerprints(handler.computed_scene());
+
+    let expected_invalidation = InvalidationSignal::new();
+    let expected_tree = WidgetTree::new(
+        Flex::<TestVm>::new(Axis::Horizontal)
+            .size(dp(220.0), dp(80.0))
+            .child(
+                filled_stack(Color::hexa(0x111827FF))
+                    .width(dp(96.0))
+                    .height(dp(24.0)),
+            )
+            .child(filled_stack(Color::hexa(0x38BDF8FF)).size(dp(24.0), dp(24.0))),
+    );
+    let mut expected_handler = test_handler(Some(expected_tree), expected_invalidation);
+    assert_eq!(
+        actual,
+        shape_fingerprints(expected_handler.computed_scene())
+    );
+}
+
+#[test]
+#[cfg(feature = "bench-support")]
+fn animation_refresh_missing_layout_slot_binding_requests_full_recollect_fallback() {
+    let invalidation = InvalidationSignal::new();
+    let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+    let width = context.state(dp(48.0));
+    let tree = WidgetTree::new(
+        Flex::<TestVm>::new(Axis::Vertical)
+            .size(dp(220.0), dp(80.0))
+            .child(
+                Flex::<TestVm>::new(Axis::Horizontal)
+                    .size(dp(180.0), dp(48.0))
+                    .child(
+                        filled_stack(Color::hexa(0x111827FF))
+                            .width(
+                                width
+                                    .signal()
+                                    .animated(Transition::linear(Duration::from_millis(100))),
+                            )
+                            .height(dp(24.0)),
+                    )
+                    .child(filled_stack(Color::hexa(0x38BDF8FF)).size(dp(24.0), dp(24.0))),
+            ),
+    );
+    let mut handler = test_handler(Some(tree), invalidation);
+    let _ = handler.computed_scene();
+
+    let start = Instant::now();
+    width.set(dp(96.0));
+    handler.request_redraw_if_dirty(start);
+    let mid = start + Duration::from_millis(50);
+    let refresh = handler.animation_engine.refresh(mid);
+    let &(target_widget_id, property) = refresh
+        .layout_property_targets
+        .first()
+        .expect("width animation layout target");
+    assert_eq!(property, PropertySlot::Width);
+    assert!(handler
+        .cached_scene
+        .as_mut()
+        .expect("cached scene")
+        .layout_slot_bindings
+        .remove(&(target_widget_id, property))
+        .is_some());
+
+    handler.animation_epoch = handler.animation_epoch.wrapping_add(1);
+    handler.layout_animation_epoch = handler.layout_animation_epoch.wrapping_add(1);
+    crate::runtime::action_stats::reset();
+    assert!(
+        !handler.patch_animation_refresh(&refresh, mid),
+        "layout binding loss must ask drive_animations for a full recollect"
+    );
+    assert!(crate::runtime::action_stats::snapshot()
+        .iter()
+        .all(|(action, _)| *action != "animation_reactive_layout_slot_update"));
+
+    // Mirror the production caller's fallback, then settle the same key so the rebuilt scene has
+    // an exact, deterministic target for comparison rather than depending on wall-clock drift.
+    handler.invalidate_computed_scene();
+    let key = AnimationKey::Widget {
+        id: target_widget_id.raw(),
+        property: WidgetProperty::Width,
+    };
+    assert_eq!(
+        handler
+            .animation_engine
+            .resolve_dp(key, dp(96.0), None, mid),
+        dp(96.0)
+    );
+    let actual = shape_fingerprints(handler.computed_scene());
+
+    let expected_invalidation = InvalidationSignal::new();
+    let expected_tree = WidgetTree::new(
+        Flex::<TestVm>::new(Axis::Vertical)
+            .size(dp(220.0), dp(80.0))
+            .child(
+                Flex::<TestVm>::new(Axis::Horizontal)
+                    .size(dp(180.0), dp(48.0))
+                    .child(
+                        filled_stack(Color::hexa(0x111827FF))
+                            .width(dp(96.0))
+                            .height(dp(24.0)),
+                    )
+                    .child(filled_stack(Color::hexa(0x38BDF8FF)).size(dp(24.0), dp(24.0))),
+            ),
+    );
+    let mut expected_handler = test_handler(Some(expected_tree), expected_invalidation);
+    assert_eq!(
+        actual,
+        shape_fingerprints(expected_handler.computed_scene())
     );
 }
 

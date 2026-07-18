@@ -1,6 +1,53 @@
 use super::*;
 
 #[test]
+fn keyboard_focused_textarea_renders_theme_focus_ring() {
+    let theme = Theme::default();
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let textarea: Element<()> = Textarea::new("first line\nsecond line")
+        .size(dp(220.0), dp(72.0))
+        .into();
+    let textarea_id = textarea.id;
+    let tree = WidgetTree::new(textarea);
+    let mut states = WidgetStateMap::default();
+    states.set(
+        textarea_id,
+        crate::ui::theme::WidgetState {
+            focused: true,
+            focus_visible: true,
+            ..Default::default()
+        },
+    );
+
+    let rendered = tree.render_output_with_widget_state(
+        &font_manager,
+        &theme,
+        &media,
+        &mut AnimationEngine::default(),
+        false,
+        None,
+        None,
+        &states,
+        &HashMap::new(),
+        &HashMap::new(),
+        Rect::new(0.0, 0.0, 220.0, 72.0),
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+
+    assert!(rendered.primitives.overlay_shapes.iter().any(|shape| {
+        shape.color == theme.focus_ring.color
+            && shape.stroke_width == theme.focus_ring.width.get()
+            && shape.rect.width > dp(220.0)
+            && shape.rect.height > dp(72.0)
+    }));
+}
+
+#[test]
 fn textarea_uses_scroll_offset_when_unfocused() {
     let theme = Theme::default();
     let font_manager = FontManager::new(&FontCatalog::default());

@@ -1,9 +1,301 @@
 use super::select_state::HoverMoveOrTransition;
 use super::*;
+use crate::runtime::state::{
+    RetainedButtonHoverPatch, RetainedButtonPressedPatch, RetainedRowHoverPatch,
+};
 use crate::ui::widget::HitPath;
 use smallvec::SmallVec;
 
 impl<VM: 'static> BoundRuntimeHandler<VM> {
+    pub(in crate::runtime) fn is_simple_button_hover_root(
+        layout: &crate::ui::widget::ResolvedSceneLayout<VM>,
+        id: WidgetId,
+    ) -> bool {
+        let Some(widget) = layout.resolved_widget(id) else {
+            return false;
+        };
+        let crate::ui::widget::ResolvedWidgetKind::Button { disabled, .. } = &widget.kind else {
+            return false;
+        };
+        let interactions = &widget.interactions;
+        !disabled.resolve_untracked()
+            && widget.tooltip.is_none()
+            && widget.popover.is_none()
+            && widget.menu.is_none()
+            && widget.context_menu.is_none()
+            && widget.modal.is_none()
+            && widget.drawer.is_none()
+            && widget.tab_trigger.is_none()
+            && widget.list_item.is_none()
+            && widget.tree_root.is_none()
+            && widget.tree_node.is_none()
+            && widget.data_grid_root.is_none()
+            && widget.data_grid_cell.is_none()
+            && widget.data_grid_header.is_none()
+            && widget.data_grid_resize_handle.is_none()
+            && widget.splitter_handle.is_none()
+            && widget.carousel_auto_play.is_none()
+            && widget.focus.scope.is_none()
+            && interactions.on_double_click.is_none()
+            && interactions.on_focus.is_none()
+            && interactions.on_blur.is_none()
+            && interactions.on_mouse_enter.is_none()
+            && interactions.on_mouse_leave.is_none()
+            && interactions.on_mouse_move.is_none()
+            && interactions.on_file_drop.is_none()
+            && interactions.gesture.is_none()
+            && !widget.lifecycle_events.has_any()
+            && !widget.media_events.has_any()
+    }
+
+    pub(in crate::runtime) fn button_hover_runtime_is_idle(&self) -> bool {
+        self.pressed_widget.is_none() && self.button_visual_runtime_is_idle_ignoring_pressed()
+    }
+
+    pub(in crate::runtime) fn button_visual_runtime_is_idle_ignoring_pressed(&self) -> bool {
+        !self.animation_engine.has_active_animations()
+            && self.next_tooltip_wakeup_deadline.is_none()
+            && self.next_toast_wakeup_deadline.is_none()
+            && self.active_gesture.is_none()
+            && self.active_pinch.is_none()
+            && self.active_scrollbar_drag.is_none()
+            && self.active_touch_scroll.is_none()
+            && self.active_slider_drag.is_none()
+            && self.active_canvas_drag.is_none()
+            && self.active_tab_reorder.is_none()
+            && self.active_tree_drag.is_none()
+            && self.active_data_grid_column_resize.is_none()
+            && self.active_splitter_resize.is_none()
+            && self.active_data_grid_column_reorder.is_none()
+            && self.active_text_selection.is_none()
+            && self.pending_click.is_none()
+            && self.deferred_mouse_click.is_none()
+    }
+
+    pub(in crate::runtime) fn is_simple_button_pressed_root(
+        layout: &crate::ui::widget::ResolvedSceneLayout<VM>,
+        id: WidgetId,
+    ) -> bool {
+        Self::is_simple_button_hover_root(layout, id)
+            && layout
+                .resolved_widget(id)
+                .is_some_and(|widget| widget.interactions.on_click.is_none())
+    }
+
+    pub(in crate::runtime) fn hovered_simple_button(
+        &self,
+        layout: &crate::ui::widget::ResolvedSceneLayout<VM>,
+    ) -> Option<WidgetId> {
+        if !Self::button_hover_path_is_passive(&self.hovered_widgets) {
+            return None;
+        }
+        let mut button = None;
+        for hovered in &self.hovered_widgets {
+            let HoverTargetId::Widget(id) = hovered.target_id else {
+                continue;
+            };
+            if matches!(
+                layout.resolved_widget(id).map(|widget| &widget.kind),
+                Some(crate::ui::widget::ResolvedWidgetKind::Button { .. })
+            ) && button.replace(id).is_some()
+            {
+                return None;
+            }
+        }
+        button
+    }
+
+    pub(in crate::runtime) fn retained_button_pressed_patch_candidate(
+        &self,
+        source_pressed_widget: Option<WidgetId>,
+    ) -> Option<RetainedButtonPressedPatch> {
+        let next_pressed_widget = self.pressed_widget;
+        if source_pressed_widget == next_pressed_widget
+            || self.invalidation.revision() != self.last_invalidation_revision
+            || self.invalidation.root_rebuild_revision() != self.last_root_rebuild_revision
+            || !self.button_visual_runtime_is_idle_ignoring_pressed()
+        {
+            return None;
+        }
+        let button = source_pressed_widget.or(next_pressed_widget)?;
+        if source_pressed_widget.is_some_and(|id| id != button)
+            || next_pressed_widget.is_some_and(|id| id != button)
+        {
+            return None;
+        }
+        let cached = self.cached_scene.as_ref()?;
+        if !cached.computed_valid
+            || !cached.layout_valid
+            || cached.gpu_scroll_deferred
+            || cached.pressed_widget != source_pressed_widget
+            || cached.hover_epoch != self.hover_epoch
+            || cached.focused_widget != self.focused_widget_id()
+            || cached.focus_visible != self.focus_visible
+            || !cached.computed.is_simple_for_button_hover_recompose()
+            || !cached.lifecycle_states.is_empty()
+            || !cached.media_texture_bindings.is_empty()
+            || !self.media_event_states.is_empty()
+            || !self.external_portal_requests.is_empty()
+        {
+            return None;
+        }
+        let layout = cached.layout.as_ref()?;
+        if layout.contains_virtual()
+            || self.hovered_simple_button(layout) != Some(button)
+            || !Self::is_simple_button_pressed_root(layout, button)
+            || !cached
+                .scene_chunks
+                .get(&button)
+                .is_some_and(|chunk| chunk.is_simple_for_button_hover_recompose())
+            || !cached.visual_contexts.contains_key(&button)
+        {
+            return None;
+        }
+        Some(RetainedButtonPressedPatch {
+            button,
+            source_pressed_widget,
+            next_pressed_widget,
+            source_hover_epoch: self.hover_epoch,
+            source_invalidation_revision: self.invalidation.revision(),
+            source_root_rebuild_revision: self.invalidation.root_rebuild_revision(),
+        })
+    }
+
+    pub(in crate::runtime) fn button_hover_path_is_passive(widgets: &[HoveredWidget<VM>]) -> bool {
+        widgets.iter().all(|hovered| {
+            hovered.row_patch_kind.is_none()
+                && hovered.on_mouse_enter.is_none()
+                && hovered.on_mouse_leave.is_none()
+                && hovered.on_mouse_move.is_none()
+        })
+    }
+
+    pub(in crate::runtime) fn retained_button_hover_patch_candidate(
+        &self,
+        next_hovered: &[HoveredWidget<VM>],
+    ) -> Option<RetainedButtonHoverPatch> {
+        if self.invalidation.revision() != self.last_invalidation_revision
+            || self.invalidation.root_rebuild_revision() != self.last_root_rebuild_revision
+            || !self.button_hover_runtime_is_idle()
+        {
+            return None;
+        }
+        let cached = self.cached_scene.as_ref()?;
+        if !cached.computed_valid
+            || !cached.layout_valid
+            || cached.gpu_scroll_deferred
+            || cached.hover_epoch != self.hover_epoch
+            || !cached.computed.is_simple_for_button_hover_recompose()
+            || !cached.lifecycle_states.is_empty()
+            || !cached.media_texture_bindings.is_empty()
+            || !self.media_event_states.is_empty()
+        {
+            return None;
+        }
+        let layout = cached.layout.as_ref()?;
+        if layout.contains_virtual() {
+            return None;
+        }
+
+        if !Self::button_hover_path_is_passive(&self.hovered_widgets)
+            || !Self::button_hover_path_is_passive(next_hovered)
+        {
+            return None;
+        }
+
+        let mut prefix_len = 0usize;
+        while prefix_len < self.hovered_widgets.len()
+            && prefix_len < next_hovered.len()
+            && self.hovered_widgets[prefix_len].target_id == next_hovered[prefix_len].target_id
+        {
+            prefix_len += 1;
+        }
+        let button_from_suffix = |suffix: &[HoveredWidget<VM>]| match suffix {
+            [] => Some(None),
+            [hovered] => match hovered.target_id {
+                HoverTargetId::Widget(id) => Some(Some(id)),
+                _ => None,
+            },
+            _ => None,
+        };
+        let previous_button = button_from_suffix(&self.hovered_widgets[prefix_len..])?;
+        let next_button = button_from_suffix(&next_hovered[prefix_len..])?;
+        if previous_button == next_button || (previous_button.is_none() && next_button.is_none()) {
+            return None;
+        }
+        for id in [previous_button, next_button].into_iter().flatten() {
+            if !Self::is_simple_button_hover_root(layout, id)
+                || !cached
+                    .scene_chunks
+                    .get(&id)
+                    .is_some_and(|chunk| chunk.is_simple_for_button_hover_recompose())
+                || !cached.visual_contexts.contains_key(&id)
+            {
+                return None;
+            }
+        }
+
+        Some(RetainedButtonHoverPatch {
+            previous_button,
+            next_button,
+            source_hover_epoch: self.hover_epoch,
+            source_invalidation_revision: self.invalidation.revision(),
+            source_root_rebuild_revision: self.invalidation.root_rebuild_revision(),
+        })
+    }
+
+    pub(in crate::runtime) fn retained_row_hover_patch_candidate(
+        &self,
+        next_hovered: &[HoveredWidget<VM>],
+    ) -> Option<RetainedRowHoverPatch> {
+        if self.invalidation.revision() != self.last_invalidation_revision
+            || self.invalidation.root_rebuild_revision() != self.last_root_rebuild_revision
+            || self.animation_engine.has_active_animations()
+            || self.next_tooltip_wakeup_deadline.is_some()
+            || self.next_toast_wakeup_deadline.is_some()
+        {
+            return None;
+        }
+        let cached = self.cached_scene.as_ref()?;
+        if !cached.computed_valid || !cached.layout_valid || cached.hover_epoch != self.hover_epoch
+        {
+            return None;
+        }
+        let layout = cached.layout.as_ref()?;
+        let split_path = |widgets: &[HoveredWidget<VM>]| {
+            let mut row = None;
+            let mut remainder = SmallVec::<[HoverTargetId; 8]>::new();
+            for hovered in widgets {
+                match (hovered.target_id, hovered.row_patch_kind) {
+                    (HoverTargetId::Widget(id), Some(kind))
+                        if layout
+                            .resolved_widget(id)
+                            .and_then(|widget| widget.retained_hover_row_kind())
+                            == Some(kind) =>
+                    {
+                        if row.replace((id, kind)).is_some() {
+                            return None;
+                        }
+                    }
+                    (target, _) => remainder.push(target),
+                }
+            }
+            Some((row, remainder))
+        };
+        let (previous_row, previous_remainder) = split_path(&self.hovered_widgets)?;
+        let (next_row, next_remainder) = split_path(next_hovered)?;
+        if previous_remainder != next_remainder || previous_row == next_row {
+            return None;
+        }
+        Some(RetainedRowHoverPatch {
+            previous_row,
+            next_row,
+            source_hover_epoch: self.hover_epoch,
+            source_invalidation_revision: self.invalidation.revision(),
+            source_root_rebuild_revision: self.invalidation.root_rebuild_revision(),
+        })
+    }
+
     pub(in crate::runtime) fn hit_path(&mut self, _viewport: Rect) -> HitPath<VM> {
         let Some(point) = self.cursor_position else {
             return HitPath::new();
@@ -32,6 +324,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             .map(|interaction| match interaction {
                 HitInteraction::Disabled { id } => HoveredWidget {
                     target_id: HoverTargetId::Widget(id),
+                    row_patch_kind: None,
                     cursor_style: Some(crate::ui::widget::CursorStyle::NotAllowed),
                     on_mouse_enter: None,
                     on_mouse_leave: None,
@@ -41,6 +334,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     id, interactions, ..
                 } => HoveredWidget {
                     target_id: HoverTargetId::Widget(id),
+                    row_patch_kind: None,
                     cursor_style: interactions.cursor_style.map(|c| c.resolve()),
                     on_mouse_enter: interactions
                         .on_mouse_enter
@@ -54,6 +348,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     id, interactions, ..
                 } => HoveredWidget {
                     target_id: HoverTargetId::Widget(id),
+                    row_patch_kind: None,
                     cursor_style: interactions
                         .cursor_style
                         .map(|c| c.resolve())
@@ -84,19 +379,10 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 | HitInteraction::SelectTrigger {
                     id, interactions, ..
                 }
-                | HitInteraction::ListItem {
-                    id, interactions, ..
-                }
-                | HitInteraction::TreeNode {
-                    id, interactions, ..
-                }
                 | HitInteraction::TreeDisclosure {
                     id, interactions, ..
                 }
                 | HitInteraction::TreeCheckbox {
-                    id, interactions, ..
-                }
-                | HitInteraction::DataGridCell {
                     id, interactions, ..
                 }
                 | HitInteraction::DataGridHeader {
@@ -112,6 +398,54 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     id, interactions, ..
                 } => HoveredWidget {
                     target_id: HoverTargetId::Widget(id),
+                    row_patch_kind: None,
+                    cursor_style: interactions.cursor_style.map(|c| c.resolve()),
+                    on_mouse_enter: interactions
+                        .on_mouse_enter
+                        .map(HoverMoveOrTransition::into_transition),
+                    on_mouse_leave: interactions
+                        .on_mouse_leave
+                        .map(HoverMoveOrTransition::into_transition),
+                    on_mouse_move: interactions.on_mouse_move.map(HoverMoveHandler::Point),
+                },
+                HitInteraction::ListItem {
+                    id, interactions, ..
+                } => HoveredWidget {
+                    target_id: HoverTargetId::Widget(id),
+                    row_patch_kind: Some(crate::ui::widget::RetainedHoverRowKind::List),
+                    cursor_style: interactions.cursor_style.map(|c| c.resolve()),
+                    on_mouse_enter: interactions
+                        .on_mouse_enter
+                        .map(HoverMoveOrTransition::into_transition),
+                    on_mouse_leave: interactions
+                        .on_mouse_leave
+                        .map(HoverMoveOrTransition::into_transition),
+                    on_mouse_move: interactions.on_mouse_move.map(HoverMoveHandler::Point),
+                },
+                HitInteraction::TreeNode {
+                    id, interactions, ..
+                } => HoveredWidget {
+                    target_id: HoverTargetId::Widget(id),
+                    row_patch_kind: Some(crate::ui::widget::RetainedHoverRowKind::Tree),
+                    cursor_style: interactions.cursor_style.map(|c| c.resolve()),
+                    on_mouse_enter: interactions
+                        .on_mouse_enter
+                        .map(HoverMoveOrTransition::into_transition),
+                    on_mouse_leave: interactions
+                        .on_mouse_leave
+                        .map(HoverMoveOrTransition::into_transition),
+                    on_mouse_move: interactions.on_mouse_move.map(HoverMoveHandler::Point),
+                },
+                HitInteraction::DataGridCell {
+                    state,
+                    interactions,
+                    ..
+                } => HoveredWidget {
+                    // All cells in a row deliberately collapse to one hover
+                    // target. This keeps the visual state continuous when the
+                    // pointer crosses pinned/unpinned column boundaries.
+                    target_id: HoverTargetId::Widget(state.row_id),
+                    row_patch_kind: Some(crate::ui::widget::RetainedHoverRowKind::DataGrid),
                     cursor_style: interactions.cursor_style.map(|c| c.resolve()),
                     on_mouse_enter: interactions
                         .on_mouse_enter
@@ -122,15 +456,16 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     on_mouse_move: interactions.on_mouse_move.map(HoverMoveHandler::Point),
                 },
                 HitInteraction::SelectOption {
-                    id,
+                    state_id,
                     option_index,
                     interactions,
                     ..
                 } => HoveredWidget {
                     target_id: HoverTargetId::SelectOption {
-                        widget_id: id,
+                        widget_id: state_id,
                         option_index,
                     },
+                    row_patch_kind: None,
                     cursor_style: interactions.cursor_style.map(|c| c.resolve()),
                     on_mouse_enter: interactions
                         .on_mouse_enter
@@ -162,6 +497,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                             widget_id: id,
                             item_id,
                         },
+                        row_patch_kind: None,
                         cursor_style,
                         on_mouse_enter: item_interactions.on_mouse_enter.map(|command| {
                             HoverTransitionHandler::Canvas(command, context.clone())
@@ -190,6 +526,13 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 .iter()
                 .zip(next_hovered.iter())
                 .any(|(previous, next)| previous.target_id != next.target_id);
+        self.button_pressed_patch_pending = None;
+        self.button_hover_patch_pending = None;
+        if hover_path_changed {
+            self.button_hover_patch_pending =
+                self.retained_button_hover_patch_candidate(&next_hovered);
+            self.row_hover_patch_pending = self.retained_row_hover_patch_candidate(&next_hovered);
+        }
         let mut prefix_len = 0usize;
         while prefix_len < self.hovered_widgets.len()
             && prefix_len < next_hovered.len()

@@ -56,6 +56,8 @@ pub(crate) use scene_debug::{
 pub use scene_query::*;
 pub(crate) use scene_render::*;
 pub(crate) use scene_text::*;
+#[cfg(feature = "bench-support")]
+pub(crate) use tessellation::with_legacy_canvas_shadow_opacity;
 use tessellation::*;
 pub use types::*;
 pub use widget::*;
@@ -276,6 +278,7 @@ fn tessellate_image(
             texture,
             media_key: None,
             media_layout: None,
+            mask_tint: None,
             frame: target_frame,
             quad: None,
             uv_rect: source_rect.and_then(|rect| source_rect_to_uv_rect(rect, intrinsic_size)),

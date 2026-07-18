@@ -5,6 +5,7 @@ use crate::ui::widget::{
     TreeSelectionChange, TreeSelectionMode, TreeSelectionTrigger, WidgetKey,
 };
 use smallvec::SmallVec;
+use std::collections::HashSet;
 
 struct TreeKeyboardTarget<VM> {
     id: WidgetId,
@@ -75,6 +76,18 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         toggle: bool,
     ) -> bool {
         self.dispatch_tree_selection(state, TreeSelectionTrigger::Keyboard, false, toggle)
+    }
+
+    pub(in crate::runtime) fn dispatch_tree_accessibility_click(
+        &mut self,
+        state: &TreeNodeState<VM>,
+    ) -> bool {
+        if state.disabled.resolve() {
+            return false;
+        }
+        self.remember_tree_focus(state);
+        let _ = self.dispatch_tree_selection(state, TreeSelectionTrigger::Click, false, false);
+        true
     }
 
     pub(in crate::runtime) fn dispatch_tree_disclosure_click(
@@ -159,9 +172,10 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         if state.disabled.resolve() || !state.has_children || state.expanded == expanded {
             return false;
         }
-        let mut expanded_keys = state.expanded_keys.resolve();
+        let snapshot = state.controlled_keys.expanded.resolve();
+        let mut expanded_keys = snapshot.ordered.to_vec();
         if expanded {
-            if !expanded_keys.iter().any(|key| key == &state.key) {
+            if !snapshot.membership.contains(&state.key) {
                 expanded_keys.push(state.key.clone());
             }
         } else {
@@ -194,15 +208,20 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         if affected_keys.is_empty() {
             return false;
         }
-        let current = state.checked_keys.resolve();
+        let current = state
+            .controlled_keys
+            .checked
+            .resolve_ref(|snapshot| snapshot.ordered.to_vec());
         let will_check = state.check_state != TreeCheckState::Checked;
+        let affected_membership = affected_keys.iter().cloned().collect::<HashSet<_>>();
         let mut checked_keys = current
             .into_iter()
-            .filter(|key| !affected_keys.iter().any(|candidate| candidate == key))
+            .filter(|key| !affected_membership.contains(key))
             .collect::<Vec<_>>();
         if will_check {
-            for key in affected_keys.iter() {
-                if !checked_keys.iter().any(|candidate| candidate == key) {
+            let mut output_membership = checked_keys.iter().cloned().collect::<HashSet<_>>();
+            for key in &affected_keys {
+                if output_membership.insert(key.clone()) {
                     checked_keys.push(key.clone());
                 }
             }
@@ -437,9 +456,6 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             return false;
         };
         let targets = self.tree_targets(current.state.tree_id);
-        if targets.len() <= 1 {
-            return false;
-        }
         let Some(current_position) = targets.iter().position(|target| target.id == current.id)
         else {
             return false;
@@ -449,10 +465,27 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         } else {
             (current_position + 1).min(targets.len() - 1)
         };
-        if next_position == current_position {
+        if next_position != current_position {
+            return self.focus_tree_target(targets[next_position].clone(), extend);
+        }
+
+        let scan_limit = self.tree_virtual_navigation_scan_limit(&current.state);
+        let Some((target_key, target_virtual_row)) =
+            next_tree_virtual_target(&current.state, step, scan_limit)
+        else {
+            return false;
+        };
+        if !self.materialize_tree_virtual_row(&current.state, target_virtual_row) {
             return false;
         }
-        self.focus_tree_target(targets[next_position].clone(), extend)
+        let target = self
+            .tree_targets(current.state.tree_id)
+            .into_iter()
+            .find(|target| target.state.key == target_key);
+        let Some(target) = target else {
+            return false;
+        };
+        self.focus_tree_target(target, extend)
     }
 
     pub(super) fn enter_focused_tree_root(&mut self, end: bool, extend: bool) -> bool {
@@ -460,56 +493,103 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             return false;
         };
         let targets = self.tree_targets(tree_id);
-        let Some(target) = (if end { targets.last() } else { targets.first() }) else {
+        let Some(seed) = targets.first() else {
             return false;
         };
-        self.focus_tree_target(target.clone(), extend)
+        let scan_limit = self.tree_virtual_navigation_scan_limit(&seed.state);
+        let Some((_, target_key, target_virtual_row)) =
+            tree_edge_virtual_target(&seed.state, end, scan_limit)
+        else {
+            return true;
+        };
+        self.focus_tree_logical_target(&seed.state, target_key, target_virtual_row, extend)
     }
 
     pub(super) fn move_focused_tree_node_to_edge(&mut self, end: bool, extend: bool) -> bool {
         let Some(current) = self.focused_tree_target() else {
             return false;
         };
-        let targets = self.tree_targets(current.state.tree_id);
-        let Some(target) = (if end { targets.last() } else { targets.first() }) else {
-            return false;
+        let scan_limit = self.tree_virtual_navigation_scan_limit(&current.state);
+        let Some((_, target_key, target_virtual_row)) =
+            tree_edge_virtual_target(&current.state, end, scan_limit)
+        else {
+            return true;
         };
-        if target.id == current.id {
+        if target_key == current.state.key {
             return false;
         }
-        self.focus_tree_target(target.clone(), extend)
+        self.focus_tree_logical_target(&current.state, target_key, target_virtual_row, extend)
     }
 
     pub(super) fn page_focused_tree_node(&mut self, direction: i32, extend: bool) -> bool {
         let Some(current) = self.focused_tree_target() else {
             return false;
         };
-        let targets = self.tree_targets(current.state.tree_id);
-        if targets.len() <= 1 {
+        if direction == 0 || current.state.visible_keys.is_empty() {
             return false;
         }
-        let Some(current_position) = targets.iter().position(|target| target.id == current.id)
-        else {
+        let Some(region) = self.scroll_region_for_tree(current.state.tree_id) else {
             return false;
         };
-        let page = self
-            .scroll_region_for_tree(current.state.tree_id)
-            .map(|region| {
-                let row_extent = row_extent_for_tree_state(&current.state);
-                (region.content_viewport.height / row_extent)
-                    .floor()
-                    .max(1.0) as usize
-            })
-            .unwrap_or(10);
-        let next_position = if direction < 0 {
-            current_position.saturating_sub(page)
+        let fallback_extent = row_extent_for_tree_state(&current.state);
+        let spacing = current.state.item_spacing.max(Dp::ZERO);
+        let (current_top, _) = self.tree_virtual_row_bounds(
+            &current.state,
+            current.state.row_index,
+            fallback_extent,
+            spacing,
+        );
+        let target_offset = if direction < 0 {
+            (current_top - region.content_viewport.height).max(Dp::ZERO)
         } else {
-            (current_position + page).min(targets.len() - 1)
+            current_top + region.content_viewport.height
         };
-        if next_position == current_position {
+        let max_virtual_row = current.state.visible_keys.len() - 1;
+        let mut target_virtual_row = self
+            .virtual_states
+            .get(&region.id)
+            .map(|cache| {
+                cache.item_index_at_main_offset(
+                    target_offset,
+                    fallback_extent,
+                    spacing,
+                    max_virtual_row,
+                )
+            })
+            .unwrap_or_else(|| {
+                let step = fallback_extent + spacing;
+                if step <= Dp::ZERO {
+                    0
+                } else {
+                    ((target_offset / step).floor() as usize).min(max_virtual_row)
+                }
+            });
+        if direction > 0 {
+            let (candidate_top, _) = self.tree_virtual_row_bounds(
+                &current.state,
+                target_virtual_row,
+                fallback_extent,
+                spacing,
+            );
+            if candidate_top + Dp::new(0.01) < target_offset {
+                target_virtual_row = target_virtual_row.saturating_add(1).min(max_virtual_row);
+            }
+        }
+        let scan_limit = self.tree_virtual_navigation_scan_limit(&current.state);
+        let Some((target_index, target_key, target_virtual_row)) =
+            tree_page_virtual_target(&current.state, target_virtual_row, direction, scan_limit)
+        else {
+            return if direction < 0 {
+                current.state.row_index > 0
+            } else {
+                current.state.row_index + 1 < current.state.visible_keys.len()
+            };
+        };
+        if target_index == current.state.row_index {
             return false;
         }
-        self.focus_tree_target(targets[next_position].clone(), extend)
+        let _ = self.materialize_tree_virtual_page(&current.state, direction);
+        self.focus_tree_logical_target(&current.state, target_key, target_virtual_row, extend)
     }
 
     pub(super) fn collapse_or_focus_parent_tree_node(&mut self) -> bool {
@@ -608,8 +688,8 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         let current = self.effective_scroll_offset(region.id, region.scroll_offset);
         let row_extent = row_extent_for_tree_state(state);
         let spacing = state.item_spacing.max(Dp::ZERO);
-        let row_top = (row_extent + spacing) * state.row_index as f32;
-        let row_bottom = row_top + row_extent;
+        let (row_top, row_bottom) =
+            self.tree_virtual_row_bounds(state, state.row_index, row_extent, spacing);
         let viewport_top = current.y;
         let viewport_bottom = current.y + region.content_viewport.height;
         let max = region.max_offset();
@@ -626,6 +706,107 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         }
         self.set_smooth_scroll_target(region.id, Point::new(current.x, next_y));
         true
+    }
+
+    fn tree_virtual_navigation_scan_limit(&mut self, state: &TreeNodeState<VM>) -> usize {
+        self.scroll_region_for_tree(state.tree_id)
+            .map(|region| {
+                (region.content_viewport.height / row_extent_for_tree_state(state))
+                    .ceil()
+                    .max(1.0) as usize
+                    + 4
+            })
+            .unwrap_or(16)
+    }
+
+    fn materialize_tree_virtual_row(
+        &mut self,
+        state: &TreeNodeState<VM>,
+        virtual_row_index: usize,
+    ) -> bool {
+        let Some(region) = self.scroll_region_for_tree(state.tree_id) else {
+            return false;
+        };
+        let current = self.effective_scroll_offset(region.id, region.scroll_offset);
+        let fallback_extent = row_extent_for_tree_state(state);
+        let spacing = state.item_spacing.max(Dp::ZERO);
+        let (row_top, row_bottom) =
+            self.tree_virtual_row_bounds(state, virtual_row_index, fallback_extent, spacing);
+        let viewport_bottom = current.y + region.content_viewport.height;
+        let next_y = if row_top < current.y {
+            row_top
+        } else if row_bottom > viewport_bottom {
+            row_bottom - region.content_viewport.height
+        } else {
+            current.y
+        }
+        .clamp(Dp::ZERO, region.max_offset().y);
+        if (next_y - current.y).abs() <= 0.01 {
+            return false;
+        }
+        self.cancel_scroll_motion(region.id);
+        self.set_scroll_offset(region.id, Point::new(current.x, next_y));
+        let _ = self.computed_scene();
+        true
+    }
+
+    fn tree_virtual_row_bounds(
+        &self,
+        state: &TreeNodeState<VM>,
+        virtual_row_index: usize,
+        fallback_extent: Dp,
+        spacing: Dp,
+    ) -> (Dp, Dp) {
+        self.virtual_states
+            .get(&state.tree_id)
+            .map(|cache| cache.item_main_bounds(virtual_row_index, fallback_extent, spacing))
+            .unwrap_or_else(|| {
+                let top = (fallback_extent + spacing) * virtual_row_index as f32;
+                (top, top + fallback_extent)
+            })
+    }
+
+    fn materialize_tree_virtual_page(&mut self, state: &TreeNodeState<VM>, direction: i32) -> bool {
+        let Some(region) = self.scroll_region_for_tree(state.tree_id) else {
+            return false;
+        };
+        let current = self.effective_scroll_offset(region.id, region.scroll_offset);
+        let delta = region.content_viewport.height * direction.signum() as f32;
+        let next_y = (current.y + delta).clamp(Dp::ZERO, region.max_offset().y);
+        if (next_y - current.y).abs() <= 0.01 {
+            return false;
+        }
+        self.cancel_scroll_motion(region.id);
+        self.set_scroll_offset(region.id, Point::new(current.x, next_y));
+        let _ = self.computed_scene();
+        true
+    }
+
+    fn focus_tree_logical_target(
+        &mut self,
+        state: &TreeNodeState<VM>,
+        target_key: WidgetKey,
+        target_virtual_row: usize,
+        extend: bool,
+    ) -> bool {
+        if let Some(target) = self
+            .tree_targets(state.tree_id)
+            .into_iter()
+            .find(|target| target.state.key == target_key)
+        {
+            return self.focus_tree_target(target, extend);
+        }
+        if !self.materialize_tree_virtual_row(state, target_virtual_row) {
+            return false;
+        }
+        let target = self
+            .tree_targets(state.tree_id)
+            .into_iter()
+            .find(|target| target.state.key == target_key);
+        let Some(target) = target else {
+            return false;
+        };
+        self.focus_tree_target(target, extend)
     }
 
     fn tree_pointer_hits_disclosure(
@@ -682,6 +863,94 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
     }
 }
 
+fn next_tree_virtual_target<VM>(
+    state: &TreeNodeState<VM>,
+    step: i32,
+    scan_limit: usize,
+) -> Option<(WidgetKey, usize)> {
+    if step == 0 {
+        return None;
+    }
+    let mut index = state.row_index;
+    for _ in 0..scan_limit {
+        index = if step < 0 {
+            index.checked_sub(1)?
+        } else {
+            index.checked_add(1)?
+        };
+        let key = state.visible_keys.get(index)?;
+        if !state
+            .visible_disabled
+            .get(index)
+            .map(|disabled| disabled.resolve())
+            .unwrap_or(false)
+        {
+            return Some((key.clone(), index));
+        }
+    }
+    None
+}
+
+fn tree_edge_virtual_target<VM>(
+    state: &TreeNodeState<VM>,
+    end: bool,
+    scan_limit: usize,
+) -> Option<(usize, WidgetKey, usize)> {
+    let len = state.visible_keys.len();
+    for offset in 0..scan_limit.min(len) {
+        let index = if end { len - 1 - offset } else { offset };
+        if tree_node_disabled(state, index) {
+            continue;
+        }
+        return Some((index, state.visible_keys.get(index)?.clone(), index));
+    }
+    None
+}
+
+fn tree_page_virtual_target<VM>(
+    state: &TreeNodeState<VM>,
+    target_virtual_row: usize,
+    direction: i32,
+    scan_limit: usize,
+) -> Option<(usize, WidgetKey, usize)> {
+    let len = state.visible_keys.len();
+    if len == 0 || direction == 0 {
+        return None;
+    }
+    let mut index = if direction < 0 {
+        target_virtual_row.min(state.row_index.saturating_sub(1))
+    } else {
+        target_virtual_row
+            .min(len - 1)
+            .max(state.row_index.saturating_add(1))
+    };
+    for _ in 0..scan_limit {
+        if !tree_node_disabled(state, index) {
+            return Some((index, state.visible_keys.get(index)?.clone(), index));
+        }
+        index = if direction < 0 {
+            match index.checked_sub(1) {
+                Some(index) => index,
+                None => break,
+            }
+        } else {
+            match index.checked_add(1).filter(|index| *index < len) {
+                Some(index) => index,
+                None => break,
+            }
+        };
+    }
+    None
+}
+
+fn tree_node_disabled<VM>(state: &TreeNodeState<VM>, index: usize) -> bool {
+    state
+        .visible_disabled
+        .get(index)
+        .map(|disabled| disabled.resolve())
+        .unwrap_or(false)
+}
+
 fn next_tree_selected_keys<VM>(
     state: &TreeNodeState<VM>,
     anchor_key: Option<&WidgetKey>,
@@ -689,14 +958,20 @@ fn next_tree_selected_keys<VM>(
     toggle: bool,
 ) -> Vec<WidgetKey> {
     match state.selection_mode {
-        TreeSelectionMode::None => state.selected_keys.resolve(),
+        TreeSelectionMode::None => state
+            .selection
+            .selected_keys
+            .resolve_ref(|keys| keys.to_vec()),
         TreeSelectionMode::Single => vec![state.key.clone()],
         TreeSelectionMode::Multiple if extend => {
             let anchor = anchor_key.unwrap_or(&state.key);
             merge_tree_selected_range(state, tree_range_keys(state, anchor, &state.key))
         }
         TreeSelectionMode::Multiple if toggle => {
-            let mut keys = state.selected_keys.resolve();
+            let mut keys = state
+                .selection
+                .selected_keys
+                .resolve_ref(|keys| keys.to_vec());
             if let Some(index) = keys.iter().position(|key| key == &state.key) {
                 keys.remove(index);
             } else {
@@ -728,7 +1003,12 @@ fn tree_range_keys<VM>(
         .skip(start)
         .take(end - start + 1)
         .filter_map(|(index, key)| {
-            (!state.visible_disabled.get(index).copied().unwrap_or(false)).then(|| key.clone())
+            (!state
+                .visible_disabled
+                .get(index)
+                .map(|disabled| disabled.resolve())
+                .unwrap_or(false))
+            .then(|| key.clone())
         })
         .collect()
 }
@@ -737,16 +1017,12 @@ fn merge_tree_selected_range<VM>(
     state: &TreeNodeState<VM>,
     range: Vec<WidgetKey>,
 ) -> Vec<WidgetKey> {
-    let mut selected = state.selected_keys.resolve();
-    for key in range {
-        if !selected.iter().any(|selected_key| selected_key == &key) {
-            selected.push(key);
-        }
-    }
+    let selected = state.selection.selected_key_membership.resolve();
+    let added = range.into_iter().collect::<HashSet<_>>();
     state
         .visible_keys
         .iter()
-        .filter(|key| selected.iter().any(|selected_key| selected_key == *key))
+        .filter(|key| selected.contains(*key) || added.contains(*key))
         .cloned()
         .collect()
 }

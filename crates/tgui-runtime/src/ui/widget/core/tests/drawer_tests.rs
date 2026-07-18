@@ -1,8 +1,11 @@
 use super::*;
+use std::time::Duration;
+
+use crate::animation::{AnimationKey, WidgetProperty};
 use crate::ui::layout::Value;
 use crate::ui::theme::Density;
 use crate::ui::widget::{
-    DrawerHost, DrawerMode, DrawerStyle, Flex, ResolvedElement, ResolvedSceneLayout,
+    ComputedScene, DrawerHost, DrawerMode, DrawerStyle, Flex, ResolvedElement, ResolvedSceneLayout,
 };
 
 fn resolved_drawer_panel<'a>(
@@ -20,6 +23,48 @@ fn resolved_drawer_panel<'a>(
             DrawerPlacement::Right | DrawerPlacement::Bottom => &children[1],
         },
     }
+}
+
+fn drawer_scene_at(
+    tree: &WidgetTree<()>,
+    theme: &Theme,
+    font_manager: &FontManager,
+    media: &MediaManager,
+    animations: &mut AnimationEngine,
+    reduced_motion: bool,
+    viewport: Rect,
+    now: Instant,
+) -> ComputedScene<()> {
+    tree.compute_scene_with_units_and_widget_state_at(
+        font_manager,
+        theme,
+        media,
+        UnitContext::default(),
+        animations,
+        reduced_motion,
+        None,
+        None,
+        &WidgetStateMap::default(),
+        &HashMap::new(),
+        &HashMap::new(),
+        viewport,
+        None,
+        None,
+        None,
+        None,
+        false,
+        now,
+    )
+}
+
+fn shape_rect_with_color(scene: &ComputedScene<()>, color: Color) -> Rect {
+    scene
+        .scene
+        .shapes
+        .iter()
+        .find(|shape| shape.color == color)
+        .unwrap_or_else(|| panic!("missing drawer panel color {color:?}"))
+        .rect
 }
 
 #[test]
@@ -204,11 +249,14 @@ fn drawer_overlay_and_push_runtime_geometry_tracks_all_placements() {
                 }
                 .expect("overlay drawer should keep its animated edge inset")
                 .resolve();
+                assert_eq!(inset, crate::ui::layout::Length::Px(Dp::ZERO));
                 let expected = match placement {
-                    DrawerPlacement::Left | DrawerPlacement::Right => dp(-260.0),
-                    DrawerPlacement::Top | DrawerPlacement::Bottom => dp(-200.0),
+                    DrawerPlacement::Left => Point::new(dp(-260.0), Dp::ZERO),
+                    DrawerPlacement::Right => Point::new(dp(260.0), Dp::ZERO),
+                    DrawerPlacement::Top => Point::new(Dp::ZERO, dp(-200.0)),
+                    DrawerPlacement::Bottom => Point::new(Dp::ZERO, dp(200.0)),
                 };
-                assert_eq!(inset, crate::ui::layout::Length::Px(expected));
+                assert_eq!(panel.visual.offset.resolve(), expected);
             } else {
                 let extent = match placement {
                     DrawerPlacement::Left | DrawerPlacement::Right => panel.layout.width.as_ref(),
@@ -220,6 +268,232 @@ fn drawer_overlay_and_push_runtime_geometry_tracks_all_placements() {
             }
         }
     }
+}
+
+#[test]
+fn overlay_drawer_motion_is_scene_only_theme_timed_and_reduced_motion_safe() {
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let viewport = Rect::new(0.0, 0.0, 640.0, 420.0);
+    let panel_color = Color::rgba(17, 123, 201, 255);
+    let context = test_context();
+    let open = context.state(false);
+    let inside: Element<()> = crate::ui::widget::Button::new("inside").into();
+    let inside_id = inside.id;
+    let drawer: Element<()> = Drawer::new(open.signal())
+        .placement(DrawerPlacement::Left)
+        .content(inside)
+        .style(move |style, _| {
+            style.width = dp(200.0);
+            style.background = Value::Static(panel_color);
+            style.border = Value::Static(Color::TRANSPARENT);
+            style.border_width = Value::Static(Dp::ZERO);
+        })
+        .into();
+    let panel_id = Drawer::_panel_id_of(&drawer).expect("drawer panel id");
+    let tree: WidgetTree<()> = WidgetTree::new(
+        Stack::<()>::new()
+            .size(viewport.width, viewport.height)
+            .child(drawer),
+    );
+    let mut theme = Theme::light();
+    theme.motion.slow_ms = 240;
+    let start = Instant::now();
+    let mut animations = AnimationEngine::default();
+
+    let _closed = drawer_scene_at(
+        &tree,
+        &theme,
+        &font_manager,
+        &media,
+        &mut animations,
+        false,
+        viewport,
+        start,
+    );
+    open.set(true);
+    let animation_start = start + Duration::from_millis(1);
+    let _opening_start = drawer_scene_at(
+        &tree,
+        &theme,
+        &font_manager,
+        &media,
+        &mut animations,
+        false,
+        viewport,
+        animation_start,
+    );
+    let offset_key = AnimationKey::Widget {
+        id: panel_id.raw(),
+        property: WidgetProperty::Offset,
+    };
+    assert!(animations.contains_key(offset_key));
+
+    let mid = animation_start + Duration::from_millis(120);
+    let refresh = animations.refresh(mid);
+    assert!(refresh.changed);
+    assert!(
+        !refresh.layout_changed,
+        "overlay drawer translation must not force layout on every animation frame"
+    );
+    assert!(refresh.scene_widget_ids.contains(&panel_id.raw()));
+    let opening_mid = drawer_scene_at(
+        &tree,
+        &theme,
+        &font_manager,
+        &media,
+        &mut animations,
+        false,
+        viewport,
+        mid,
+    );
+    let mid_rect = shape_rect_with_color(&opening_mid, panel_color);
+    assert!(mid_rect.x > dp(-200.0) && mid_rect.x < Dp::ZERO);
+
+    let almost_done = animation_start + Duration::from_millis(239);
+    let _almost_done = drawer_scene_at(
+        &tree,
+        &theme,
+        &font_manager,
+        &media,
+        &mut animations,
+        false,
+        viewport,
+        almost_done,
+    );
+    assert!(animations.has_active_animations());
+    let settled = animation_start + Duration::from_millis(241);
+    let opened = drawer_scene_at(
+        &tree,
+        &theme,
+        &font_manager,
+        &media,
+        &mut animations,
+        false,
+        viewport,
+        settled,
+    );
+    assert_eq!(shape_rect_with_color(&opened, panel_color).x, Dp::ZERO);
+    assert!(!animations.has_active_animations());
+
+    open.set(false);
+    let close_start = settled + Duration::from_millis(1);
+    let closing = drawer_scene_at(
+        &tree,
+        &theme,
+        &font_manager,
+        &media,
+        &mut animations,
+        false,
+        viewport,
+        close_start,
+    );
+    assert!(closing.hit_regions.iter().all(|hit| {
+        !matches!(hit.interaction, HitInteraction::Widget { id, .. } if id == inside_id)
+    }));
+    assert!(animations.has_active_animations());
+
+    let reduced = drawer_scene_at(
+        &tree,
+        &theme,
+        &font_manager,
+        &media,
+        &mut animations,
+        true,
+        viewport,
+        close_start + Duration::from_millis(1),
+    );
+    assert_eq!(
+        shape_rect_with_color(&reduced, panel_color).x,
+        dp(-200.0),
+        "reduced motion should land the closing drawer off-screen immediately"
+    );
+    assert!(!animations.has_active_animations());
+}
+
+#[test]
+fn overlay_drawer_position_is_identical_at_120_and_144_hz() {
+    fn sampled_x(frame_interval: Duration) -> Dp {
+        let font_manager = FontManager::new(&FontCatalog::default());
+        let media = test_media();
+        let viewport = Rect::new(0.0, 0.0, 640.0, 420.0);
+        let panel_color = Color::rgba(31, 149, 91, 255);
+        let context = test_context();
+        let open = context.state(false);
+        let tree: WidgetTree<()> = WidgetTree::new(
+            Stack::<()>::new()
+                .size(viewport.width, viewport.height)
+                .child(
+                    Drawer::new(open.signal())
+                        .placement(DrawerPlacement::Left)
+                        .style(move |style, _| {
+                            style.width = dp(200.0);
+                            style.background = Value::Static(panel_color);
+                            style.border = Value::Static(Color::TRANSPARENT);
+                            style.border_width = Value::Static(Dp::ZERO);
+                        }),
+                ),
+        );
+        let mut theme = Theme::light();
+        theme.motion.slow_ms = 240;
+        let start = Instant::now();
+        let animation_start = start + Duration::from_millis(1);
+        let target_elapsed = Duration::from_millis(120);
+        let mut animations = AnimationEngine::default();
+        let _ = drawer_scene_at(
+            &tree,
+            &theme,
+            &font_manager,
+            &media,
+            &mut animations,
+            false,
+            viewport,
+            start,
+        );
+        open.set(true);
+        let _ = drawer_scene_at(
+            &tree,
+            &theme,
+            &font_manager,
+            &media,
+            &mut animations,
+            false,
+            viewport,
+            animation_start,
+        );
+        let mut elapsed = frame_interval;
+        while elapsed < target_elapsed {
+            let _ = drawer_scene_at(
+                &tree,
+                &theme,
+                &font_manager,
+                &media,
+                &mut animations,
+                false,
+                viewport,
+                animation_start + elapsed,
+            );
+            elapsed += frame_interval;
+        }
+        let sampled = drawer_scene_at(
+            &tree,
+            &theme,
+            &font_manager,
+            &media,
+            &mut animations,
+            false,
+            viewport,
+            animation_start + target_elapsed,
+        );
+        shape_rect_with_color(&sampled, panel_color).x
+    }
+
+    let at_120_hz = sampled_x(Duration::from_secs_f64(1.0 / 120.0));
+    let at_144_hz = sampled_x(Duration::from_secs_f64(1.0 / 144.0));
+    assert!(
+        (at_120_hz - at_144_hz).abs() <= dp(0.001),
+        "same absolute timestamp must not depend on refresh cadence: {at_120_hz:?} vs {at_144_hz:?}"
+    );
 }
 
 #[test]

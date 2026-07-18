@@ -42,6 +42,54 @@ fn tooltip_emits_overlay_primitives_when_hovered() {
 }
 
 #[test]
+fn tooltip_default_flat_surface_avoids_backdrop_blur() {
+    let invalidation = InvalidationSignal::new();
+    let tree = WidgetTree::new(
+        Button::new("Save")
+            .size(dp(120.0), dp(40.0))
+            .tooltip(Tooltip::new("Flat hint").delay(Duration::ZERO)),
+    );
+    let mut handler = test_handler(Some(tree), invalidation);
+    handler.reduced_motion = true;
+    handler.cursor_position = Some(Point::new(dp(40.0), dp(20.0)));
+
+    let viewport = handler.viewport_rect();
+    assert!(handler.handle_hover(viewport));
+    handler.invalidate_computed_scene();
+    let computed = handler.computed_scene();
+    assert_eq!(computed.scene.backdrop_blurs.len(), 0);
+    assert_eq!(computed.scene.overlay_shapes.len(), 1);
+    assert_eq!(computed.scene.overlay_texts.len(), 1);
+    assert_eq!(computed.scene.overlay_meshes.len(), 1);
+}
+
+#[test]
+fn tooltip_shadow_override_retains_opt_in_backdrop_blur() {
+    let invalidation = InvalidationSignal::new();
+    let tree = WidgetTree::new(
+        Button::new("Save").size(dp(120.0), dp(40.0)).tooltip(
+            Tooltip::new("Glassy hint")
+                .delay(Duration::ZERO)
+                .style(|style, context| {
+                    style.shadow = context.theme.elevation.md.clone();
+                }),
+        ),
+    );
+    let mut handler = test_handler(Some(tree), invalidation);
+    handler.reduced_motion = true;
+    handler.cursor_position = Some(Point::new(dp(40.0), dp(20.0)));
+
+    let viewport = handler.viewport_rect();
+    assert!(handler.handle_hover(viewport));
+    handler.invalidate_computed_scene();
+    let computed = handler.computed_scene();
+    assert_eq!(computed.scene.backdrop_blurs.len(), 1);
+    assert_eq!(computed.scene.overlay_shapes.len(), 1);
+    assert_eq!(computed.scene.overlay_texts.len(), 1);
+    assert_eq!(computed.scene.overlay_meshes.len(), 1);
+}
+
+#[test]
 fn tooltip_rich_content_renders_nested_scene_and_pointer() {
     let invalidation = InvalidationSignal::new();
     let tree = WidgetTree::new(

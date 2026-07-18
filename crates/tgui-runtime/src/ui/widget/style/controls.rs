@@ -213,8 +213,11 @@ impl ButtonStyle {
                 ),
                 stateful_single(
                     palette.on_surface,
-                    palette.primary.lighten(hover_lighten()),
-                    palette.primary.darken(hover_lighten()),
+                    // The surface and border already carry the interaction cue.
+                    // Switching label text to the accent color drops below 4.5:1
+                    // against `surface_high` in both default themes.
+                    palette.on_surface,
+                    palette.on_surface,
                     palette.disabled_content,
                 ),
                 stateful_colors(
@@ -249,7 +252,9 @@ impl ButtonStyle {
             ButtonVariantKind::Danger => (
                 stateful_colors(
                     palette.error,
-                    palette.error.lighten(hover_lighten()),
+                    // Keep light-theme danger labels above WCAG AA. Lightening the
+                    // default red makes `on_error` fall below 4.5:1 on hover.
+                    palette.error.darken(surface_hover_lighten()),
                     palette.error.darken(hover_lighten()),
                     palette.disabled_surface,
                 ),
@@ -261,7 +266,7 @@ impl ButtonStyle {
                 ),
                 stateful_colors(
                     palette.error,
-                    palette.error.lighten(hover_lighten()),
+                    palette.error.darken(surface_hover_lighten()),
                     palette.error.darken(hover_lighten()),
                     palette.disabled_surface,
                 ),
@@ -387,17 +392,20 @@ impl RadioStyle {
         let metrics = control_density_metrics(theme, density);
         Self {
             surface: WidgetSurfaceStyle::default(),
-            background: stateful_colors(
-                palette.surface_low,
-                palette.surface_high,
-                palette.surface_low.darken(surface_hover_lighten()),
-                palette.disabled_surface,
+            // A quiet outline + dot is both clearer at small sizes and cheaper than stacking an
+            // opaque fill under every radio. Filled variants remain available through the public
+            // style fields; hover/press feedback stays on the animated outline.
+            background: stateful_single(
+                Color::TRANSPARENT,
+                Color::TRANSPARENT,
+                Color::TRANSPARENT,
+                Color::TRANSPARENT,
             ),
-            background_checked: stateful_colors(
-                palette.surface_low,
-                palette.surface_high,
-                palette.surface_low.darken(surface_hover_lighten()),
-                palette.disabled_surface,
+            background_checked: stateful_single(
+                Color::TRANSPARENT,
+                Color::TRANSPARENT,
+                Color::TRANSPARENT,
+                Color::TRANSPARENT,
             ),
             border: stateful_colors(
                 palette.outline_muted,
@@ -518,6 +526,9 @@ pub struct SelectStyle {
     pub focus_ring: Option<FocusRingOverride>,
     pub arrow: StateValue<Value<Color>>,
     pub menu_background: Value<Color>,
+    pub menu_border: Value<Color>,
+    pub menu_border_width: Value<Dp>,
+    pub menu_radius: Value<Dp>,
     pub option_background: StateValue<Value<Color>>,
     pub selected_option_background: Value<Color>,
     pub border_width: Value<Dp>,
@@ -568,10 +579,16 @@ impl SelectStyle {
             arrow: stateful_single(
                 palette.on_surface_muted,
                 palette.on_surface_muted,
-                palette.on_surface,
+                // The border already carries hover/press/open feedback. Keeping the built-in
+                // SVG chevron neutral avoids baking every intermediate transition tint into a
+                // new SVG source and raster texture during interaction.
+                palette.on_surface_muted,
                 palette.disabled_content,
             ),
             menu_background: Value::Static(theme.colors.surface_overlay),
+            menu_border: Value::Static(theme.colors.outline_muted),
+            menu_border_width: Value::Static(theme.border.thin),
+            menu_radius: Value::Static(theme.radius.xl),
             option_background: stateful_colors(
                 Color::TRANSPARENT,
                 palette.primary_container.with_alpha_factor(0.46),
@@ -626,7 +643,12 @@ impl TooltipStyle {
             offset: theme.spacing.sm,
             pointer_size: theme.spacing.sm,
             pointer_inset: theme.spacing.md,
-            shadow: theme.elevation.md.clone(),
+            // Tooltips already use an opaque, high-contrast surface. The text-tooltip renderer
+            // interprets this field as a backdrop blur, so a default elevation would add a scene
+            // copy plus horizontal, vertical, and composite GPU passes beneath pixels that the
+            // opaque bubble immediately covers. Keep the default surface flat and let glassy or
+            // elevated variants opt in through `Tooltip::style`.
+            shadow: theme.elevation.none.clone(),
             text_style: theme.typography.label.clone(),
         }
     }
@@ -677,7 +699,7 @@ impl PopoverStyle {
             border: menu.border,
             border_width: menu.border_width,
             radius: menu.radius,
-            shadow: theme.elevation.lg.clone(),
+            shadow: theme.elevation.md.clone(),
             padding: Insets::all(padding),
             min_width,
             max_width,
@@ -836,16 +858,28 @@ pub struct MenuBarStyle {
 
 impl MenuBarStyle {
     pub fn default_for_theme(theme: &Theme) -> Self {
+        Self::default_for_density(theme, theme.density)
+    }
+
+    pub(crate) fn default_for_density(theme: &Theme, density: Density) -> Self {
         let palette = palette_from_theme(theme);
+        let metrics = control_density_metrics(theme, density);
+        let (bar_padding_x, entry_gap) = match density {
+            Density::Compact => (theme.spacing.xs, theme.spacing.xxs),
+            Density::Comfortable => (theme.spacing.sm, theme.spacing.xs),
+            Density::Spacious => (theme.spacing.sm + theme.spacing.xs, theme.spacing.sm),
+        };
         Self {
             surface: WidgetSurfaceStyle::default(),
             background: Value::Static(theme.colors.surface_low),
             border: Value::Static(theme.colors.outline_muted),
             border_width: Value::Static(theme.border.none),
             radius: Value::Static(theme.radius.none),
-            padding: Insets::symmetric(theme.spacing.xs, theme.spacing.xxs),
-            height: theme.spacing.xl,
-            entry_padding_x: theme.spacing.sm + theme.spacing.xxs,
+            // Keep the entry's full control-height hit target. Vertical root padding would be
+            // counted on top of an equally tall child and either overflow or shrink that target.
+            padding: Insets::symmetric(bar_padding_x, Dp::ZERO),
+            height: metrics.control_height,
+            entry_padding_x: metrics.button_padding_x,
             entry_min_width: theme.spacing.xxl + theme.spacing.sm,
             entry_background: stateful_colors(
                 Color::TRANSPARENT,
@@ -860,7 +894,7 @@ impl MenuBarStyle {
                 palette.disabled_content,
             ),
             entry_active_background: Value::Static(theme.colors.surface_high),
-            entry_gap: theme.spacing.xxs,
+            entry_gap,
             text_style: theme.typography.label.clone(),
         }
     }
@@ -1040,11 +1074,7 @@ impl ModalStyle {
             max_height,
             margin: Insets::all(margin),
             padding: Insets::all(Dp::ZERO),
-            title_text_style: {
-                let mut style = theme.typography.label.clone();
-                style.size = crate::ui::unit::sp(18.0);
-                style
-            },
+            title_text_style: theme.typography.title.clone(),
             title_padding,
             content_padding,
             actions_gap,
@@ -1182,7 +1212,11 @@ impl ToastStyle {
                 style.weight = FontWeight::Medium;
                 style
             },
-            body_text_style: theme.typography.label.clone(),
+            body_text_style: {
+                let mut style = theme.typography.body_small.clone();
+                style.weight = FontWeight::Regular;
+                style
+            },
             icon_size,
             min_width,
             max_width,
@@ -1257,6 +1291,24 @@ mod tests {
     use crate::ui::theme::WidgetState;
     use crate::ui::unit::sp;
 
+    fn relative_luminance(color: Color) -> f32 {
+        let linear = |channel: u8| {
+            let channel = channel as f32 / 255.0;
+            if channel <= 0.04045 {
+                channel / 12.92
+            } else {
+                ((channel + 0.055) / 1.055).powf(2.4)
+            }
+        };
+        0.2126 * linear(color.r) + 0.7152 * linear(color.g) + 0.0722 * linear(color.b)
+    }
+
+    fn contrast_ratio(a: Color, b: Color) -> f32 {
+        let a = relative_luminance(a);
+        let b = relative_luminance(b);
+        (a.max(b) + 0.05) / (a.min(b) + 0.05)
+    }
+
     #[test]
     fn button_default_for_theme_uses_theme_tokens() {
         let mut theme = Theme::light();
@@ -1272,6 +1324,37 @@ mod tests {
         assert_eq!(style.padding_x, dp(12.0));
         assert_eq!(style.min_height, dp(40.0));
         assert_eq!(style.text_style.size, theme.typography.label.size);
+    }
+
+    #[test]
+    fn button_interaction_states_keep_wcag_aa_text_contrast() {
+        for theme in [Theme::light(), Theme::dark()] {
+            for variant in [
+                ButtonVariantKind::Primary,
+                ButtonVariantKind::Secondary,
+                ButtonVariantKind::Danger,
+            ] {
+                let style = ButtonStyle::default_for_theme(&theme, variant);
+                for state in [
+                    WidgetState::default(),
+                    WidgetState {
+                        hovered: true,
+                        ..WidgetState::default()
+                    },
+                    WidgetState {
+                        pressed: true,
+                        ..WidgetState::default()
+                    },
+                ] {
+                    let foreground = style.foreground.resolve(state).resolve();
+                    let background = style.background.resolve(state).resolve();
+                    assert!(
+                        contrast_ratio(foreground, background) >= 4.5,
+                        "{variant:?} foreground {foreground:?} on {background:?} misses WCAG AA"
+                    );
+                }
+            }
+        }
     }
 
     #[test]
@@ -1427,6 +1510,67 @@ mod tests {
     }
 
     #[test]
+    fn menu_bar_defaults_follow_control_density_without_vertical_root_padding() {
+        for mut theme in [Theme::light(), Theme::dark()] {
+            for (density, expected_height, expected_gap) in [
+                (Density::Compact, dp(32.0), theme.spacing.xxs),
+                (Density::Comfortable, dp(40.0), theme.spacing.xs),
+                (Density::Spacious, dp(48.0), theme.spacing.sm),
+            ] {
+                theme.density = density;
+                let metrics = control_density_metrics(&theme, density);
+                let style = MenuBarStyle::default_for_theme(&theme);
+
+                assert_eq!(style.height, expected_height);
+                assert_eq!(style.height, metrics.control_height);
+                assert_eq!(style.entry_padding_x, metrics.button_padding_x);
+                assert_eq!(style.padding.top, Dp::ZERO);
+                assert_eq!(style.padding.bottom, Dp::ZERO);
+                assert_eq!(style.entry_gap, expected_gap);
+                assert!(
+                    contrast_ratio(
+                        style.entry_foreground.normal.resolve(),
+                        style.background.resolve(),
+                    ) >= 4.5
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn modal_title_uses_the_theme_title_token_with_readable_line_height() {
+        for mut theme in [Theme::light(), Theme::dark()] {
+            for density in [Density::Compact, Density::Comfortable, Density::Spacious] {
+                theme.density = density;
+                let style = ModalStyle::default_for_theme(&theme);
+                assert_eq!(style.title_text_style, theme.typography.title);
+                assert!(style
+                    .title_text_style
+                    .line_height
+                    .is_some_and(|line_height| line_height > style.title_text_style.size));
+            }
+        }
+    }
+
+    #[test]
+    fn toast_typography_separates_title_and_body_using_theme_tokens() {
+        for mut theme in [Theme::light(), Theme::dark()] {
+            for density in [Density::Compact, Density::Comfortable, Density::Spacious] {
+                theme.density = density;
+                let style = ToastStyle::default_for_theme(&theme);
+                assert_eq!(style.title_text_style, theme.typography.label);
+                assert_eq!(style.title_text_style.weight, FontWeight::Medium);
+                assert_eq!(style.body_text_style, theme.typography.body_small);
+                assert_eq!(style.body_text_style.weight, FontWeight::Regular);
+                assert!(style.body_text_style.line_height > style.title_text_style.line_height);
+                assert!(
+                    contrast_ratio(style.foreground.resolve(), style.background.resolve()) >= 4.5
+                );
+            }
+        }
+    }
+
+    #[test]
     fn floating_surfaces_follow_theme_density() {
         let mut theme = Theme::light();
         let expected = [
@@ -1451,6 +1595,8 @@ mod tests {
             assert_eq!(popover.padding, Insets::all(popover_padding));
             assert_eq!(popover.radius, menu.radius);
             assert_eq!(popover.background, menu.background);
+            assert_eq!(popover.shadow, theme.elevation.md);
+            assert_eq!(popover.shadow, menu.shadow);
         }
     }
 
@@ -1511,11 +1657,11 @@ mod tests {
         );
         assert_eq!(
             radio.background.resolve(hovered).resolve(),
-            palette.surface_high
+            Color::TRANSPARENT
         );
         assert_eq!(
-            checkbox.background.resolve(pressed).resolve(),
-            radio.background.resolve(pressed).resolve()
+            radio.background.resolve(pressed).resolve(),
+            Color::TRANSPARENT
         );
         assert_eq!(
             checkbox.border.resolve(hovered).resolve(),

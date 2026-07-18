@@ -26,6 +26,14 @@ pub(crate) struct FocusCollectState {
     pub(crate) disabled_depth: usize,
 }
 
+#[derive(Clone, Debug)]
+pub(crate) struct PortalAccessibilityGeometryRecord {
+    pub(crate) resolved_path: smallvec::SmallVec<[usize; 4]>,
+    pub(crate) widget_id: WidgetId,
+    pub(crate) frame: Rect,
+    pub(crate) clip_rect: Option<Rect>,
+}
+
 pub(crate) struct CollectContext<'a, 'b> {
     pub(crate) taffy: &'a TaffyTree<MeasureContext>,
     pub(crate) font_manager: &'a FontManager,
@@ -57,6 +65,9 @@ pub(crate) struct CollectContext<'a, 'b> {
     pub(crate) animations: &'b mut AnimationEngine,
     pub(crate) reduced_motion: bool,
     pub(crate) now: Instant,
+    /// Per-window absolute frame cadence. Nested overlay and portal contexts
+    /// copy this value so their animation deadlines stay on the same phase.
+    pub(crate) frame_clock: crate::animation::FrameClockSnapshot,
     pub(crate) focus: FocusCollectState,
     /// runtime 维护：widget 进入 hover 的时间戳。emit_tooltip 据此判断 hover 是否已持续到 `delay`。
     pub(crate) tooltip_hover_started_at: &'a HashMap<WidgetId, Instant>,
@@ -70,6 +81,9 @@ pub(crate) struct CollectContext<'a, 'b> {
     pub(crate) gpu_scroll_enabled: bool,
     pub(crate) gpu_scroll_container: Option<WidgetId>,
     pub(crate) transform_stack: smallvec::SmallVec<[WidgetId; 2]>,
+    pub(crate) portal_accessibility_geometry:
+        Option<&'a mut Vec<PortalAccessibilityGeometryRecord>>,
+    pub(crate) portal_accessibility_path: smallvec::SmallVec<[usize; 4]>,
 }
 
 impl<'a, 'b> CollectContext<'a, 'b> {
@@ -158,13 +172,29 @@ pub(crate) enum ReactiveScenePropertyValue {
     ShapeFillColor {
         rect: Rect,
         color: Color,
+        /// The fallback surface hit contributed by an otherwise non-interactive Container.
+        ///
+        /// Reactive backgrounds retain a transparent shape so their draw topology stays fixed,
+        /// but the hit collector intentionally omits an `Occluder` while the complete surface is
+        /// transparent. A retained binding may therefore write this color only while the expected
+        /// occluder state remains unchanged. Non-Container fills leave the guard unset.
+        container_occluder: Option<bool>,
     },
     ShapeStrokeColor {
         rect: Rect,
         stroke_width: f32,
         color: Color,
     },
-    BackdropBlur(BackdropBlurPrimitive),
+    BackdropBlur {
+        primitive: BackdropBlurPrimitive,
+        /// The fallback surface hit contributed by an otherwise non-interactive Container.
+        ///
+        /// Reactive blur retains a zero-radius primitive so draw topology stays fixed, while the
+        /// hit collector only emits an `Occluder` for a positive blur (or another painted surface).
+        /// A retained binding may therefore update the primitive only while this expected state
+        /// remains unchanged. Non-Container blur leaves the guard unset.
+        container_occluder: Option<bool>,
+    },
     Brush(BrushPrimitive),
     BorderRadius {
         background: Option<(Rect, Color, f32)>,
@@ -176,9 +206,17 @@ pub(crate) enum ReactiveScenePropertyValue {
         border: Option<(Rect, Color, f32)>,
     },
     Opacity {
+        shadow: Option<(u64, Rect, f32)>,
         background: Option<(Rect, Color)>,
         border: Option<(Rect, f32, Color)>,
         text: Option<Color>,
+        /// The fallback surface hit contributed by an otherwise non-interactive Container.
+        ///
+        /// Reactive opacity retains transparent draw primitives at zero, but the hit collector
+        /// intentionally removes the Container `Occluder` when the complete surface becomes
+        /// transparent. A retained binding may therefore update opacity only while this expected
+        /// state remains unchanged. Non-Container opacity leaves the guard unset.
+        container_occluder: Option<bool>,
     },
     Offset {
         background: Option<(Rect, Color)>,
@@ -195,6 +233,12 @@ pub(crate) enum ReactiveScenePropertyValue {
             Option<Rect>,
             Option<ClipMask>,
         )>,
+        /// The fallback surface hit owned by an otherwise non-interactive Container.
+        ///
+        /// Offsetting changes this hit rectangle together with the retained paint primitives. A
+        /// semantic hit is deliberately not represented here and falls back to bounded subtree
+        /// recollection instead.
+        container_occluder: Option<(WidgetId, Rect, Option<Rect>)>,
     },
     Scale {
         background: Option<(Rect, Color, f32)>,
@@ -211,6 +255,12 @@ pub(crate) enum ReactiveScenePropertyValue {
             Option<Rect>,
             Option<ClipMask>,
         )>,
+        /// The fallback surface hit owned by an otherwise non-interactive Container.
+        ///
+        /// Scaling changes this hit rectangle together with the retained paint primitives. A
+        /// semantic hit is deliberately not represented here and falls back to bounded subtree
+        /// recollection instead.
+        container_occluder: Option<(WidgetId, Rect, Option<Rect>)>,
     },
     TextColor {
         color: Color,
@@ -225,10 +275,14 @@ pub(crate) enum ReactiveScenePropertyValue {
         corner_radius: f32,
         opacity: f32,
     },
+    TextureMaskTint {
+        color: Color,
+    },
     Texture {
         texture: Arc<TextureFrame>,
         media_key: Option<crate::media::MediaTextureKey>,
         media_layout: Option<crate::media::MediaTextureLayout>,
+        mask_tint: Option<Color>,
         frame: Rect,
         corner_radius: f32,
         opacity: f32,

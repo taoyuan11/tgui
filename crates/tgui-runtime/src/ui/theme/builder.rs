@@ -57,6 +57,15 @@ impl ThemeBuilder {
 
     pub fn primary(mut self, color: Color) -> Self {
         self.colors.primary = color;
+        // Focus and selection are the low-emphasis expressions of the accent color. Keeping the
+        // baked blue values after a caller changes `primary` makes an otherwise custom theme look
+        // inconsistent. Explicit `focus_ring(...)` still wins during `build`.
+        let (focus_alpha, selection_alpha) = match self.mode {
+            ResolvedThemeMode::Light => (0.75, 0.18),
+            ResolvedThemeMode::Dark => (0.65, 0.24),
+        };
+        self.colors.focus_ring = color.with_alpha_factor(focus_alpha);
+        self.colors.selection = color.with_alpha_factor(selection_alpha);
         self
     }
 
@@ -125,5 +134,41 @@ impl ThemeBuilder {
         theme.components = self.components;
         theme.motion = self.motion;
         theme
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ui::unit::dp;
+
+    #[test]
+    fn custom_primary_keeps_focus_and_selection_accents_coherent() {
+        let accent = Color::hexa(0x7C3AEDFF);
+        let light = ThemeBuilder::light("custom-light").primary(accent).build();
+        assert_eq!(light.colors.primary, accent);
+        assert_eq!(light.colors.focus_ring, accent.with_alpha_factor(0.75));
+        assert_eq!(light.colors.selection, accent.with_alpha_factor(0.18));
+        assert_eq!(light.focus_ring.color, light.colors.focus_ring);
+
+        let dark = ThemeBuilder::dark("custom-dark").primary(accent).build();
+        assert_eq!(dark.colors.primary, accent);
+        assert_eq!(dark.colors.focus_ring, accent.with_alpha_factor(0.65));
+        assert_eq!(dark.colors.selection, accent.with_alpha_factor(0.24));
+    }
+
+    #[test]
+    fn explicit_focus_ring_still_overrides_derived_primary_accent() {
+        let explicit = FocusRingStyle {
+            enabled: true,
+            color: Color::hexa(0x22C55EFF),
+            width: dp(3.0),
+            gap: dp(1.0),
+        };
+        let theme = ThemeBuilder::light("custom")
+            .focus_ring(explicit.clone())
+            .primary(Color::hexa(0x7C3AEDFF))
+            .build();
+        assert_eq!(theme.focus_ring, explicit);
     }
 }

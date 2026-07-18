@@ -1,5 +1,6 @@
 use super::*;
 use crate::ui::theme::Density;
+use crate::ui::widget::{MeshPrimitive, ScenePrimitives};
 use crate::widgets::{
     Divider, DividerStyle, Pagination, PaginationStyle, ProgressBar, ProgressBarStyle, Spinner,
     SpinnerStyle,
@@ -199,6 +200,8 @@ fn spinner_renders_mesh_and_reduced_motion_disables_rotation_animation() {
 
     assert!(!animated.primitives.meshes.is_empty());
     assert!(!reduced.primitives.meshes.is_empty());
+    assert_eq!(animated.primitives.meshes.len(), 1);
+    assert_eq!(reduced.primitives.meshes.len(), 1);
     assert!(animated_engine.has_active_animations());
     assert!(!reduced_engine.has_active_animations());
 }
@@ -209,7 +212,7 @@ fn spinner_mesh_uses_dense_segments_and_antialiased_edges() {
     let font_manager = FontManager::new(&FontCatalog::default());
     let media = test_media();
     let mut animations = AnimationEngine::default();
-    let tree: WidgetTree<()> = WidgetTree::new(Spinner::new().size(dp(28.0), dp(28.0)));
+    let tree: WidgetTree<()> = WidgetTree::new(Spinner::new().track(true).size(dp(28.0), dp(28.0)));
 
     let rendered = tree.render_output(
         &font_manager,
@@ -244,6 +247,64 @@ fn spinner_mesh_uses_dense_segments_and_antialiased_edges() {
     assert!(track_mesh.vertices.len() > 400);
     assert!(min_alpha <= 0.001);
     assert!(max_alpha > 0.05);
+}
+
+#[test]
+fn spinner_default_is_indicator_only_and_track_override_restores_full_ring() {
+    fn render(spinner: Spinner<()>, theme: &Theme) -> ScenePrimitives {
+        let tree = WidgetTree::new(spinner.size(dp(28.0), dp(28.0)));
+        let font_manager = FontManager::new(&FontCatalog::default());
+        let media = test_media();
+        let mut animations = AnimationEngine::default();
+        tree.render_output(
+            &font_manager,
+            theme,
+            &media,
+            &mut animations,
+            None,
+            None,
+            &HashMap::new(),
+            Rect::new(0.0, 0.0, 64.0, 64.0),
+            None,
+            None,
+            None,
+            None,
+            false,
+        )
+        .primitives
+    }
+
+    fn peak_color(mesh: &MeshPrimitive) -> [f32; 4] {
+        mesh.vertices
+            .iter()
+            .map(|vertex| vertex.stop_colors[0])
+            .max_by(|left, right| left[3].total_cmp(&right[3]))
+            .expect("spinner mesh should contain vertices")
+    }
+
+    for theme in [Theme::light(), Theme::dark()] {
+        let style = SpinnerStyle::default_for_theme(&theme);
+        assert!(!style.show_track);
+
+        let indicator_only = render(Spinner::new(), &theme);
+        assert_eq!(indicator_only.meshes.len(), 1);
+        assert_eq!(
+            peak_color(&indicator_only.meshes[0]),
+            style.indicator_color.resolve().to_linear_rgba_f32(),
+        );
+
+        let with_track = render(Spinner::new().track(true), &theme);
+        assert_eq!(with_track.meshes.len(), 2);
+        assert_eq!(
+            peak_color(&with_track.meshes[0]),
+            style.track_color.resolve().to_linear_rgba_f32(),
+        );
+        assert_eq!(
+            peak_color(&with_track.meshes[1]),
+            style.indicator_color.resolve().to_linear_rgba_f32(),
+        );
+        assert!(with_track.meshes[0].vertices.len() > with_track.meshes[1].vertices.len());
+    }
 }
 
 #[test]
@@ -317,7 +378,7 @@ fn feedback_components_follow_real_light_dark_and_density_scenes() {
             );
             let spinner_style = SpinnerStyle::default_for_theme(&theme);
             assert_eq!(spinner_style.size, expected_spinner_size);
-            assert_eq!(spinner_scene.primitives.meshes.len(), 2);
+            assert_eq!(spinner_scene.primitives.meshes.len(), 1);
             let (min_x, max_x, min_y, max_y) = spinner_scene
                 .primitives
                 .meshes
@@ -339,8 +400,12 @@ fn feedback_components_follow_real_light_dark_and_density_scenes() {
                         )
                     },
                 );
-            assert!(((max_x - min_x) - expected_spinner_size.get()).abs() <= 0.01);
-            assert!(((max_y - min_y) - expected_spinner_size.get()).abs() <= 0.01);
+            let mesh_width = max_x - min_x;
+            let mesh_height = max_y - min_y;
+            assert!(mesh_width <= expected_spinner_size.get() + 0.01);
+            assert!(mesh_height <= expected_spinner_size.get() + 0.01);
+            assert!(mesh_width >= expected_spinner_size.get() * 0.45);
+            assert!(mesh_height >= expected_spinner_size.get() * 0.45);
 
             let mut animations = AnimationEngine::default();
             let divider_scene = divider.render_output(
@@ -374,8 +439,7 @@ fn feedback_components_follow_real_light_dark_and_density_scenes() {
 fn pagination_real_scene_tracks_density_hover_disabled_and_selection() {
     let font_manager = FontManager::new(&FontCatalog::default());
     let media = test_media();
-    let tree: WidgetTree<()> =
-        WidgetTree::new(Pagination::new(1usize, 3usize).page_size_options(Vec::new()));
+    let tree: WidgetTree<()> = WidgetTree::new(Pagination::new(1usize, 3usize));
 
     for (density, expected_width, expected_height) in [
         (Density::Compact, dp(32.0), dp(32.0)),
@@ -522,6 +586,52 @@ fn pagination_real_scene_tracks_density_hover_disabled_and_selection() {
             .expect("selected page label should render");
         assert_eq!(selected.color, theme.colors.on_primary_container);
     }
+}
+
+#[test]
+fn pagination_page_size_options_are_explicit_and_default_scene_stays_compact() {
+    let theme = Theme::default();
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let render = |tree: &WidgetTree<()>| {
+        tree.render_output(
+            &font_manager,
+            &theme,
+            &media,
+            &mut AnimationEngine::default(),
+            None,
+            None,
+            &HashMap::new(),
+            Rect::new(0.0, 0.0, 720.0, 64.0),
+            None,
+            None,
+            None,
+            None,
+            false,
+        )
+    };
+
+    let compact = WidgetTree::new(Pagination::new(1usize, 3usize));
+    let compact_output = render(&compact);
+    assert!(compact_output
+        .primitives
+        .texts
+        .iter()
+        .all(|text| !text.content.ends_with("/page")));
+
+    let with_options = WidgetTree::new(
+        Pagination::new(1usize, 3usize)
+            .page_size(25usize)
+            .page_size_options(vec![10, 25, 50, 100]),
+    );
+    let options_output = render(&with_options);
+    let option_labels = options_output
+        .primitives
+        .texts
+        .iter()
+        .filter(|text| text.content.ends_with("/page"))
+        .count();
+    assert_eq!(option_labels, 4);
 }
 
 fn render_indeterminate_progress_at(

@@ -2,11 +2,43 @@ pub(super) use super::*;
 
 use std::time::Duration;
 
-use crate::animation::Transition;
+use crate::animation::{AnimationKey, Transition, WidgetProperty};
 use crate::foundation::view_model::ValueCommand;
 use crate::ui::layout::Value;
 use crate::ui::theme::Density;
-use crate::ui::widget::{Modal, ModalAction, ModalStyle};
+use crate::ui::widget::{ComputedScene, Modal, ModalAction, ModalStyle};
+
+fn modal_scene_at(
+    tree: &WidgetTree<()>,
+    theme: &Theme,
+    font_manager: &FontManager,
+    media: &MediaManager,
+    animations: &mut AnimationEngine,
+    reduced_motion: bool,
+    viewport: Rect,
+    now: Instant,
+) -> ComputedScene<()> {
+    tree.compute_scene_with_units_and_widget_state_at(
+        font_manager,
+        theme,
+        media,
+        UnitContext::default(),
+        animations,
+        reduced_motion,
+        None,
+        None,
+        &WidgetStateMap::default(),
+        &HashMap::new(),
+        &HashMap::new(),
+        viewport,
+        None,
+        None,
+        None,
+        None,
+        false,
+        now,
+    )
+}
 
 #[test]
 fn modal_builder_attaches_descriptor() {
@@ -169,8 +201,62 @@ fn modal_with_on_open_change_keeps_descriptor_attached() {
 
 #[test]
 fn modal_style_defaults_include_enter_scale() {
-    let style = ModalStyle::default_for_theme(&Theme::light());
+    let theme = Theme::light();
+    let style = ModalStyle::default_for_theme(&theme);
     assert!((style.enter_scale - 0.96).abs() < f32::EPSILON);
+    assert_eq!(style.title_text_style, theme.typography.title);
+    assert!(style
+        .title_text_style
+        .line_height
+        .is_some_and(|line_height| line_height > style.title_text_style.size));
+}
+
+#[test]
+fn modal_title_primitive_preserves_theme_title_typography_across_modes_and_density() {
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+
+    for mut theme in [Theme::light(), Theme::dark()] {
+        for density in [Density::Compact, Density::Comfortable, Density::Spacious] {
+            theme.density = density;
+            let tree: WidgetTree<()> =
+                WidgetTree::new(Modal::new(true).title("Agjpq dialog title"));
+            let rendered = tree.render_output(
+                &font_manager,
+                &theme,
+                &media,
+                &mut AnimationEngine::default(),
+                None,
+                None,
+                &HashMap::new(),
+                Rect::new(0.0, 0.0, 720.0, 480.0),
+                None,
+                None,
+                None,
+                None,
+                false,
+            );
+            let title = rendered
+                .primitives
+                .texts
+                .iter()
+                .find(|text| text.content.as_ref() == "Agjpq dialog title")
+                .expect("Modal title primitive");
+            assert_eq!(title.font_size, theme.typography.title.size.get());
+            assert_eq!(title.font_weight, theme.typography.title.weight);
+            assert!(
+                title.line_height
+                    >= theme
+                        .typography
+                        .title
+                        .line_height
+                        .expect("default title line height")
+                        .get()
+            );
+            assert!(title.line_height > title.font_size);
+            assert!(title.frame.height.get() >= title.line_height);
+        }
+    }
 }
 
 #[test]
@@ -406,6 +492,120 @@ fn modal_runtime_geometry_and_enter_scale_follow_the_same_tree() {
             "closed modal should use the active theme's enter scale"
         );
     }
+}
+
+#[test]
+fn modal_motion_uses_live_theme_tokens_and_reduced_motion_settles_slots() {
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let viewport = Rect::new(0.0, 0.0, 640.0, 420.0);
+    let context = test_context();
+    let open = context.state(false);
+    let inside: Element<()> = crate::ui::widget::Button::new("inside").into();
+    let inside_id = inside.id;
+    let modal: Element<()> = Modal::new(open.signal()).content(inside).into();
+    let backdrop_id = Modal::_backdrop_id_of(&modal).expect("modal backdrop id");
+    let card_id = Modal::_card_id_of(&modal).expect("modal card id");
+    let tree: WidgetTree<()> = WidgetTree::new(modal);
+    let mut theme = Theme::light();
+    theme.motion.normal_ms = 200;
+    let start = Instant::now();
+    let mut animations = AnimationEngine::default();
+
+    let _ = modal_scene_at(
+        &tree,
+        &theme,
+        &font_manager,
+        &media,
+        &mut animations,
+        false,
+        viewport,
+        start,
+    );
+    open.set(true);
+    let animation_start = start + Duration::from_millis(1);
+    let _ = modal_scene_at(
+        &tree,
+        &theme,
+        &font_manager,
+        &media,
+        &mut animations,
+        false,
+        viewport,
+        animation_start,
+    );
+    for key in [
+        AnimationKey::Widget {
+            id: backdrop_id.raw(),
+            property: WidgetProperty::Opacity,
+        },
+        AnimationKey::Widget {
+            id: card_id.raw(),
+            property: WidgetProperty::Opacity,
+        },
+        AnimationKey::Widget {
+            id: card_id.raw(),
+            property: WidgetProperty::Scale,
+        },
+    ] {
+        assert!(animations.contains_key(key));
+    }
+
+    let mid = animation_start + Duration::from_millis(100);
+    let refresh = animations.refresh(mid);
+    assert!(refresh.changed && !refresh.layout_changed);
+    assert!(refresh.scene_widget_ids.contains(&backdrop_id.raw()));
+    assert!(refresh.scene_widget_ids.contains(&card_id.raw()));
+    let _ = modal_scene_at(
+        &tree,
+        &theme,
+        &font_manager,
+        &media,
+        &mut animations,
+        false,
+        viewport,
+        animation_start + Duration::from_millis(199),
+    );
+    assert!(animations.has_active_animations());
+    let _ = modal_scene_at(
+        &tree,
+        &theme,
+        &font_manager,
+        &media,
+        &mut animations,
+        false,
+        viewport,
+        animation_start + Duration::from_millis(201),
+    );
+    assert!(!animations.has_active_animations());
+
+    open.set(false);
+    let close_start = animation_start + Duration::from_millis(202);
+    let closing = modal_scene_at(
+        &tree,
+        &theme,
+        &font_manager,
+        &media,
+        &mut animations,
+        false,
+        viewport,
+        close_start,
+    );
+    assert!(closing.hit_regions.iter().all(|hit| {
+        !matches!(hit.interaction, HitInteraction::Widget { id, .. } if id == inside_id)
+    }));
+    assert!(animations.has_active_animations());
+    let _reduced = modal_scene_at(
+        &tree,
+        &theme,
+        &font_manager,
+        &media,
+        &mut animations,
+        true,
+        viewport,
+        close_start + Duration::from_millis(1),
+    );
+    assert!(!animations.has_active_animations());
 }
 
 #[test]

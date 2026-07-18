@@ -14,13 +14,17 @@ use taffy::prelude::TaffyTree;
 use super::BoundRuntimeHandler;
 
 pub(crate) struct ExternalPortalRequest<VM> {
+    pub(crate) source_window_instance_id: Option<u64>,
+    pub(crate) source_publication_generation: u64,
+    pub(crate) source_open: crate::ui::layout::Value<bool>,
+    pub(crate) focus_scope_instance_id: Option<WidgetId>,
     pub(crate) source_widget_id: WidgetId,
     pub(crate) overlay_id: OverlayId,
     pub(crate) target_window_key: String,
     pub(crate) anchor: PortalAnchor,
     pub(crate) options: PlacementOptions,
     pub(crate) layer: OverlayLayer,
-    pub(crate) content: Box<Element<VM>>,
+    pub(crate) content: std::sync::Arc<Element<VM>>,
     pub(crate) on_open_change: Option<ValueCommand<VM, bool>>,
     pub(crate) return_focus_to: Option<WidgetId>,
     pub(crate) close_on_outside_click: bool,
@@ -31,6 +35,10 @@ pub(crate) struct ExternalPortalRequest<VM> {
 impl<VM> Clone for ExternalPortalRequest<VM> {
     fn clone(&self) -> Self {
         Self {
+            source_window_instance_id: self.source_window_instance_id,
+            source_publication_generation: self.source_publication_generation,
+            source_open: self.source_open.clone(),
+            focus_scope_instance_id: self.focus_scope_instance_id,
             source_widget_id: self.source_widget_id,
             overlay_id: self.overlay_id,
             target_window_key: self.target_window_key.clone(),
@@ -53,24 +61,47 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         requests: Vec<ExternalPortalRequest<VM>>,
         revision: u64,
     ) {
+        if self.external_portal_revision == revision {
+            return;
+        }
         self.external_portal_requests = requests;
-        if self.external_portal_revision != revision {
-            self.external_portal_revision = revision;
-            self.invalidate_computed_scene();
-            if let Some(window) = self.window.as_ref() {
-                window.request_redraw();
-            }
+        self.external_portal_revision = revision;
+        self.invalidate_computed_scene();
+        if let Some(window) = self.window.as_ref() {
+            window.request_redraw();
         }
     }
 
     pub(in crate::runtime) fn external_portal_requests_from_computed(
         &mut self,
     ) -> Vec<ExternalPortalRequest<VM>> {
-        self.computed_scene()
+        let source_window_instance_id = self.window_instance_id;
+        let source_publication_generation = self.portal_publication_generation;
+        let mut requests = self
+            .computed_scene()
             .external_portal_requests
             .iter()
             .cloned()
-            .collect()
+            .collect::<Vec<_>>();
+        let mut live_focus_scopes = std::collections::HashSet::new();
+        for request in &mut requests {
+            request.source_window_instance_id = Some(source_window_instance_id);
+            request.source_publication_generation = source_publication_generation;
+            if request.focus_scope.is_some() && request.source_open.resolve_untracked() {
+                live_focus_scopes.insert(request.overlay_id);
+                request.focus_scope_instance_id = Some(
+                    *self
+                        .external_portal_focus_scopes
+                        .entry(request.overlay_id)
+                        .or_insert_with(WidgetId::next),
+                );
+            } else {
+                request.focus_scope_instance_id = None;
+            }
+        }
+        self.external_portal_focus_scopes
+            .retain(|overlay_id, _| live_focus_scopes.contains(overlay_id));
+        requests
     }
 
     pub(in crate::runtime) fn append_external_portals_to_computed(
@@ -143,6 +174,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             animations: &mut self.animation_engine,
             reduced_motion: self.reduced_motion,
             now,
+            frame_clock: self.frame_clock.snapshot(),
             focus: FocusCollectState::default(),
             tooltip_hover_started_at: &self.tooltip_hover_started_at,
             next_tooltip_wakeup: &next_tooltip_wakeup,
@@ -152,17 +184,38 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             gpu_scroll_enabled: false,
             gpu_scroll_container: None,
             transform_stack: smallvec::SmallVec::new(),
+            portal_accessibility_geometry: None,
+            portal_accessibility_path: smallvec::SmallVec::new(),
         };
 
         for request in &requests {
+            if !request.source_open.resolve() {
+                continue;
+            }
             let Some(anchor) = resolve_external_portal_anchor(request, viewport, computed) else {
                 continue;
             };
-            let Some((content_scene, content_size)) =
+            let Some((mut content_scene, content_size)) =
                 collect_portal_content_scene(request.content.as_ref(), &mut context)
             else {
                 continue;
             };
+            if let Some(source_window_instance_id) = request.source_window_instance_id {
+                for fragment in &mut content_scene.accessibility_fragments {
+                    fragment.source_window_instance_id = Some(source_window_instance_id);
+                    fragment.source_publication_generation =
+                        Some(request.source_publication_generation);
+                    fragment.source_open = Some(request.source_open.clone());
+                }
+            } else {
+                // A malformed/legacy request must never make visible Portal content disappear.
+                // Without a real source instance its accessibility identity is unsafe, so only
+                // omit that metadata and preserve rendering, hits, and close handlers.
+                content_scene.accessibility_fragments.clear();
+            }
+            if request.focus_scope.is_some() && request.focus_scope_instance_id.is_none() {
+                content_scene.accessibility_fragments.clear();
+            }
             computed
                 .dependencies
                 .merge_from(&content_scene.dependencies);
@@ -199,7 +252,9 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
 impl<VM> ExternalPortalRequest<VM> {
     pub(crate) fn fingerprint(&self) -> String {
         format!(
-            "{:?}|{:?}|{}|{:?}|{:?}|{:?}|{:?}|{}|{}|{:?}|{}",
+            "{:?}|{}|{:?}|{:?}|{}|{:?}|{:?}|{:?}|{:?}|{}|{}|{:?}|{:?}|{}",
+            self.source_window_instance_id,
+            self.source_publication_generation,
             self.source_widget_id,
             self.overlay_id,
             self.target_window_key,
@@ -210,6 +265,7 @@ impl<VM> ExternalPortalRequest<VM> {
             self.close_on_outside_click,
             self.close_on_escape,
             self.focus_scope,
+            self.focus_scope_instance_id,
             self.content.id.raw(),
         )
     }
@@ -266,12 +322,18 @@ impl<VM> PortalRegistry<VM> {
 
     pub(crate) fn remove_source(&mut self, source_window_key: &str) -> Vec<String> {
         let previous_targets = self.targets_for_source(source_window_key);
+        self.by_source.remove(source_window_key);
+        self.source_fingerprints.remove(source_window_key);
         if previous_targets.is_empty() {
             return Vec::new();
         }
-        self.by_source.remove(source_window_key);
-        self.source_fingerprints.remove(source_window_key);
         self.bump_targets(previous_targets.into_iter().collect())
+    }
+
+    #[cfg(test)]
+    pub(crate) fn has_source_registration(&self, source_window_key: &str) -> bool {
+        self.by_source.contains_key(source_window_key)
+            || self.source_fingerprints.contains_key(source_window_key)
     }
 
     pub(crate) fn requests_for_target(

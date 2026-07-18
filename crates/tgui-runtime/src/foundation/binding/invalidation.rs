@@ -22,13 +22,19 @@ thread_local! {
 
 #[derive(Clone, Default)]
 pub(crate) struct InvalidationSignal {
-    revision: Arc<AtomicU64>,
+    revisions: Arc<InvalidationRevisions>,
     proxy: Arc<Mutex<Option<EventLoopProxy>>>,
     dirty_dependencies: Arc<Mutex<DirtyDependencyLog>>,
     dependency_revisions: Arc<Mutex<HashMap<DependencyId, u64>>>,
     media_revisions: Arc<Mutex<Vec<u64>>>,
     wake_flags: Arc<InvalidationWakeFlags>,
     reactive_graph: ReactiveGraph,
+}
+
+#[derive(Default)]
+struct InvalidationRevisions {
+    revision: AtomicU64,
+    root_rebuild_revision: AtomicU64,
 }
 
 #[derive(Default)]
@@ -40,7 +46,10 @@ struct InvalidationWakeFlags {
 impl InvalidationSignal {
     pub(crate) fn new() -> Self {
         Self {
-            revision: Arc::new(AtomicU64::new(1)),
+            revisions: Arc::new(InvalidationRevisions {
+                revision: AtomicU64::new(1),
+                root_rebuild_revision: AtomicU64::new(0),
+            }),
             proxy: Arc::new(Mutex::new(None)),
             dirty_dependencies: Arc::new(Mutex::new(DirtyDependencyLog::default())),
             dependency_revisions: Arc::new(Mutex::new(HashMap::new())),
@@ -63,7 +72,7 @@ impl InvalidationSignal {
     }
 
     pub(crate) fn mark_media_dirty(&self) {
-        let revision = self.revision.fetch_add(1, Ordering::SeqCst) + 1;
+        let revision = self.revisions.revision.fetch_add(1, Ordering::SeqCst) + 1;
         let mut revisions = self.media_revisions.lock();
         revisions.push(revision);
         if revisions.len() > 1024 {
@@ -86,7 +95,7 @@ impl InvalidationSignal {
     }
 
     fn mark_dirty_dependency(&self, dependency: Option<DependencyId>) {
-        let revision = self.revision.fetch_add(1, Ordering::SeqCst) + 1;
+        let revision = self.revisions.revision.fetch_add(1, Ordering::SeqCst) + 1;
         if let Some(dependency) = dependency {
             self.dependency_revisions
                 .lock()
@@ -154,7 +163,20 @@ impl InvalidationSignal {
     }
 
     pub(crate) fn revision(&self) -> u64 {
-        self.revision.load(Ordering::SeqCst)
+        self.revisions.revision.load(Ordering::SeqCst)
+    }
+
+    pub(crate) fn request_root_rebuild(&self) {
+        self.revisions
+            .root_rebuild_revision
+            .fetch_add(1, Ordering::SeqCst);
+        // A cloned/scoped CommandContext may outlive the synchronous command dispatch. Make the
+        // rebuild request self-waking instead of relying on the executor's trailing invalidation.
+        self.mark_dirty();
+    }
+
+    pub(crate) fn root_rebuild_revision(&self) -> u64 {
+        self.revisions.root_rebuild_revision.load(Ordering::SeqCst)
     }
 
     pub(crate) fn set_proxy(&self, proxy: EventLoopProxy) {

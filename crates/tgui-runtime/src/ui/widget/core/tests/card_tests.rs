@@ -133,3 +133,105 @@ fn card_light_and_dark_themes_reach_real_scene_surfaces_on_the_same_tree() {
         );
     }
 }
+
+#[test]
+fn card_defaults_stay_on_the_regular_surface_plane() {
+    for theme in [Theme::light(), Theme::dark()] {
+        let style = CardStyle::default_for_theme(&theme);
+        assert_eq!(style.background.resolve(), theme.colors.surface);
+        assert_eq!(style.radius, theme.radius.lg);
+        assert_eq!(style.shadow, theme.elevation.none);
+        assert!(
+            style.radius <= theme.radius.lg,
+            "regular card corners should not use overlay-scale radii"
+        );
+    }
+}
+
+#[test]
+fn card_shadow_is_texture_free_by_default_and_remains_explicitly_available() {
+    let theme = Theme::default();
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let render = |tree: &WidgetTree<()>| {
+        tree.render_output(
+            &font_manager,
+            &theme,
+            &media,
+            &mut AnimationEngine::default(),
+            None,
+            None,
+            &HashMap::new(),
+            Rect::new(0.0, 0.0, 320.0, 160.0),
+            None,
+            None,
+            None,
+            None,
+            false,
+        )
+    };
+
+    let default_card = WidgetTree::new(
+        Card::new()
+            .body(Text::new("Border-only card"))
+            .size(dp(280.0), dp(120.0)),
+    );
+    assert!(render(&default_card).primitives.textures.is_empty());
+
+    let elevated_card = WidgetTree::new(
+        Card::new()
+            .body(Text::new("Elevated card"))
+            .style(|style, context| style.shadow = context.theme.elevation.sm.clone())
+            .size(dp(280.0), dp(120.0)),
+    );
+    assert_eq!(render(&elevated_card).primitives.textures.len(), 1);
+}
+
+#[test]
+fn clickable_card_uses_theme_focus_ring_for_keyboard_focus() {
+    let theme = Theme::default();
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let card: Element<()> = Card::new()
+        .body(Text::new("Keyboard action"))
+        .on_click(Command::new(|_: &mut ()| {}))
+        .size(dp(240.0), dp(96.0))
+        .into();
+    let card_id = card.id;
+    let tree = WidgetTree::new(card);
+    let mut states = WidgetStateMap::default();
+    states.set(
+        card_id,
+        crate::ui::theme::WidgetState {
+            focused: true,
+            focus_visible: true,
+            ..Default::default()
+        },
+    );
+
+    let rendered = tree.render_output_with_widget_state(
+        &font_manager,
+        &theme,
+        &media,
+        &mut AnimationEngine::default(),
+        false,
+        None,
+        None,
+        &states,
+        &HashMap::new(),
+        &HashMap::new(),
+        Rect::new(0.0, 0.0, 240.0, 96.0),
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+
+    assert!(rendered.primitives.overlay_shapes.iter().any(|shape| {
+        shape.color == theme.focus_ring.color
+            && shape.stroke_width == theme.focus_ring.width.get()
+            && shape.rect.width > dp(240.0)
+            && shape.rect.height > dp(96.0)
+    }));
+}

@@ -15,18 +15,16 @@
 //! - card 走 Flex(vertical)，按 title / content / actions 三段排列；
 //! - 外层 Stack 挂动态 active 的 `FocusScopeOptions::{trap, auto_focus_first}`，
 //!   打开后聚焦主按钮 / 首个控件，并使 Tab 在 modal 内循环；
-//! - backdrop + card 的 `opacity` 由 `open` 派生 + `animated` 标记，渲染时
-//!   走 `AnimationEngine` 完成 fade in/out（160ms ease_in_out）；
+//! - backdrop + card 的 `opacity` 由 `open` 派生，运行时按当前
+//!   `Theme.motion.normal_ms` 应用 ease-out；reduced-motion 直接落到终值；
 //! - Esc 关闭 / on_close 派发 / focus return 由挂在外层 Stack 上的
 //!   `ModalDescriptor` + collect 阶段 sentinel overlay 完成；
 //! - `close_on_backdrop_click` 由 backdrop 自己的 `on_click` 命令直接驱动。
 
 use std::sync::Arc;
-use std::time::Duration;
 
-use parking_lot::RwLock;
+use parking_lot::{Mutex, RwLock};
 
-use crate::animation::Transition;
 use crate::foundation::color::Color;
 use crate::foundation::view_model::{Command, CommandContext, ValueCommand};
 use crate::ui::layout::{pct, Align, Axis, Insets, Length, Overflow, Value};
@@ -44,8 +42,6 @@ use crate::ui::widget::{FocusScopeOptions, WidgetId};
 
 use super::action::ModalAction;
 use super::descriptor::ModalDescriptor;
-
-const MODAL_FADE_DURATION_MS: u64 = 160;
 
 #[derive(Clone, Debug, PartialEq)]
 struct ModalRuntimeMetrics {
@@ -222,19 +218,13 @@ impl<VM: 'static> From<Modal<VM>> for Element<VM> {
         } = modal;
 
         // -----------------------------------------------------------------
-        // visibility signal：把 open(bool) 派生成 0/1 浮点并标记 animated。
-        // 渲染层 `resolve_widget_clamped(WidgetProperty::Opacity)` 读到带
-        // transition 的 Value<f32> 后会自动 ease 过渡。
+        // visibility target：只派生目标值。transition 在 runtime layout 中
+        // 按当前 StyleContext 注入，避免构建树时冻结 Theme.motion，也让
+        // reduced-motion / 0ms theme 可以移除已有 transition。
         // -----------------------------------------------------------------
-        let fade_transition =
-            Transition::ease_in_out(Duration::from_millis(MODAL_FADE_DURATION_MS));
         let visibility_value: Value<f32> = match open.clone() {
             Value::Static(open_now) => Value::Static(if open_now { 1.0 } else { 0.0 }),
-            Value::Signal(signal) => Value::Signal(
-                signal
-                    .map(|o| if o { 1.0 } else { 0.0 })
-                    .animated(fade_transition),
-            ),
+            Value::Signal(signal) => Value::Signal(signal.map(|o| if o { 1.0 } else { 0.0 })),
         };
         let runtime_metrics = Arc::new(RwLock::new(ModalRuntimeMetrics::default()));
 
@@ -250,10 +240,11 @@ impl<VM: 'static> From<Modal<VM>> for Element<VM> {
 
         // -----------------------------------------------------------------
         // backdrop：覆盖整个 modal 区域的半透明 scrim。
-        // 通过 `.opacity(visibility_value)` 走动画通道。
+        // Opacity 在 runtime layout 中读取 live motion token。
         // 背景色由 ContainerStyle.surface.background 设置。
         // -----------------------------------------------------------------
         let backdrop_style = style.clone();
+        let backdrop_visibility = visibility_value.clone();
         let mut backdrop = Stack::<VM>::new()
             .size(pct(100.0), pct(100.0))
             .position_absolute()
@@ -274,7 +265,12 @@ impl<VM: 'static> From<Modal<VM>> for Element<VM> {
                 s.surface.border_radius = Some(Dp::ZERO.into());
                 s
             })
-            .opacity(visibility_value.clone());
+            .opacity(visibility_value.clone())
+            .runtime_layout(move |_, _, context, _, visual| {
+                visual.opacity = backdrop_visibility
+                    .clone()
+                    .with_default_transition(context.motion_normal_transition());
+            });
         if close_on_backdrop_click {
             if let Some(close_cmd) = close_command.clone() {
                 backdrop = backdrop.on_click(close_cmd);
@@ -290,6 +286,9 @@ impl<VM: 'static> From<Modal<VM>> for Element<VM> {
         let title_value_for_render = title.clone();
         let card_runtime_metrics = runtime_metrics.clone();
         let card_open = open.clone();
+        let card_scale_cache = Arc::new(Mutex::new(None::<(f32, Value<f32>)>));
+        let card_visibility = visibility_value.clone();
+        let card_base_visibility = card_visibility.clone();
         let mut card: Flex<VM> = Flex::new(Axis::Vertical)
             .style_full_with_style_sheet(move |context, style_sheet, visual, state| {
                 let resolved = resolve_modal_style_with_sheet(
@@ -307,25 +306,43 @@ impl<VM: 'static> From<Modal<VM>> for Element<VM> {
                 s.surface.shadow = Some(resolved.shadow.into());
                 s
             })
-            .runtime_layout(move |layout, container, _, _, visual| {
+            .runtime_layout(move |layout, container, context, _, visual| {
                 let metrics = card_runtime_metrics.read().clone();
                 layout.min_width = Some(Value::Static(Length::Px(metrics.min_width)));
                 layout.max_width = Some(Value::Static(Length::Px(metrics.max_width)));
                 layout.max_height = Some(Value::Static(Length::Px(metrics.max_height)));
                 layout.margin = Value::Static(metrics.margin);
                 container.padding = Some(Value::Static(metrics.padding));
-                visual.scale = match card_open.clone() {
+                let transition = context.motion_normal_transition();
+                visual.scale = match &card_open {
                     Value::Static(open_now) => {
-                        Value::Static(if open_now { 1.0 } else { metrics.enter_scale })
+                        Value::Static(if *open_now { 1.0 } else { metrics.enter_scale })
                     }
-                    Value::Signal(signal) => Value::Signal(
-                        signal
-                            .map(move |open| if open { 1.0 } else { metrics.enter_scale })
-                            .animated(fade_transition),
-                    ),
+                    Value::Signal(signal) => {
+                        let mut cache = card_scale_cache.lock();
+                        let value = match cache.as_ref() {
+                            Some((enter_scale, value)) if *enter_scale == metrics.enter_scale => {
+                                value.clone()
+                            }
+                            _ => {
+                                let enter_scale = metrics.enter_scale;
+                                let value = Value::Signal(signal.clone().map(move |open| {
+                                    if open {
+                                        1.0
+                                    } else {
+                                        enter_scale
+                                    }
+                                }));
+                                *cache = Some((enter_scale, value.clone()));
+                                value
+                            }
+                        };
+                        value.with_default_transition(transition)
+                    }
                 };
+                visual.opacity = card_visibility.clone().with_default_transition(transition);
             })
-            .opacity(visibility_value.clone())
+            .opacity(card_base_visibility)
             .overflow(Overflow::Hidden);
 
         // title 段（如果给了 title）
@@ -463,8 +480,6 @@ impl<VM: 'static> From<Modal<VM>> for Element<VM> {
 }
 
 impl<VM> Modal<VM> {
-    /// 暴露内部 WidgetId 字段名常量，方便 tests / 高级用法引用。
-    pub(crate) const _MODAL_FADE_DURATION_MS: u64 = MODAL_FADE_DURATION_MS;
     #[doc(hidden)]
     pub fn _backdrop_id_of(element: &Element<VM>) -> Option<WidgetId> {
         element.modal.as_ref().map(|m| m.backdrop_widget_id)

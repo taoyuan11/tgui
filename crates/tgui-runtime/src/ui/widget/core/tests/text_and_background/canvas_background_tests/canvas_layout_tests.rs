@@ -103,6 +103,69 @@ fn background_brush_generates_brush_primitive() {
 }
 
 #[test]
+fn background_brush_inherits_ancestor_opacity() {
+    let theme = Theme::default();
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let mut animations = AnimationEngine::default();
+    let start = Color::hexa(0x38BDF8E0);
+    let end = Color::hexa(0x1D4ED8A0);
+    let tree: WidgetTree<()> = WidgetTree::new(
+        Stack::new().size(dp(120.0), dp(80.0)).opacity(0.5).child(
+            Stack::new()
+                .size(dp(120.0), dp(80.0))
+                .style_full(move |ctx| {
+                    container_style(
+                        ctx,
+                        None,
+                        Some(
+                            BackgroundLinearGradient::new(
+                                Point::new(dp(0.0), dp(0.0)),
+                                Point::new(dp(120.0), dp(80.0)),
+                                vec![
+                                    BackgroundGradientStop::new(0.0, start),
+                                    BackgroundGradientStop::new(1.0, end),
+                                ],
+                            )
+                            .into(),
+                        ),
+                        None,
+                        None,
+                        None,
+                        None,
+                        Some(dp(12.0)),
+                        None,
+                    )
+                }),
+        ),
+    );
+
+    let rendered = tree.render_output(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        None,
+        None,
+        &HashMap::new(),
+        Rect::new(0.0, 0.0, 120.0, 80.0),
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+
+    let crate::ui::widget::BackgroundBrush::LinearGradient(gradient) =
+        &rendered.primitives.brushes[0].brush
+    else {
+        panic!("expected a linear gradient brush");
+    };
+    assert_eq!(gradient.stops[0].color, start.with_alpha_factor(0.5));
+    assert_eq!(gradient.stops[1].color, end.with_alpha_factor(0.5));
+}
+
+#[test]
 fn background_brush_takes_priority_over_background_color() {
     let theme = Theme::default();
     let font_manager = FontManager::new(&FontCatalog::default());

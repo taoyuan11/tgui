@@ -315,7 +315,7 @@ impl MediaManager {
             .saturating_mul(8)
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "bench-support"))]
     pub(crate) fn cached_image_count(&self) -> usize {
         self.images
             .lock()

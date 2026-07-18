@@ -20,26 +20,23 @@
 //! - 外层 Stack 在打开时挂动态 active 的
 //!   `FocusScopeOptions::{trap, auto_focus_first}`，使 Tab 在 drawer 内循环，并让
 //!   backdrop 点击留在 trap scope 内；
-//! - backdrop + panel 的动画：backdrop 走 `opacity` fade，panel 走对应方向的位移
-//!   （left/right/top/bottom）+ `opacity` 组合实现 slide + fade；
+//! - backdrop + panel 的动画：backdrop 走 `opacity` fade，panel 走 scene-only
+//!   `offset` 位移（left/right/top/bottom），避免滑动帧重复布局；
 //! - Esc 关闭 / on_close 派发 / focus return 由挂在外层 Stack 上的
 //!   `DrawerDescriptor` + collect 阶段 sentinel overlay 完成；
 //! - `close_on_backdrop_click` 在 collect 阶段按当前 open 信号注入 backdrop hit
 //!   region，避免初始关闭的 Drawer 打开后缺少点击 handler。
 
+use parking_lot::{Mutex, RwLock};
 use std::sync::Arc;
-use std::time::Duration;
 
-use parking_lot::RwLock;
-
-use crate::animation::Transition;
 use crate::foundation::color::Color;
 use crate::foundation::view_model::ValueCommand;
 use crate::log::Log;
 use crate::ui::layout::{pct, Axis, Insets, LayoutStyle, Value};
 use crate::ui::theme::{StyleContext, WidgetState};
 use crate::ui::unit::Dp;
-use crate::ui::widget::common::VisualStyle;
+use crate::ui::widget::common::{Point, VisualStyle};
 use crate::ui::widget::container::{
     set_layout_inset, set_layout_length, set_layout_lengths, IntoLengthValue,
 };
@@ -50,8 +47,6 @@ use crate::ui::widget::{CursorStyle, FocusScopeOptions, WidgetId};
 
 use super::descriptor::DrawerDescriptor;
 use super::placement::DrawerPlacement;
-
-const DRAWER_SLIDE_DURATION_MS: u64 = 250;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 struct DrawerRuntimeMetrics {
@@ -212,33 +207,29 @@ impl<VM: 'static> From<Drawer<VM>> for Element<VM> {
         }
 
         // -----------------------------------------------------------------
-        // 动画过渡配置
-        // -----------------------------------------------------------------
-        let slide_transition =
-            Transition::ease_in_out(Duration::from_millis(DRAWER_SLIDE_DURATION_MS));
-
-        // backdrop fade 动画
+        // Motion targets stay transition-free until runtime layout, where the
+        // current Theme.motion and reduced-motion preference are available.
         let backdrop_visibility: Value<f32> = match open.clone() {
             Value::Static(open_now) => Value::Static(if open_now { 1.0 } else { 0.0 }),
-            Value::Signal(signal) => Value::Signal(
-                signal
-                    .map(|o| if o { 1.0 } else { 0.0 })
-                    .animated(slide_transition),
-            ),
+            Value::Signal(signal) => Value::Signal(signal.map(|o| if o { 1.0 } else { 0.0 })),
         };
 
         // -----------------------------------------------------------------
         // backdrop：覆盖整个区域的半透明 scrim
         // 根据 open 状态动态设置背景色，确保关闭时完全透明
         // -----------------------------------------------------------------
-        let backdrop_open = open.clone();
         let backdrop_style = style.clone();
+        let backdrop_opacity = backdrop_visibility.clone();
         let backdrop = Stack::<VM>::new()
             .size(pct(100.0), pct(100.0))
             .position_absolute()
             .left(Dp::ZERO)
             .top(Dp::ZERO)
-            .opacity(backdrop_visibility.clone())
+            .runtime_layout(move |_, _, context, _, visual| {
+                visual.opacity = backdrop_opacity
+                    .clone()
+                    .with_default_transition(context.motion_normal_transition());
+            })
             .style_full_with_style_sheet(move |context, style_sheet, visual, state| {
                 let resolved = resolve_drawer_style_with_sheet(
                     backdrop_style.as_ref(),
@@ -248,10 +239,7 @@ impl<VM: 'static> From<Drawer<VM>> for Element<VM> {
                     state,
                 );
                 let mut s = ContainerStyle::default_for_theme(context.theme);
-                s.surface.background = Some(drawer_backdrop_color(
-                    backdrop_open.clone(),
-                    resolved.backdrop_color,
-                ));
+                s.surface.background = Some(resolved.backdrop_color);
                 s.surface.border_color = Some(Color::TRANSPARENT.into());
                 s.surface.border_width = Some(Dp::ZERO.into());
                 s.surface.border_radius = Some(Dp::ZERO.into());
@@ -267,12 +255,13 @@ impl<VM: 'static> From<Drawer<VM>> for Element<VM> {
         let runtime_metrics = Arc::new(RwLock::new(DrawerRuntimeMetrics::default()));
         let panel_runtime_metrics = runtime_metrics.clone();
         let panel_open = open.clone();
+        let panel_offset_cache = Arc::new(Mutex::new(None::<(Dp, Value<Point>)>));
 
         // 构建 panel 容器
         let mut panel: Flex<VM> = Flex::new(Axis::Vertical)
             .position_absolute()
             .cursor(CursorStyle::Default)
-            // 不在 panel 上设置 opacity，由外层 Stack 统一控制
+            // Panel 保持不透明并只做平移；backdrop 独立淡入淡出。
             .style_full_with_style_sheet(move |context, style_sheet, visual, state| {
                 let resolved = resolve_drawer_style_with_sheet(
                     drawer_style_for_panel.as_ref(),
@@ -289,40 +278,65 @@ impl<VM: 'static> From<Drawer<VM>> for Element<VM> {
                 s.surface.shadow = Some(resolved.shadow.into());
                 s
             })
-            .runtime_layout(move |layout, container, _, _, _| {
+            .runtime_layout(move |layout, container, context, _, visual| {
                 let metrics = *panel_runtime_metrics.read();
                 let hidden_extent = match placement {
                     DrawerPlacement::Left | DrawerPlacement::Right => metrics.width,
                     DrawerPlacement::Top | DrawerPlacement::Bottom => metrics.height,
                 };
-                let slide_offset = drawer_extent_value(
-                    panel_open.clone(),
-                    Dp::ZERO,
-                    -hidden_extent,
-                    slide_transition,
-                );
+                let hidden_offset = match placement {
+                    DrawerPlacement::Left => Point::new(-hidden_extent, Dp::ZERO),
+                    DrawerPlacement::Right => Point::new(hidden_extent, Dp::ZERO),
+                    DrawerPlacement::Top => Point::new(Dp::ZERO, -hidden_extent),
+                    DrawerPlacement::Bottom => Point::new(Dp::ZERO, hidden_extent),
+                };
+                visual.offset = match &panel_open {
+                    Value::Static(open) => {
+                        Value::Static(if *open { Point::ZERO } else { hidden_offset })
+                    }
+                    Value::Signal(signal) => {
+                        let mut cache = panel_offset_cache.lock();
+                        let value = match cache.as_ref() {
+                            Some((cached_extent, value)) if *cached_extent == hidden_extent => {
+                                value.clone()
+                            }
+                            _ => {
+                                let value = Value::Signal(signal.clone().map(move |open| {
+                                    if open {
+                                        Point::ZERO
+                                    } else {
+                                        hidden_offset
+                                    }
+                                }));
+                                *cache = Some((hidden_extent, value.clone()));
+                                value
+                            }
+                        };
+                        value.with_default_transition(context.motion_slow_transition())
+                    }
+                };
                 match placement {
                     DrawerPlacement::Left => {
-                        set_layout_inset(&mut layout.left, slide_offset);
+                        set_layout_inset(&mut layout.left, Dp::ZERO);
                         set_layout_inset(&mut layout.top, Dp::ZERO);
                         set_layout_length(&mut layout.width, metrics.width);
                         set_layout_length(&mut layout.height, pct(100.0));
                     }
                     DrawerPlacement::Right => {
-                        set_layout_inset(&mut layout.right, slide_offset);
+                        set_layout_inset(&mut layout.right, Dp::ZERO);
                         set_layout_inset(&mut layout.top, Dp::ZERO);
                         set_layout_length(&mut layout.width, metrics.width);
                         set_layout_length(&mut layout.height, pct(100.0));
                     }
                     DrawerPlacement::Top => {
                         set_layout_inset(&mut layout.left, Dp::ZERO);
-                        set_layout_inset(&mut layout.top, slide_offset);
+                        set_layout_inset(&mut layout.top, Dp::ZERO);
                         set_layout_length(&mut layout.width, pct(100.0));
                         set_layout_length(&mut layout.height, metrics.height);
                     }
                     DrawerPlacement::Bottom => {
                         set_layout_inset(&mut layout.left, Dp::ZERO);
-                        set_layout_inset(&mut layout.bottom, slide_offset);
+                        set_layout_inset(&mut layout.bottom, Dp::ZERO);
                         set_layout_length(&mut layout.width, pct(100.0));
                         set_layout_length(&mut layout.height, metrics.height);
                     }
@@ -460,11 +474,11 @@ fn build_push_drawer_host<VM: 'static>(content: Element<VM>, drawer: Drawer<VM>)
         style,
     } = drawer;
 
-    let slide_transition = Transition::ease_in_out(Duration::from_millis(DRAWER_SLIDE_DURATION_MS));
     let drawer_style_for_panel = style.clone();
     let runtime_metrics = Arc::new(RwLock::new(DrawerRuntimeMetrics::default()));
     let panel_runtime_metrics = runtime_metrics.clone();
     let panel_open = open.clone();
+    let panel_extent_cache = Arc::new(Mutex::new(None::<(Dp, Value<Dp>)>));
 
     let mut panel: Flex<VM> = Flex::new(Axis::Vertical)
         .cursor(CursorStyle::Default)
@@ -491,18 +505,35 @@ fn build_push_drawer_host<VM: 'static>(content: Element<VM>, drawer: Drawer<VM>)
             s.surface.shadow = Some(resolved.shadow.into());
             s
         })
-        .runtime_layout(move |layout, container, _, _, _| {
+        .runtime_layout(move |layout, container, context, _, _| {
             let metrics = *panel_runtime_metrics.read();
             let target_extent = match placement {
                 DrawerPlacement::Left | DrawerPlacement::Right => metrics.width,
                 DrawerPlacement::Top | DrawerPlacement::Bottom => metrics.height,
             };
-            let panel_extent = drawer_extent_value(
-                panel_open.clone(),
-                target_extent,
-                Dp::ZERO,
-                slide_transition,
-            );
+            let panel_extent = match &panel_open {
+                Value::Static(open) => Value::Static(if *open { target_extent } else { Dp::ZERO }),
+                Value::Signal(signal) => {
+                    let mut cache = panel_extent_cache.lock();
+                    let value = match cache.as_ref() {
+                        Some((cached_extent, value)) if *cached_extent == target_extent => {
+                            value.clone()
+                        }
+                        _ => {
+                            let value = Value::Signal(signal.clone().map(move |open| {
+                                if open {
+                                    target_extent
+                                } else {
+                                    Dp::ZERO
+                                }
+                            }));
+                            *cache = Some((target_extent, value.clone()));
+                            value
+                        }
+                    };
+                    value.with_default_transition(context.motion_slow_transition())
+                }
+            };
             match placement {
                 DrawerPlacement::Left | DrawerPlacement::Right => {
                     set_layout_length(&mut layout.width, panel_extent);
@@ -561,8 +592,6 @@ fn build_push_drawer_host<VM: 'static>(content: Element<VM>, drawer: Drawer<VM>)
 }
 
 impl<VM> Drawer<VM> {
-    /// 暴露内部常量，方便 tests 引用。
-    pub(crate) const _DRAWER_SLIDE_DURATION_MS: u64 = DRAWER_SLIDE_DURATION_MS;
     #[doc(hidden)]
     pub fn _backdrop_id_of(element: &Element<VM>) -> Option<WidgetId> {
         element.drawer.as_ref().map(|d| d.backdrop_widget_id)
@@ -570,24 +599,6 @@ impl<VM> Drawer<VM> {
     #[doc(hidden)]
     pub fn _panel_id_of(element: &Element<VM>) -> Option<WidgetId> {
         element.drawer.as_ref().map(|d| d.panel_widget_id)
-    }
-}
-
-fn drawer_extent_value(
-    open: Value<bool>,
-    open_extent: Dp,
-    closed_extent: Dp,
-    transition: Transition,
-) -> Value<Dp> {
-    match open {
-        Value::Static(open_now) => {
-            Value::Static(if open_now { open_extent } else { closed_extent })
-        }
-        Value::Signal(signal) => Value::Signal(
-            signal
-                .map(move |open| if open { open_extent } else { closed_extent })
-                .animated(transition),
-        ),
     }
 }
 
@@ -605,31 +616,4 @@ fn resolve_drawer_style_with_sheet(
     style
         .map(|resolver| resolver.resolve_from(base.clone(), context))
         .unwrap_or(base)
-}
-
-fn drawer_backdrop_color(open: Value<bool>, base: Value<Color>) -> Value<Color> {
-    match open {
-        Value::Static(open_now) => {
-            if open_now {
-                base
-            } else {
-                Value::Static(Color::TRANSPARENT)
-            }
-        }
-        Value::Signal(signal) => {
-            let base_color = match base {
-                Value::Static(color) => color,
-                Value::Signal(_) => Color::rgba(0, 0, 0, 0x80),
-            };
-            Value::Signal(signal.map(
-                move |open| {
-                    if open {
-                        base_color
-                    } else {
-                        Color::TRANSPARENT
-                    }
-                },
-            ))
-        }
-    }
 }

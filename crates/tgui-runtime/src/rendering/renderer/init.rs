@@ -109,6 +109,7 @@ impl Renderer {
             text_upload_scratch: Vec::new(),
             text_atlas,
             text_cache: HashMap::new(),
+            stale_text_atlas_allocations_scratch: Vec::new(),
             texture_cache: HashMap::new(),
             next_sprite_bind_group_id: 1,
             active_text_keys_scratch: HashSet::new(),
@@ -116,12 +117,29 @@ impl Renderer {
             cache_liveness_scene_serial: None,
             #[cfg(feature = "video")]
             video_yuv_texture_cache: HashMap::new(),
+            #[cfg(any(test, feature = "bench-support"))]
+            text_atlas_whole_page_stale_release_enabled: true,
+            #[cfg(any(test, feature = "bench-support"))]
+            cache_liveness_legacy_dirty_draw_gate: false,
+            #[cfg(any(test, feature = "bench-support"))]
+            cache_liveness_scan_count: 0,
+            #[cfg(any(test, feature = "bench-support"))]
+            cache_liveness_paint_only_skip_count: 0,
             vertex_pool,
             retained_prepare_cache: prepare::RetainedPrepareCache::default(),
+            clean_prepared_frame_cache: prepare::CleanPreparedFrameCache::default(),
+            clean_prepared_content_generation: 0,
             prepared_command_scratch: prepare::PreparedCommandScratch::default(),
             scroll_translate_cache: prepare::ScrollTranslateCache::default(),
+            transform_translate_cache: prepare::TransformTranslateCache::default(),
             mesh_clip_bind_group_cache: prepare::MeshClipBindGroupCache::default(),
             last_prepare_stats: HashMap::new(),
+            #[cfg(any(test, feature = "bench-support"))]
+            clean_prepared_frame_cache_enabled: true,
+            #[cfg(any(test, feature = "bench-support"))]
+            clean_prepared_frame_cache_hits: 0,
+            #[cfg(any(test, feature = "bench-support"))]
+            clean_prepared_frame_cache_misses: 0,
             #[cfg(any(test, feature = "bench-support"))]
             sprite_draw_batching_enabled: true,
             #[cfg(any(test, feature = "bench-support"))]
@@ -130,12 +148,20 @@ impl Renderer {
             transparent_shape_skip_enabled: true,
             #[cfg(any(test, feature = "bench-support"))]
             last_scene_draw_stats: super::draw::SceneDrawStats::default(),
+            #[cfg(feature = "bench-support")]
+            last_bench_render_profile: super::BenchRenderProfile::default(),
             #[cfg(any(test, feature = "bench-support"))]
             text_cache_hits: 0,
             #[cfg(any(test, feature = "bench-support"))]
             text_cache_misses: 0,
             #[cfg(any(test, feature = "bench-support"))]
             text_atlas_releases: 0,
+            #[cfg(any(test, feature = "bench-support"))]
+            text_atlas_whole_pages_released: 0,
+            #[cfg(any(test, feature = "bench-support"))]
+            text_atlas_whole_page_releases: 0,
+            #[cfg(any(test, feature = "bench-support"))]
+            text_atlas_individual_releases: 0,
             #[cfg(any(test, feature = "bench-support"))]
             text_prepare_cache_clears: 0,
             #[cfg(any(test, feature = "bench-support"))]
@@ -263,6 +289,7 @@ impl Renderer {
             text_upload_scratch: Vec::new(),
             text_atlas,
             text_cache: HashMap::new(),
+            stale_text_atlas_allocations_scratch: Vec::new(),
             texture_cache: HashMap::new(),
             next_sprite_bind_group_id: 1,
             active_text_keys_scratch: HashSet::new(),
@@ -270,12 +297,29 @@ impl Renderer {
             cache_liveness_scene_serial: None,
             #[cfg(feature = "video")]
             video_yuv_texture_cache: HashMap::new(),
+            #[cfg(any(test, feature = "bench-support"))]
+            text_atlas_whole_page_stale_release_enabled: true,
+            #[cfg(any(test, feature = "bench-support"))]
+            cache_liveness_legacy_dirty_draw_gate: false,
+            #[cfg(any(test, feature = "bench-support"))]
+            cache_liveness_scan_count: 0,
+            #[cfg(any(test, feature = "bench-support"))]
+            cache_liveness_paint_only_skip_count: 0,
             vertex_pool,
             retained_prepare_cache: prepare::RetainedPrepareCache::default(),
+            clean_prepared_frame_cache: prepare::CleanPreparedFrameCache::default(),
+            clean_prepared_content_generation: 0,
             prepared_command_scratch: prepare::PreparedCommandScratch::default(),
             scroll_translate_cache: prepare::ScrollTranslateCache::default(),
+            transform_translate_cache: prepare::TransformTranslateCache::default(),
             mesh_clip_bind_group_cache: prepare::MeshClipBindGroupCache::default(),
             last_prepare_stats: HashMap::new(),
+            #[cfg(any(test, feature = "bench-support"))]
+            clean_prepared_frame_cache_enabled: true,
+            #[cfg(any(test, feature = "bench-support"))]
+            clean_prepared_frame_cache_hits: 0,
+            #[cfg(any(test, feature = "bench-support"))]
+            clean_prepared_frame_cache_misses: 0,
             #[cfg(any(test, feature = "bench-support"))]
             sprite_draw_batching_enabled: true,
             #[cfg(any(test, feature = "bench-support"))]
@@ -284,12 +328,20 @@ impl Renderer {
             transparent_shape_skip_enabled: true,
             #[cfg(any(test, feature = "bench-support"))]
             last_scene_draw_stats: super::draw::SceneDrawStats::default(),
+            #[cfg(feature = "bench-support")]
+            last_bench_render_profile: super::BenchRenderProfile::default(),
             #[cfg(any(test, feature = "bench-support"))]
             text_cache_hits: 0,
             #[cfg(any(test, feature = "bench-support"))]
             text_cache_misses: 0,
             #[cfg(any(test, feature = "bench-support"))]
             text_atlas_releases: 0,
+            #[cfg(any(test, feature = "bench-support"))]
+            text_atlas_whole_pages_released: 0,
+            #[cfg(any(test, feature = "bench-support"))]
+            text_atlas_whole_page_releases: 0,
+            #[cfg(any(test, feature = "bench-support"))]
+            text_atlas_individual_releases: 0,
             #[cfg(any(test, feature = "bench-support"))]
             text_prepare_cache_clears: 0,
             #[cfg(any(test, feature = "bench-support"))]

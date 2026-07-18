@@ -39,13 +39,26 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             WidgetTree::new(build_root_element(&root_view, &view_model))
         };
         self.widget_tree = Some(tree);
+        self.portal_publication_generation = self.portal_publication_generation.wrapping_add(1);
         self.cached_scene = None;
         self.clear_rebuilt_tree_runtime_state();
         true
     }
 
+    pub(in crate::runtime) fn observe_root_rebuild_request(&mut self) -> bool {
+        let revision = self.invalidation.root_rebuild_revision();
+        if revision == self.last_root_rebuild_revision {
+            return false;
+        }
+        self.last_root_rebuild_revision = revision;
+        self.rebuild_widget_tree_from_root_view()
+    }
+
     fn clear_rebuilt_tree_runtime_state(&mut self) {
         self.hovered_widgets.clear();
+        self.button_hover_patch_pending = None;
+        self.button_pressed_patch_pending = None;
+        self.row_hover_patch_pending = None;
         self.tooltip_hover_started_at.clear();
         self.next_tooltip_wakeup_deadline = None;
         self.next_toast_wakeup_deadline = None;

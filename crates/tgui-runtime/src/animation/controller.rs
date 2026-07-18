@@ -11,8 +11,6 @@ mod timeline;
 
 pub(crate) use self::timeline::{sample_timeline, AnimationCoordinator};
 
-pub(crate) const FRAME_INTERVAL: Duration = Duration::from_nanos(16_666_667);
-
 /// 表示控制器当前的生命周期状态。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AnimationStatus {

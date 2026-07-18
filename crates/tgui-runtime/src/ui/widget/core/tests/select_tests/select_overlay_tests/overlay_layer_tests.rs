@@ -100,6 +100,7 @@ fn select_dropdown_stays_above_later_slider_decorations() {
     let slider: Element<ScopeChildVm> = Slider::new(50.0, 0.0, 100.0)
         .size(dp(180.0), dp(40.0))
         .show_ticks(true)
+        .style(|style, _| style.thumb_shadow = Some(test_shadow()))
         .into();
     let tree = WidgetTree::new(
         crate::ui::widget::Flex::new(Axis::Vertical)
@@ -130,6 +131,10 @@ fn select_dropdown_stays_above_later_slider_decorations() {
     assert!(
         !rendered.primitives.overlay_shapes.is_empty(),
         "open select should render menu in overlay layer"
+    );
+    assert!(
+        !rendered.primitives.textures.is_empty(),
+        "explicit Slider thumb shadow should exercise the later base-layer texture path"
     );
     assert!(
         rendered.primitives.overlay_textures.is_empty(),
@@ -201,4 +206,85 @@ fn select_dropdown_stays_above_later_media_placeholder() {
             .any(|shape| shape.rect == image_frame),
         "media placeholder should still render in the normal scene"
     );
+}
+
+#[test]
+fn select_dropdown_uses_themeable_modern_surface_tokens() {
+    let default_theme = Theme::light();
+    let default_style = crate::ui::widget::SelectStyle::default_for_theme(&default_theme);
+    assert_eq!(
+        default_style.menu_background.resolve(),
+        default_theme.colors.surface_overlay
+    );
+    assert_eq!(
+        default_style.menu_border.resolve(),
+        default_theme.colors.outline_muted
+    );
+    assert_eq!(
+        default_style.menu_border_width.resolve(),
+        default_theme.border.thin
+    );
+    assert_eq!(default_style.menu_border_width.resolve(), dp(1.0));
+    assert_eq!(default_style.menu_radius.resolve(), default_theme.radius.xl);
+    assert_eq!(default_style.menu_radius.resolve(), dp(12.0));
+
+    let menu_background = Color::hexa(0x243447FF);
+    let menu_border = Color::hexa(0xD97745FF);
+    let menu_border_width = dp(2.0);
+    let menu_radius = dp(14.0);
+    let mut theme = Theme::light();
+    theme.components.select = crate::ui::theme::ComponentStyle::patch(
+        move |style: &mut crate::ui::widget::SelectStyle, _| {
+            style.menu_background = crate::ui::layout::Value::Static(menu_background);
+            style.menu_border = crate::ui::layout::Value::Static(menu_border);
+            style.menu_border_width = crate::ui::layout::Value::Static(menu_border_width);
+            style.menu_radius = crate::ui::layout::Value::Static(menu_radius);
+        },
+    );
+    let select: Element<()> = Select::<(), String, String>::new(
+        vec![
+            SelectOption::new("email".to_string(), "Email".to_string()),
+            SelectOption::new("sms".to_string(), "SMS".to_string()),
+        ],
+        None::<String>,
+    )
+    .open(true)
+    .size(dp(180.0), dp(40.0))
+    .into();
+    let tree = WidgetTree::new(Stack::new().child(select));
+    let rendered = tree.render_output_with_widget_state(
+        &FontManager::new(&FontCatalog::default()),
+        &theme,
+        &test_media(),
+        &mut AnimationEngine::default(),
+        true,
+        None,
+        None,
+        &WidgetStateMap::default(),
+        &HashMap::new(),
+        &HashMap::new(),
+        Rect::new(0.0, 0.0, 180.0, 160.0),
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+    let surface = rendered
+        .primitives
+        .overlay_shapes
+        .iter()
+        .find(|shape| shape.color == menu_background && shape.stroke_width == 0.0)
+        .expect("Select menu overlay surface");
+    let outline = rendered
+        .primitives
+        .overlay_shapes
+        .iter()
+        .find(|shape| shape.color == menu_border)
+        .expect("Select menu muted outline");
+
+    assert_eq!(outline.rect, surface.rect);
+    assert_eq!(surface.corner_radius, menu_radius.get());
+    assert_eq!(outline.corner_radius, menu_radius.get());
+    assert_eq!(outline.stroke_width, menu_border_width.get());
 }

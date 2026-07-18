@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use parking_lot::RwLock;
@@ -10,8 +11,8 @@ use crate::ui::unit::{dp, Dp};
 
 use super::common::{
     ChildSource, CursorStyle, DataGridCellState, DataGridHeaderState, DataGridResizeHandleState,
-    DataGridRootState, FocusScopeOptions, InteractionHandlers, LifecycleEventHandlers,
-    MediaEventHandlers, VisualStyle, WidgetId, WidgetKey, WidgetKind,
+    DataGridRootState, DataGridSelectionMetadata, FocusScopeOptions, InteractionHandlers,
+    LifecycleEventHandlers, MediaEventHandlers, VisualStyle, WidgetId, WidgetKey, WidgetKind,
 };
 use super::container::{set_layout_inset, set_layout_length, set_layout_lengths, IntoLengthValue};
 use super::core::Element;
@@ -362,13 +363,14 @@ impl DataGridStyle {
             header_text: Value::Static(palette.on_surface_muted),
             row_background: Value::Static(Color::TRANSPARENT),
             zebra_background: Value::Static(Color::TRANSPARENT),
-            row_hover_background: Value::Static(theme.colors.surface_low.with_alpha_factor(0.72)),
-            row_selected_background: Value::Static(
-                theme.colors.primary_container.with_alpha_factor(0.72),
-            ),
+            // Match List/Tree interaction layers: a neutral 6% hover wash and
+            // a restrained 12% accent selection remain legible on both light
+            // and dark surfaces without turning dense tables into color bars.
+            row_hover_background: Value::Static(palette.on_surface.with_alpha_factor(0.06)),
+            row_selected_background: Value::Static(palette.primary.with_alpha_factor(0.12)),
             cell_focused_border: Value::Static(theme.colors.focus_ring),
             cell_editing_background: Value::Static(theme.colors.surface),
-            grid_line: Value::Static(theme.colors.outline_muted.with_alpha_factor(0.64)),
+            grid_line: Value::Static(theme.colors.outline_muted.with_alpha_factor(0.42)),
             resize_handle: Value::Static(theme.colors.outline),
             sort_indicator: Value::Static(theme.colors.primary),
             scrollbar: ContainerStyle::default_for_theme(theme).scrollbar,
@@ -554,10 +556,10 @@ where
         rows: Vec<DataGridVirtualRow<T, VM>>,
         columns: Vec<DataGridColumn<T, VM>>,
     ) -> Self {
-        let interactions = InteractionHandlers {
-            cursor_style: Some(Value::Static(CursorStyle::Pointer)),
-            ..Default::default()
-        };
+        // Cells and headers own their cursor and interaction state. Keeping a
+        // second pointer hit region on the root made the hover path change at
+        // pinned-column clip boundaries and forced redundant scene updates.
+        let interactions = InteractionHandlers::default();
         Self {
             rows,
             columns,
@@ -889,7 +891,19 @@ where
             spacing: Dp::ZERO,
             overscan: 2,
         });
-        let selected_keys = self.selected_keys.clone();
+        let (selected_keys, selected_key_membership) = match self.selected_keys {
+            Value::Static(keys) => {
+                let shared: Arc<[WidgetKey]> = keys.into();
+                let membership = Arc::new(shared.iter().cloned().collect::<HashSet<_>>());
+                (Value::Static(shared), Value::Static(membership))
+            }
+            Value::Signal(signal) => {
+                let shared = signal.map_memo(|keys| Arc::<[WidgetKey]>::from(keys));
+                let membership =
+                    shared.map_memo(|keys| Arc::new(keys.iter().cloned().collect::<HashSet<_>>()));
+                (Value::Signal(shared), Value::Signal(membership))
+            }
+        };
         let sort = self.sort.clone();
         let columns = Arc::new(ordered_columns(self.columns));
         let total_width = columns
@@ -906,16 +920,37 @@ where
             })
             .collect::<Vec<_>>()
             .into();
+        let row_virtual_indices: Arc<[usize]> = self
+            .rows
+            .iter()
+            .enumerate()
+            .filter_map(|(virtual_index, row)| {
+                matches!(row, DataGridVirtualRow::Row { .. }).then_some(virtual_index)
+            })
+            .collect::<Vec<_>>()
+            .into();
         let row_count = row_keys.len();
-        let row_disabled: Arc<[bool]> = self
+        // One relaxed atomic reservation gives every logical row a stable
+        // identity without adding an id field to every source item. A row's
+        // source index is stable across VirtualList window reconstruction.
+        let row_id_base = WidgetId::reserve(row_count);
+        let row_disabled: Arc<[Value<bool>]> = self
             .rows
             .iter()
             .filter_map(|row| match row {
-                DataGridVirtualRow::Row { disabled, .. } => Some(disabled.resolve()),
+                DataGridVirtualRow::Row { disabled, .. } => Some(disabled.clone()),
                 DataGridVirtualRow::Section(_) => None,
             })
             .collect::<Vec<_>>()
             .into();
+        let selection = Arc::new(DataGridSelectionMetadata {
+            selected_keys,
+            selected_key_membership,
+            sibling_keys: row_keys,
+            sibling_virtual_row_indices: row_virtual_indices,
+            sibling_disabled: row_disabled,
+        });
+        let root_selection = selection.clone();
         let source = DataGridRowSource {
             rows: self.rows.into(),
         };
@@ -937,7 +972,7 @@ where
         let on_cell_edit_commit = self.on_cell_edit_commit.clone();
         let context_menu = Arc::new(self.context_menu);
         let row_columns = columns.clone();
-        let row_selected_keys = selected_keys.clone();
+        let row_selection = selection.clone();
         let row_style_resolver = style_resolver.clone();
         let body_style_resolver = style_resolver.clone();
         let row_runtime_metrics = runtime_metrics.clone();
@@ -959,6 +994,7 @@ where
                     disabled,
                 } => build_data_row(
                     grid_id,
+                    row_id_base.offset(*source_index),
                     body_id,
                     _visible,
                     *source_index,
@@ -966,10 +1002,8 @@ where
                     value.clone(),
                     disabled.clone(),
                     row_columns.clone(),
-                    row_selected_keys.clone(),
+                    row_selection.clone(),
                     selection_mode,
-                    row_keys.clone(),
-                    row_disabled.clone(),
                     row_runtime_metrics.clone(),
                     row_style_resolver.clone(),
                     on_selection_change.clone(),
@@ -1052,7 +1086,7 @@ where
             row_count,
             column_count: columns.len(),
             selection_mode,
-            selected_keys,
+            selection: root_selection,
         });
         apply_data_grid_root_style(&mut root, style_resolver);
         root
@@ -1217,6 +1251,7 @@ where
 #[allow(clippy::too_many_arguments)]
 fn build_data_row<T, VM: 'static>(
     grid_id: WidgetId,
+    row_id: WidgetId,
     scroll_container_id: WidgetId,
     virtual_row_index: usize,
     row_index: usize,
@@ -1224,10 +1259,8 @@ fn build_data_row<T, VM: 'static>(
     row: T,
     disabled: Value<bool>,
     columns: Arc<Vec<DataGridColumn<T, VM>>>,
-    selected_keys: Value<Vec<WidgetKey>>,
+    selection: Arc<DataGridSelectionMetadata>,
     selection_mode: DataGridSelectionMode,
-    sibling_keys: Arc<[WidgetKey]>,
-    sibling_disabled: Arc<[bool]>,
     runtime_metrics: Arc<RwLock<DataGridRuntimeMetrics>>,
     style_resolver: Option<StyleResolver<DataGridStyle>>,
     on_selection_change: Option<ValueCommand<VM, DataGridSelectionChange>>,
@@ -1239,7 +1272,9 @@ fn build_data_row<T, VM: 'static>(
 where
     T: Clone + Send + Sync + 'static,
 {
-    let selected = selected_keys.resolve().contains(&row_key);
+    let selected = selection
+        .selected_key_membership
+        .resolve_ref(|membership| membership.contains(&row_key));
     let disabled_now = disabled.resolve();
     let initial_metrics = *runtime_metrics.read();
     let row_metrics = runtime_metrics.clone();
@@ -1305,6 +1340,7 @@ where
         }));
         cell.data_grid_cell = Some(DataGridCellState {
             grid_id,
+            row_id,
             scroll_container_id,
             virtual_row_index,
             row_index,
@@ -1315,16 +1351,17 @@ where
             pin_offset: pin_metrics.offsets[column_index],
             start_pin_extent: pin_metrics.start_extent,
             end_pin_extent: pin_metrics.end_extent,
-            selected_keys: selected_keys.clone(),
+            selected,
+            selection: selection.clone(),
             selection_mode,
             disabled: disabled.clone(),
+            item_extent: initial_metrics.row_height,
+            item_spacing: Dp::ZERO,
             editable: column.editable && column.text_value.is_some(),
             edit_value,
             on_selection_change: on_selection_change.clone(),
             on_cell_action: on_cell_action.clone(),
             on_cell_edit_commit: on_cell_edit_commit.clone(),
-            sibling_keys: sibling_keys.clone(),
-            sibling_disabled: sibling_disabled.clone(),
         });
         if !context_menu.is_empty() {
             let on_show = ValueCommand::new(|_: &mut VM, _: LongPressEvent| {});
@@ -1342,7 +1379,18 @@ where
         row_element = row_element.child(cell);
     }
     let mut row_element: Element<VM> = row_element.into();
-    apply_data_grid_row_container_style(&mut row_element, style_resolver, selected, row_index);
+    // The row owns the visual state. Cells only forward pointer state to this
+    // stable identity, so pinned and scrolling cells cannot highlight
+    // different fragments of the same logical row.
+    row_element.id = row_id;
+    row_element.key = Some(row_key);
+    apply_data_grid_row_container_style(
+        &mut row_element,
+        style_resolver,
+        selected,
+        disabled_now,
+        row_index,
+    );
     row_element
 }
 
@@ -1445,9 +1493,16 @@ fn apply_data_grid_row_container_style<VM>(
     element: &mut Element<VM>,
     style_resolver: Option<StyleResolver<DataGridStyle>>,
     selected: bool,
+    disabled: bool,
     row_index: usize,
 ) {
     apply_container_style(element, move |context, style_sheet, visual, state| {
+        let state = WidgetState {
+            hovered: state.hovered && !disabled,
+            disabled,
+            selected,
+            ..state
+        };
         let style = resolve_data_grid_style_with_sheet(
             style_resolver.as_ref(),
             context,
@@ -1455,8 +1510,13 @@ fn apply_data_grid_row_container_style<VM>(
             visual,
             state,
         );
+        // A disabled row never reacts to pointer hover. Selection remains
+        // visible for controlled grids, and takes precedence over hover so a
+        // selected row cannot flicker as the pointer crosses cell boundaries.
         let background = if selected {
             style.row_selected_background
+        } else if !disabled && state.hovered {
+            style.row_hover_background
         } else if row_index % 2 == 1 {
             style.zebra_background
         } else {

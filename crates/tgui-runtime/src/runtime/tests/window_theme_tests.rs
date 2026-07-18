@@ -401,6 +401,27 @@ fn stable_wait_control_flow_is_not_reapplied() {
 }
 
 #[test]
+fn idle_window_does_not_erase_another_windows_future_deadline() {
+    let handler = test_handler_with_config(
+        TestVm,
+        None,
+        InvalidationSignal::new(),
+        test_config_with_theme(ThemeSelection::Mode(ThemeMode::Light), ThemeSet::default()),
+    );
+    let event_loop = CapturingEventLoop::default();
+    let now = Instant::now();
+    let sibling_deadline = now + Duration::from_millis(8);
+    event_loop.set_control_flow(ControlFlow::WaitUntil(sibling_deadline));
+
+    handler.set_control_flow_for_deadline(&event_loop, None, now);
+
+    assert_eq!(
+        event_loop.control_flow(),
+        ControlFlow::WaitUntil(sibling_deadline)
+    );
+}
+
+#[test]
 fn schedule_next_deadline_tracks_theme_animations_created_during_scene_collection() {
     let invalidation = InvalidationSignal::new();
     let mut handler = test_handler_with_config(
@@ -443,14 +464,18 @@ fn schedule_next_deadline_preserves_earlier_future_wakeup() {
 
     let event_loop = CapturingEventLoop::default();
     let now = Instant::now();
-    let earlier_deadline = now + Duration::from_millis(4);
+    let computed_deadline = handler
+        .next_deadline(now)
+        .expect("active theme animation should arm the frame clock");
+    let earlier_deadline = now + computed_deadline.saturating_duration_since(now) / 2;
     event_loop.set_control_flow(ControlFlow::WaitUntil(earlier_deadline));
 
-    let computed_deadline = handler
+    let scheduled_deadline = handler
         .schedule_next_deadline(&event_loop, now)
         .expect("active theme animation should schedule another frame");
 
-    assert!(computed_deadline > earlier_deadline);
+    assert_eq!(scheduled_deadline, computed_deadline);
+    assert!(scheduled_deadline > earlier_deadline);
     match event_loop.control_flow() {
         ControlFlow::WaitUntil(scheduled) => assert_eq!(scheduled, earlier_deadline),
         other => panic!("expected WaitUntil control flow, got {other:?}"),
@@ -536,11 +561,13 @@ fn drive_animations_waits_for_scheduled_frame_clock_deadline() {
 
     let event_loop = CapturingEventLoop::default();
     let now = Instant::now();
-    let scheduled_deadline = now + Duration::from_millis(16);
-    event_loop.set_control_flow(ControlFlow::WaitUntil(scheduled_deadline));
+    let scheduled_deadline = handler
+        .schedule_next_deadline(&event_loop, now)
+        .expect("active animation should arm the per-window frame clock");
+    let early = now + scheduled_deadline.saturating_duration_since(now) / 2;
 
     let before_epoch = handler.animation_epoch;
-    assert!(!handler.drive_animations(&event_loop, now + Duration::from_millis(4)));
+    assert!(!handler.drive_animations(&event_loop, early));
     assert_eq!(handler.animation_epoch, before_epoch);
     match event_loop.control_flow() {
         ControlFlow::WaitUntil(scheduled) => assert_eq!(scheduled, scheduled_deadline),
@@ -549,6 +576,41 @@ fn drive_animations_waits_for_scheduled_frame_clock_deadline() {
 
     assert!(handler.drive_animations(&event_loop, scheduled_deadline + Duration::from_millis(1)));
     assert!(handler.animation_epoch > before_epoch);
+}
+
+#[test]
+fn unrelated_earlier_wakeup_does_not_oversample_animation_clock() {
+    let invalidation = InvalidationSignal::new();
+    let mut handler = test_handler_with_config(
+        TestVm,
+        Some(WidgetTree::new(
+            Flex::new(Axis::Vertical)
+                .child(ProgressBar::indeterminate(true))
+                .child(Spinner::new()),
+        )),
+        invalidation,
+        test_config_with_theme(ThemeSelection::Mode(ThemeMode::Light), ThemeSet::default()),
+    );
+    let _ = handler.computed_scene();
+
+    let event_loop = CapturingEventLoop::default();
+    let now = Instant::now();
+    handler.frame_clock = crate::animation::AdaptiveFrameClock::new(now);
+    let frame_deadline = handler
+        .next_deadline(now)
+        .expect("feedback animation should arm a frame deadline");
+    let unrelated_deadline = now + Duration::from_millis(4);
+    assert!(unrelated_deadline < frame_deadline);
+    event_loop.set_control_flow(ControlFlow::WaitUntil(unrelated_deadline));
+
+    let before_epoch = handler.animation_epoch;
+    let unrelated_wake = unrelated_deadline + Duration::from_millis(1);
+    assert!(!handler.drive_animations(&event_loop, unrelated_wake));
+    assert_eq!(handler.animation_epoch, before_epoch);
+    match event_loop.control_flow() {
+        ControlFlow::WaitUntil(scheduled) => assert_eq!(scheduled, frame_deadline),
+        other => panic!("expected frame WaitUntil after unrelated wake, got {other:?}"),
+    }
 }
 
 #[test]

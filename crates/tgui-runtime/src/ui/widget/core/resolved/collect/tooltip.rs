@@ -8,7 +8,7 @@
 use std::sync::Arc;
 use taffy::prelude::TaffyTree;
 
-use crate::animation::{AnimationKey, Transition, WidgetProperty};
+use crate::animation::{AnimationKey, WidgetProperty};
 use crate::foundation::binding::{with_dependency_collection, DependencyGraph};
 use crate::foundation::color::Color;
 use crate::text::font::TextFontRequest;
@@ -87,7 +87,7 @@ impl<VM: 'static> ResolvedElement<VM> {
                     property: WidgetProperty::TooltipVisibility,
                 },
                 0.0,
-                Some(default_tooltip_transition()),
+                context.style_context.motion_fast_transition(),
                 context.now,
             );
             return;
@@ -98,7 +98,7 @@ impl<VM: 'static> ResolvedElement<VM> {
                 property: WidgetProperty::TooltipVisibility,
             },
             if target_visible { 1.0 } else { 0.0 },
-            Some(default_tooltip_transition()),
+            context.style_context.motion_fast_transition(),
             context.now,
         );
         if visibility <= f32::EPSILON {
@@ -207,7 +207,8 @@ fn emit_text_tooltip<VM>(
     context: &mut CollectContext<'_, '_>,
     computed: &mut ComputedScene<VM>,
 ) {
-    let foreground = style.foreground;
+    let foreground = style.foreground.with_alpha_factor(visibility);
+    let background = background.with_alpha_factor(visibility);
     let shadow_blur = style.shadow.blur.get() * visibility;
 
     let units = context.units;
@@ -353,15 +354,18 @@ fn emit_element_tooltip<VM: 'static>(
     flip_policy: crate::ui::widget::OverlayFlipPolicy,
     style: &TooltipStyle,
     background: Color,
-    _visibility: f32,
+    visibility: f32,
     animated_offset: Dp,
     overlay: Overlay<VM>,
     context: &mut CollectContext<'_, '_>,
     computed: &mut ComputedScene<VM>,
 ) {
-    let Some((content_scene, content_size)) = build_tooltip_scene(content, style, context) else {
+    let Some((content_scene, content_size)) =
+        build_tooltip_scene(content, style, visibility, context)
+    else {
         return;
     };
+    let background = background.with_alpha_factor(visibility);
 
     let pointer = style.pointer_size.max(Dp::ZERO);
     let overlay_w = if placement.side.is_vertical() {
@@ -426,6 +430,7 @@ fn emit_element_tooltip<VM: 'static>(
 fn build_tooltip_scene<VM: 'static>(
     content: &Element<VM>,
     style: &TooltipStyle,
+    opacity: f32,
     context: &mut CollectContext<'_, '_>,
 ) -> Option<(ComputedScene<VM>, (Dp, Dp))> {
     let (result, dependencies): (Option<(ComputedScene<VM>, _)>, DependencyGraph) =
@@ -505,6 +510,7 @@ fn build_tooltip_scene<VM: 'static>(
                     animations: context.animations,
                     reduced_motion: context.reduced_motion,
                     now: context.now,
+                    frame_clock: context.frame_clock,
                     focus: Default::default(),
                     tooltip_hover_started_at: context.tooltip_hover_started_at,
                     next_tooltip_wakeup: context.next_tooltip_wakeup,
@@ -514,12 +520,14 @@ fn build_tooltip_scene<VM: 'static>(
                     gpu_scroll_enabled: false,
                     gpu_scroll_container: None,
                     transform_stack: context.transform_stack.clone(),
+                    portal_accessibility_geometry: None,
+                    portal_accessibility_path: smallvec::SmallVec::new(),
                 };
                 let root_id = resolved.collect_subtree_cache(
                     &layout_root,
                     VisualContext {
                         origin: crate::ui::widget::Point::ZERO,
-                        opacity: 1.0,
+                        opacity: opacity.clamp(0.0, 1.0),
                         clip_rect: local_bounds,
                         overflow_clip_rect: None,
                         clip_mask: None,
@@ -539,10 +547,6 @@ fn build_tooltip_scene<VM: 'static>(
     let (mut computed, size) = result?;
     computed.dependencies = dependencies.clone();
     Some((computed, size))
-}
-
-fn default_tooltip_transition() -> Transition {
-    Transition::ease_in_out(std::time::Duration::from_millis(140))
 }
 
 fn insets_max(insets: Insets) -> Dp {

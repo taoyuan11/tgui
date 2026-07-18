@@ -101,6 +101,25 @@ impl WidgetId {
         Self(NEXT_WIDGET_ID.fetch_add(1, Ordering::Relaxed))
     }
 
+    /// Reserves a contiguous range of widget ids and returns its first id.
+    ///
+    /// Virtualized controls use this to give every logical item a stable id
+    /// without storing one `WidgetId` per item. The caller must only use
+    /// offsets in `0..count`.
+    pub(crate) fn reserve(count: usize) -> Self {
+        let count = u64::try_from(count).expect("widget id range exceeds u64");
+        Self(NEXT_WIDGET_ID.fetch_add(count, Ordering::Relaxed))
+    }
+
+    pub(crate) fn offset(self, offset: usize) -> Self {
+        let offset = u64::try_from(offset).expect("widget id offset exceeds u64");
+        Self(
+            self.0
+                .checked_add(offset)
+                .expect("widget id range overflow"),
+        )
+    }
+
     pub(crate) fn raw(self) -> u64 {
         self.0
     }
@@ -297,6 +316,66 @@ impl Default for VisualStyle {
             opacity: Value::Static(1.0),
             offset: Value::Static(Point::ZERO),
             scale: Value::Static(1.0),
+        }
+    }
+}
+
+impl VisualStyle {
+    /// Copy only fields a runtime-layout resolver changed relative to the
+    /// already-resolved component surface. The destination is the element's
+    /// original explicit visual style, so untouched fields remain eligible for
+    /// live theme, stylesheet, hover, focus, and disabled-state resolution.
+    pub(crate) fn apply_runtime_layout_overrides(
+        &mut self,
+        before: &VisualStyle,
+        after: &VisualStyle,
+    ) {
+        fn option_same<T>(left: &Option<Value<T>>, right: &Option<Value<T>>) -> bool
+        where
+            T: Clone + PartialEq,
+        {
+            match (left, right) {
+                (None, None) => true,
+                (Some(left), Some(right)) => left.same_binding(right),
+                _ => false,
+            }
+        }
+
+        if before.style_id != after.style_id {
+            self.style_id = after.style_id.clone();
+        }
+        if before.classes != after.classes {
+            self.classes = after.classes.clone();
+        }
+        if !option_same(&before.border_color, &after.border_color) {
+            self.border_color = after.border_color.clone();
+        }
+        if !option_same(&before.border_radius, &after.border_radius) {
+            self.border_radius = after.border_radius.clone();
+        }
+        if !option_same(&before.border_width, &after.border_width) {
+            self.border_width = after.border_width.clone();
+        }
+        if !option_same(&before.background_brush, &after.background_brush) {
+            self.background_brush = after.background_brush.clone();
+        }
+        if !option_same(&before.background_image, &after.background_image) {
+            self.background_image = after.background_image.clone();
+        }
+        if !before.background_blur.same_binding(&after.background_blur) {
+            self.background_blur = after.background_blur.clone();
+        }
+        if !option_same(&before.shadow, &after.shadow) {
+            self.shadow = after.shadow.clone();
+        }
+        if !before.opacity.same_binding(&after.opacity) {
+            self.opacity = after.opacity.clone();
+        }
+        if !before.offset.same_binding(&after.offset) {
+            self.offset = after.offset.clone();
+        }
+        if !before.scale.same_binding(&after.scale) {
+            self.scale = after.scale.clone();
         }
     }
 }

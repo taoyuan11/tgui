@@ -205,6 +205,7 @@ pub(crate) fn push_svg_icon_texture(
         texture: texture.clone(),
         media_key: None,
         media_layout: None,
+        mask_tint: None,
         frame: target_frame,
         quad,
         uv_rect: None,
@@ -277,7 +278,9 @@ fn icon_paths(icon: SvgIconId) -> &'static [SvgPath] {
             SvgPath::stroke("M4.5 21a7.5 5.5 0 0 1 15 0"),
         ],
         SvgIconId::Image => svg_paths![
-            SvgPath::stroke("M4 5.5A1.5 1.5 0 0 1 5.5 4h13A1.5 1.5 0 0 1 20 5.5v13A1.5 1.5 0 0 1 18.5 20h-13A1.5 1.5 0 0 1 4 18.5v-13Z"),
+            SvgPath::stroke(
+                "M4 5.5A1.5 1.5 0 0 1 5.5 4h13A1.5 1.5 0 0 1 20 5.5v13A1.5 1.5 0 0 1 18.5 20h-13A1.5 1.5 0 0 1 4 18.5v-13Z"
+            ),
             SvgPath::stroke("M7 16L10 13L12.5 15.5L15.5 12L20 17"),
             SvgPath::fill("M8 8a1.5 1.5 0 1 0 .01 0Z"),
         ],
@@ -302,7 +305,9 @@ fn icon_paths(icon: SvgIconId) -> &'static [SvgPath] {
             SvgPath::stroke("M8.5 8.5L15.5 15.5M15.5 8.5L8.5 15.5"),
         ],
         SvgIconId::Calendar => svg_paths![
-            SvgPath::stroke("M5 5h14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z"),
+            SvgPath::stroke(
+                "M5 5h14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z"
+            ),
             SvgPath::stroke("M8 3v4M16 3v4M3 10h18"),
         ],
         SvgIconId::Clock => svg_paths![
@@ -315,7 +320,9 @@ fn icon_paths(icon: SvgIconId) -> &'static [SvgPath] {
         ],
         SvgIconId::Settings => svg_paths![
             SvgPath::stroke("M12 15.5a3.5 3.5 0 1 0 0-7a3.5 3.5 0 0 0 0 7"),
-            SvgPath::stroke("M19.4 15a1.8 1.8 0 0 0 .36 1.98l.05.05a2 2 0 0 1-2.83 2.83l-.05-.05a1.8 1.8 0 0 0-1.98-.36a1.8 1.8 0 0 0-1.1 1.66V21a2 2 0 0 1-4 0v-.08a1.8 1.8 0 0 0-1.18-1.68a1.8 1.8 0 0 0-1.98.36l-.05.05a2 2 0 0 1-2.83-2.83l.05-.05a1.8 1.8 0 0 0 .36-1.98a1.8 1.8 0 0 0-1.66-1.1H3a2 2 0 0 1 0-4h.08a1.8 1.8 0 0 0 1.68-1.18a1.8 1.8 0 0 0-.36-1.98l-.05-.05a2 2 0 0 1 2.83-2.83l.05.05a1.8 1.8 0 0 0 1.98.36h.01A1.8 1.8 0 0 0 10.3 3V3a2 2 0 0 1 4 0v.08a1.8 1.8 0 0 0 1.18 1.68a1.8 1.8 0 0 0 1.98-.36l.05-.05a2 2 0 0 1 2.83 2.83l-.05.05a1.8 1.8 0 0 0-.36 1.98a1.8 1.8 0 0 0 1.66 1.1H21a2 2 0 0 1 0 4h-.08a1.8 1.8 0 0 0-1.52.69Z"),
+            SvgPath::stroke(
+                "M19.4 15a1.8 1.8 0 0 0 .36 1.98l.05.05a2 2 0 0 1-2.83 2.83l-.05-.05a1.8 1.8 0 0 0-1.98-.36a1.8 1.8 0 0 0-1.1 1.66V21a2 2 0 0 1-4 0v-.08a1.8 1.8 0 0 0-1.18-1.68a1.8 1.8 0 0 0-1.98.36l-.05.05a2 2 0 0 1-2.83-2.83l.05-.05a1.8 1.8 0 0 0 .36-1.98a1.8 1.8 0 0 0-1.66-1.1H3a2 2 0 0 1 0-4h.08a1.8 1.8 0 0 0 1.68-1.18a1.8 1.8 0 0 0-.36-1.98l-.05-.05a2 2 0 0 1 2.83-2.83l.05.05a1.8 1.8 0 0 0 1.98.36h.01A1.8 1.8 0 0 0 10.3 3V3a2 2 0 0 1 4 0v.08a1.8 1.8 0 0 0 1.18 1.68a1.8 1.8 0 0 0 1.98-.36l.05-.05a2 2 0 0 1 2.83 2.83l-.05.05a1.8 1.8 0 0 0-.36 1.98a1.8 1.8 0 0 0 1.66 1.1H21a2 2 0 0 1 0 4h-.08a1.8 1.8 0 0 0-1.52.69Z"
+            ),
         ],
         SvgIconId::Bell => svg_paths![
             SvgPath::stroke("M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"),
@@ -379,9 +386,7 @@ fn icon_paths(icon: SvgIconId) -> &'static [SvgPath] {
             SvgPath::stroke("M4 12h16"),
             SvgPath::stroke("M4 18h16"),
         ],
-        SvgIconId::Filter => svg_paths![SvgPath::stroke(
-            "M4 5h16l-6 7v5l-4 2v-7L4 5Z",
-        )],
+        SvgIconId::Filter => svg_paths![SvgPath::stroke("M4 5h16l-6 7v5l-4 2v-7L4 5Z",)],
         SvgIconId::SortAsc => svg_paths![
             SvgPath::stroke("M7 17V5"),
             SvgPath::stroke("M3 9l4-4l4 4"),
@@ -404,8 +409,12 @@ fn icon_paths(icon: SvgIconId) -> &'static [SvgPath] {
             "M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.6l-1-1a5.5 5.5 0 0 0-7.8 7.8l1 1L12 21l7.8-7.6l1-1a5.5 5.5 0 0 0 0-7.8Z",
         )],
         SvgIconId::Palette => svg_paths![
-            SvgPath::stroke("M12 4a8 8 0 0 0 0 16h1.2a1.8 1.8 0 0 0 1.3-3.05a1.45 1.45 0 0 1 1.05-2.45H17a3 3 0 0 0 3-3C20 7.35 16.42 4 12 4Z"),
-            SvgPath::fill("M8 11a1.2 1.2 0 1 0 .01 0ZM10 7.5a1.2 1.2 0 1 0 .01 0ZM14 7.5a1.2 1.2 0 1 0 .01 0ZM16 11a1.2 1.2 0 1 0 .01 0Z"),
+            SvgPath::stroke(
+                "M12 4a8 8 0 0 0 0 16h1.2a1.8 1.8 0 0 0 1.3-3.05a1.45 1.45 0 0 1 1.05-2.45H17a3 3 0 0 0 3-3C20 7.35 16.42 4 12 4Z"
+            ),
+            SvgPath::fill(
+                "M8 11a1.2 1.2 0 1 0 .01 0ZM10 7.5a1.2 1.2 0 1 0 .01 0ZM14 7.5a1.2 1.2 0 1 0 .01 0ZM16 11a1.2 1.2 0 1 0 .01 0Z"
+            ),
         ],
         SvgIconId::Upload => svg_paths![
             SvgPath::stroke("M12 15V4M8 8L12 4L16 8"),
@@ -415,22 +424,26 @@ fn icon_paths(icon: SvgIconId) -> &'static [SvgPath] {
             SvgPath::stroke("M7 3h7l5 5v13H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z"),
             SvgPath::stroke("M14 3v6h5M8 14h8M8 18h6"),
         ],
-        SvgIconId::Delete => svg_paths![
-            SvgPath::stroke("M5 7h14M10 11v6M14 11v6M8 7l1-3h6l1 3M7 7l1 14h8l1-14"),
-        ],
+        SvgIconId::Delete => svg_paths![SvgPath::stroke(
+            "M5 7h14M10 11v6M14 11v6M8 7l1-3h6l1 3M7 7l1 14h8l1-14"
+        ),],
         SvgIconId::Pending => svg_paths![
             SvgPath::stroke("M12 21a9 9 0 1 0 0-18a9 9 0 0 0 0 18"),
             SvgPath::stroke("M12 7v5l3 2"),
         ],
         SvgIconId::CheckboxChecked => svg_paths![
-            SvgPath::stroke("M6 4h12a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z"),
+            SvgPath::stroke(
+                "M6 4h12a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z"
+            ),
             SvgPath::stroke("M7.5 12.5L10.5 15.5L16.5 8.5"),
         ],
         SvgIconId::CheckboxUnchecked => svg_paths![SvgPath::stroke(
             "M6 4h12a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z",
         )],
         SvgIconId::CheckboxIndeterminate => svg_paths![
-            SvgPath::stroke("M6 4h12a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z"),
+            SvgPath::stroke(
+                "M6 4h12a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z"
+            ),
             SvgPath::stroke("M8 12h8"),
         ],
         SvgIconId::PlayArrow => svg_paths![SvgPath::fill("M8 5v14l11-7z")],

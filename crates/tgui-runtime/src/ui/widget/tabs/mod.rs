@@ -1,5 +1,5 @@
 use crate::foundation::view_model::{Command, CommandContext, ValueCommand};
-use crate::theme::{StyleContext, WidgetState};
+use crate::theme::{StateValue, StyleContext, WidgetState};
 use crate::ui::layout::{Align, Axis, Insets, LayoutStyle, Length, Overflow, Value};
 use crate::ui::widget::button::Button;
 use crate::ui::widget::common::{Point, TabPlacement, TabTriggerState, VisualStyle, WidgetId};
@@ -9,10 +9,12 @@ use crate::ui::widget::core::Element;
 use crate::ui::widget::menu::{Menu, MenuItem};
 use crate::ui::widget::scroll_view::ScrollView;
 use crate::ui::widget::style::{ButtonStyle, ContainerStyle, StyleResolver, StyleSheet, TabsStyle};
-use crate::ui::widget::Stack;
+use crate::ui::widget::{FocusScopeOptions, Stack};
+use std::collections::HashMap;
+use std::sync::Arc;
 
 const TABS_MORE_VISIBLE_BUDGET: usize = 4;
-const HIDDEN_PANEL_OFFSET_DP: f32 = 100_000.0;
+const TAB_PANEL_SHIFT_DP: f32 = 8.0;
 
 /// Tab strip overflow behavior.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -490,6 +492,7 @@ fn build_triggers<VM: 'static>(
             placement,
             key: item.key.clone(),
             label: item.label.clone(),
+            selected: selected.clone(),
             active,
             on_change: on_change.clone(),
             reorderable: reorderable.clone(),
@@ -619,8 +622,7 @@ fn build_panel<VM: 'static>(
     selected: Value<String>,
     style: Option<StyleResolver<TabsStyle>>,
 ) -> Element<VM> {
-    let panel_keys: Vec<String> = items.iter().map(|item| item.key.clone()).collect();
-    let initial_selected = selected.resolve_untracked();
+    let panel_index = selected_tab_index_value(&items, selected);
     let panel_layout_style = style.clone();
     let mut panel = Flex::vertical()
         .grow(1.0)
@@ -651,24 +653,55 @@ fn build_panel<VM: 'static>(
             }
         });
 
-    for item in items {
-        let active = Value::Static(tab_panel_is_active(
-            &initial_selected,
-            &item.key,
-            panel_keys.first().map(String::as_str),
-            &panel_keys,
-        ));
+    for (index, item) in items.into_iter().enumerate() {
+        let active = index_active_value(&panel_index, index);
+        let opacity = active_opacity_value(active.clone());
+        let offset = tab_panel_offset_value(&panel_index, index);
         let slot = Stack::new()
             .position_absolute()
             .inset(crate::ui::unit::dp(0.0))
             .width(crate::ui::layout::Length::Percent(1.0))
             .height(crate::ui::layout::Length::Percent(1.0))
-            .opacity(active_opacity_value(active.clone()))
-            .offset(active_panel_offset_value(active))
+            .runtime_layout(move |_, _, context, _, visual| {
+                visual.opacity = opacity
+                    .clone()
+                    .with_default_transition(context.motion_normal_transition());
+                visual.offset = offset
+                    .clone()
+                    .with_default_transition(context.motion_fast_transition());
+            })
+            .focus_scope(
+                FocusScopeOptions::new()
+                    .active(active)
+                    .suppress_interactions_when_inactive(),
+            )
             .child(item.panel);
         panel = panel.child(slot);
     }
     panel.into()
+}
+
+fn selected_tab_index_value<VM>(items: &[TabItem<VM>], selected: Value<String>) -> Value<usize> {
+    let indexes = Arc::new(
+        items
+            .iter()
+            .enumerate()
+            .map(|(index, item)| (item.key.clone(), index))
+            .collect::<HashMap<_, _>>(),
+    );
+    match selected {
+        Value::Static(selected) => Value::Static(indexes.get(&selected).copied().unwrap_or(0)),
+        Value::Signal(signal) => Value::Signal(
+            signal.map_memo(move |selected| indexes.get(&selected).copied().unwrap_or(0)),
+        ),
+    }
+}
+
+fn index_active_value(selected: &Value<usize>, index: usize) -> Value<bool> {
+    match selected {
+        Value::Static(selected) => Value::Static(*selected == index),
+        Value::Signal(signal) => Value::Signal(signal.map_memo(move |selected| selected == index)),
+    }
 }
 
 fn tab_active_value(selected: &Value<String>, key: &str) -> Value<bool> {
@@ -676,7 +709,7 @@ fn tab_active_value(selected: &Value<String>, key: &str) -> Value<bool> {
         Value::Static(selected) => Value::Static(selected == key),
         Value::Signal(signal) => {
             let key = key.to_string();
-            Value::Signal(signal.map_memo(move |selected| selected == key))
+            Value::Signal(signal.map(move |selected| selected == key))
         }
     }
 }
@@ -685,19 +718,9 @@ fn any_tab_active_value(selected: &Value<String>, keys: Vec<String>) -> Value<bo
     match selected {
         Value::Static(selected) => Value::Static(keys.iter().any(|key| key == selected)),
         Value::Signal(signal) => {
-            Value::Signal(signal.map_memo(move |selected| keys.iter().any(|key| key == &selected)))
+            Value::Signal(signal.map(move |selected| keys.iter().any(|key| key == &selected)))
         }
     }
-}
-
-fn tab_panel_is_active(
-    selected: &str,
-    key: &str,
-    fallback_key: Option<&str>,
-    known_keys: &[String],
-) -> bool {
-    selected == key
-        || (!known_keys.iter().any(|known| known == selected) && fallback_key == Some(key))
 }
 
 fn active_opacity_value(active: Value<bool>) -> Value<f32> {
@@ -709,19 +732,22 @@ fn active_opacity_value(active: Value<bool>) -> Value<f32> {
     }
 }
 
-fn active_panel_offset_value(active: Value<bool>) -> Value<Point> {
-    match active {
-        Value::Static(active) => Value::Static(panel_offset_for_active(active)),
-        Value::Signal(signal) => Value::Signal(signal.map_memo(panel_offset_for_active)),
+fn tab_panel_offset_value(selected: &Value<usize>, index: usize) -> Value<Point> {
+    match selected {
+        Value::Static(selected) => Value::Static(tab_panel_offset(*selected, index)),
+        Value::Signal(signal) => {
+            Value::Signal(signal.map_memo(move |selected| tab_panel_offset(selected, index)))
+        }
     }
 }
 
-fn panel_offset_for_active(active: bool) -> Point {
-    if active {
+fn tab_panel_offset(selected: usize, index: usize) -> Point {
+    if selected == index {
         Point::ZERO
     } else {
+        let direction = if index < selected { -1.0 } else { 1.0 };
         Point::new(
-            crate::ui::unit::dp(HIDDEN_PANEL_OFFSET_DP),
+            crate::ui::unit::dp(TAB_PANEL_SHIFT_DP * direction),
             crate::ui::unit::dp(0.0),
         )
     }
@@ -752,8 +778,16 @@ fn tab_button_style(
         context.theme,
         crate::ui::widget::common::ButtonVariantKind::Ghost,
     );
-    button.background = style.tab_background.clone();
-    button.foreground = style.tab_foreground.clone();
+    button.background = active_tab_state_value(
+        &active,
+        style.active_tab_background.clone(),
+        style.tab_background.clone(),
+    );
+    button.foreground = active_tab_state_value(
+        &active,
+        style.active_tab_foreground.clone(),
+        style.tab_foreground.clone(),
+    );
     button.border = crate::ui::theme::StateValue::interactive(
         active_value(
             &active,
@@ -777,6 +811,42 @@ fn tab_button_style(
     button
 }
 
+fn active_tab_state_value<T>(
+    active: &Value<bool>,
+    active_style: Value<T>,
+    inactive: StateValue<Value<T>>,
+) -> StateValue<Value<T>>
+where
+    T: Clone + PartialEq + Send + Sync + 'static,
+{
+    // Selection owns the active fill/label across pointer states. Hover and
+    // pressed tokens remain interaction feedback for inactive triggers only.
+    StateValue {
+        normal: active_value(active, active_style.clone(), inactive.normal),
+        hovered: active_value(active, active_style.clone(), inactive.hovered),
+        pressed: active_value(active, active_style.clone(), inactive.pressed),
+        disabled: active_value(active, active_style.clone(), inactive.disabled),
+        focused: inactive
+            .focused
+            .map(|value| active_value(active, active_style.clone(), value)),
+        focus_visible: inactive
+            .focus_visible
+            .map(|value| active_value(active, active_style.clone(), value)),
+        selected: inactive
+            .selected
+            .map(|value| active_value(active, active_style.clone(), value)),
+        checked: inactive
+            .checked
+            .map(|value| active_value(active, active_style.clone(), value)),
+        open: inactive
+            .open
+            .map(|value| active_value(active, active_style.clone(), value)),
+        invalid: inactive
+            .invalid
+            .map(|value| active_value(active, active_style, value)),
+    }
+}
+
 fn active_value<T>(active: &Value<bool>, on: Value<T>, off: Value<T>) -> Value<T>
 where
     T: Clone + PartialEq + Send + Sync + 'static,
@@ -784,7 +854,11 @@ where
     match active {
         Value::Static(true) => on,
         Value::Static(false) => off,
-        Value::Signal(signal) => Value::Signal(signal.map_memo(move |active| {
+        // This reader intentionally stays lazy instead of introducing a second
+        // memo layer. It always observes the current selection when the retained
+        // property slot is consumed, while still subscribing directly through
+        // the source signal for scene invalidation.
+        Value::Signal(signal) => Value::Signal(signal.map(move |active| {
             if active {
                 on.resolve_untracked()
             } else {
@@ -811,4 +885,86 @@ fn panel_container_style(style: TabsStyle, context: &StyleContext<'_>) -> Contai
     container.surface.border_width = Some(style.border_width);
     container.surface.border_radius = Some(style.radius);
     container
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::foundation::color::Color;
+    use crate::ui::theme::Theme;
+
+    #[test]
+    fn active_tab_tokens_override_hover_and_pressed_while_inactive_tabs_remain_stateful() {
+        let inactive_background = [
+            Color::rgb(11, 21, 31),
+            Color::rgb(12, 22, 32),
+            Color::rgb(13, 23, 33),
+            Color::rgb(14, 24, 34),
+        ];
+        let inactive_foreground = [
+            Color::rgb(41, 51, 61),
+            Color::rgb(42, 52, 62),
+            Color::rgb(43, 53, 63),
+            Color::rgb(44, 54, 64),
+        ];
+        let active_background = Color::rgb(211, 31, 71);
+        let active_foreground = Color::rgb(29, 181, 223);
+        let theme = Theme::light();
+        let context = StyleContext::from_theme(&theme);
+        let mut style = TabsStyle::default_for_theme(&theme);
+        style.tab_background = StateValue::interactive(
+            inactive_background[0].into(),
+            inactive_background[1].into(),
+            inactive_background[2].into(),
+            inactive_background[3].into(),
+        );
+        style.tab_foreground = StateValue::interactive(
+            inactive_foreground[0].into(),
+            inactive_foreground[1].into(),
+            inactive_foreground[2].into(),
+            inactive_foreground[3].into(),
+        );
+        style.active_tab_background = active_background.into();
+        style.active_tab_foreground = active_foreground.into();
+
+        let interaction_states = [
+            WidgetState::default(),
+            WidgetState {
+                hovered: true,
+                ..WidgetState::default()
+            },
+            WidgetState {
+                hovered: true,
+                pressed: true,
+                ..WidgetState::default()
+            },
+            WidgetState {
+                disabled: true,
+                ..WidgetState::default()
+            },
+        ];
+        let inactive_style = tab_button_style(style.clone(), &context, Value::Static(false));
+        for (index, state) in interaction_states.iter().copied().enumerate() {
+            assert_eq!(
+                inactive_style.background.resolve(state).resolve(),
+                inactive_background[index]
+            );
+            assert_eq!(
+                inactive_style.foreground.resolve(state).resolve(),
+                inactive_foreground[index]
+            );
+        }
+
+        let active_style = tab_button_style(style, &context, Value::Static(true));
+        for state in interaction_states {
+            assert_eq!(
+                active_style.background.resolve(state).resolve(),
+                active_background
+            );
+            assert_eq!(
+                active_style.foreground.resolve(state).resolve(),
+                active_foreground
+            );
+        }
+    }
 }

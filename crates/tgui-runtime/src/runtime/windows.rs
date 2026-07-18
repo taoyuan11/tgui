@@ -345,7 +345,11 @@ impl<VM: ViewModel> MultiWindowHandler<VM> {
             let requests = window.external_portal_requests_from_computed();
             targets_to_update.extend(self.portal_registry.publish_source(key, requests));
         }
-        targets_to_update.extend(keys);
+        targets_to_update.extend(keys.into_iter().filter(|key| {
+            self.windows_by_key.get(key).is_some_and(|window| {
+                window.external_portal_revision != self.portal_registry.target_revision(key)
+            })
+        }));
         self.apply_portal_target_updates(targets_to_update.into_iter().collect());
     }
 
@@ -389,6 +393,16 @@ impl<VM: ViewModel> ApplicationHandler for MultiWindowHandler<VM> {
         let Some(key) = self.window_keys_by_id.get(&window_id).cloned() else {
             return;
         };
+
+        if matches!(
+            &event,
+            winit::event::WindowEvent::Moved(_)
+                | winit::event::WindowEvent::ScaleFactorChanged { .. }
+        ) {
+            if let Some(window) = self.windows_by_key.get_mut(&key) {
+                window.refresh_frame_clock_from_monitor(std::time::Instant::now(), true);
+            }
+        }
 
         let events = self
             .windows_by_key

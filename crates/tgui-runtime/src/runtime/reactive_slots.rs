@@ -3,13 +3,21 @@ use super::*;
 use crate::ui::unit::Dp;
 use crate::ui::widget::{
     BackdropBlurPrimitive, BackdropBlurPrimitiveSlot, BrushPrimitive, BrushPrimitiveSlot,
-    HitInteraction, OverlayShapePrimitiveSlot, OverlayTextPrimitiveSlot,
-    OverlayTexturePrimitiveSlot, TextPrimitive, TexturePrimitive, TexturePrimitiveSlot,
+    HitGeometry, HitInteraction, OverlayShapePrimitiveSlot, OverlayTextPrimitiveSlot,
+    OverlayTexturePrimitiveSlot, SceneChunkParts, TextPrimitive, TexturePrimitive,
+    TexturePrimitiveSlot,
 };
+use smallvec::SmallVec;
 use std::sync::Arc;
 
+fn reactive_property_targets_are_canonical(targets: &[(WidgetId, PropertySlot)]) -> bool {
+    targets
+        .windows(2)
+        .all(|pair| (pair[0].0.raw(), pair[0].1 as u8) < (pair[1].0.raw(), pair[1].1 as u8))
+}
+
 #[derive(Clone)]
-pub(super) struct ReactiveSlotBinding {
+pub(crate) struct ReactiveSlotBinding {
     widget_id: WidgetId,
     local: LocalReactiveSlotBinding,
     root_offset: SceneCounts,
@@ -19,9 +27,16 @@ pub(super) struct ReactiveSlotBinding {
 }
 
 #[derive(Clone)]
-struct ReactiveSlotPatch {
-    writes: Vec<ReactiveSlotWrite>,
+pub(crate) struct ReactiveSlotPatch {
+    writes: SmallVec<[ReactiveSlotWrite; 4]>,
     hit_write: Option<ReactiveHitWrite>,
+}
+
+impl ReactiveSlotBinding {
+    #[cfg(feature = "bench-support")]
+    pub(crate) fn patch_for(&self, value: ReactiveScenePropertyValue) -> Option<ReactiveSlotPatch> {
+        self.local.patch_for(value)
+    }
 }
 
 #[derive(Clone)]
@@ -33,9 +48,11 @@ struct LocalReactiveSlotBinding {
 enum ReactiveSlotBindingKind {
     ShapeFillColor {
         slot: ShapePrimitiveSlot,
+        container_occluder: Option<bool>,
     },
     OverlayShapeFillColor {
         slot: OverlayShapePrimitiveSlot,
+        container_occluder: Option<bool>,
     },
     ShapeStrokeColor {
         slot: ShapePrimitiveSlot,
@@ -45,6 +62,7 @@ enum ReactiveSlotBindingKind {
     },
     BackdropBlur {
         slot: BackdropBlurPrimitiveSlot,
+        container_occluder: Option<bool>,
     },
     Brush {
         slot: BrushPrimitiveSlot,
@@ -58,9 +76,11 @@ enum ReactiveSlotBindingKind {
         border: Option<ShapePrimitiveSlot>,
     },
     Opacity {
+        shadow: Option<TexturePrimitiveSlot>,
         background: Option<ShapePrimitiveSlot>,
         border: Option<ShapePrimitiveSlot>,
         text: Option<TextPrimitiveSlot>,
+        container_occluder: Option<bool>,
     },
     Offset {
         backdrop_blur: Option<BackdropBlurPrimitiveSlot>,
@@ -68,6 +88,7 @@ enum ReactiveSlotBindingKind {
         border: Option<ShapePrimitiveSlot>,
         texture: Option<TexturePrimitiveSlot>,
         brush: Option<BrushPrimitiveSlot>,
+        container_occluder: Option<(usize, WidgetId, Option<Rect>)>,
     },
     Scale {
         backdrop_blur: Option<BackdropBlurPrimitiveSlot>,
@@ -75,6 +96,7 @@ enum ReactiveSlotBindingKind {
         border: Option<ShapePrimitiveSlot>,
         texture: Option<TexturePrimitiveSlot>,
         brush: Option<BrushPrimitiveSlot>,
+        container_occluder: Option<(usize, WidgetId, Option<Rect>)>,
     },
     TextColor {
         slot: TextPrimitiveSlot,
@@ -92,6 +114,9 @@ enum ReactiveSlotBindingKind {
         slot: TextPrimitiveSlot,
     },
     TextureOpacity {
+        slot: TexturePrimitiveSlot,
+    },
+    TextureMaskTint {
         slot: TexturePrimitiveSlot,
     },
     OverlayTextureOpacity {
@@ -170,6 +195,10 @@ enum ReactiveSlotWrite {
         slot: TexturePrimitiveSlot,
         opacity: f32,
     },
+    TextureMaskTint {
+        slot: TexturePrimitiveSlot,
+        color: Color,
+    },
     OverlayTextureOpacity {
         slot: OverlayTexturePrimitiveSlot,
         opacity: f32,
@@ -182,6 +211,12 @@ enum ReactiveSlotWrite {
 
 #[derive(Clone, Copy)]
 enum ReactiveHitWrite {
+    ContainerOccluder {
+        hit_index: usize,
+        widget_id: WidgetId,
+        rect: Rect,
+        clip_rect: Option<Rect>,
+    },
     Slider {
         hit_index: usize,
         widget_id: WidgetId,
@@ -246,6 +281,9 @@ impl ReactiveSlotWrite {
             Self::TextureOpacity { slot, opacity } => {
                 computed.write_texture_opacity_slot(offset, *slot, *opacity)
             }
+            Self::TextureMaskTint { slot, color } => {
+                computed.write_texture_mask_tint_slot(offset, *slot, *color)
+            }
             Self::OverlayTextureOpacity { slot, opacity } => computed
                 .scene
                 .write_overlay_texture_opacity_slot(offset, *slot, *opacity),
@@ -259,6 +297,23 @@ impl ReactiveSlotWrite {
 impl ReactiveHitWrite {
     fn can_write<VM>(self, computed: &ComputedScene<VM>, hit_offset: usize) -> bool {
         match self {
+            Self::ContainerOccluder {
+                hit_index,
+                widget_id,
+                clip_rect,
+                ..
+            } => {
+                let Some(index) = hit_offset.checked_add(hit_index) else {
+                    return false;
+                };
+                matches!(
+                    computed.hit_regions.get(index),
+                    Some(hit)
+                        if matches!(hit.geometry, HitGeometry::Rect)
+                            && hit.clip_rect == clip_rect
+                            && matches!(hit.interaction, HitInteraction::Occluder { id } if id == widget_id)
+                )
+            }
             Self::Slider {
                 hit_index,
                 widget_id,
@@ -277,6 +332,23 @@ impl ReactiveHitWrite {
 
     fn write<VM>(self, computed: &mut ComputedScene<VM>, hit_offset: usize) -> bool {
         match self {
+            Self::ContainerOccluder {
+                hit_index,
+                widget_id,
+                rect,
+                clip_rect,
+            } => {
+                if !self.can_write(computed, hit_offset) {
+                    return false;
+                }
+                let hit = &mut computed.hit_regions[hit_offset + hit_index];
+                if !matches!(hit.interaction, HitInteraction::Occluder { id } if id == widget_id) {
+                    return false;
+                }
+                hit.rect = rect;
+                hit.clip_rect = clip_rect;
+                true
+            }
             Self::Slider {
                 hit_index,
                 widget_id,
@@ -313,15 +385,15 @@ impl ReactiveHitWrite {
 impl LocalReactiveSlotBinding {
     fn can_write<VM>(&self, computed: &ComputedScene<VM>, offset: &SceneCounts) -> bool {
         match &self.kind {
-            ReactiveSlotBindingKind::ShapeFillColor { slot }
+            ReactiveSlotBindingKind::ShapeFillColor { slot, .. }
             | ReactiveSlotBindingKind::ShapeStrokeColor { slot } => {
                 computed.can_write_shape_color_slot(offset, *slot)
             }
-            ReactiveSlotBindingKind::OverlayShapeFillColor { slot }
+            ReactiveSlotBindingKind::OverlayShapeFillColor { slot, .. }
             | ReactiveSlotBindingKind::OverlayShapeStrokeColor { slot } => {
                 computed.scene.can_write_overlay_shape_slot(offset, *slot)
             }
-            ReactiveSlotBindingKind::BackdropBlur { slot } => {
+            ReactiveSlotBindingKind::BackdropBlur { slot, .. } => {
                 computed.can_write_backdrop_blur_slot(offset, *slot)
             }
             ReactiveSlotBindingKind::Brush { slot } => computed.can_write_brush_slot(offset, *slot),
@@ -334,11 +406,16 @@ impl LocalReactiveSlotBinding {
                     && can_write_shape_option(computed, offset, *border)
             }
             ReactiveSlotBindingKind::Opacity {
+                shadow,
                 background,
                 border,
                 text,
+                ..
             } => {
-                can_write_shape_option(computed, offset, *background)
+                shadow
+                    .map(|slot| computed.can_write_texture_opacity_slot(offset, slot))
+                    .unwrap_or(true)
+                    && can_write_shape_option(computed, offset, *background)
                     && can_write_shape_option(computed, offset, *border)
                     && text
                         .map(|slot| computed.can_write_text_color_slot(offset, slot))
@@ -350,6 +427,7 @@ impl LocalReactiveSlotBinding {
                 border,
                 texture,
                 brush,
+                ..
             }
             | ReactiveSlotBindingKind::Scale {
                 backdrop_blur,
@@ -357,6 +435,7 @@ impl LocalReactiveSlotBinding {
                 border,
                 texture,
                 brush,
+                ..
             } => {
                 backdrop_blur
                     .map(|slot| computed.can_write_backdrop_blur_slot(offset, slot))
@@ -380,6 +459,7 @@ impl LocalReactiveSlotBinding {
                 .scene
                 .can_write_overlay_text_color_slot(offset, *slot),
             ReactiveSlotBindingKind::TextureOpacity { slot }
+            | ReactiveSlotBindingKind::TextureMaskTint { slot }
             | ReactiveSlotBindingKind::Texture { slot } => {
                 computed.can_write_texture_opacity_slot(offset, *slot)
             }
@@ -423,38 +503,76 @@ impl LocalReactiveSlotBinding {
                 thumb_rect: Rect::new(Dp::ZERO, Dp::ZERO, Dp::ZERO, Dp::ZERO),
             }
             .can_write(computed, hit_offset),
+            ReactiveSlotBindingKind::Offset {
+                container_occluder: Some((hit_index, widget_id, clip_rect)),
+                ..
+            }
+            | ReactiveSlotBindingKind::Scale {
+                container_occluder: Some((hit_index, widget_id, clip_rect)),
+                ..
+            } => ReactiveHitWrite::ContainerOccluder {
+                hit_index: *hit_index,
+                widget_id: *widget_id,
+                rect: Rect::new(Dp::ZERO, Dp::ZERO, Dp::ZERO, Dp::ZERO),
+                clip_rect: *clip_rect,
+            }
+            .can_write(computed, hit_offset),
             _ => true,
         }
     }
 
     fn patch_for(&self, value: ReactiveScenePropertyValue) -> Option<ReactiveSlotPatch> {
-        let mut writes = Vec::new();
+        let mut writes = SmallVec::new();
         let mut hit_write = None;
         match (&self.kind, value) {
             (
-                ReactiveSlotBindingKind::ShapeFillColor { slot },
-                ReactiveScenePropertyValue::ShapeFillColor { color, .. },
-            )
-            | (
+                ReactiveSlotBindingKind::ShapeFillColor {
+                    slot,
+                    container_occluder,
+                },
+                ReactiveScenePropertyValue::ShapeFillColor {
+                    color,
+                    container_occluder: value_container_occluder,
+                    ..
+                },
+            ) if *container_occluder == value_container_occluder => {
+                writes.push(ReactiveSlotWrite::ShapeColor { slot: *slot, color });
+            }
+            (
                 ReactiveSlotBindingKind::ShapeStrokeColor { slot },
                 ReactiveScenePropertyValue::ShapeStrokeColor { color, .. },
             ) => {
                 writes.push(ReactiveSlotWrite::ShapeColor { slot: *slot, color });
             }
             (
-                ReactiveSlotBindingKind::OverlayShapeFillColor { slot },
-                ReactiveScenePropertyValue::ShapeFillColor { color, .. },
-            )
-            | (
+                ReactiveSlotBindingKind::OverlayShapeFillColor {
+                    slot,
+                    container_occluder,
+                },
+                ReactiveScenePropertyValue::ShapeFillColor {
+                    color,
+                    container_occluder: value_container_occluder,
+                    ..
+                },
+            ) if *container_occluder == value_container_occluder => {
+                writes.push(ReactiveSlotWrite::OverlayShapeColor { slot: *slot, color });
+            }
+            (
                 ReactiveSlotBindingKind::OverlayShapeStrokeColor { slot },
                 ReactiveScenePropertyValue::ShapeStrokeColor { color, .. },
             ) => {
                 writes.push(ReactiveSlotWrite::OverlayShapeColor { slot: *slot, color });
             }
             (
-                ReactiveSlotBindingKind::BackdropBlur { slot },
-                ReactiveScenePropertyValue::BackdropBlur(primitive),
-            ) => {
+                ReactiveSlotBindingKind::BackdropBlur {
+                    slot,
+                    container_occluder,
+                },
+                ReactiveScenePropertyValue::BackdropBlur {
+                    primitive,
+                    container_occluder: value_container_occluder,
+                },
+            ) if *container_occluder == value_container_occluder => {
                 writes.push(ReactiveSlotWrite::BackdropBlur {
                     slot: *slot,
                     primitive,
@@ -522,21 +640,32 @@ impl LocalReactiveSlotBinding {
             }
             (
                 ReactiveSlotBindingKind::Opacity {
+                    shadow,
                     background,
                     border,
                     text,
+                    container_occluder,
                 },
                 ReactiveScenePropertyValue::Opacity {
+                    shadow: value_shadow,
                     background: value_background,
                     border: value_border,
                     text: value_text,
+                    container_occluder: value_container_occluder,
                 },
-            ) => {
-                if background.is_some() != value_background.is_some()
+            ) if *container_occluder == value_container_occluder => {
+                if shadow.is_some() != value_shadow.is_some()
+                    || background.is_some() != value_background.is_some()
                     || border.is_some() != value_border.is_some()
                     || text.is_some() != value_text.is_some()
                 {
                     return None;
+                }
+                if let (Some(slot), Some((_, _, opacity))) = (*shadow, value_shadow) {
+                    writes.push(ReactiveSlotWrite::TextureOpacity {
+                        slot,
+                        opacity: opacity.clamp(0.0, 1.0),
+                    });
                 }
                 if let (Some(slot), Some((_, color))) = (*background, value_background) {
                     writes.push(ReactiveSlotWrite::ShapeColor { slot, color });
@@ -555,6 +684,7 @@ impl LocalReactiveSlotBinding {
                     border,
                     texture,
                     brush,
+                    container_occluder,
                 },
                 ReactiveScenePropertyValue::Offset {
                     background: value_background,
@@ -562,6 +692,7 @@ impl LocalReactiveSlotBinding {
                     backdrop_blur: value_backdrop_blur,
                     brush: value_brush,
                     texture: value_texture,
+                    container_occluder: value_container_occluder,
                 },
             ) => {
                 if backdrop_blur.is_some() != value_backdrop_blur.is_some()
@@ -569,6 +700,7 @@ impl LocalReactiveSlotBinding {
                     || border.is_some() != value_border.is_some()
                     || texture.is_some() != value_texture.is_some()
                     || brush.is_some() != value_brush.is_some()
+                    || container_occluder.is_some() != value_container_occluder.is_some()
                 {
                     return None;
                 }
@@ -601,6 +733,7 @@ impl LocalReactiveSlotBinding {
                             texture,
                             media_key,
                             media_layout,
+                            mask_tint: None,
                             frame,
                             quad: None,
                             uv_rect: None,
@@ -614,6 +747,21 @@ impl LocalReactiveSlotBinding {
                 if let (Some(slot), Some(primitive)) = (*brush, value_brush) {
                     writes.push(ReactiveSlotWrite::Brush { slot, primitive });
                 }
+                if let (
+                    Some((hit_index, widget_id, binding_clip_rect)),
+                    Some((value_widget_id, rect, clip_rect)),
+                ) = (*container_occluder, value_container_occluder)
+                {
+                    if widget_id != value_widget_id || binding_clip_rect != clip_rect {
+                        return None;
+                    }
+                    hit_write = Some(ReactiveHitWrite::ContainerOccluder {
+                        hit_index,
+                        widget_id,
+                        rect,
+                        clip_rect,
+                    });
+                }
             }
             (
                 ReactiveSlotBindingKind::Scale {
@@ -622,6 +770,7 @@ impl LocalReactiveSlotBinding {
                     border,
                     texture,
                     brush,
+                    container_occluder,
                 },
                 ReactiveScenePropertyValue::Scale {
                     background: value_background,
@@ -629,6 +778,7 @@ impl LocalReactiveSlotBinding {
                     backdrop_blur: value_backdrop_blur,
                     brush: value_brush,
                     texture: value_texture,
+                    container_occluder: value_container_occluder,
                 },
             ) => {
                 if backdrop_blur.is_some() != value_backdrop_blur.is_some()
@@ -636,6 +786,7 @@ impl LocalReactiveSlotBinding {
                     || border.is_some() != value_border.is_some()
                     || texture.is_some() != value_texture.is_some()
                     || brush.is_some() != value_brush.is_some()
+                    || container_occluder.is_some() != value_container_occluder.is_some()
                 {
                     return None;
                 }
@@ -681,6 +832,7 @@ impl LocalReactiveSlotBinding {
                             texture,
                             media_key,
                             media_layout,
+                            mask_tint: None,
                             frame,
                             quad: None,
                             uv_rect: None,
@@ -693,6 +845,21 @@ impl LocalReactiveSlotBinding {
                 }
                 if let (Some(slot), Some(primitive)) = (*brush, value_brush) {
                     writes.push(ReactiveSlotWrite::Brush { slot, primitive });
+                }
+                if let (
+                    Some((hit_index, widget_id, binding_clip_rect)),
+                    Some((value_widget_id, rect, clip_rect)),
+                ) = (*container_occluder, value_container_occluder)
+                {
+                    if widget_id != value_widget_id || binding_clip_rect != clip_rect {
+                        return None;
+                    }
+                    hit_write = Some(ReactiveHitWrite::ContainerOccluder {
+                        hit_index,
+                        widget_id,
+                        rect,
+                        clip_rect,
+                    });
                 }
             }
             (
@@ -752,6 +919,12 @@ impl LocalReactiveSlotBinding {
                 });
             }
             (
+                ReactiveSlotBindingKind::TextureMaskTint { slot },
+                ReactiveScenePropertyValue::TextureMaskTint { color },
+            ) => {
+                writes.push(ReactiveSlotWrite::TextureMaskTint { slot: *slot, color });
+            }
+            (
                 ReactiveSlotBindingKind::OverlayTextureOpacity { slot },
                 ReactiveScenePropertyValue::TextureOpacity { opacity, .. },
             ) => {
@@ -766,6 +939,7 @@ impl LocalReactiveSlotBinding {
                     texture,
                     media_key,
                     media_layout,
+                    mask_tint,
                     frame,
                     corner_radius,
                     opacity,
@@ -779,6 +953,7 @@ impl LocalReactiveSlotBinding {
                         texture,
                         media_key,
                         media_layout,
+                        mask_tint,
                         frame,
                         quad: None,
                         uv_rect: None,
@@ -882,6 +1057,129 @@ fn can_write_shape_option<VM>(
         .unwrap_or(true)
 }
 
+pub(crate) fn build_reactive_slot_binding_for_scene<VM: 'static>(
+    widget_id: WidgetId,
+    value: ReactiveScenePropertyValue,
+    layout: &ResolvedSceneLayout<VM>,
+    computed: &ComputedScene<VM>,
+    scene_chunks: &HashMap<WidgetId, ComputedScene<VM>>,
+    scene_chunk_parts: &HashMap<WidgetId, SceneChunkParts<VM>>,
+) -> Option<ReactiveSlotBinding> {
+    let target_chunk = scene_chunks.get(&widget_id)?;
+    let (local_scene, has_chunk_part) = if let Some(parts) = scene_chunk_parts.get(&widget_id) {
+        (&parts.before_children, true)
+    } else {
+        (target_chunk, false)
+    };
+    let local = slot_binding_for_reactive_value(local_scene, value)?;
+    let zero = SceneCounts::default();
+    if !local.can_write(local_scene, &zero)
+        || !local.can_write_hit(local_scene, 0)
+        || !local.can_write(target_chunk, &zero)
+        || !local.can_write_hit(target_chunk, 0)
+    {
+        return None;
+    }
+
+    let (root_offset, root_hit_offset, ancestor_offsets) = if widget_id == layout.root_id() {
+        (SceneCounts::default(), 0, Vec::new())
+    } else {
+        let offsets =
+            layout.scene_splice_ancestor_offsets(widget_id, scene_chunk_parts, scene_chunks)?;
+        let (root_id, root_offset, root_hit_offset, _) = offsets.first().copied()?;
+        if root_id != layout.root_id() {
+            return None;
+        }
+        let mut ancestor_offsets = Vec::with_capacity(offsets.len());
+        for (ancestor_id, offset, hit_offset, _) in offsets {
+            let ancestor_chunk = scene_chunks.get(&ancestor_id)?;
+            if !local.can_write(ancestor_chunk, &offset)
+                || !local.can_write_hit(ancestor_chunk, hit_offset)
+            {
+                return None;
+            }
+            ancestor_offsets.push((ancestor_id, offset, hit_offset));
+        }
+        (root_offset, root_hit_offset, ancestor_offsets)
+    };
+    if !local.can_write(computed, &root_offset) || !local.can_write_hit(computed, root_hit_offset) {
+        return None;
+    }
+
+    Some(ReactiveSlotBinding {
+        widget_id,
+        local,
+        root_offset,
+        root_hit_offset,
+        ancestor_offsets,
+        has_chunk_part,
+    })
+}
+
+pub(crate) fn write_reactive_slot_patch_to_scene<VM: 'static>(
+    computed: &mut ComputedScene<VM>,
+    scene_chunks: &mut HashMap<WidgetId, ComputedScene<VM>>,
+    scene_chunk_parts: &mut HashMap<WidgetId, SceneChunkParts<VM>>,
+    binding: &ReactiveSlotBinding,
+    patch: &ReactiveSlotPatch,
+) -> bool {
+    let zero = SceneCounts::default();
+    if binding.has_chunk_part {
+        let Some(parts) = scene_chunk_parts.get_mut(&binding.widget_id) else {
+            return false;
+        };
+        for write in &patch.writes {
+            if !write.write(&mut parts.before_children, &zero) {
+                return false;
+            }
+        }
+        if let Some(hit_write) = patch.hit_write {
+            if !hit_write.write(&mut parts.before_children, 0) {
+                return false;
+            }
+        }
+    }
+    let Some(target_chunk) = scene_chunks.get_mut(&binding.widget_id) else {
+        return false;
+    };
+    for write in &patch.writes {
+        if !write.write(target_chunk, &zero) {
+            return false;
+        }
+    }
+    if let Some(hit_write) = patch.hit_write {
+        if !hit_write.write(target_chunk, 0) {
+            return false;
+        }
+    }
+    for (ancestor_id, offset, hit_offset) in &binding.ancestor_offsets {
+        let Some(ancestor_chunk) = scene_chunks.get_mut(ancestor_id) else {
+            return false;
+        };
+        for write in &patch.writes {
+            if !write.write(ancestor_chunk, offset) {
+                return false;
+            }
+        }
+        if let Some(hit_write) = patch.hit_write {
+            if !hit_write.write(ancestor_chunk, *hit_offset) {
+                return false;
+            }
+        }
+    }
+    for write in &patch.writes {
+        if !write.write(computed, &binding.root_offset) {
+            return false;
+        }
+    }
+    if let Some(hit_write) = patch.hit_write {
+        if !hit_write.write(computed, binding.root_hit_offset) {
+            return false;
+        }
+    }
+    true
+}
+
 impl<VM: 'static> BoundRuntimeHandler<VM> {
     pub(super) fn try_update_reactive_transform_records(
         &mut self,
@@ -896,41 +1194,64 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             return false;
         }
 
-        let mut unique_targets = Vec::with_capacity(targets.len());
-        let mut seen = HashSet::new();
-        for &(widget_id, _) in targets {
-            if seen.insert(widget_id) {
-                unique_targets.push(widget_id);
-            }
+        let mut unique_targets = targets
+            .iter()
+            .map(|(widget_id, _)| *widget_id)
+            .collect::<Vec<_>>();
+        unique_targets.sort_unstable_by_key(|widget_id| widget_id.raw());
+        unique_targets.dedup();
+
+        self.try_update_canonical_transform_widget_ids(&unique_targets, now)
+    }
+
+    pub(super) fn try_update_canonical_reactive_transform_records(
+        &mut self,
+        targets: &[(WidgetId, PropertySlot)],
+        now: Instant,
+    ) -> bool {
+        debug_assert!(reactive_property_targets_are_canonical(targets));
+        if targets.is_empty()
+            || targets
+                .iter()
+                .any(|(_, property)| *property != PropertySlot::Offset)
+        {
+            return false;
         }
+        let widget_ids = targets
+            .iter()
+            .map(|(widget_id, _)| *widget_id)
+            .collect::<Vec<_>>();
+        self.try_update_canonical_transform_widget_ids(&widget_ids, now)
+    }
+
+    fn try_update_canonical_transform_widget_ids(
+        &mut self,
+        unique_targets: &[WidgetId],
+        now: Instant,
+    ) -> bool {
+        debug_assert!(unique_targets
+            .windows(2)
+            .all(|pair| pair[0].raw() < pair[1].raw()));
 
         let theme = self.animated_theme(now);
         let viewport = self.viewport_rect();
         let active_scrollbar = self.active_scrollbar_drag.map(|drag| drag.handle);
         let widget_states = self.widget_state_map(active_scrollbar);
-        let mut updates = Vec::with_capacity(unique_targets.len());
-        let mut changed = false;
-        for widget_id in unique_targets {
+        let resolved_offsets = {
             let Some(cached) = self.cached_scene.as_ref() else {
                 return false;
             };
             let Some(layout) = cached.layout.as_ref() else {
                 return false;
             };
-            let Some(record) = cached.computed.transform_records.get(&widget_id) else {
-                return false;
-            };
-            let Some(visual_context) = cached.visual_contexts.get(&widget_id).copied() else {
-                return false;
-            };
-            let Some(offset) = layout.resolve_reactive_transform_offset(
-                widget_id,
+            layout.resolve_reactive_transform_offsets(
+                &unique_targets,
+                &cached.visual_contexts,
                 &self.font_manager,
                 &theme,
                 &self.media_manager,
                 &mut self.animation_engine,
                 self.reduced_motion,
-                visual_context,
                 self.hovered_scrollbar,
                 active_scrollbar,
                 &widget_states,
@@ -940,7 +1261,18 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 viewport,
                 now,
                 &self.config.style_sheet,
-            ) else {
+            )
+        };
+        let mut updates = Vec::with_capacity(unique_targets.len());
+        let mut changed = false;
+        for (widget_id, offset) in unique_targets.iter().copied().zip(resolved_offsets) {
+            let Some(cached) = self.cached_scene.as_ref() else {
+                return false;
+            };
+            let Some(record) = cached.computed.transform_records.get(&widget_id) else {
+                return false;
+            };
+            let Some(offset) = offset else {
                 return false;
             };
             changed |= record.current_offset != offset;
@@ -985,16 +1317,30 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             return false;
         }
 
-        let mut unique_targets = Vec::with_capacity(targets.len());
-        let mut seen = HashSet::new();
-        for &(widget_id, property) in targets {
-            if seen.insert((widget_id, property)) {
-                unique_targets.push((widget_id, property));
-            }
+        let mut unique_targets = targets.to_vec();
+        unique_targets
+            .sort_unstable_by_key(|(widget_id, property)| (widget_id.raw(), *property as u8));
+        unique_targets.dedup();
+
+        self.try_patch_canonical_reactive_property_slots(&unique_targets, now)
+    }
+
+    pub(super) fn try_patch_canonical_reactive_property_slots(
+        &mut self,
+        targets: &[(WidgetId, PropertySlot)],
+        now: Instant,
+    ) -> bool {
+        debug_assert!(reactive_property_targets_are_canonical(targets));
+        if targets.is_empty() {
+            return false;
         }
 
-        let mut plans = Vec::with_capacity(unique_targets.len());
-        for (widget_id, property) in unique_targets {
+        let Some(values) = self.resolve_reactive_slot_values(targets, now) else {
+            return false;
+        };
+
+        let mut plans = Vec::with_capacity(targets.len());
+        for ((widget_id, property), value) in targets.iter().copied().zip(values) {
             let Some(binding) = self.cached_scene.as_ref().and_then(|cached| {
                 cached
                     .reactive_slot_bindings
@@ -1003,7 +1349,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             }) else {
                 return false;
             };
-            let Some(value) = self.resolve_reactive_slot_value(widget_id, property, now) else {
+            let Some(value) = value else {
                 return false;
             };
             let Some(patch) = binding.local.patch_for(value) else {
@@ -1076,37 +1422,53 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         targets.sort_by_key(|(widget_id, property)| (widget_id.raw(), *property as u8));
         targets.dedup();
 
+        let Some(values) = self.resolve_reactive_slot_values(&targets, now) else {
+            return HashMap::new();
+        };
         let mut bindings = HashMap::with_capacity(targets.len());
-        for (widget_id, property) in targets {
-            if let Some(binding) = self.build_reactive_slot_binding(widget_id, property, now) {
+        for ((widget_id, property), value) in targets.into_iter().zip(values) {
+            let Some(value) = value else {
+                continue;
+            };
+            let Some(cached) = self.cached_scene.as_ref() else {
+                break;
+            };
+            let Some(layout) = cached.layout.as_ref() else {
+                break;
+            };
+            if let Some(binding) = build_reactive_slot_binding_for_scene(
+                widget_id,
+                value,
+                layout,
+                &cached.computed,
+                &cached.scene_chunks,
+                &cached.scene_chunk_parts,
+            ) {
                 bindings.insert((widget_id, property), binding);
             }
         }
         bindings
     }
 
-    fn resolve_reactive_slot_value(
+    pub(super) fn resolve_reactive_slot_values(
         &mut self,
-        widget_id: WidgetId,
-        property: PropertySlot,
+        targets: &[(WidgetId, PropertySlot)],
         now: Instant,
-    ) -> Option<ReactiveScenePropertyValue> {
+    ) -> Option<Vec<Option<ReactiveScenePropertyValue>>> {
         let theme = self.animated_theme(now);
         let viewport = self.viewport_rect();
         let active_scrollbar = self.active_scrollbar_drag.map(|drag| drag.handle);
         let widget_states = self.widget_state_map(active_scrollbar);
         let cached = self.cached_scene.as_ref()?;
         let layout = cached.layout.as_ref()?;
-        let visual_context = cached.visual_contexts.get(&widget_id).copied()?;
-        layout.resolve_reactive_scene_property_value(
-            widget_id,
-            property,
+        Some(layout.resolve_reactive_scene_property_values(
+            targets,
+            &cached.visual_contexts,
             &self.font_manager,
             &theme,
             &self.media_manager,
             &mut self.animation_engine,
             self.reduced_motion,
-            visual_context,
             self.hovered_scrollbar,
             active_scrollbar,
             &widget_states,
@@ -1116,73 +1478,22 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             viewport,
             now,
             &self.config.style_sheet,
-        )
+        ))
     }
 
-    fn build_reactive_slot_binding(
+    #[cfg(all(test, feature = "bench-support"))]
+    pub(super) fn resolve_reactive_slot_values_individually(
         &mut self,
-        widget_id: WidgetId,
-        property: PropertySlot,
+        targets: &[(WidgetId, PropertySlot)],
         now: Instant,
-    ) -> Option<ReactiveSlotBinding> {
-        let value = self.resolve_reactive_slot_value(widget_id, property, now)?;
-        let cached = self.cached_scene.as_ref()?;
-        let layout = cached.layout.as_ref()?;
-        let target_chunk = cached.scene_chunks.get(&widget_id)?;
-        let (local_scene, has_chunk_part) =
-            if let Some(parts) = cached.scene_chunk_parts.get(&widget_id) {
-                (&parts.before_children, true)
-            } else {
-                (target_chunk, false)
-            };
-        let local = slot_binding_for_reactive_value(local_scene, value)?;
-        let zero = SceneCounts::default();
-        if !local.can_write(local_scene, &zero)
-            || !local.can_write_hit(local_scene, 0)
-            || !local.can_write(target_chunk, &zero)
-            || !local.can_write_hit(target_chunk, 0)
-        {
-            return None;
+    ) -> Option<Vec<Option<ReactiveScenePropertyValue>>> {
+        let mut values = Vec::with_capacity(targets.len());
+        for target in targets {
+            let mut resolved =
+                self.resolve_reactive_slot_values(std::slice::from_ref(target), now)?;
+            values.push(resolved.pop().unwrap_or(None));
         }
-
-        let (root_offset, root_hit_offset, ancestor_offsets) = if widget_id == layout.root_id() {
-            (SceneCounts::default(), 0, Vec::new())
-        } else {
-            let offsets = layout.scene_splice_ancestor_offsets(
-                widget_id,
-                &cached.scene_chunk_parts,
-                &cached.scene_chunks,
-            )?;
-            let (root_id, root_offset, root_hit_offset, _) = offsets.first().copied()?;
-            if root_id != layout.root_id() {
-                return None;
-            }
-            let mut ancestor_offsets = Vec::with_capacity(offsets.len());
-            for (ancestor_id, offset, hit_offset, _) in offsets {
-                let ancestor_chunk = cached.scene_chunks.get(&ancestor_id)?;
-                if !local.can_write(ancestor_chunk, &offset)
-                    || !local.can_write_hit(ancestor_chunk, hit_offset)
-                {
-                    return None;
-                }
-                ancestor_offsets.push((ancestor_id, offset, hit_offset));
-            }
-            (root_offset, root_hit_offset, ancestor_offsets)
-        };
-        if !local.can_write(&cached.computed, &root_offset)
-            || !local.can_write_hit(&cached.computed, root_hit_offset)
-        {
-            return None;
-        }
-
-        Some(ReactiveSlotBinding {
-            widget_id,
-            local,
-            root_offset,
-            root_hit_offset,
-            ancestor_offsets,
-            has_chunk_part,
-        })
+        Some(values)
     }
 }
 
@@ -1191,59 +1502,14 @@ fn write_reactive_slot_patch<VM: 'static>(
     binding: &ReactiveSlotBinding,
     patch: &ReactiveSlotPatch,
 ) -> bool {
-    let zero = SceneCounts::default();
-    if binding.has_chunk_part {
-        let Some(parts) = cached.scene_chunk_parts.get_mut(&binding.widget_id) else {
-            return false;
-        };
-        for write in &patch.writes {
-            if !write.write(&mut parts.before_children, &zero) {
-                return false;
-            }
-        }
-        if let Some(hit_write) = patch.hit_write {
-            if !hit_write.write(&mut parts.before_children, 0) {
-                return false;
-            }
-        }
-    }
-    let Some(target_chunk) = cached.scene_chunks.get_mut(&binding.widget_id) else {
+    if !write_reactive_slot_patch_to_scene(
+        &mut cached.computed,
+        &mut cached.scene_chunks,
+        &mut cached.scene_chunk_parts,
+        binding,
+        patch,
+    ) {
         return false;
-    };
-    for write in &patch.writes {
-        if !write.write(target_chunk, &zero) {
-            return false;
-        }
-    }
-    if let Some(hit_write) = patch.hit_write {
-        if !hit_write.write(target_chunk, 0) {
-            return false;
-        }
-    }
-    for (ancestor_id, offset, hit_offset) in &binding.ancestor_offsets {
-        let Some(ancestor_chunk) = cached.scene_chunks.get_mut(ancestor_id) else {
-            return false;
-        };
-        for write in &patch.writes {
-            if !write.write(ancestor_chunk, offset) {
-                return false;
-            }
-        }
-        if let Some(hit_write) = patch.hit_write {
-            if !hit_write.write(ancestor_chunk, *hit_offset) {
-                return false;
-            }
-        }
-    }
-    for write in &patch.writes {
-        if !write.write(&mut cached.computed, &binding.root_offset) {
-            return false;
-        }
-    }
-    if let Some(hit_write) = patch.hit_write {
-        if !hit_write.write(&mut cached.computed, binding.root_hit_offset) {
-            return false;
-        }
     }
     if let Some(snapshot) = cached
         .layout
@@ -1299,17 +1565,25 @@ fn slot_binding_kind_from_plan(
     plan: &LocalReactiveSlotPlan,
 ) -> Option<ReactiveSlotBindingKind> {
     match value {
-        ReactiveScenePropertyValue::ShapeFillColor { .. } => {
+        ReactiveScenePropertyValue::ShapeFillColor {
+            container_occluder, ..
+        } => {
             let [write] = plan.writes.as_slice() else {
                 return None;
             };
             no_hit(plan)?;
             match write {
                 ReactiveSlotWrite::ShapeColor { slot, .. } => {
-                    Some(ReactiveSlotBindingKind::ShapeFillColor { slot: *slot })
+                    Some(ReactiveSlotBindingKind::ShapeFillColor {
+                        slot: *slot,
+                        container_occluder,
+                    })
                 }
                 ReactiveSlotWrite::OverlayShapeColor { slot, .. } => {
-                    Some(ReactiveSlotBindingKind::OverlayShapeFillColor { slot: *slot })
+                    Some(ReactiveSlotBindingKind::OverlayShapeFillColor {
+                        slot: *slot,
+                        container_occluder,
+                    })
                 }
                 _ => None,
             }
@@ -1329,12 +1603,17 @@ fn slot_binding_kind_from_plan(
                 _ => None,
             }
         }
-        ReactiveScenePropertyValue::BackdropBlur(_) => {
+        ReactiveScenePropertyValue::BackdropBlur {
+            container_occluder, ..
+        } => {
             let [ReactiveSlotWrite::BackdropBlur { slot, .. }] = plan.writes.as_slice() else {
                 return None;
             };
             no_hit(plan)?;
-            Some(ReactiveSlotBindingKind::BackdropBlur { slot: *slot })
+            Some(ReactiveSlotBindingKind::BackdropBlur {
+                slot: *slot,
+                container_occluder,
+            })
         }
         ReactiveScenePropertyValue::Brush(_) => {
             let [ReactiveSlotWrite::Brush { slot, .. }] = plan.writes.as_slice() else {
@@ -1380,12 +1659,19 @@ fn slot_binding_kind_from_plan(
             Some(ReactiveSlotBindingKind::BorderWidth { background, border })
         }
         ReactiveScenePropertyValue::Opacity {
+            shadow,
             background,
             border,
             text,
+            container_occluder,
         } => {
             no_hit(plan)?;
             let mut writes = plan.writes.iter();
+            let shadow = if shadow.is_some() {
+                Some(next_texture_opacity_slot(&mut writes)?)
+            } else {
+                None
+            };
             let background = if background.is_some() {
                 Some(next_shape_color_slot(&mut writes)?)
             } else {
@@ -1403,9 +1689,11 @@ fn slot_binding_kind_from_plan(
             };
             writes.next().is_none().then_some(())?;
             Some(ReactiveSlotBindingKind::Opacity {
+                shadow,
                 background,
                 border,
                 text,
+                container_occluder,
             })
         }
         ReactiveScenePropertyValue::Offset {
@@ -1414,8 +1702,8 @@ fn slot_binding_kind_from_plan(
             backdrop_blur,
             brush,
             texture,
+            container_occluder,
         } => {
-            no_hit(plan)?;
             let mut writes = plan.writes.iter();
             let backdrop_blur = if backdrop_blur.is_some() {
                 Some(next_backdrop_blur_slot(&mut writes)?)
@@ -1443,12 +1731,34 @@ fn slot_binding_kind_from_plan(
                 None
             };
             writes.next().is_none().then_some(())?;
+            let container_occluder = match container_occluder {
+                Some((widget_id, _, clip_rect)) => {
+                    let Some(ReactiveHitWrite::ContainerOccluder {
+                        hit_index,
+                        widget_id: hit_widget_id,
+                        clip_rect: hit_clip_rect,
+                        ..
+                    }) = plan.hit_write
+                    else {
+                        return None;
+                    };
+                    Some(
+                        (hit_widget_id == widget_id && hit_clip_rect == clip_rect)
+                            .then_some((hit_index, widget_id, clip_rect))?,
+                    )
+                }
+                None => {
+                    no_hit(plan)?;
+                    None
+                }
+            };
             Some(ReactiveSlotBindingKind::Offset {
                 backdrop_blur,
                 background,
                 border,
                 texture,
                 brush,
+                container_occluder,
             })
         }
         ReactiveScenePropertyValue::Scale {
@@ -1457,8 +1767,8 @@ fn slot_binding_kind_from_plan(
             backdrop_blur,
             brush,
             texture,
+            container_occluder,
         } => {
-            no_hit(plan)?;
             let mut writes = plan.writes.iter();
             let backdrop_blur = if backdrop_blur.is_some() {
                 Some(next_backdrop_blur_slot(&mut writes)?)
@@ -1491,12 +1801,34 @@ fn slot_binding_kind_from_plan(
                 None
             };
             writes.next().is_none().then_some(())?;
+            let container_occluder = match container_occluder {
+                Some((widget_id, _, clip_rect)) => {
+                    let Some(ReactiveHitWrite::ContainerOccluder {
+                        hit_index,
+                        widget_id: hit_widget_id,
+                        clip_rect: hit_clip_rect,
+                        ..
+                    }) = plan.hit_write
+                    else {
+                        return None;
+                    };
+                    Some(
+                        (hit_widget_id == widget_id && hit_clip_rect == clip_rect)
+                            .then_some((hit_index, widget_id, clip_rect))?,
+                    )
+                }
+                None => {
+                    no_hit(plan)?;
+                    None
+                }
+            };
             Some(ReactiveSlotBindingKind::Scale {
                 backdrop_blur,
                 background,
                 border,
                 texture,
                 brush,
+                container_occluder,
             })
         }
         ReactiveScenePropertyValue::TextColor { .. } => {
@@ -1550,6 +1882,13 @@ fn slot_binding_kind_from_plan(
                 }
                 _ => None,
             }
+        }
+        ReactiveScenePropertyValue::TextureMaskTint { .. } => {
+            let [ReactiveSlotWrite::TextureMaskTint { slot, .. }] = plan.writes.as_slice() else {
+                return None;
+            };
+            no_hit(plan)?;
+            Some(ReactiveSlotBindingKind::TextureMaskTint { slot: *slot })
         }
         ReactiveScenePropertyValue::Texture { .. } => {
             let [ReactiveSlotWrite::Texture { slot, .. }] = plan.writes.as_slice() else {
@@ -1696,12 +2035,21 @@ fn next_texture_slot<'a>(
     }
 }
 
+fn next_texture_opacity_slot<'a>(
+    writes: &mut impl Iterator<Item = &'a ReactiveSlotWrite>,
+) -> Option<TexturePrimitiveSlot> {
+    match writes.next()? {
+        ReactiveSlotWrite::TextureOpacity { slot, .. } => Some(*slot),
+        _ => None,
+    }
+}
+
 fn slot_write_for_reactive_value<VM>(
     computed: &ComputedScene<VM>,
     value: ReactiveScenePropertyValue,
 ) -> Option<LocalReactiveSlotPlan> {
     match value {
-        ReactiveScenePropertyValue::ShapeFillColor { rect, color } => {
+        ReactiveScenePropertyValue::ShapeFillColor { rect, color, .. } => {
             let slots = computed
                 .scene
                 .matching_shape_slots(|shape| shape.stroke_width == 0.0 && shape.rect == rect);
@@ -1758,7 +2106,7 @@ fn slot_write_for_reactive_value<VM>(
                 })
             }
         }
-        ReactiveScenePropertyValue::BackdropBlur(primitive) => {
+        ReactiveScenePropertyValue::BackdropBlur { primitive, .. } => {
             if primitive.rect.is_empty() {
                 return None;
             }
@@ -1890,12 +2238,32 @@ fn slot_write_for_reactive_value<VM>(
             }
         }
         ReactiveScenePropertyValue::Opacity {
+            shadow,
             background,
             border,
             text,
+            ..
         } => {
             let mut writes = Vec::new();
             let mut used_shape_slots = Vec::new();
+            if let Some((texture_id, frame, opacity)) = shadow {
+                let slots = computed.scene.matching_texture_slots(|texture| {
+                    texture.texture.id() == texture_id
+                        && texture.frame == frame
+                        && texture.media_key.is_none()
+                        && texture.media_layout.is_none()
+                        && texture.mask_tint.is_none()
+                        && texture.quad.is_none()
+                        && texture.uv_rect.is_none()
+                });
+                if slots.len() != 1 {
+                    return None;
+                }
+                writes.push(ReactiveSlotWrite::TextureOpacity {
+                    slot: slots[0],
+                    opacity: opacity.clamp(0.0, 1.0),
+                });
+            }
             if let Some((rect, color)) = background {
                 let slots = computed
                     .scene
@@ -1955,6 +2323,7 @@ fn slot_write_for_reactive_value<VM>(
             backdrop_blur,
             brush,
             texture,
+            container_occluder,
         } => {
             let mut writes = Vec::new();
             let mut used_shape_slots = Vec::new();
@@ -2024,6 +2393,7 @@ fn slot_write_for_reactive_value<VM>(
                         texture,
                         media_key,
                         media_layout,
+                        mask_tint: None,
                         frame,
                         quad: None,
                         uv_rect: None,
@@ -2047,10 +2417,35 @@ fn slot_write_for_reactive_value<VM>(
             if writes.is_empty() {
                 None
             } else {
-                Some(LocalReactiveSlotPlan {
-                    writes,
-                    hit_write: None,
-                })
+                let hit_write = if let Some((widget_id, rect, clip_rect)) = container_occluder {
+                    let matches = computed
+                        .hit_regions
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, hit)| {
+                            hit.rect == rect
+                                && hit.clip_rect == clip_rect
+                                && matches!(hit.geometry, HitGeometry::Rect)
+                                && matches!(
+                                    hit.interaction,
+                                    HitInteraction::Occluder { id } if id == widget_id
+                                )
+                        })
+                        .map(|(index, _)| index)
+                        .collect::<SmallVec<[usize; 2]>>();
+                    if matches.len() != 1 {
+                        return None;
+                    }
+                    Some(ReactiveHitWrite::ContainerOccluder {
+                        hit_index: matches[0],
+                        widget_id,
+                        rect,
+                        clip_rect,
+                    })
+                } else {
+                    None
+                };
+                Some(LocalReactiveSlotPlan { writes, hit_write })
             }
         }
         ReactiveScenePropertyValue::Scale {
@@ -2059,6 +2454,7 @@ fn slot_write_for_reactive_value<VM>(
             backdrop_blur,
             brush,
             texture,
+            container_occluder,
         } => {
             let mut writes = Vec::new();
             let mut used_shape_slots = Vec::new();
@@ -2136,6 +2532,7 @@ fn slot_write_for_reactive_value<VM>(
                         texture,
                         media_key,
                         media_layout,
+                        mask_tint: None,
                         frame,
                         quad: None,
                         uv_rect: None,
@@ -2159,10 +2556,35 @@ fn slot_write_for_reactive_value<VM>(
             if writes.is_empty() {
                 None
             } else {
-                Some(LocalReactiveSlotPlan {
-                    writes,
-                    hit_write: None,
-                })
+                let hit_write = if let Some((widget_id, rect, clip_rect)) = container_occluder {
+                    let matches = computed
+                        .hit_regions
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, hit)| {
+                            hit.rect == rect
+                                && hit.clip_rect == clip_rect
+                                && matches!(hit.geometry, HitGeometry::Rect)
+                                && matches!(
+                                    hit.interaction,
+                                    HitInteraction::Occluder { id } if id == widget_id
+                                )
+                        })
+                        .map(|(index, _)| index)
+                        .collect::<SmallVec<[usize; 2]>>();
+                    if matches.len() != 1 {
+                        return None;
+                    }
+                    Some(ReactiveHitWrite::ContainerOccluder {
+                        hit_index: matches[0],
+                        widget_id,
+                        rect,
+                        clip_rect,
+                    })
+                } else {
+                    None
+                };
+                Some(LocalReactiveSlotPlan { writes, hit_write })
             }
         }
         ReactiveScenePropertyValue::TextColor { color } => {
@@ -2268,10 +2690,23 @@ fn slot_write_for_reactive_value<VM>(
                 })
             }
         }
+        ReactiveScenePropertyValue::TextureMaskTint { color } => {
+            let slots = computed
+                .scene
+                .matching_texture_slots(|texture| texture.mask_tint.is_some());
+            (slots.len() == 1).then(|| LocalReactiveSlotPlan {
+                writes: vec![ReactiveSlotWrite::TextureMaskTint {
+                    slot: slots[0],
+                    color,
+                }],
+                hit_write: None,
+            })
+        }
         ReactiveScenePropertyValue::Texture {
             texture,
             media_key,
             media_layout,
+            mask_tint,
             frame,
             corner_radius,
             opacity,
@@ -2289,6 +2724,7 @@ fn slot_write_for_reactive_value<VM>(
                             texture,
                             media_key,
                             media_layout,
+                            mask_tint,
                             frame,
                             quad: None,
                             uv_rect: None,
@@ -2574,6 +3010,7 @@ mod tests {
             uv_rect: None,
             corner_radius: 2.0,
             opacity,
+            mask_tint: None,
             clip_rect: None,
             clip_mask: None,
         }
@@ -2602,6 +3039,7 @@ mod tests {
         let value = ReactiveScenePropertyValue::ShapeFillColor {
             rect,
             color: Color::RED,
+            container_occluder: None,
         };
         let binding = slot_binding_for_reactive_value(&computed, value.clone())
             .expect("overlay shape should build a retained slot binding");
@@ -2616,6 +3054,36 @@ mod tests {
             RenderCommand::Shape(command) => assert_eq!(command.color, Color::RED),
             _ => panic!("expected overlay shape command"),
         }
+    }
+
+    #[test]
+    fn container_background_slot_rejects_occluder_topology_changes() {
+        let mut computed = ComputedScene::<()>::default();
+        let rect = Rect::new(1.0, 2.0, 30.0, 20.0);
+        computed.scene.push_shape(shape(rect, Color::TRANSPARENT));
+
+        let initial = ReactiveScenePropertyValue::ShapeFillColor {
+            rect,
+            color: Color::TRANSPARENT,
+            container_occluder: Some(false),
+        };
+        let binding = slot_binding_for_reactive_value(&computed, initial)
+            .expect("transparent Container background should retain its shape slot");
+
+        assert!(binding
+            .patch_for(ReactiveScenePropertyValue::ShapeFillColor {
+                rect,
+                color: Color::rgba(255, 255, 255, 0),
+                container_occluder: Some(false),
+            })
+            .is_some());
+        assert!(binding
+            .patch_for(ReactiveScenePropertyValue::ShapeFillColor {
+                rect,
+                color: Color::WHITE,
+                container_occluder: Some(true),
+            })
+            .is_none());
     }
 
     #[test]
@@ -2670,5 +3138,52 @@ mod tests {
             RenderCommand::Texture(command) => assert_eq!(command.opacity, 0.75),
             _ => panic!("expected overlay texture command"),
         }
+    }
+
+    #[test]
+    fn texture_mask_tint_updates_only_the_retained_draw() {
+        let mut computed = ComputedScene::<()>::default();
+        let mut primitive = texture(1.0);
+        primitive.mask_tint = Some(Color::WHITE);
+        let texture_id = primitive.texture.id();
+        let frame = primitive.frame;
+        computed.scene.push_texture(primitive);
+        let serial = computed.scene.prepare_cache_serial();
+
+        let value = ReactiveScenePropertyValue::TextureMaskTint { color: Color::RED };
+        let binding = slot_binding_for_reactive_value(&computed, value.clone())
+            .expect("monochrome texture should build a retained tint binding");
+        assert!(matches!(
+            binding.kind,
+            ReactiveSlotBindingKind::TextureMaskTint { .. }
+        ));
+
+        apply_patch(&mut computed, &binding, value);
+        let texture = &computed.scene.textures[0];
+        assert_eq!(texture.texture.id(), texture_id);
+        assert_eq!(texture.frame, frame);
+        assert_eq!(texture.mask_tint, Some(Color::RED));
+        assert_eq!(computed.scene.prepare_cache_serial(), serial);
+        assert!(!computed.scene.cache_liveness_dirty());
+        assert_eq!(computed.scene.dirty_draw_ranges().len(), 1);
+        match &computed.scene.commands[0] {
+            RenderCommand::Texture(command) => {
+                assert_eq!(command.texture.id(), texture_id);
+                assert_eq!(command.frame, frame);
+                assert_eq!(command.mask_tint, Some(Color::RED));
+            }
+            _ => panic!("expected texture command"),
+        }
+    }
+
+    #[test]
+    fn ordinary_texture_rejects_mask_tint_slot_for_fallback() {
+        let mut computed = ComputedScene::<()>::default();
+        computed.scene.push_texture(texture(1.0));
+        assert!(slot_binding_for_reactive_value(
+            &computed,
+            ReactiveScenePropertyValue::TextureMaskTint { color: Color::RED },
+        )
+        .is_none());
     }
 }

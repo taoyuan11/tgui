@@ -31,8 +31,8 @@ use crate::ui::widget::{
     Button, Canvas, CanvasMouseButton, CanvasParagraphStyle, CanvasPointerEvent, CanvasRecorder,
     CanvasShadow, CanvasStroke, CanvasTextStyle, CanvasTextVerticalAlign, CanvasTextWrap, Carousel,
     Checkbox, ContainerStyle, CursorStyle, DataGrid, DataGridColumn, DataGridColumnPin,
-    DataGridRow, Flex, FocusScopeOptions, HitInteraction, Input, Point, ProgressBar, Rect,
-    ScrollView, Select, SelectOption, Slider, Spinner, Switch, Text, TextEditState, Textarea,
+    DataGridRow, Flex, FocusScopeOptions, HitInteraction, HitRegion, Input, Point, ProgressBar,
+    Rect, ScrollView, Select, SelectOption, Slider, Spinner, Switch, Text, TextEditState, Textarea,
     Tooltip, VirtualCacheState, WidgetKey, WidgetTree,
 };
 use crate::ui::widget::{Element, Stack, WidgetId};
@@ -440,6 +440,110 @@ fn carousel_auto_play_advances_after_interval() {
     let view_model = handler.view_model.lock().unwrap();
     assert_eq!(view_model.selected, 1);
     assert_eq!(view_model.changes, vec![1]);
+}
+
+#[test]
+fn carousel_auto_play_reads_live_selection_and_pauses_while_hovered() {
+    let invalidation = InvalidationSignal::new();
+    let selected = State::new(0usize, invalidation.clone());
+    let selected_for_command = selected.clone();
+    let items: Vec<Element<CarouselRuntimeVm>> = vec![
+        Text::new("first").into(),
+        Text::new("second").into(),
+        Text::new("third").into(),
+    ];
+    let tree = WidgetTree::new(
+        Carousel::new(items, selected.signal())
+            .auto_play(Duration::from_millis(10))
+            .on_change(ValueCommand::new(
+                move |vm: &mut CarouselRuntimeVm, next| {
+                    selected_for_command.set(next);
+                    vm.selected = next;
+                    vm.changes.push(next);
+                },
+            )),
+    );
+    let mut handler = test_handler_with_vm(CarouselRuntimeVm::default(), Some(tree), invalidation);
+    let frame = handler
+        .computed_scene()
+        .carousel_auto_play
+        .first()
+        .expect("carousel autoplay metadata")
+        .frame;
+    let now = Instant::now();
+
+    assert!(!handler.drive_carousel_auto_play(now));
+    selected.set(1);
+    handler.cursor_position = Some(Point::new(
+        frame.x + frame.width * 0.5,
+        frame.y + frame.height * 0.5,
+    ));
+    assert!(!handler.drive_carousel_auto_play(now + Duration::from_millis(10)));
+    assert!(handler.view_model.lock().unwrap().changes.is_empty());
+
+    handler.cursor_position = Some(Point::new(
+        frame.right() + dp(20.0),
+        frame.bottom() + dp(20.0),
+    ));
+    assert!(!handler.drive_carousel_auto_play(now + Duration::from_millis(19)));
+    assert!(handler.drive_carousel_auto_play(now + Duration::from_millis(20)));
+    assert_eq!(handler.view_model.lock().unwrap().changes.as_slice(), [2]);
+
+    // The command updated the same State. A second tick must resolve that live
+    // value and wrap from 2 to 0 even if no widget tree is rebuilt.
+    assert!(handler.drive_carousel_auto_play(now + Duration::from_millis(30)));
+    assert_eq!(
+        handler.view_model.lock().unwrap().changes.as_slice(),
+        [2, 0]
+    );
+}
+
+#[test]
+fn carousel_previous_and_next_buttons_resolve_live_selection_on_activation() {
+    let invalidation = InvalidationSignal::new();
+    let selected = State::new(0usize, invalidation.clone());
+    let selected_for_command = selected.clone();
+    let items: Vec<Element<CarouselRuntimeVm>> = vec![
+        Text::new("first").into(),
+        Text::new("second").into(),
+        Text::new("third").into(),
+    ];
+    let tree = WidgetTree::new(Carousel::new(items, selected.signal()).on_change(
+        ValueCommand::new(move |vm: &mut CarouselRuntimeVm, next| {
+            selected_for_command.set(next);
+            vm.selected = next;
+            vm.changes.push(next);
+        }),
+    ));
+    let mut handler = test_handler_with_vm(CarouselRuntimeVm::default(), Some(tree), invalidation);
+    let viewport = handler.viewport_rect();
+    let scene = handler.computed_scene().clone();
+    let button_center = |label: &str| {
+        let text = scene
+            .scene
+            .texts
+            .iter()
+            .find(|text| text.content.as_ref() == label)
+            .unwrap_or_else(|| panic!("missing {label} button"));
+        Point::new(
+            text.frame.x + text.frame.width * 0.5,
+            text.frame.y + text.frame.height * 0.5,
+        )
+    };
+
+    // Change selection after the tree and button commands already exist. A
+    // build-time target snapshot would incorrectly choose 1 here.
+    selected.set(1);
+    handler.cursor_position = Some(button_center("Next"));
+    handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Left);
+    assert_eq!(handler.view_model.lock().unwrap().changes.as_slice(), [2]);
+
+    handler.cursor_position = Some(button_center("Prev"));
+    handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Left);
+    assert_eq!(
+        handler.view_model.lock().unwrap().changes.as_slice(),
+        [2, 1]
+    );
 }
 
 #[test]

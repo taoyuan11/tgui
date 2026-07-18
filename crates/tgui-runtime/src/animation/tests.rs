@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 use crate::foundation::binding::InvalidationSignal;
 use crate::foundation::color::Color;
 use crate::ui::unit::dp;
-use crate::ui::widget::Point;
+use crate::ui::widget::{Point, WidgetId};
 
 use super::controller::sample_timeline;
 use super::{
@@ -374,6 +374,148 @@ fn sparse_refresh_visits_only_running_slots() {
 }
 
 #[test]
+fn refresh_canonicalizes_mixed_property_targets_without_losing_fallback_scope() {
+    use crate::foundation::binding::PropertySlot;
+
+    let mut engine = AnimationEngine::default();
+    let start = Instant::now();
+    let animate_at = start + Duration::from_millis(1);
+    let sample_at = animate_at + Duration::from_millis(50);
+    let transition = Transition::linear(Duration::from_millis(100));
+    let id = 77;
+
+    let opacity = AnimationKey::Widget {
+        id,
+        property: WidgetProperty::Opacity,
+    };
+    let background = AnimationKey::Widget {
+        id,
+        property: WidgetProperty::Background,
+    };
+    let offset = AnimationKey::Widget {
+        id,
+        property: WidgetProperty::Offset,
+    };
+    let unsupported = AnimationKey::Widget {
+        id,
+        property: WidgetProperty::SpinnerPhase,
+    };
+
+    engine.resolve_f32(opacity, 0.0, None, start);
+    engine.resolve_color(background, Color::BLACK, None, start);
+    engine.resolve_point(offset, Point::ZERO, None, start);
+    engine.resolve_f32(unsupported, 0.0, None, start);
+    engine.resolve_f32(opacity, 1.0, Some(transition), animate_at);
+    engine.resolve_color(background, Color::WHITE, Some(transition), animate_at);
+    engine.resolve_point(
+        offset,
+        Point::new(dp(8.0), dp(4.0)),
+        Some(transition),
+        animate_at,
+    );
+    engine.resolve_f32(unsupported, 1.0, Some(transition), animate_at);
+
+    let refresh = engine.refresh(sample_at);
+    assert_eq!(refresh.scene_widget_ids.as_slice(), &[id]);
+    assert_eq!(
+        refresh.scene_property_targets.as_slice(),
+        &[
+            (WidgetId::from_raw(id), PropertySlot::Background),
+            (WidgetId::from_raw(id), PropertySlot::Opacity),
+            (WidgetId::from_raw(id), PropertySlot::Offset),
+        ]
+    );
+    assert!(refresh.has_unscoped_scene_changes);
+}
+
+#[test]
+fn refresh_sorts_and_deduplicates_widget_ids_across_typed_stores() {
+    use crate::foundation::binding::PropertySlot;
+
+    let mut engine = AnimationEngine::default();
+    let start = Instant::now();
+    let animate_at = start + Duration::from_millis(1);
+    let sample_at = animate_at + Duration::from_millis(50);
+    let transition = Transition::linear(Duration::from_millis(100));
+
+    let background = AnimationKey::Widget {
+        id: 42,
+        property: WidgetProperty::Background,
+    };
+    let opacity = AnimationKey::Widget {
+        id: 7,
+        property: WidgetProperty::Opacity,
+    };
+    let scale = AnimationKey::Widget {
+        id: 42,
+        property: WidgetProperty::Scale,
+    };
+    let offset = AnimationKey::Widget {
+        id: 19,
+        property: WidgetProperty::Offset,
+    };
+    let width = AnimationKey::Widget {
+        id: 42,
+        property: WidgetProperty::Width,
+    };
+    let height = AnimationKey::Widget {
+        id: 7,
+        property: WidgetProperty::Height,
+    };
+    let gap = AnimationKey::Widget {
+        id: 19,
+        property: WidgetProperty::Gap,
+    };
+
+    engine.resolve_color(background, Color::BLACK, None, start);
+    engine.resolve_f32(opacity, 0.25, None, start);
+    engine.resolve_f32(scale, 0.9, None, start);
+    engine.resolve_point(offset, Point::ZERO, None, start);
+    engine.resolve_dp(width, dp(20.0), None, start);
+    engine.resolve_dp(height, dp(18.0), None, start);
+    engine.resolve_dp(gap, dp(2.0), None, start);
+
+    engine.resolve_color(background, Color::WHITE, Some(transition), animate_at);
+    engine.resolve_f32(opacity, 0.75, Some(transition), animate_at);
+    engine.resolve_f32(scale, 1.1, Some(transition), animate_at);
+    engine.resolve_point(
+        offset,
+        Point::new(dp(6.0), dp(3.0)),
+        Some(transition),
+        animate_at,
+    );
+    engine.resolve_dp(width, dp(40.0), Some(transition), animate_at);
+    engine.resolve_dp(height, dp(30.0), Some(transition), animate_at);
+    engine.resolve_dp(gap, dp(8.0), Some(transition), animate_at);
+
+    let refresh = engine.refresh(sample_at);
+    assert_eq!(refresh.scene_widget_ids.as_slice(), &[7, 19, 42]);
+    assert_eq!(
+        refresh.scene_property_targets.as_slice(),
+        &[
+            (WidgetId::from_raw(7), PropertySlot::Opacity),
+            (WidgetId::from_raw(19), PropertySlot::Offset),
+            (WidgetId::from_raw(42), PropertySlot::Background),
+            (WidgetId::from_raw(42), PropertySlot::Scale),
+        ]
+    );
+    assert!(!refresh.has_unscoped_scene_changes);
+
+    assert_eq!(refresh.layout_widget_ids.as_slice(), &[7, 19, 42]);
+    assert_eq!(
+        refresh.layout_property_targets.as_slice(),
+        &[
+            (WidgetId::from_raw(7), PropertySlot::Height),
+            (WidgetId::from_raw(42), PropertySlot::Width),
+        ]
+    );
+    assert!(
+        refresh.has_unscoped_layout_changes,
+        "Gap has no retained layout slot and must preserve the fallback scope"
+    );
+}
+
+#[test]
 fn refresh_marks_only_accessibility_geometry_animations() {
     let mut engine = AnimationEngine::default();
     let start = Instant::now();
@@ -576,6 +718,91 @@ fn over_cap_reclaims_stale_settled_slots_but_keeps_recent() {
     // 此刻 refresh 触发回收:陈旧的已稳定槽位被回收,仅保留刚触达的存活槽位。
     let _ = engine.refresh(later);
     assert_eq!(engine.debug_total_slots(), 1);
+}
+
+#[test]
+fn over_cap_idle_refresh_throttles_gc_but_still_reclaims_after_ttl() {
+    use super::engine::{SLOT_GC_SOFT_CAP, SLOT_GC_SWEEP_INTERVAL, SLOT_GC_TTL};
+    let mut engine = AnimationEngine::default();
+    let start = Instant::now();
+
+    for id in 0..(SLOT_GC_SOFT_CAP as u64 + 4) {
+        engine.resolve_f32(
+            AnimationKey::Widget {
+                id,
+                property: WidgetProperty::Opacity,
+            },
+            1.0,
+            None,
+            start,
+        );
+    }
+
+    let _ = engine.refresh(start);
+    assert_eq!(engine.debug_slot_gc_sweep_count(), 1);
+    assert!(engine.debug_total_slots() > SLOT_GC_SOFT_CAP);
+
+    for step in 1..10 {
+        let _ = engine.refresh(start + SLOT_GC_SWEEP_INTERVAL / 10 * step);
+    }
+    assert_eq!(
+        engine.debug_slot_gc_sweep_count(),
+        1,
+        "idle event refreshes before the deadline must not rescan the retained slot table"
+    );
+
+    let expired = start + SLOT_GC_TTL + SLOT_GC_SWEEP_INTERVAL;
+    let _ = engine.refresh(expired);
+    assert_eq!(engine.debug_slot_gc_sweep_count(), 2);
+    assert_eq!(engine.debug_total_slots(), 0);
+}
+
+#[test]
+fn over_cap_gc_preserves_active_and_window_slots() {
+    use super::engine::{SLOT_GC_SOFT_CAP, SLOT_GC_TTL};
+    let mut engine = AnimationEngine::default();
+    let start = Instant::now();
+    let active_key = AnimationKey::Widget {
+        id: 7,
+        property: WidgetProperty::Opacity,
+    };
+
+    for id in 0..(SLOT_GC_SOFT_CAP as u64 + 4) {
+        engine.resolve_f32(
+            AnimationKey::Widget {
+                id,
+                property: WidgetProperty::Opacity,
+            },
+            1.0,
+            None,
+            start,
+        );
+        engine.resolve_color(
+            AnimationKey::Widget {
+                id,
+                property: WidgetProperty::Background,
+            },
+            Color::BLACK,
+            None,
+            start,
+        );
+    }
+    let window_key = AnimationKey::Window(super::WindowProperty::ThemeBackground);
+    engine.resolve_color(window_key, Color::WHITE, None, start);
+    engine.resolve_f32(
+        active_key,
+        2.0,
+        Some(Transition::linear(Duration::from_secs(60))),
+        start + Duration::from_millis(1),
+    );
+
+    let expired = start + SLOT_GC_TTL + Duration::from_secs(1);
+    let _ = engine.refresh(expired);
+
+    assert!(engine.contains_key(active_key));
+    assert!(engine.contains_key(window_key));
+    assert!(engine.has_active_animations());
+    assert_eq!(engine.debug_total_slots(), 2);
 }
 
 #[test]

@@ -26,14 +26,16 @@ use cosmic_text::Editor;
 use ropey::Rope;
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use super::input::TextInputSnapshot;
 use super::layout_slots::LayoutSlotBinding;
 use super::reactive_slots::ReactiveSlotBinding;
 
 pub(super) const SMOOTH_SCROLL_EPSILON: f32 = 0.1;
+#[cfg(test)]
 pub(super) const SMOOTH_SCROLL_FRAMES: u16 = 4;
+pub(super) const SMOOTH_SCROLL_DURATION: Duration = Duration::from_nanos(66_666_668);
 
 pub(super) struct CachedScene<VM> {
     pub(super) viewport: Rect,
@@ -317,6 +319,34 @@ pub(super) enum HoverTargetId {
         widget_id: WidgetId,
         item_id: CanvasItemId,
     },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct RetainedRowHoverPatch {
+    pub(super) previous_row: Option<(WidgetId, crate::ui::widget::RetainedHoverRowKind)>,
+    pub(super) next_row: Option<(WidgetId, crate::ui::widget::RetainedHoverRowKind)>,
+    pub(super) source_hover_epoch: u64,
+    pub(super) source_invalidation_revision: u64,
+    pub(super) source_root_rebuild_revision: u64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct RetainedButtonHoverPatch {
+    pub(super) previous_button: Option<WidgetId>,
+    pub(super) next_button: Option<WidgetId>,
+    pub(super) source_hover_epoch: u64,
+    pub(super) source_invalidation_revision: u64,
+    pub(super) source_root_rebuild_revision: u64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct RetainedButtonPressedPatch {
+    pub(super) button: WidgetId,
+    pub(super) source_pressed_widget: Option<WidgetId>,
+    pub(super) next_pressed_widget: Option<WidgetId>,
+    pub(super) source_hover_epoch: u64,
+    pub(super) source_invalidation_revision: u64,
+    pub(super) source_root_rebuild_revision: u64,
 }
 
 #[derive(Clone)]
@@ -725,6 +755,7 @@ pub(super) enum HoverMoveHandler<VM> {
 
 pub(super) struct HoveredWidget<VM> {
     pub(super) target_id: HoverTargetId,
+    pub(super) row_patch_kind: Option<crate::ui::widget::RetainedHoverRowKind>,
     pub(super) cursor_style: Option<crate::ui::widget::CursorStyle>,
     pub(super) on_mouse_enter: Option<HoverTransitionHandler<VM>>,
     pub(super) on_mouse_leave: Option<HoverTransitionHandler<VM>>,
@@ -823,7 +854,8 @@ pub(super) struct TouchScrollInertiaState {
 pub(super) struct SmoothScrollState {
     pub(super) start: Point,
     pub(super) target: Point,
-    pub(super) frame: u16,
+    pub(super) started_at: Instant,
+    pub(super) last_advanced_at: Instant,
 }
 
 #[derive(Clone)]

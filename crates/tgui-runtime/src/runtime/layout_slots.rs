@@ -1,6 +1,17 @@
 use super::*;
 use crate::ui::layout::{Length, Value};
 
+const DENSE_LAYOUT_ANIMATION_MIN_TARGETS: usize = 512;
+const DENSE_LAYOUT_ANIMATION_NUMERATOR: usize = 15;
+const DENSE_LAYOUT_ANIMATION_DENOMINATOR: usize = 16;
+
+fn should_rebuild_dense_layout_animation(target_count: usize, widget_count: usize) -> bool {
+    target_count >= DENSE_LAYOUT_ANIMATION_MIN_TARGETS
+        && widget_count > 0
+        && target_count.saturating_mul(DENSE_LAYOUT_ANIMATION_DENOMINATOR)
+            >= widget_count.saturating_mul(DENSE_LAYOUT_ANIMATION_NUMERATOR)
+}
+
 #[derive(Clone)]
 pub(super) struct LayoutSlotBinding {
     pub(super) widget_id: WidgetId,
@@ -199,6 +210,45 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         }
     }
 
+    /// Animation frames can safely choose the full-layout fallback when their retained scene
+    /// boundary is the root. Generic strict-reactive updates cannot fall back, so this guard is
+    /// intentionally queried only by `patch_animation_refresh` rather than being baked into the
+    /// shared layout-slot writer.
+    pub(super) fn animation_layout_targets_require_root_recollect(
+        &self,
+        targets: &[(WidgetId, PropertySlot)],
+    ) -> bool {
+        let Some(layout) = self
+            .cached_scene
+            .as_ref()
+            .and_then(|cached| cached.layout.as_ref())
+        else {
+            return true;
+        };
+        targets.iter().any(|(widget_id, property)| {
+            self.layout_slot_scene_root(layout, *widget_id, *property) == layout.root_id()
+        })
+    }
+
+    /// A retained layout-slot patch wins decisively for sparse animation targets, but once a
+    /// large animation changes almost the entire tree it repeats subtree bookkeeping while still
+    /// rebuilding every draw. Keep the sparse path and let the normal full-layout fallback handle
+    /// only the measured dense cliff.
+    pub(super) fn animation_layout_refresh_is_dense(&self, widget_ids: &[u64]) -> bool {
+        if widget_ids.len() < DENSE_LAYOUT_ANIMATION_MIN_TARGETS {
+            return false;
+        }
+        let Some(widget_count) = self
+            .cached_scene
+            .as_ref()
+            .and_then(|cached| cached.layout.as_ref())
+            .map(ResolvedSceneLayout::widget_count)
+        else {
+            return true;
+        };
+        should_rebuild_dense_layout_animation(widget_ids.len(), widget_count)
+    }
+
     fn layout_slot_is_scene_patch_boundary(
         &self,
         layout: &ResolvedSceneLayout<VM>,
@@ -217,4 +267,18 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
 
 fn layout_length_is_definite_px(value: Option<&Value<Length>>) -> bool {
     matches!(value.map(Value::resolve_untracked), Some(Length::Px(_)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::should_rebuild_dense_layout_animation;
+
+    #[test]
+    fn dense_layout_animation_fallback_keeps_sparse_and_small_batches_retained() {
+        assert!(!should_rebuild_dense_layout_animation(511, 512));
+        assert!(!should_rebuild_dense_layout_animation(512, 547));
+        assert!(should_rebuild_dense_layout_animation(512, 546));
+        assert!(should_rebuild_dense_layout_animation(1_000, 1_027));
+        assert!(!should_rebuild_dense_layout_animation(750, 1_027));
+    }
 }

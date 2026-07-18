@@ -51,6 +51,7 @@ fn texture(frame_local: Rect) -> OverlayPrimitive {
         uv_rect: None,
         corner_radius: 2.0,
         opacity: 0.75,
+        mask_tint: None,
         clip_rect: None,
         clip_mask: None,
     })

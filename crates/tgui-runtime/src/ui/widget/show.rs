@@ -27,7 +27,7 @@ impl<VM> IntoChildren<VM> for Show<VM> {
     fn into_child_source(self) -> ChildSource<VM> {
         ChildSource::Show {
             visible: self.visible,
-            child: self.child,
+            child: Box::new(self.child),
         }
     }
 }

@@ -5,7 +5,7 @@ use std::hint::black_box;
 #[cfg(feature = "bench-support")]
 use std::time::Duration;
 
-use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
+use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
 
 #[cfg(feature = "bench-support")]
 use tgui::animation::{AnimationCurve, FillMode, Keyframes, Playback, PlaybackDirection};
@@ -65,6 +65,69 @@ fn bench_real_animation_sparse_active_refresh(c: &mut Criterion) {
                     let changed = refresh_real_animation_engine(black_box(&mut engine));
                     black_box(changed);
                 });
+            },
+        );
+    }
+
+    group.finish();
+}
+
+#[cfg(feature = "bench-support")]
+fn bench_real_animation_refresh_widget_dedup(c: &mut Criterion) {
+    let mut group = c.benchmark_group("real_animation_refresh_widget_dedup");
+
+    for active_count in [1_usize, 100, 1000] {
+        let mut optimized_probe =
+            create_real_animation_engine_with_mixed_active_widgets(active_count);
+        let mut legacy_probe = create_real_animation_engine_with_mixed_active_widgets(active_count);
+        let (optimized_changed, optimized_stats) =
+            refresh_real_animation_engine_with_dedup_strategy(&mut optimized_probe, false);
+        let (legacy_changed, legacy_stats) =
+            refresh_real_animation_engine_with_dedup_strategy(&mut legacy_probe, true);
+        assert!(optimized_changed);
+        assert_eq!(optimized_changed, legacy_changed);
+        assert_eq!(
+            optimized_stats.id_buffer_spills,
+            legacy_stats.id_buffer_spills
+        );
+        eprintln!(
+            "animation_refresh_widget_dedup: active_widgets={active_count} optimized_comparisons={} legacy_comparisons={} optimized_spills={} legacy_spills={}",
+            optimized_stats.comparisons,
+            legacy_stats.comparisons,
+            optimized_stats.id_buffer_spills,
+            legacy_stats.id_buffer_spills,
+        );
+
+        group.bench_with_input(
+            BenchmarkId::new("sort_dedup", active_count),
+            &active_count,
+            |b, &count| {
+                b.iter_batched(
+                    || create_real_animation_engine_with_mixed_active_widgets(count),
+                    |mut engine| {
+                        black_box(refresh_real_animation_engine_with_dedup_strategy(
+                            black_box(&mut engine),
+                            false,
+                        ))
+                    },
+                    BatchSize::SmallInput,
+                );
+            },
+        );
+        group.bench_with_input(
+            BenchmarkId::new("legacy_contains", active_count),
+            &active_count,
+            |b, &count| {
+                b.iter_batched(
+                    || create_real_animation_engine_with_mixed_active_widgets(count),
+                    |mut engine| {
+                        black_box(refresh_real_animation_engine_with_dedup_strategy(
+                            black_box(&mut engine),
+                            true,
+                        ))
+                    },
+                    BatchSize::SmallInput,
+                );
             },
         );
     }
@@ -338,6 +401,9 @@ fn bench_real_animation_resolve_settled(_c: &mut Criterion) {}
 fn bench_real_animation_sparse_active_refresh(_c: &mut Criterion) {}
 
 #[cfg(not(feature = "bench-support"))]
+fn bench_real_animation_refresh_widget_dedup(_c: &mut Criterion) {}
+
+#[cfg(not(feature = "bench-support"))]
 fn bench_real_animation_sparse_active_controllers(_c: &mut Criterion) {}
 
 #[cfg(not(feature = "bench-support"))]
@@ -375,6 +441,7 @@ criterion_group!(
     bench_animation_update,
     bench_real_animation_idle_refresh,
     bench_real_animation_sparse_active_refresh,
+    bench_real_animation_refresh_widget_dedup,
     bench_real_animation_sparse_active_controllers,
     bench_real_animation_resolve_settled,
     bench_animation_interpolation,

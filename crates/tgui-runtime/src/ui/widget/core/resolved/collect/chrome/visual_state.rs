@@ -20,6 +20,50 @@ impl<VM> ResolvedElement<VM> {
         visual_context: VisualContext,
         context: &mut CollectContext<'_, '_>,
     ) -> CollectVisualState {
+        self.resolve_collect_visual_state_impl(layout_node, visual_context, context, None, None)
+    }
+
+    pub(in super::super) fn resolve_collect_visual_state_with_runtime(
+        &self,
+        layout_node: &LayoutNode,
+        visual_context: VisualContext,
+        context: &mut CollectContext<'_, '_>,
+        prepared: PreparedCollectVisualRuntime,
+    ) -> CollectVisualState {
+        self.resolve_collect_visual_state_impl(
+            layout_node,
+            visual_context,
+            context,
+            Some(prepared),
+            None,
+        )
+    }
+
+    pub(in super::super) fn resolve_collect_visual_state_with_runtime_and_slider_style(
+        &self,
+        layout_node: &LayoutNode,
+        visual_context: VisualContext,
+        context: &mut CollectContext<'_, '_>,
+        prepared: PreparedCollectVisualRuntime,
+        slider_style: ResolvedSliderStyle,
+    ) -> CollectVisualState {
+        self.resolve_collect_visual_state_impl(
+            layout_node,
+            visual_context,
+            context,
+            Some(prepared),
+            Some(slider_style),
+        )
+    }
+
+    fn resolve_collect_visual_state_impl(
+        &self,
+        layout_node: &LayoutNode,
+        visual_context: VisualContext,
+        context: &mut CollectContext<'_, '_>,
+        prepared: Option<PreparedCollectVisualRuntime>,
+        prepared_slider_style: Option<ResolvedSliderStyle>,
+    ) -> CollectVisualState {
         let layout = context
             .taffy
             .layout(layout_node.node)
@@ -30,10 +74,24 @@ impl<VM> ResolvedElement<VM> {
             layout.size.width,
             layout.size.height,
         );
-        let disabled = self.collect_visual_disabled_state();
-        let widget_state = self.collect_widget_state(disabled, context);
-        let (runtime_background, runtime_visual) =
-            self.resolve_runtime_visual(widget_state, context);
+        let PreparedCollectVisualRuntime {
+            disabled,
+            widget_state,
+            runtime_background,
+            runtime_visual,
+        } = prepared.unwrap_or_else(|| {
+            let disabled = self.collect_visual_disabled_state();
+            let widget_state = self.collect_widget_state(disabled, context);
+            let (runtime_background, runtime_visual) =
+                self.resolve_runtime_visual(widget_state, context);
+            PreparedCollectVisualRuntime {
+                disabled,
+                widget_state,
+                runtime_background,
+                runtime_visual,
+            }
+        });
+        let has_surface_background = runtime_background.is_some();
         let offset = track_property_scope(PropertySlot::Offset, || {
             runtime_visual.offset.resolve_widget(
                 context.animations,
@@ -54,7 +112,20 @@ impl<VM> ResolvedElement<VM> {
             .unwrap_or(frame);
         let scale = track_property_scope(PropertySlot::Scale, || {
             if context.reduced_motion {
-                runtime_visual.scale.resolve().clamp(0.01, 16.0)
+                // Resolve through the engine with no transition so a motion
+                // preference change also cancels any previously active slot.
+                runtime_visual
+                    .scale
+                    .clone()
+                    .with_default_transition(None)
+                    .resolve_widget_clamped(
+                        context.animations,
+                        self.id,
+                        WidgetProperty::Scale,
+                        context.now,
+                        0.01,
+                        16.0,
+                    )
             } else {
                 runtime_visual.scale.resolve_widget_clamped(
                     context.animations,
@@ -90,7 +161,7 @@ impl<VM> ResolvedElement<VM> {
                 )
             })
             * if disabled { 0.55 } else { 1.0 };
-        let styles = self.resolve_collect_styles(widget_state, context);
+        let styles = self.resolve_collect_styles(widget_state, context, prepared_slider_style);
         let border_width = track_property_scope(PropertySlot::BorderWidth, || {
             self.resolve_collect_border_width(&runtime_visual, &styles, context)
         })
@@ -164,6 +235,7 @@ impl<VM> ResolvedElement<VM> {
             border_radius: Dp::new(border_radius),
             border_color,
             background,
+            has_surface_background,
             reactive_background: matches!(runtime_background, Some(Value::Signal(_)))
                 || reactive_style_background,
             reactive_border_color,
@@ -172,7 +244,7 @@ impl<VM> ResolvedElement<VM> {
         }
     }
 
-    fn resolve_runtime_visual(
+    pub(in super::super) fn resolve_runtime_visual(
         &self,
         widget_state: WidgetState,
         context: &CollectContext<'_, '_>,
@@ -291,7 +363,7 @@ impl<VM> ResolvedElement<VM> {
         clip_rect.intersect(unpinned_clip).unwrap_or(unpinned_clip)
     }
 
-    fn collect_visual_disabled_state(&self) -> bool {
+    pub(in super::super) fn collect_visual_disabled_state(&self) -> bool {
         match &self.kind {
             ResolvedWidgetKind::Button { disabled, .. }
             | ResolvedWidgetKind::Checkbox { disabled, .. }
@@ -317,7 +389,7 @@ impl<VM> ResolvedElement<VM> {
         validation_state_color(&state, theme)
     }
 
-    fn collect_widget_state(
+    pub(in super::super) fn collect_widget_state(
         &self,
         disabled: bool,
         context: &CollectContext<'_, '_>,

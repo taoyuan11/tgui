@@ -7,6 +7,8 @@ pub(crate) struct AnimationCoordinator {
 
 pub(crate) struct AnimationCoordinatorFrame {
     pub(crate) changed: bool,
+    pub(crate) active: bool,
+    #[cfg(any(test, feature = "bench-support"))]
     pub(crate) next_deadline: Option<Instant>,
     #[cfg(test)]
     pub(crate) visited_controllers: usize,
@@ -23,11 +25,7 @@ impl AnimationCoordinator {
     /// Tick controllers and determine whether another frame is needed in one traversal. Runtime
     /// scheduling previously upgraded and locked every controller once for `refresh` and again for
     /// `next_frame_deadline` on every event-loop wake.
-    pub(crate) fn refresh_and_next_frame_deadline(
-        &self,
-        now: Instant,
-        tick: bool,
-    ) -> AnimationCoordinatorFrame {
+    pub(crate) fn refresh(&self, now: Instant, tick: bool) -> AnimationCoordinatorFrame {
         let mut controllers = self
             .active_controllers
             .lock()
@@ -64,15 +62,41 @@ impl AnimationCoordinator {
 
         AnimationCoordinatorFrame {
             changed,
-            next_deadline: active.then_some(now + FRAME_INTERVAL),
+            active,
+            #[cfg(any(test, feature = "bench-support"))]
+            next_deadline: None,
             #[cfg(test)]
             visited_controllers,
         }
     }
 
-    pub(crate) fn next_frame_deadline(&self, now: Instant) -> Option<Instant> {
-        self.refresh_and_next_frame_deadline(now, false)
-            .next_deadline
+    /// Compatibility helper retained for internal tests and benchmark support.
+    /// Production runtime scheduling uses the per-window adaptive frame clock.
+    #[cfg(any(test, feature = "bench-support"))]
+    pub(crate) fn refresh_and_next_frame_deadline(
+        &self,
+        now: Instant,
+        tick: bool,
+    ) -> AnimationCoordinatorFrame {
+        let mut frame = self.refresh(now, tick);
+        frame.next_deadline = frame
+            .active
+            .then_some(now + super::super::frame_clock::DEFAULT_FRAME_INTERVAL);
+        frame
+    }
+
+    pub(crate) fn has_active_controllers(&self) -> bool {
+        self.active_controllers
+            .lock()
+            .expect("animation coordinator lock poisoned")
+            .iter()
+            .filter_map(Weak::upgrade)
+            .any(|controller| {
+                controller
+                    .lock()
+                    .expect("animation controller lock poisoned")
+                    .is_running()
+            })
     }
 }
 

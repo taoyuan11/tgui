@@ -441,3 +441,83 @@ fn tree_virtualizes_large_expanded_roots() {
     assert_eq!(children.len(), window_plan.placements.len());
     assert!(children.iter().all(|child| child.tree_node.is_some()));
 }
+
+#[test]
+fn large_tree_selection_snapshot_is_shared_and_membership_stays_equivalent() {
+    let nodes = (0..100_000)
+        .map(|index| TreeNode::keyed(index, format!("Node {index}")))
+        .collect::<Vec<_>>();
+    let selected = (0..100_000)
+        .step_by(2)
+        .map(WidgetKey::from)
+        .collect::<Vec<_>>();
+    let checked = selected.clone();
+    let tree: WidgetTree<()> = WidgetTree::new(
+        Tree::<String, ()>::new(nodes, |ctx| Text::new(ctx.item).into())
+            .selected_keys(selected)
+            .checked_keys(checked)
+            .checkable(true)
+            .selection_mode(TreeSelectionMode::Multiple)
+            .item_layout(ItemLayout::Fixed {
+                item_extent: dp(40.0),
+                spacing: Dp::ZERO,
+                overscan: 0,
+            })
+            .size(dp(240.0), dp(160.0)),
+    );
+
+    let layout = tree_layout(tree, Rect::new(0.0, 0.0, 240.0, 160.0));
+    let root_selection = layout
+        .resolved_root
+        .tree_root
+        .as_ref()
+        .expect("Tree root selection metadata")
+        .selection
+        .clone();
+    let ResolvedWidgetKind::Virtual { children, .. } = &layout.resolved_root.kind else {
+        panic!("Tree should resolve to a virtual widget");
+    };
+    let states = children
+        .iter()
+        .map(|child| child.tree_node.as_ref().expect("visible tree row state"))
+        .collect::<Vec<_>>();
+    let shared_keys = root_selection.selected_keys.resolve();
+    let shared_membership = root_selection.selected_key_membership.resolve();
+    let controlled_keys = states[0].controlled_keys.clone();
+    let shared_checked = controlled_keys.checked.resolve();
+    for state in states {
+        assert!(Arc::ptr_eq(&root_selection, &state.selection));
+        assert!(Arc::ptr_eq(&controlled_keys, &state.controlled_keys));
+        let keys = state.selection.selected_keys.resolve();
+        let membership = state.selection.selected_key_membership.resolve();
+        assert!(Arc::ptr_eq(&shared_keys, &keys));
+        assert!(Arc::ptr_eq(&shared_membership, &membership));
+        assert_eq!(
+            membership.contains(&state.key),
+            keys.contains(&state.key),
+            "membership snapshot must preserve controlled Tree selection semantics"
+        );
+        let checked = state.controlled_keys.checked.resolve();
+        assert!(Arc::ptr_eq(&shared_checked, &checked));
+        assert_eq!(
+            checked.membership.contains(&state.key),
+            checked.ordered.contains(&state.key),
+            "checked membership must share the ordered controlled snapshot"
+        );
+    }
+}
+
+#[test]
+#[cfg(target_pointer_width = "64")]
+fn tree_selection_metadata_stays_out_of_line() {
+    let size = std::mem::size_of::<crate::ui::widget::common::TreeNodeState<()>>();
+    let metadata_size = std::mem::size_of::<crate::ui::widget::common::TreeSelectionMetadata>();
+    assert!(
+        size <= 2_900,
+        "Tree selection lookup tables must remain behind Arc; got {size} bytes"
+    );
+    assert!(
+        metadata_size <= 352,
+        "shared Tree selection metadata grew to {metadata_size} bytes"
+    );
+}

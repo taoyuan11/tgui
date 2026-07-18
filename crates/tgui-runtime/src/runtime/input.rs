@@ -445,7 +445,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     || self.scroll_focused_region_to_edge(true)
             }
             PhysicalKey::Code(KeyCode::PageUp) => {
-                self.move_focused_data_grid_cell(-10, 0, self.modifiers.shift_key())
+                self.page_focused_data_grid_cell(-1, self.modifiers.shift_key())
                     || self.page_focused_tree_node(-1, self.modifiers.shift_key())
                     || self.enter_focused_tree_root(false, self.modifiers.shift_key())
                     || self.page_focused_list_item(-1, self.modifiers.shift_key())
@@ -453,7 +453,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     || self.scroll_focused_region_by_pages(-1)
             }
             PhysicalKey::Code(KeyCode::PageDown) => {
-                self.move_focused_data_grid_cell(10, 0, self.modifiers.shift_key())
+                self.page_focused_data_grid_cell(1, self.modifiers.shift_key())
                     || self.page_focused_tree_node(1, self.modifiers.shift_key())
                     || self.enter_focused_tree_root(false, self.modifiers.shift_key())
                     || self.page_focused_list_item(1, self.modifiers.shift_key())

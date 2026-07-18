@@ -1,5 +1,6 @@
 use taffy::prelude::TaffyTree;
 
+use crate::animation::{AnimationKey, WidgetProperty};
 use crate::foundation::binding::{with_dependency_collection, DependencyGraph};
 use crate::ui::layout::Length;
 use crate::ui::widget::container::Stack;
@@ -28,24 +29,37 @@ impl<VM: 'static> ResolvedElement<VM> {
         let Some(popover) = &self.popover else {
             return;
         };
-        if popover.disabled.resolve() {
-            return;
-        }
-
         let fixed_open = popover.open.resolve();
         let hover_preview =
             context.active_hover_popover == Some(self.id) && popover.trigger_mode.allows_hover();
-        if !fixed_open && !hover_preview {
+        let target_visible = !popover.disabled.resolve() && (fixed_open || hover_preview);
+        let visibility = context.animations.resolve_f32(
+            AnimationKey::Widget {
+                id: self.id.raw(),
+                property: WidgetProperty::PopoverVisibility,
+            },
+            if target_visible { 1.0 } else { 0.0 },
+            context.style_context.motion_fast_transition(),
+            context.now,
+        );
+        if !target_visible && visibility <= f32::EPSILON {
             return;
         }
 
         let style = Box::new(self.resolved_popover_style(context, visual));
+        let animated_offset = (style.offset - crate::ui::unit::Dp::from((1.0 - visibility) * 4.0))
+            .max(crate::ui::unit::Dp::ZERO);
         let anchor_width = popover
             .match_anchor_width
             .then_some(visual.frame.width.max(style.min_width).min(style.max_width));
-        let Some((content_scene, content_size)) =
-            build_popover_scene(popover.content.as_ref(), &style, anchor_width, context)
-        else {
+        let Some((content_scene, content_size)) = build_popover_scene(
+            popover.content.as_ref(),
+            &style,
+            anchor_width,
+            visibility,
+            target_visible,
+            context,
+        ) else {
             return;
         };
 
@@ -58,12 +72,12 @@ impl<VM: 'static> ResolvedElement<VM> {
         let mut overlay = Overlay::<VM>::new(overlay_id, Anchor::Key(AnchorKey::widget(self.id)))
             .source_widget(self.id)
             .placement(popover.placement)
-            .offset(style.offset)
+            .offset(animated_offset)
             .flip_policy(popover.flip_policy)
             .viewport_padding(insets_max(style.padding))
             .match_anchor_width(popover.match_anchor_width)
             .layer(OverlayLayer::Popover);
-        if fixed_open {
+        if fixed_open && target_visible {
             if let Some(command) = popover.on_open_change.clone() {
                 overlay = overlay
                     .close_on_escape(popover.close_on_escape)
@@ -100,7 +114,7 @@ impl<VM: 'static> ResolvedElement<VM> {
         };
         let placement_options = PlacementOptions {
             placement: popover.placement,
-            offset: style.offset,
+            offset: animated_offset,
             cross_offset: crate::ui::unit::Dp::ZERO,
             flip: popover.flip_policy,
             viewport_padding: insets_max(style.padding),
@@ -116,7 +130,7 @@ impl<VM: 'static> ResolvedElement<VM> {
         let bubble_origin = bubble_origin(solved.resolved_placement.side, pointer);
         let mut primitives = Vec::new();
         if let Some(pointer_mesh) = overlay_pointer_mesh(
-            style.background.resolve(),
+            style.background.resolve().with_alpha_factor(visibility),
             pointer,
             style.pointer_inset,
             &solved,
@@ -169,6 +183,8 @@ fn build_popover_scene<VM: 'static>(
     content: &Element<VM>,
     style: &PopoverStyle,
     anchor_width: Option<crate::ui::unit::Dp>,
+    opacity: f32,
+    interactive: bool,
     context: &mut CollectContext<'_, '_>,
 ) -> Option<(
     ComputedScene<VM>,
@@ -283,6 +299,7 @@ fn build_popover_scene<VM: 'static>(
                     animations: context.animations,
                     reduced_motion: context.reduced_motion,
                     now: context.now,
+                    frame_clock: context.frame_clock,
                     focus: Default::default(),
                     tooltip_hover_started_at: context.tooltip_hover_started_at,
                     next_tooltip_wakeup: context.next_tooltip_wakeup,
@@ -292,12 +309,14 @@ fn build_popover_scene<VM: 'static>(
                     gpu_scroll_enabled: false,
                     gpu_scroll_container: None,
                     transform_stack: context.transform_stack.clone(),
+                    portal_accessibility_geometry: None,
+                    portal_accessibility_path: smallvec::SmallVec::new(),
                 };
                 let root_id = resolved.collect_subtree_cache(
                     &layout_root,
                     VisualContext {
                         origin: crate::ui::widget::Point::ZERO,
-                        opacity: 1.0,
+                        opacity: opacity.clamp(0.0, 1.0),
                         clip_rect: local_bounds,
                         overflow_clip_rect: None,
                         clip_mask: None,
@@ -314,6 +333,10 @@ fn build_popover_scene<VM: 'static>(
             })
         });
     let (mut computed, size) = result?;
+
+    if !interactive {
+        computed.clear_interactive_subtree_channels();
+    }
 
     computed.dependencies = dependencies.clone();
     Some((computed, size))

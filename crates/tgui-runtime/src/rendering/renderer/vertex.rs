@@ -75,6 +75,7 @@ pub(super) struct TextQuadSpec {
     pub(super) clip_mask: Option<ClipMask>,
     pub(super) opacity: f32,
     pub(super) tint: [u8; 4],
+    pub(super) mask_mode: f32,
 }
 
 #[derive(Clone, Copy)]
@@ -86,6 +87,7 @@ pub(super) struct TextTransformSpec {
     pub(super) clip_mask: Option<ClipMask>,
     pub(super) opacity: f32,
     pub(super) tint: [u8; 4],
+    pub(super) mask_mode: f32,
 }
 
 #[repr(C)]
@@ -490,6 +492,7 @@ impl TextVertex {
                 clip_mask: spec.clip_mask,
                 opacity: spec.opacity,
                 tint: spec.tint,
+                mask_mode: spec.mask_mode,
             },
             viewport,
         )
@@ -504,6 +507,7 @@ impl TextVertex {
             clip_mask,
             opacity,
             tint,
+            mask_mode,
         } = spec;
         let scale_factor = viewport.scale_factor;
         let rect_width = rect.width.get();
@@ -537,7 +541,7 @@ impl TextVertex {
                 clip_local_position: clip_mask.clip_local_position,
                 clip_rect_size: clip_mask.clip_rect_size,
                 clip_corner_radius: clip_mask.clip_corner_radius,
-                clip_enabled: clip_mask.clip_enabled,
+                clip_enabled: encode_text_clip_and_mask(clip_mask.clip_enabled, mask_mode),
                 opacity,
                 tint,
             }
@@ -554,13 +558,20 @@ impl TextVertex {
     }
 }
 
+#[inline]
+fn encode_text_clip_and_mask(clip_enabled: f32, mask_mode: f32) -> f32 {
+    debug_assert!(clip_enabled == 0.0 || clip_enabled == 1.0);
+    debug_assert!(matches!(mask_mode, 0.0 | 1.0 | 2.0));
+    clip_enabled + 2.0 * mask_mode
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         CompositeQuadSpec, CompositeVertex, TextQuadSpec, TextTransformSpec, TextVertex,
         VertexViewport,
     };
-    use crate::ui::widget::{Point, Rect};
+    use crate::ui::widget::{ClipMask, Point, Rect};
 
     fn viewport(physical_width: f32, physical_height: f32, scale_factor: f32) -> VertexViewport {
         VertexViewport::new(
@@ -577,6 +588,47 @@ mod tests {
             (actual - expected).abs() < 1e-5,
             "expected {actual} to be close to {expected}"
         );
+    }
+
+    fn decode_text_clip_and_mask(encoded: f32) -> (f32, f32) {
+        let mask_mode = (encoded / 2.0).floor();
+        (encoded - 2.0 * mask_mode, mask_mode)
+    }
+
+    #[test]
+    fn text_clip_and_mask_modes_pack_losslessly_into_one_float() {
+        for mask_mode in [0.0, 1.0, 2.0] {
+            for clip_enabled in [0.0, 1.0] {
+                let encoded = super::encode_text_clip_and_mask(clip_enabled, mask_mode);
+                assert_eq!(
+                    decode_text_clip_and_mask(encoded),
+                    (clip_enabled, mask_mode)
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn text_quad_preserves_clip_and_mask_when_packed_together() {
+        let quad = TextVertex::quad(
+            TextQuadSpec {
+                rect: Rect::new(0.0, 0.0, 100.0, 50.0),
+                uv_rect: None,
+                corner_radius: 0.0,
+                clip_mask: Some(ClipMask {
+                    rect: Rect::new(5.0, 5.0, 80.0, 40.0),
+                    corner_radius: 4.0,
+                }),
+                opacity: 1.0,
+                tint: [255; 4],
+                mask_mode: 2.0,
+            },
+            VertexViewport::new(100.0, 50.0, 100.0, 50.0, 1.0),
+        );
+
+        assert!(quad
+            .iter()
+            .all(|vertex| decode_text_clip_and_mask(vertex.clip_enabled) == (1.0, 2.0)));
     }
 
     #[test]
@@ -607,6 +659,7 @@ mod tests {
                 clip_mask: None,
                 opacity: 1.0,
                 tint: [255; 4],
+                mask_mode: 0.0,
             },
             viewport(physical_width, physical_height, scale_factor),
         );
@@ -636,6 +689,7 @@ mod tests {
                 clip_mask: None,
                 opacity: 0.25,
                 tint: [255; 4],
+                mask_mode: 0.0,
             },
             VertexViewport::new(100.0, 50.0, 100.0, 50.0, 1.0),
         );
@@ -654,6 +708,7 @@ mod tests {
                 clip_mask: None,
                 opacity: 1.0,
                 tint,
+                mask_mode: 0.0,
             },
             VertexViewport::new(100.0, 50.0, 100.0, 50.0, 1.0),
         );
@@ -677,6 +732,7 @@ mod tests {
                 clip_mask: None,
                 opacity: 0.8,
                 tint: [255; 4],
+                mask_mode: 0.0,
             },
             VertexViewport::new(100.0, 100.0, 200.0, 200.0, 2.0),
         );

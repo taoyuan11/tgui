@@ -19,6 +19,32 @@ use crate::ui::widget::{Flex, Rect, Text, WidgetTree};
 #[cfg(feature = "bench-support")]
 use super::bench_support::{WidgetBenchmarkContext, WidgetBenchmarkStats};
 
+#[cfg(feature = "bench-support")]
+pub struct BenchTransformTranslatePrepareProbe {
+    inner: crate::rendering::renderer::TransformTranslatePrepareProbe,
+}
+
+#[cfg(feature = "bench-support")]
+impl BenchTransformTranslatePrepareProbe {
+    pub fn new(draw_count: usize, chain_depth: usize, distinct_chains: usize) -> Self {
+        Self {
+            inner: crate::rendering::renderer::TransformTranslatePrepareProbe::new(
+                draw_count,
+                chain_depth,
+                distinct_chains,
+            ),
+        }
+    }
+
+    pub fn run_cached(&mut self) -> f64 {
+        self.inner.run_cached()
+    }
+
+    pub fn run_direct(&self) -> f64 {
+        self.inner.run_direct()
+    }
+}
+
 // ============================================================
 // State/Signal Helpers (for benchmarks)
 // ============================================================
@@ -805,6 +831,12 @@ pub struct RealAnimationEngineBench {
     count: usize,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct RealAnimationRefreshDedupStats {
+    pub comparisons: u64,
+    pub id_buffer_spills: u64,
+}
+
 pub fn create_real_animation_engine_with_settled_slots(count: usize) -> RealAnimationEngineBench {
     let mut engine = crate::animation::AnimationEngine::default();
     let now = Instant::now();
@@ -859,6 +891,98 @@ pub fn create_real_animation_engine_with_sparse_active_slots(
         now: animation_start + Duration::from_secs(1),
         count: settled_count,
     }
+}
+
+/// Builds a deliberately mixed animation frame: every widget owns four scene properties across
+/// three typed stores plus one layout property. This exercises cross-store widget-ID
+/// canonicalization instead of the simpler one-property-per-widget path.
+pub fn create_real_animation_engine_with_mixed_active_widgets(
+    active_count: usize,
+) -> RealAnimationEngineBench {
+    let mut engine = crate::animation::AnimationEngine::default();
+    let start = Instant::now();
+    let transition = crate::animation::Transition::linear(Duration::from_secs(60));
+    let animation_start = start + Duration::from_millis(1);
+
+    for index in 0..active_count {
+        let id = index as u64;
+        let opacity = crate::animation::AnimationKey::Widget {
+            id,
+            property: crate::animation::WidgetProperty::Opacity,
+        };
+        let scale = crate::animation::AnimationKey::Widget {
+            id,
+            property: crate::animation::WidgetProperty::Scale,
+        };
+        let background = crate::animation::AnimationKey::Widget {
+            id,
+            property: crate::animation::WidgetProperty::Background,
+        };
+        let offset = crate::animation::AnimationKey::Widget {
+            id,
+            property: crate::animation::WidgetProperty::Offset,
+        };
+        let width = crate::animation::AnimationKey::Widget {
+            id,
+            property: crate::animation::WidgetProperty::Width,
+        };
+
+        engine.resolve_f32(opacity, 0.25, None, start);
+        engine.resolve_f32(scale, 0.92, None, start);
+        engine.resolve_color(
+            background,
+            crate::foundation::color::Color::rgba(34, 211, 238, 255),
+            None,
+            start,
+        );
+        engine.resolve_point(
+            offset,
+            crate::ui::widget::Point::new(dp(-2.0), dp(0.0)),
+            None,
+            start,
+        );
+        engine.resolve_dp(width, dp(18.0), None, start);
+
+        engine.resolve_f32(opacity, 1.0, Some(transition), animation_start);
+        engine.resolve_f32(scale, 1.0, Some(transition), animation_start);
+        engine.resolve_color(
+            background,
+            crate::foundation::color::Color::rgba(139, 92, 246, 255),
+            Some(transition),
+            animation_start,
+        );
+        engine.resolve_point(
+            offset,
+            crate::ui::widget::Point::new(dp(2.0), dp(0.0)),
+            Some(transition),
+            animation_start,
+        );
+        engine.resolve_dp(width, dp(24.0), Some(transition), animation_start);
+    }
+
+    RealAnimationEngineBench {
+        engine,
+        now: animation_start + Duration::from_secs(1),
+        count: active_count,
+    }
+}
+
+pub fn refresh_real_animation_engine_with_dedup_strategy(
+    engine: &mut RealAnimationEngineBench,
+    legacy: bool,
+) -> (bool, RealAnimationRefreshDedupStats) {
+    crate::animation::reset_refresh_widget_dedup_stats();
+    let refresh = crate::animation::with_legacy_refresh_widget_dedup(legacy, || {
+        engine.engine.refresh(engine.now)
+    });
+    let (comparisons, id_buffer_spills) = crate::animation::refresh_widget_dedup_stats();
+    (
+        refresh.changed,
+        RealAnimationRefreshDedupStats {
+            comparisons,
+            id_buffer_spills,
+        },
+    )
 }
 
 pub fn refresh_real_animation_engine(engine: &mut RealAnimationEngineBench) -> bool {
