@@ -244,6 +244,27 @@ fn test_media() -> MediaManager {
     MediaManager::new(InvalidationSignal::new())
 }
 
+#[test]
+fn deep_container_resolution_switches_stack_before_debug_frame_guard() {
+    let mut root: Element<()> = Text::new("leaf").into();
+    for _ in 0..24 {
+        root = Stack::new().child(root).into();
+    }
+
+    let tree = WidgetTree::new(root);
+    let theme = Theme::default();
+    let resolved = tree.root.resolve(&theme);
+    let mut current = &resolved;
+    for _ in 0..24 {
+        let ResolvedWidgetKind::Container { children, .. } = &current.kind else {
+            panic!("nested test node should resolve as a container");
+        };
+        assert_eq!(children.len(), 1);
+        current = &children[0];
+    }
+    assert!(matches!(current.kind, ResolvedWidgetKind::Text { .. }));
+}
+
 fn wait_for_rendered_output(
     tree: &WidgetTree<()>,
     font_manager: &FontManager,

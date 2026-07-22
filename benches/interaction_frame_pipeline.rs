@@ -11,11 +11,11 @@ use tgui::mvvm::CommandEffect;
 #[cfg(feature = "bench-support")]
 use tgui::widgets::{
     RuntimeButtonHoverBenchmarkContext, RuntimeDataGridBenchmarkContext,
-    RuntimeDataGridHoverTarget, RuntimeFocusBenchmarkContext, RuntimeInteractionFrameStats,
-    RuntimeRowHoverBenchmarkContext, RuntimeRowHoverKind, RuntimeRowSelectionBenchmarkContext,
-    RuntimeRowSelectionKind, RuntimeRowSelectionMode, RuntimeSliderValueBenchmarkContext,
-    RuntimeTextContentBenchmarkContext, RuntimeToastBenchmarkContext,
-    RuntimeTreeCheckedBenchmarkContext,
+    RuntimeDataGridHoverTarget, RuntimeFocusBenchmarkContext, RuntimeFocusNavigationCacheStats,
+    RuntimeInteractionFrameStats, RuntimeRowHoverBenchmarkContext, RuntimeRowHoverKind,
+    RuntimeRowSelectionBenchmarkContext, RuntimeRowSelectionKind, RuntimeRowSelectionMode,
+    RuntimeSliderValueBenchmarkContext, RuntimeTextContentBenchmarkContext,
+    RuntimeToastBenchmarkContext, RuntimeTreeCheckedBenchmarkContext,
 };
 
 #[cfg(feature = "bench-support")]
@@ -1436,6 +1436,7 @@ fn print_focus_phase_profile(
     label: &str,
     candidates: usize,
     samples: &[RuntimeInteractionFrameStats],
+    cache: RuntimeFocusNavigationCacheStats,
 ) {
     let totals = samples.iter().map(|stats| stats.total).collect::<Vec<_>>();
     print_budget(label, &totals);
@@ -1461,8 +1462,11 @@ fn print_focus_phase_profile(
         .copied()
         .expect("focus profile requires at least one sample");
     eprintln!(
-        "interaction_focus_phase: path={label} candidates={candidates} samples={} total_p50_ms={:.4} total_p95_ms={:.4} event_p50_ms={:.4} event_p95_ms={:.4} sync_p50_ms={:.4} sync_p95_ms={:.4} scene_update_p50_ms={:.4} scene_update_p95_ms={:.4} scene_layout_p50_ms={:.4} scene_layout_p95_ms={:.4} renderer_p50_ms={:.4} renderer_p95_ms={:.4} liveness_p50_ms={:.4} liveness_p95_ms={:.4} prepare_p50_ms={:.4} prepare_p95_ms={:.4} encode_p50_ms={:.4} encode_p95_ms={:.4} submit_p50_ms={:.4} submit_p95_ms={:.4} gpu_wait_p50_ms={:.4} gpu_wait_p95_ms={:.4} first_path={first:?}",
+        "interaction_focus_phase: path={label} candidates={candidates} samples={} cache_builds={} cache_validations={} cache_hits={} total_p50_ms={:.4} total_p95_ms={:.4} event_p50_ms={:.4} event_p95_ms={:.4} sync_p50_ms={:.4} sync_p95_ms={:.4} scene_update_p50_ms={:.4} scene_update_p95_ms={:.4} scene_layout_p50_ms={:.4} scene_layout_p95_ms={:.4} renderer_p50_ms={:.4} renderer_p95_ms={:.4} liveness_p50_ms={:.4} liveness_p95_ms={:.4} prepare_p50_ms={:.4} prepare_p95_ms={:.4} encode_p50_ms={:.4} encode_p95_ms={:.4} submit_p50_ms={:.4} submit_p95_ms={:.4} gpu_wait_p50_ms={:.4} gpu_wait_p95_ms={:.4} first_path={first:?}",
         samples.len(),
+        cache.builds,
+        cache.validations,
+        cache.hits,
         milliseconds(total_p50),
         milliseconds(total_p95),
         milliseconds(event_p50),
@@ -1602,11 +1606,13 @@ fn profile_no_ui_command_effect_path(
         &format!("focus/{buttons}_buttons/{label}/conservative"),
         buttons,
         &conservative_samples,
+        conservative.focus_navigation_cache_stats(),
     );
     print_focus_phase_profile(
         &format!("focus/{buttons}_buttons/{label}/no_ui_change"),
         buttons,
         &no_ui_samples,
+        no_ui.focus_navigation_cache_stats(),
     );
     let conservative_p50 = duration_percentiles(&conservative_samples, |stats| stats.total).0;
     let no_ui_p50 = duration_percentiles(&no_ui_samples, |stats| stats.total).0;
@@ -1658,9 +1664,10 @@ fn profile_focus_pipeline(buttons: usize) {
         &format!("focus/{buttons}_buttons/tab_forward"),
         buttons,
         &tab_samples,
+        tab.focus_navigation_cache_stats(),
     );
 
-    let mut enter = RuntimeFocusBenchmarkContext::new(buttons, viewport())
+    let mut enter = RuntimeFocusBenchmarkContext::new_no_ui_change(buttons, viewport())
         .expect("Enter activation benchmark context");
     let initial_focus = enter.tab_forward().expect("Enter initial focus frame");
     assert_focus_pipeline_frame("Enter initial focus", initial_focus, 0);
@@ -1668,25 +1675,26 @@ fn profile_focus_pipeline(buttons: usize) {
         let stats = enter
             .activate_enter()
             .expect("Enter activation warmup frame");
-        assert_focus_pipeline_frame("Enter warmup", stats, 1);
+        assert_no_ui_command_frame("Enter warmup", stats);
     }
     let mut enter_samples = Vec::with_capacity(SAMPLES);
     for _ in 0..SAMPLES {
         let stats = enter
             .activate_enter()
             .expect("Enter activation profile frame");
-        assert_focus_pipeline_frame("Enter profile", stats, 1);
+        assert_no_ui_command_frame("Enter profile", stats);
         enter_samples.push(stats);
     }
     assert_eq!(enter.focused_index(), Some(0));
     assert_eq!(enter.last_activated_index(), Some(0));
     print_focus_phase_profile(
-        &format!("focus/{buttons}_buttons/enter_activation"),
+        &format!("focus/{buttons}_buttons/enter_activation/no_ui_change"),
         buttons,
         &enter_samples,
+        enter.focus_navigation_cache_stats(),
     );
 
-    let mut space = RuntimeFocusBenchmarkContext::new(buttons, viewport())
+    let mut space = RuntimeFocusBenchmarkContext::new_no_ui_change(buttons, viewport())
         .expect("Space activation benchmark context");
     let initial_focus = space.tab_forward().expect("Space initial focus frame");
     assert_focus_pipeline_frame("Space initial focus", initial_focus, 0);
@@ -1694,22 +1702,23 @@ fn profile_focus_pipeline(buttons: usize) {
         let stats = space
             .activate_space()
             .expect("Space activation warmup frame");
-        assert_focus_pipeline_frame("Space warmup", stats, 1);
+        assert_no_ui_command_frame("Space warmup", stats);
     }
     let mut space_samples = Vec::with_capacity(SAMPLES);
     for _ in 0..SAMPLES {
         let stats = space
             .activate_space()
             .expect("Space activation profile frame");
-        assert_focus_pipeline_frame("Space profile", stats, 1);
+        assert_no_ui_command_frame("Space profile", stats);
         space_samples.push(stats);
     }
     assert_eq!(space.focused_index(), Some(0));
     assert_eq!(space.last_activated_index(), Some(0));
     print_focus_phase_profile(
-        &format!("focus/{buttons}_buttons/space_activation"),
+        &format!("focus/{buttons}_buttons/space_activation/no_ui_change"),
         buttons,
         &space_samples,
+        space.focus_navigation_cache_stats(),
     );
 
     eprintln!(
@@ -1722,9 +1731,9 @@ fn profile_focus_pipeline(buttons: usize) {
 fn bench_focus_pipeline(c: &mut Criterion, buttons: usize) {
     let mut tab = RuntimeFocusBenchmarkContext::new(buttons, viewport())
         .expect("criterion Tab focus benchmark context");
-    let mut enter = RuntimeFocusBenchmarkContext::new(buttons, viewport())
+    let mut enter = RuntimeFocusBenchmarkContext::new_no_ui_change(buttons, viewport())
         .expect("criterion Enter activation benchmark context");
-    let mut space = RuntimeFocusBenchmarkContext::new(buttons, viewport())
+    let mut space = RuntimeFocusBenchmarkContext::new_no_ui_change(buttons, viewport())
         .expect("criterion Space activation benchmark context");
     let initial_enter_focus = enter.tab_forward().expect("criterion Enter initial focus");
     assert_focus_pipeline_frame("criterion Enter initial focus", initial_enter_focus, 0);
@@ -1754,7 +1763,7 @@ fn bench_focus_pipeline(c: &mut Criterion, buttons: usize) {
                 let stats = enter
                     .activate_enter()
                     .expect("criterion Enter activation frame");
-                assert_focus_pipeline_frame("criterion Enter", stats, 1);
+                assert_no_ui_command_frame("criterion Enter", stats);
                 total += stats.total;
             }
             total
@@ -1767,7 +1776,7 @@ fn bench_focus_pipeline(c: &mut Criterion, buttons: usize) {
                 let stats = space
                     .activate_space()
                     .expect("criterion Space activation frame");
-                assert_focus_pipeline_frame("criterion Space", stats, 1);
+                assert_no_ui_command_frame("criterion Space", stats);
                 total += stats.total;
             }
             total

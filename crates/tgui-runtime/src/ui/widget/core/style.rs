@@ -518,7 +518,7 @@ pub(super) fn resolve_focus_ring(
     override_style: Option<&FocusRingOverride>,
     state: WidgetState,
 ) -> Option<crate::theme::FocusRingStyle> {
-    if state.disabled || !state.focused {
+    if state.disabled || !state.focus_visible {
         return None;
     }
 
@@ -620,12 +620,17 @@ pub(super) fn resolve_select_style(
     state: WidgetState,
     theme: &Theme,
 ) -> ResolvedSelectStyle {
-    let visual_state = base_interaction_state(state);
+    let visual_state = state;
+    let mut border_state = state;
+    if border_state.focused || border_state.open {
+        border_state.hovered = false;
+        border_state.pressed = false;
+    }
     ResolvedSelectStyle {
         background: resolve_stateful_widget_color(&style.background, visual_state),
         text: resolve_stateful_widget_color(&style.text, visual_state),
         placeholder: resolve_stateful_widget_color(&style.placeholder, visual_state),
-        border: resolve_stateful_widget_color(&style.border, visual_state),
+        border: resolve_stateful_widget_color(&style.border, border_state),
         focus_ring: resolve_focus_ring(theme, style.focus_ring.as_ref(), state),
         arrow: resolve_stateful_widget_color(&style.arrow, visual_state),
         menu_background: style.menu_background.resolve(),
@@ -648,11 +653,16 @@ pub(super) fn resolve_input_style(
     style: &WidgetInputStyle,
     state: WidgetState,
 ) -> ResolvedInputStyle {
+    let mut border_state = state;
+    if border_state.focused {
+        border_state.hovered = false;
+        border_state.pressed = false;
+    }
     ResolvedInputStyle {
         background: resolve_stateful_widget_color(&style.background, state),
         text: resolve_stateful_widget_color(&style.text, state),
         placeholder: resolve_stateful_widget_color(&style.placeholder, state),
-        border: resolve_stateful_widget_color(&style.border, state),
+        border: resolve_stateful_widget_color(&style.border, border_state),
         selection: style.selection.as_ref().map(Value::resolve),
         caret: style.caret.as_ref().map(Value::resolve),
         border_width: style.border_width.resolve(),

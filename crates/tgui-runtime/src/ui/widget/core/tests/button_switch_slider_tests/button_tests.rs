@@ -327,6 +327,7 @@ fn focused_secondary_button_keeps_default_border() {
             hovered: true,
             pressed: true,
             focused: true,
+            focus_visible: true,
             ..Default::default()
         },
     );
@@ -355,6 +356,7 @@ fn focused_secondary_button_keeps_default_border() {
             hovered: true,
             pressed: true,
             focused: true,
+            focus_visible: true,
             ..Default::default()
         },
         crate::ui::widget::common::ButtonVariantKind::Secondary,

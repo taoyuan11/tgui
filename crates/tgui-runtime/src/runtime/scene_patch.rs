@@ -19,6 +19,328 @@ pub(in crate::runtime) mod splice_probe {
     }
 }
 
+#[cfg(test)]
+pub(in crate::runtime) mod focus_ring_overlay_patch_probe {
+    use std::cell::Cell;
+
+    thread_local! {
+        static HITS: Cell<u64> = const { Cell::new(0) };
+        static REJECTS: Cell<u64> = const { Cell::new(0) };
+    }
+
+    pub(in crate::runtime) fn record_hit() {
+        HITS.with(|hits| hits.set(hits.get() + 1));
+    }
+
+    pub(in crate::runtime) fn record_reject() {
+        REJECTS.with(|rejects| rejects.set(rejects.get() + 1));
+    }
+
+    pub(in crate::runtime) fn reset() {
+        HITS.with(|hits| hits.set(0));
+        REJECTS.with(|rejects| rejects.set(0));
+    }
+
+    pub(in crate::runtime) fn hits() -> u64 {
+        HITS.with(Cell::get)
+    }
+
+    pub(in crate::runtime) fn rejects() -> u64 {
+        REJECTS.with(Cell::get)
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ScenePatchMode {
+    General,
+    FocusRingOverlay,
+}
+
+struct ScenePatch<VM> {
+    root: WidgetId,
+    old_ids: Vec<WidgetId>,
+    cache: CollectedSceneCache<VM>,
+}
+
+struct SceneSplicePlan<VM> {
+    new_chunk: ComputedScene<VM>,
+    ancestor_offsets: Vec<(WidgetId, crate::ui::widget::SceneCounts, usize, usize)>,
+    computed_offset: crate::ui::widget::SceneCounts,
+    computed_hit_offset: usize,
+    computed_scroll_offset: usize,
+}
+
+fn apply_focus_ring_overlay_patch_to_cache<VM: 'static>(
+    cached: &mut CachedScene<VM>,
+    mut patches: Vec<ScenePatch<VM>>,
+    roots: &[WidgetId],
+) -> bool {
+    let Some(layout) = cached.layout.as_ref() else {
+        return false;
+    };
+    if !cached.computed.allows_focus_ring_overlay_patch() || roots.len() != patches.len() {
+        return false;
+    }
+
+    let unique_roots = roots.iter().copied().collect::<HashSet<_>>();
+    if unique_roots.len() != roots.len()
+        || roots.iter().copied().any(|root| {
+            let mut parent = layout.parent_of(root);
+            while let Some(current) = parent {
+                if unique_roots.contains(&current) {
+                    return true;
+                }
+                parent = layout.parent_of(current);
+            }
+            false
+        })
+    {
+        return false;
+    }
+
+    let old_global_has_ring = cached
+        .computed
+        .scene
+        .focus_ring_overlay_shape()
+        .ok()
+        .flatten()
+        .is_some();
+    let mut old_ring_roots = 0usize;
+    let mut new_ring_roots = 0usize;
+    let mut affected_ancestors = HashSet::new();
+    let mut new_ring_ancestors = HashSet::new();
+    let mut new_overlay_source = crate::ui::widget::ScenePrimitives::default();
+    let mut scene_owner_ids = HashSet::new();
+
+    // Complete every structural check before mutating the cache. A failed qualification therefore
+    // leaves the existing scene intact for the caller's generic/full-recollect fallback.
+    for patch in &patches {
+        let old_id_set = patch.old_ids.iter().copied().collect::<HashSet<_>>();
+        let new_id_set = patch.cache.chunks.keys().copied().collect::<HashSet<_>>();
+        if old_id_set != new_id_set || !new_id_set.contains(&patch.root) {
+            return false;
+        }
+        scene_owner_ids.extend(patch.old_ids.iter().map(|id| id.raw()));
+
+        for widget_id in &patch.old_ids {
+            let Some(old_chunk) = cached.scene_chunks.get(widget_id) else {
+                return false;
+            };
+            let Some(new_chunk) = patch.cache.chunks.get(widget_id) else {
+                return false;
+            };
+            if !old_chunk.focus_ring_overlay_patch_compatible_with(new_chunk) {
+                return false;
+            }
+        }
+
+        let old_root = cached
+            .scene_chunks
+            .get(&patch.root)
+            .expect("validated old focus root chunk");
+        if old_root
+            .scene
+            .focus_ring_overlay_shape()
+            .ok()
+            .flatten()
+            .is_some()
+        {
+            old_ring_roots += 1;
+            if !old_root
+                .scene
+                .focus_ring_overlay_equal(&cached.computed.scene)
+            {
+                return false;
+            }
+        }
+
+        let new_root = patch
+            .cache
+            .chunks
+            .get(&patch.root)
+            .expect("validated new focus root chunk");
+        let new_root_has_ring = new_root
+            .scene
+            .focus_ring_overlay_shape()
+            .ok()
+            .flatten()
+            .is_some();
+        if new_root_has_ring {
+            new_ring_roots += 1;
+            if new_ring_roots > 1
+                || !new_overlay_source.replace_focus_ring_overlay_from(&new_root.scene)
+            {
+                return false;
+            }
+        }
+
+        let mut parent = layout.parent_of(patch.root);
+        while let Some(current) = parent {
+            affected_ancestors.insert(current);
+            if new_root_has_ring {
+                new_ring_ancestors.insert(current);
+            }
+            parent = layout.parent_of(current);
+        }
+    }
+
+    if old_global_has_ring != (old_ring_roots == 1) || old_ring_roots > 1 {
+        return false;
+    }
+
+    for ancestor in &affected_ancestors {
+        let Some(chunk) = cached.scene_chunks.get(ancestor) else {
+            return false;
+        };
+        if !chunk.allows_focus_ring_overlay_patch() {
+            return false;
+        }
+        if chunk
+            .scene
+            .focus_ring_overlay_shape()
+            .ok()
+            .flatten()
+            .is_some()
+            && !chunk.scene.focus_ring_overlay_equal(&cached.computed.scene)
+        {
+            return false;
+        }
+        let Some(parts) = cached.scene_chunk_parts.get(ancestor) else {
+            return false;
+        };
+        for local in [&parts.before_children, &parts.after_children] {
+            if !local.allows_focus_ring_overlay_patch()
+                || local
+                    .scene
+                    .focus_ring_overlay_shape()
+                    .ok()
+                    .flatten()
+                    .is_some()
+            {
+                return false;
+            }
+        }
+    }
+
+    // Subtree collection numbers focus targets from a fresh local counter. Preserve the orders
+    // assigned by the full-tree collection before these owned replacement chunks enter the cache;
+    // otherwise a later unrelated ancestor recomposition can silently reorder Tab navigation.
+    for patch in &mut patches {
+        for widget_id in &patch.old_ids {
+            let Some(previous) = cached.scene_chunks.get(widget_id) else {
+                return false;
+            };
+            let Some(replacement) = patch.cache.chunks.get_mut(widget_id) else {
+                return false;
+            };
+            if !replacement.preserve_focus_orders_from(previous) {
+                return false;
+            }
+        }
+
+        let previous_part_ids = patch
+            .old_ids
+            .iter()
+            .copied()
+            .filter(|widget_id| cached.scene_chunk_parts.contains_key(widget_id))
+            .collect::<HashSet<_>>();
+        let replacement_part_ids = patch
+            .cache
+            .chunk_parts
+            .keys()
+            .copied()
+            .collect::<HashSet<_>>();
+        if previous_part_ids != replacement_part_ids {
+            return false;
+        }
+        for widget_id in previous_part_ids {
+            let previous = cached
+                .scene_chunk_parts
+                .get(&widget_id)
+                .expect("validated previous focus chunk parts");
+            let replacement = patch
+                .cache
+                .chunk_parts
+                .get_mut(&widget_id)
+                .expect("validated replacement focus chunk parts");
+            if !replacement
+                .before_children
+                .preserve_focus_orders_from(&previous.before_children)
+                || !replacement
+                    .after_children
+                    .preserve_focus_orders_from(&previous.after_children)
+                || !previous
+                    .before_children
+                    .focus_ring_overlay_patch_compatible_with(&replacement.before_children)
+                || !previous
+                    .after_children
+                    .focus_ring_overlay_patch_compatible_with(&replacement.after_children)
+            {
+                return false;
+            }
+        }
+    }
+
+    cached
+        .dependencies
+        .remove_widget_phase_owners(&scene_owner_ids, DependencyPhase::Scene);
+    cached
+        .computed
+        .dependencies
+        .remove_widget_phase_owners(&scene_owner_ids, DependencyPhase::Scene);
+
+    for patch in patches {
+        for old_id in &patch.old_ids {
+            cached.lifecycle_states.remove(old_id);
+        }
+        cached.scene_chunks.extend(patch.cache.chunks);
+        cached.scene_chunk_parts.extend(patch.cache.chunk_parts);
+        cached.visual_contexts.extend(patch.cache.visual_contexts);
+        cached.lifecycle_states.extend(patch.cache.lifecycle_states);
+        cached.dependencies.merge_from(&patch.cache.dependencies);
+        cached
+            .computed
+            .dependencies
+            .merge_from(&patch.cache.dependencies);
+    }
+
+    let empty_overlay_source = crate::ui::widget::ScenePrimitives::default();
+    for ancestor in affected_ancestors {
+        let source = if new_ring_ancestors.contains(&ancestor) {
+            &new_overlay_source
+        } else {
+            &empty_overlay_source
+        };
+        let Some(chunk) = cached.scene_chunks.get_mut(&ancestor) else {
+            unreachable!("ancestor chunks were validated before focus-ring patch commit");
+        };
+        let source_shape = source
+            .focus_ring_overlay_shape()
+            .expect("validated focus-ring source")
+            .copied();
+        chunk
+            .scene
+            .replace_validated_focus_ring_overlay_shape(source_shape);
+    }
+    let computed_source = if new_ring_roots == 1 {
+        &new_overlay_source
+    } else {
+        &empty_overlay_source
+    };
+    let computed_shape = computed_source
+        .focus_ring_overlay_shape()
+        .expect("validated computed focus-ring source")
+        .copied();
+    cached
+        .computed
+        .scene
+        .replace_validated_focus_ring_overlay_shape(computed_shape);
+
+    #[cfg(test)]
+    focus_ring_overlay_patch_probe::record_hit();
+    true
+}
+
 impl<VM: 'static> BoundRuntimeHandler<VM> {
     pub(super) fn patch_cached_layout_for_roots(
         &mut self,
@@ -195,7 +517,28 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         sync_runtime_scene_state: bool,
     ) -> bool {
         with_runtime_scene_patch_stack(|| {
-            self.patch_cached_scene_for_roots_inner(roots, now, sync_runtime_scene_state)
+            self.patch_cached_scene_for_roots_inner(
+                roots,
+                now,
+                sync_runtime_scene_state,
+                ScenePatchMode::General,
+            )
+        })
+    }
+
+    pub(super) fn patch_cached_focus_ring_scene_for_roots(
+        &mut self,
+        roots: &[WidgetId],
+        now: Instant,
+        sync_runtime_scene_state: bool,
+    ) -> bool {
+        with_runtime_scene_patch_stack(|| {
+            self.patch_cached_scene_for_roots_inner(
+                roots,
+                now,
+                sync_runtime_scene_state,
+                ScenePatchMode::FocusRingOverlay,
+            )
         })
     }
 
@@ -204,6 +547,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         roots: &[WidgetId],
         now: Instant,
         sync_runtime_scene_state: bool,
+        patch_mode: ScenePatchMode,
     ) -> bool {
         let started_at = text_profile_enabled().then_some(Instant::now());
         let collect_started_at = text_profile_enabled().then_some(Instant::now());
@@ -324,20 +668,6 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         }
         let focused_widget = self.focused_widget_id();
 
-        struct ScenePatch<VM> {
-            root: WidgetId,
-            old_ids: Vec<WidgetId>,
-            cache: CollectedSceneCache<VM>,
-        }
-
-        struct SceneSplicePlan<VM> {
-            new_chunk: ComputedScene<VM>,
-            ancestor_offsets: Vec<(WidgetId, crate::ui::widget::SceneCounts, usize, usize)>,
-            computed_offset: crate::ui::widget::SceneCounts,
-            computed_hit_offset: usize,
-            computed_scroll_offset: usize,
-        }
-
         let mut patches = Vec::new();
         for root in roots {
             let old_ids = layout.subtree_widget_ids(*root);
@@ -445,235 +775,24 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             }
         }
 
-        let recompose_started_at = text_profile_enabled().then_some(Instant::now());
-        {
+        if patch_mode == ScenePatchMode::FocusRingOverlay {
+            ancestor_count = ancestor_ids.len();
+            if !apply_focus_ring_overlay_patch_to_cache(
+                self.cached_scene.as_mut().expect("validated cached scene"),
+                patches,
+                roots,
+            ) {
+                #[cfg(test)]
+                focus_ring_overlay_patch_probe::record_reject();
+                return false;
+            }
             let Some(cached) = self.cached_scene.as_mut() else {
                 return false;
             };
-            let Some(layout) = cached.layout.as_ref() else {
-                return false;
-            };
-
-            for patch in &patches {
-                for old_id in &patch.old_ids {
-                    scene_owner_ids.insert(old_id.raw());
-                }
-            }
-            cached
-                .dependencies
-                .remove_widget_phase_owners(&scene_owner_ids, DependencyPhase::Scene);
-
-            // Splice 资格判定：必须在「存入新 chunk」之前读取旧 root chunk。
-            // 多个 root 只有在全部互不嵌套、且每个 subtree 的新旧命令/命中/滚动数量
-            // 完全一致时才整体命中。任一 root 不满足就整体回退到 recompose，避免半快半慢
-            // 带来偏移漂移。
-            let can_attempt_splice = computed_allows_direct_scene_splice(&cached.computed);
-            let splice_plans: Option<Vec<SceneSplicePlan<VM>>> = {
-                let mut unique_roots = HashSet::new();
-                let unique = roots.iter().copied().all(|root| unique_roots.insert(root));
-                let disjoint = roots.iter().copied().all(|root| {
-                    let mut parent = layout.parent_of(root);
-                    while let Some(current) = parent {
-                        if unique_roots.contains(&current) {
-                            return false;
-                        }
-                        parent = layout.parent_of(current);
-                    }
-                    true
-                });
-                if can_attempt_splice && unique && disjoint && roots.len() == patches.len() {
-                    let mut plans = Vec::with_capacity(patches.len());
-                    let mut ok = true;
-                    for patch in &patches {
-                        let target = patch.root;
-                        let Some(new_chunk) = patch.cache.chunks.get(&target) else {
-                            ok = false;
-                            break;
-                        };
-                        let Some(old_chunk) = cached.scene_chunks.get(&target) else {
-                            ok = false;
-                            break;
-                        };
-                        if !(new_chunk.is_simple_for_splice()
-                            && old_chunk.is_simple_for_splice()
-                            && new_chunk.scene_counts() == old_chunk.scene_counts()
-                            && new_chunk.hit_regions.len() == old_chunk.hit_regions.len()
-                            && new_chunk.scroll_regions.len() == old_chunk.scroll_regions.len())
-                        {
-                            ok = false;
-                            break;
-                        }
-                        let Some(ancestor_offsets) = layout.scene_splice_ancestor_offsets(
-                            target,
-                            &cached.scene_chunk_parts,
-                            &cached.scene_chunks,
-                        ) else {
-                            ok = false;
-                            break;
-                        };
-                        let (computed_offset, computed_hit_offset, computed_scroll_offset) =
-                            ancestor_offsets
-                                .first()
-                                .map(|(_, offset, hit_offset, scroll_offset)| {
-                                    (*offset, *hit_offset, *scroll_offset)
-                                })
-                                .unwrap_or_default();
-                        plans.push(SceneSplicePlan {
-                            new_chunk: new_chunk.clone(),
-                            ancestor_offsets,
-                            computed_offset,
-                            computed_hit_offset,
-                            computed_scroll_offset,
-                        });
-                    }
-                    ok.then_some(plans)
-                } else {
-                    None
-                }
-            };
-
-            for patch in patches {
-                let new_ids: HashSet<_> = patch.cache.chunks.keys().copied().collect();
-                for old_id in &patch.old_ids {
-                    cached.lifecycle_states.remove(old_id);
-                    if !new_ids.contains(old_id) {
-                        cached.scene_chunks.remove(old_id);
-                        cached.scene_chunk_parts.remove(old_id);
-                        cached.visual_contexts.remove(old_id);
-                    }
-                }
-                cached.scene_chunks.extend(patch.cache.chunks);
-                cached.scene_chunk_parts.extend(patch.cache.chunk_parts);
-                cached.visual_contexts.extend(patch.cache.visual_contexts);
-                cached.lifecycle_states.extend(patch.cache.lifecycle_states);
-                cached.dependencies.merge_from(&patch.cache.dependencies);
-            }
-
-            let mut ancestors = ancestor_ids.into_iter().collect::<Vec<_>>();
-            ancestors.sort_by_key(|widget_id| std::cmp::Reverse(layout.depth_of(*widget_id)));
-            ancestor_count = ancestors.len();
-
-            // Splice 快路径：把每个目标子树的新 chunk 原地覆盖进每个严格祖先 chunk
-            // 的稳定区间，跳过「逐级 recompose 向上重合成」。纯连接模型下，这与 recompose
-            // 的结果逐字节等价（只有目标子树的字节变化，且新旧数量一致 → 后续偏移不动）。
-            // 任一前置不满足（缺 chunk_parts / 子 chunk / 偏移越界）即 return false，
-            // 由调用方 invalidate_computed_scene() 安全回退整帧重收集。
-            let did_splice = if let Some(plans) = splice_plans.as_ref() {
-                let mut ok = true;
-                for plan in plans {
-                    for (ancestor_id, offset, hit_offset, scroll_offset) in &plan.ancestor_offsets {
-                        let Some(ancestor_chunk) = cached.scene_chunks.get_mut(ancestor_id) else {
-                            ok = false;
-                            break;
-                        };
-                        if !ancestor_chunk.splice_chunk_in_place(
-                            offset,
-                            *hit_offset,
-                            *scroll_offset,
-                            &plan.new_chunk,
-                        ) {
-                            ok = false;
-                            break;
-                        }
-                    }
-                    if !ok {
-                        break;
-                    }
-                }
-                if !ok {
-                    return false;
-                }
-                #[cfg(test)]
-                splice_probe::record_hit();
-                true
-            } else {
-                false
-            };
-
-            if !did_splice {
-                for ancestor in ancestors {
-                    if layout
-                        .recompose_scene_chunk(
-                            ancestor,
-                            &cached.scene_chunk_parts,
-                            &mut cached.scene_chunks,
-                        )
-                        .is_none()
-                    {
-                        return false;
-                    }
-                }
-            }
-            if let Some(recompose_started_at) = recompose_started_at {
-                let root_commands = cached
-                    .scene_chunks
-                    .get(&layout.root_id())
-                    .map(|chunk| chunk.scene.commands.len())
-                    .unwrap_or(0);
-                let root_texts = cached
-                    .scene_chunks
-                    .get(&layout.root_id())
-                    .map(|chunk| chunk.scene.texts.len())
-                    .unwrap_or(0);
-                root_command_count = root_commands;
-                root_text_count = root_texts;
-                recompose_elapsed_ms = recompose_started_at.elapsed().as_secs_f64() * 1000.0;
-                log_text_profile(
-                    "textarea_patch_scene_recompose",
-                    std::time::Duration::from_secs_f64(recompose_elapsed_ms / 1000.0),
-                    format!(
-                        "roots={:?} ancestors={} root_commands={} root_texts={}",
-                        roots, ancestor_count, root_commands, root_texts
-                    ),
-                );
-            }
-
-            let can_splice_computed_directly = did_splice
-                && self.external_portal_requests.is_empty()
-                && computed_allows_direct_scene_splice(&cached.computed);
-            if can_splice_computed_directly {
-                let Some(plans) = splice_plans.as_ref() else {
-                    return false;
-                };
-                for plan in plans {
-                    if !cached.computed.splice_chunk_in_place(
-                        &plan.computed_offset,
-                        plan.computed_hit_offset,
-                        plan.computed_scroll_offset,
-                        &plan.new_chunk,
-                    ) {
-                        return false;
-                    }
-                }
-                root_hit_region_count = cached.computed.hit_regions.len();
-                root_scroll_region_count = cached.computed.scroll_regions.len();
-            } else {
-                let root_clone_started_at = text_profile_enabled().then_some(Instant::now());
-                let Some(mut root_chunk) = cached.scene_chunks.get(&layout.root_id()).cloned()
-                else {
-                    return false;
-                };
-                root_chunk.finalize_portals(viewport);
-                root_chunk.assign_new_prepare_cache_serial();
-                root_hit_region_count = root_chunk.hit_regions.len();
-                root_scroll_region_count = root_chunk.scroll_regions.len();
-                if let Some(root_clone_started_at) = root_clone_started_at {
-                    root_clone_elapsed_ms = root_clone_started_at.elapsed().as_secs_f64() * 1000.0;
-                    log_text_profile(
-                        "textarea_patch_scene_root_clone",
-                        std::time::Duration::from_secs_f64(root_clone_elapsed_ms / 1000.0),
-                        format!(
-                            "roots={:?} commands={} texts={} hit_regions={} scroll_regions={}",
-                            roots,
-                            root_chunk.scene.commands.len(),
-                            root_chunk.scene.texts.len(),
-                            root_chunk.hit_regions.len(),
-                            root_chunk.scroll_regions.len()
-                        ),
-                    );
-                }
-                cached.computed = root_chunk;
-            }
+            root_command_count = cached.computed.scene.commands.len();
+            root_text_count = cached.computed.scene.texts.len();
+            root_hit_region_count = cached.computed.hit_regions.len();
+            root_scroll_region_count = cached.computed.scroll_regions.len();
             cached.computed_valid = true;
             cached.animation_epoch = self.animation_epoch;
             cached.layout_animation_epoch = self.layout_animation_epoch;
@@ -695,6 +814,263 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 cached.external_portal_revision = self.external_portal_revision;
                 cached.hovered_scrollbar = self.hovered_scrollbar;
                 cached.active_scrollbar = active_scrollbar;
+            }
+        } else {
+            let recompose_started_at = text_profile_enabled().then_some(Instant::now());
+            {
+                let Some(cached) = self.cached_scene.as_mut() else {
+                    return false;
+                };
+                let Some(layout) = cached.layout.as_ref() else {
+                    return false;
+                };
+
+                for patch in &patches {
+                    for old_id in &patch.old_ids {
+                        scene_owner_ids.insert(old_id.raw());
+                    }
+                }
+                cached
+                    .dependencies
+                    .remove_widget_phase_owners(&scene_owner_ids, DependencyPhase::Scene);
+
+                // Splice 资格判定：必须在「存入新 chunk」之前读取旧 root chunk。
+                // 多个 root 只有在全部互不嵌套、且每个 subtree 的新旧命令/命中/滚动数量
+                // 完全一致时才整体命中。任一 root 不满足就整体回退到 recompose，避免半快半慢
+                // 带来偏移漂移。
+                let can_attempt_splice = computed_allows_direct_scene_splice(&cached.computed);
+                let splice_plans: Option<Vec<SceneSplicePlan<VM>>> = {
+                    let mut unique_roots = HashSet::new();
+                    let unique = roots.iter().copied().all(|root| unique_roots.insert(root));
+                    let disjoint = roots.iter().copied().all(|root| {
+                        let mut parent = layout.parent_of(root);
+                        while let Some(current) = parent {
+                            if unique_roots.contains(&current) {
+                                return false;
+                            }
+                            parent = layout.parent_of(current);
+                        }
+                        true
+                    });
+                    if can_attempt_splice && unique && disjoint && roots.len() == patches.len() {
+                        let mut plans = Vec::with_capacity(patches.len());
+                        let mut ok = true;
+                        for patch in &patches {
+                            let target = patch.root;
+                            let Some(new_chunk) = patch.cache.chunks.get(&target) else {
+                                ok = false;
+                                break;
+                            };
+                            let Some(old_chunk) = cached.scene_chunks.get(&target) else {
+                                ok = false;
+                                break;
+                            };
+                            if !(new_chunk.is_simple_for_splice()
+                                && old_chunk.is_simple_for_splice()
+                                && new_chunk.scene_counts() == old_chunk.scene_counts()
+                                && new_chunk.hit_regions.len() == old_chunk.hit_regions.len()
+                                && new_chunk.scroll_regions.len() == old_chunk.scroll_regions.len())
+                            {
+                                ok = false;
+                                break;
+                            }
+                            let Some(ancestor_offsets) = layout.scene_splice_ancestor_offsets(
+                                target,
+                                &cached.scene_chunk_parts,
+                                &cached.scene_chunks,
+                            ) else {
+                                ok = false;
+                                break;
+                            };
+                            let (computed_offset, computed_hit_offset, computed_scroll_offset) =
+                                ancestor_offsets
+                                    .first()
+                                    .map(|(_, offset, hit_offset, scroll_offset)| {
+                                        (*offset, *hit_offset, *scroll_offset)
+                                    })
+                                    .unwrap_or_default();
+                            plans.push(SceneSplicePlan {
+                                new_chunk: new_chunk.clone(),
+                                ancestor_offsets,
+                                computed_offset,
+                                computed_hit_offset,
+                                computed_scroll_offset,
+                            });
+                        }
+                        ok.then_some(plans)
+                    } else {
+                        None
+                    }
+                };
+
+                for patch in patches {
+                    let new_ids: HashSet<_> = patch.cache.chunks.keys().copied().collect();
+                    for old_id in &patch.old_ids {
+                        cached.lifecycle_states.remove(old_id);
+                        if !new_ids.contains(old_id) {
+                            cached.scene_chunks.remove(old_id);
+                            cached.scene_chunk_parts.remove(old_id);
+                            cached.visual_contexts.remove(old_id);
+                        }
+                    }
+                    cached.scene_chunks.extend(patch.cache.chunks);
+                    cached.scene_chunk_parts.extend(patch.cache.chunk_parts);
+                    cached.visual_contexts.extend(patch.cache.visual_contexts);
+                    cached.lifecycle_states.extend(patch.cache.lifecycle_states);
+                    cached.dependencies.merge_from(&patch.cache.dependencies);
+                }
+
+                let mut ancestors = ancestor_ids.into_iter().collect::<Vec<_>>();
+                ancestors.sort_by_key(|widget_id| std::cmp::Reverse(layout.depth_of(*widget_id)));
+                ancestor_count = ancestors.len();
+
+                // Splice 快路径：把每个目标子树的新 chunk 原地覆盖进每个严格祖先 chunk
+                // 的稳定区间，跳过「逐级 recompose 向上重合成」。纯连接模型下，这与 recompose
+                // 的结果逐字节等价（只有目标子树的字节变化，且新旧数量一致 → 后续偏移不动）。
+                // 任一前置不满足（缺 chunk_parts / 子 chunk / 偏移越界）即 return false，
+                // 由调用方 invalidate_computed_scene() 安全回退整帧重收集。
+                let did_splice = if let Some(plans) = splice_plans.as_ref() {
+                    let mut ok = true;
+                    for plan in plans {
+                        for (ancestor_id, offset, hit_offset, scroll_offset) in
+                            &plan.ancestor_offsets
+                        {
+                            let Some(ancestor_chunk) = cached.scene_chunks.get_mut(ancestor_id)
+                            else {
+                                ok = false;
+                                break;
+                            };
+                            if !ancestor_chunk.splice_chunk_in_place(
+                                offset,
+                                *hit_offset,
+                                *scroll_offset,
+                                &plan.new_chunk,
+                            ) {
+                                ok = false;
+                                break;
+                            }
+                        }
+                        if !ok {
+                            break;
+                        }
+                    }
+                    if !ok {
+                        return false;
+                    }
+                    #[cfg(test)]
+                    splice_probe::record_hit();
+                    true
+                } else {
+                    false
+                };
+
+                if !did_splice {
+                    for ancestor in ancestors {
+                        if layout
+                            .recompose_scene_chunk(
+                                ancestor,
+                                &cached.scene_chunk_parts,
+                                &mut cached.scene_chunks,
+                            )
+                            .is_none()
+                        {
+                            return false;
+                        }
+                    }
+                }
+                if let Some(recompose_started_at) = recompose_started_at {
+                    let root_commands = cached
+                        .scene_chunks
+                        .get(&layout.root_id())
+                        .map(|chunk| chunk.scene.commands.len())
+                        .unwrap_or(0);
+                    let root_texts = cached
+                        .scene_chunks
+                        .get(&layout.root_id())
+                        .map(|chunk| chunk.scene.texts.len())
+                        .unwrap_or(0);
+                    root_command_count = root_commands;
+                    root_text_count = root_texts;
+                    recompose_elapsed_ms = recompose_started_at.elapsed().as_secs_f64() * 1000.0;
+                    log_text_profile(
+                        "textarea_patch_scene_recompose",
+                        std::time::Duration::from_secs_f64(recompose_elapsed_ms / 1000.0),
+                        format!(
+                            "roots={:?} ancestors={} root_commands={} root_texts={}",
+                            roots, ancestor_count, root_commands, root_texts
+                        ),
+                    );
+                }
+
+                let can_splice_computed_directly = did_splice
+                    && self.external_portal_requests.is_empty()
+                    && computed_allows_direct_scene_splice(&cached.computed);
+                if can_splice_computed_directly {
+                    let Some(plans) = splice_plans.as_ref() else {
+                        return false;
+                    };
+                    for plan in plans {
+                        if !cached.computed.splice_chunk_in_place(
+                            &plan.computed_offset,
+                            plan.computed_hit_offset,
+                            plan.computed_scroll_offset,
+                            &plan.new_chunk,
+                        ) {
+                            return false;
+                        }
+                    }
+                    root_hit_region_count = cached.computed.hit_regions.len();
+                    root_scroll_region_count = cached.computed.scroll_regions.len();
+                } else {
+                    let root_clone_started_at = text_profile_enabled().then_some(Instant::now());
+                    let Some(mut root_chunk) = cached.scene_chunks.get(&layout.root_id()).cloned()
+                    else {
+                        return false;
+                    };
+                    root_chunk.finalize_portals(viewport);
+                    root_chunk.assign_new_prepare_cache_serial();
+                    root_hit_region_count = root_chunk.hit_regions.len();
+                    root_scroll_region_count = root_chunk.scroll_regions.len();
+                    if let Some(root_clone_started_at) = root_clone_started_at {
+                        root_clone_elapsed_ms =
+                            root_clone_started_at.elapsed().as_secs_f64() * 1000.0;
+                        log_text_profile(
+                            "textarea_patch_scene_root_clone",
+                            std::time::Duration::from_secs_f64(root_clone_elapsed_ms / 1000.0),
+                            format!(
+                                "roots={:?} commands={} texts={} hit_regions={} scroll_regions={}",
+                                roots,
+                                root_chunk.scene.commands.len(),
+                                root_chunk.scene.texts.len(),
+                                root_chunk.hit_regions.len(),
+                                root_chunk.scroll_regions.len()
+                            ),
+                        );
+                    }
+                    cached.computed = root_chunk;
+                }
+                cached.computed_valid = true;
+                cached.animation_epoch = self.animation_epoch;
+                cached.layout_animation_epoch = self.layout_animation_epoch;
+                cached.accessibility_animation_epoch = self.accessibility_animation_epoch;
+                if sync_runtime_scene_state {
+                    cached.focused_widget = focused_widget;
+                    cached.focus_visible = self.focus_visible;
+                    cached.pressed_widget = self.pressed_widget;
+                    cached.selected_text = self.selected_text;
+                    cached.caret_visible = caret_visible;
+                    cached.theme_epoch = self.theme_store.version();
+                    cached.style_sheet_version = self.config.style_sheet.version();
+                    cached.density = self.theme.density;
+                    cached.reduced_motion = self.reduced_motion;
+                    cached.text_scale_bits = cached.units.font_scale().to_bits();
+                    cached.scroll_epoch = self.scroll_epoch;
+                    cached.hover_epoch = self.hover_epoch;
+                    cached.text_input_epoch = self.text_input_epoch;
+                    cached.external_portal_revision = self.external_portal_revision;
+                    cached.hovered_scrollbar = self.hovered_scrollbar;
+                    cached.active_scrollbar = active_scrollbar;
+                }
             }
         }
         // Preserve the old portal behavior: menu keyboard state is derived from the newly

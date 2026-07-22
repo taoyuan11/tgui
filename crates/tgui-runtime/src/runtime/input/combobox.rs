@@ -4,11 +4,8 @@ use crate::ui::widget::HitInteraction;
 use smallvec::SmallVec;
 
 impl<VM: 'static> BoundRuntimeHandler<VM> {
-    fn focused_open_popover_source(
-        &mut self,
-    ) -> Option<(WidgetId, crate::ui::widget::ComputedScene<VM>)> {
+    fn focused_open_popover_source(&mut self) -> Option<WidgetId> {
         let focused_id = self.focused_widget_id()?;
-        let computed = self.computed_scene().clone();
 
         if self.focused_text_input_id() == Some(focused_id) {
             let open = self
@@ -20,34 +17,36 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 .map(|popover| !popover.disabled.resolve() && popover.open.resolve())
                 .unwrap_or(false);
             if open {
-                return Some((focused_id, computed));
+                return Some(focused_id);
             }
         }
 
-        let focused_is_overlay = computed
-            .overlay_hit_regions
-            .iter()
-            .any(|region| region.focus.as_ref().map(|focus| focus.widget_id) == Some(focused_id));
-        if !focused_is_overlay {
-            return None;
-        }
-
-        let source = computed
-            .overlay_close_handlers
-            .iter()
-            .rev()
-            .find(|handler| {
-                handler.layer == OverlayLayer::Popover && handler.source_widget_id.is_some()
-            })
-            .and_then(|handler| handler.source_widget_id)?;
-        Some((source, computed))
+        let source = {
+            let computed = self.computed_scene();
+            let focused_is_overlay = computed.overlay_hit_regions.iter().any(|region| {
+                region.focus.as_ref().map(|focus| focus.widget_id) == Some(focused_id)
+            });
+            if !focused_is_overlay {
+                return None;
+            }
+            computed
+                .overlay_close_handlers
+                .iter()
+                .rev()
+                .find(|handler| {
+                    handler.layer == OverlayLayer::Popover && handler.source_widget_id.is_some()
+                })
+                .and_then(|handler| handler.source_widget_id)
+        }?;
+        Some(source)
     }
 
     pub(super) fn focus_open_popover_option_from_input(&mut self, direction: i32) -> bool {
-        let Some((source_id, computed)) = self.focused_open_popover_source() else {
+        let Some(source_id) = self.focused_open_popover_source() else {
             return false;
         };
         let focused_id = self.focused_widget_id();
+        let computed = self.computed_scene();
         let mut options = SmallVec::<[_; 8]>::new();
         let mut seen_inline = SmallVec::<[WidgetId; 8]>::new();
         let mut seen_heap = None;
@@ -93,25 +92,23 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
     }
 
     pub(super) fn activate_first_open_popover_option_from_input(&mut self) -> bool {
-        let Some((source_id, computed)) = self.focused_open_popover_source() else {
+        let Some(source_id) = self.focused_open_popover_source() else {
             return false;
         };
-        for region in computed.overlay_hit_regions.iter() {
-            let HitInteraction::Widget {
-                id, interactions, ..
-            } = &region.interaction
-            else {
-                continue;
-            };
-            if *id == source_id {
-                continue;
-            }
-            if let Some(command) = interactions.on_click.as_ref() {
-                self.execute_command(command);
-                return true;
-            }
-        }
-        false
+        let command = self
+            .computed_scene()
+            .overlay_hit_regions
+            .iter()
+            .find_map(|region| match &region.interaction {
+                HitInteraction::Widget {
+                    id, interactions, ..
+                } if *id != source_id => interactions.on_click.clone(),
+                _ => None,
+            });
+        command.is_some_and(|command| {
+            self.execute_command(&command);
+            true
+        })
     }
 }
 

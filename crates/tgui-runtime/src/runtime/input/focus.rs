@@ -1,80 +1,145 @@
 use super::*;
 use crate::ui::widget::ScrollRegion;
 use smallvec::SmallVec;
+use std::collections::{HashMap, HashSet};
 
-struct FocusCandidate<VM> {
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum FocusHitStream {
+    Normal,
+    Overlay,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct FocusHitLocation {
+    stream: FocusHitStream,
+    index: usize,
+}
+
+impl FocusHitLocation {
+    fn region<'a, VM>(
+        self,
+        computed: &'a crate::ui::widget::ComputedScene<VM>,
+    ) -> Option<&'a crate::ui::widget::HitRegion<VM>> {
+        match self.stream {
+            FocusHitStream::Normal => computed.hit_regions.get(self.index),
+            FocusHitStream::Overlay => computed.overlay_hit_regions.get(self.index),
+        }
+    }
+}
+
+struct FocusCandidate {
     widget_id: WidgetId,
     tab_index: Option<i32>,
     order: usize,
     scope_path: Vec<WidgetId>,
-    on_focus: Option<Command<VM>>,
-    on_blur: Option<Command<VM>>,
+    location: FocusHitLocation,
+    /// Whether the hit occurrence is a text input.  Focus navigation already has to index every
+    /// focusable occurrence, so retaining this bit avoids rescanning the full hit stream when the
+    /// runtime only needs to decide whether IME/text-edit handling applies.
+    is_text_input: bool,
 }
 
-impl<VM> Clone for FocusCandidate<VM> {
+impl Clone for FocusCandidate {
     fn clone(&self) -> Self {
         Self {
             widget_id: self.widget_id,
             tab_index: self.tab_index,
             order: self.order,
             scope_path: self.scope_path.clone(),
-            on_focus: self.on_focus.clone(),
-            on_blur: self.on_blur.clone(),
+            location: self.location,
+            is_text_input: self.is_text_input,
         }
     }
 }
 
-#[derive(Clone)]
-struct FocusNavigationSnapshot<VM> {
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct ActivationLocations {
+    enter: Option<FocusHitLocation>,
+    space: Option<FocusHitLocation>,
+}
+
+pub(in crate::runtime) struct FocusNavigationSnapshot {
+    scene_key: (u64, u64),
+    active_trap_scope: Option<Vec<WidgetId>>,
     active_auto_focus_scope: Option<Vec<WidgetId>>,
-    candidates: Vec<FocusCandidate<VM>>,
+    /// Candidates remain in source order so a new scene can be validated without sorting or
+    /// cloning scope paths. `tab_order` is the sorted indirection used by keyboard navigation.
+    candidates: Vec<FocusCandidate>,
+    tab_order: Vec<usize>,
+    tab_position_by_widget: HashMap<WidgetId, usize>,
+    activations: HashMap<WidgetId, ActivationLocations>,
+    text_input_widgets: HashSet<WidgetId>,
 }
 
 fn scope_path_within(path: &[WidgetId], scope: &[WidgetId]) -> bool {
     path.starts_with(scope)
 }
 
-impl<VM> FocusNavigationSnapshot<VM> {
-    fn from_scene(computed: &crate::ui::widget::ComputedScene<VM>) -> Self {
+impl FocusNavigationSnapshot {
+    fn from_scene<VM>(computed: &crate::ui::widget::ComputedScene<VM>) -> Self {
         let active_trap_scope = active_focus_trap_scope_from_scene(computed);
         let active_auto_focus_scope = computed
             .focus_scopes
             .iter()
             .rev()
             .find(|scope| scope.active && scope.options.is_auto_focus_first())
-            .map(|scope| scope.path.clone());
+            .map(|scope| scope.path.as_slice());
         let mut candidates = Vec::new();
         let mut seen_inline = SmallVec::<[WidgetId; 16]>::new();
         let mut seen_heap = None;
-        for region in computed
-            .hit_regions
-            .iter()
-            .chain(computed.overlay_hit_regions.iter())
-        {
-            let Some(focus) = region.focus.as_ref() else {
-                continue;
-            };
-            if focus.tab_index.unwrap_or(0) < 0 {
-                continue;
-            }
-            if let Some(trap) = active_trap_scope.as_ref() {
-                if !scope_path_within(&focus.scope_path, trap) {
+        let mut activations = HashMap::<WidgetId, ActivationLocations>::new();
+        let mut text_input_widgets = HashSet::new();
+        for (stream, regions) in [
+            (FocusHitStream::Normal, computed.hit_regions.as_slice()),
+            (
+                FocusHitStream::Overlay,
+                computed.overlay_hit_regions.as_slice(),
+            ),
+        ] {
+            for (index, region) in regions.iter().enumerate() {
+                let location = FocusHitLocation { stream, index };
+                if let crate::ui::widget::HitInteraction::TextInput { id, .. } = &region.interaction
+                {
+                    text_input_widgets.insert(*id);
+                }
+                if let Some((widget_id, enter, space)) = region.interaction.keyboard_activation() {
+                    let locations = activations.entry(widget_id).or_default();
+                    if enter && locations.enter.is_none() {
+                        locations.enter = Some(location);
+                    }
+                    if space && locations.space.is_none() {
+                        locations.space = Some(location);
+                    }
+                }
+
+                let Some(focus) = region.focus.as_ref() else {
+                    continue;
+                };
+                if focus.tab_index.unwrap_or(0) < 0
+                    || active_trap_scope
+                        .as_ref()
+                        .is_some_and(|trap| !scope_path_within(&focus.scope_path, trap))
+                    || !insert_seen_focus(&mut seen_inline, &mut seen_heap, focus.widget_id)
+                {
                     continue;
                 }
+                candidates.push(FocusCandidate {
+                    widget_id: focus.widget_id,
+                    tab_index: focus.tab_index,
+                    order: focus.order,
+                    scope_path: focus.scope_path.clone(),
+                    location,
+                    is_text_input: matches!(
+                        region.interaction,
+                        crate::ui::widget::HitInteraction::TextInput { .. }
+                    ),
+                });
             }
-            if !insert_seen_focus(&mut seen_inline, &mut seen_heap, focus.widget_id) {
-                continue;
-            }
-            candidates.push(FocusCandidate {
-                widget_id: focus.widget_id,
-                tab_index: focus.tab_index,
-                order: focus.order,
-                scope_path: focus.scope_path.clone(),
-                on_focus: focus.on_focus.clone(),
-                on_blur: focus.on_blur.clone(),
-            });
         }
-        candidates.sort_by(|left, right| {
+        let mut tab_order = (0..candidates.len()).collect::<Vec<_>>();
+        tab_order.sort_by(|left, right| {
+            let left = &candidates[*left];
+            let right = &candidates[*right];
             let left_bucket = left.tab_index.unwrap_or(0);
             let right_bucket = right.tab_index.unwrap_or(0);
             match (left_bucket > 0, right_bucket > 0) {
@@ -86,29 +151,178 @@ impl<VM> FocusNavigationSnapshot<VM> {
                 (false, false) => left.order.cmp(&right.order),
             }
         });
+        let tab_position_by_widget = tab_order
+            .iter()
+            .enumerate()
+            .map(|(position, candidate_index)| (candidates[*candidate_index].widget_id, position))
+            .collect();
         Self {
-            active_auto_focus_scope,
+            scene_key: computed.focus_navigation_cache_key(),
+            active_trap_scope: active_trap_scope.map(<[WidgetId]>::to_vec),
+            active_auto_focus_scope: active_auto_focus_scope.map(<[WidgetId]>::to_vec),
             candidates,
+            tab_order,
+            tab_position_by_widget,
+            activations,
+            text_input_widgets,
         }
     }
 
-    fn first_candidate_in_scope(&self, scope: &[WidgetId]) -> Option<FocusCandidate<VM>> {
-        self.candidates
+    fn first_candidate_in_scope(&self, scope: &[WidgetId]) -> Option<&FocusCandidate> {
+        self.tab_order
             .iter()
+            .map(|index| &self.candidates[*index])
             .find(|candidate| scope_path_within(&candidate.scope_path, scope))
-            .cloned()
+    }
+
+    fn candidate_for_widget(&self, widget_id: WidgetId) -> Option<&FocusCandidate> {
+        let position = *self.tab_position_by_widget.get(&widget_id)?;
+        self.tab_order
+            .get(position)
+            .and_then(|index| self.candidates.get(*index))
+    }
+
+    fn activation_for(
+        &self,
+        widget_id: WidgetId,
+        enter: bool,
+        space: bool,
+    ) -> Option<FocusHitLocation> {
+        let locations = self.activations.get(&widget_id)?;
+        if enter {
+            locations.enter
+        } else if space {
+            locations.space
+        } else {
+            None
+        }
+    }
+
+    /// Exact semantic validation against a newly materialized scene. Unchanged paint/focus-style
+    /// recollections can transfer the existing snapshot to the new scene serial; a key change is
+    /// already a cold path, so retaining the complete text-input set keeps wrapper hit regions
+    /// from being mistaken for ordinary controls.
+    fn matches_scene<VM>(&self, computed: &crate::ui::widget::ComputedScene<VM>) -> bool {
+        let active_trap_scope = active_focus_trap_scope_from_scene(computed);
+        let active_auto_focus_scope = computed
+            .focus_scopes
+            .iter()
+            .rev()
+            .find(|scope| scope.active && scope.options.is_auto_focus_first())
+            .map(|scope| scope.path.as_slice());
+        if self.active_trap_scope.as_deref() != active_trap_scope
+            || self.active_auto_focus_scope.as_deref() != active_auto_focus_scope
+        {
+            return false;
+        }
+
+        let mut candidate_cursor = 0;
+        let mut matched_enter = 0;
+        let mut matched_space = 0;
+        let mut text_input_widgets = HashSet::new();
+
+        for (stream, regions) in [
+            (FocusHitStream::Normal, computed.hit_regions.as_slice()),
+            (
+                FocusHitStream::Overlay,
+                computed.overlay_hit_regions.as_slice(),
+            ),
+        ] {
+            for (index, region) in regions.iter().enumerate() {
+                let location = FocusHitLocation { stream, index };
+                if let crate::ui::widget::HitInteraction::TextInput { id, .. } = &region.interaction
+                {
+                    text_input_widgets.insert(*id);
+                }
+                if let Some((widget_id, enter, space)) = region.interaction.keyboard_activation() {
+                    let Some(expected) = self.activations.get(&widget_id) else {
+                        return false;
+                    };
+                    if enter {
+                        match expected.enter {
+                            Some(expected_location) if expected_location == location => {
+                                matched_enter += 1;
+                            }
+                            Some(expected_location) if expected_location < location => {}
+                            _ => return false,
+                        }
+                    }
+                    if space {
+                        match expected.space {
+                            Some(expected_location) if expected_location == location => {
+                                matched_space += 1;
+                            }
+                            Some(expected_location) if expected_location < location => {}
+                            _ => return false,
+                        }
+                    }
+                }
+
+                let Some(focus) = region.focus.as_ref() else {
+                    continue;
+                };
+                if focus.tab_index.unwrap_or(0) < 0
+                    || active_trap_scope
+                        .as_ref()
+                        .is_some_and(|trap| !scope_path_within(&focus.scope_path, trap))
+                {
+                    continue;
+                }
+                let Some(first_occurrence) = self.candidate_for_widget(focus.widget_id) else {
+                    return false;
+                };
+                if first_occurrence.location != location {
+                    if first_occurrence.location < location {
+                        continue;
+                    }
+                    return false;
+                }
+                let Some(expected) = self.candidates.get(candidate_cursor) else {
+                    return false;
+                };
+                if expected.location != location
+                    || expected.widget_id != focus.widget_id
+                    || expected.tab_index != focus.tab_index
+                    || expected.order != focus.order
+                    || expected.scope_path != focus.scope_path
+                    || expected.is_text_input
+                        != matches!(
+                            region.interaction,
+                            crate::ui::widget::HitInteraction::TextInput { .. }
+                        )
+                {
+                    return false;
+                }
+                candidate_cursor += 1;
+            }
+        }
+
+        candidate_cursor == self.candidates.len()
+            && text_input_widgets == self.text_input_widgets
+            && matched_enter
+                == self
+                    .activations
+                    .values()
+                    .filter(|locations| locations.enter.is_some())
+                    .count()
+            && matched_space
+                == self
+                    .activations
+                    .values()
+                    .filter(|locations| locations.space.is_some())
+                    .count()
     }
 }
 
 fn active_focus_trap_scope_from_scene<VM>(
     computed: &crate::ui::widget::ComputedScene<VM>,
-) -> Option<Vec<WidgetId>> {
+) -> Option<&[WidgetId]> {
     computed
         .focus_scopes
         .iter()
         .rev()
         .find(|scope| scope.active && scope.options.is_trap())
-        .map(|scope| scope.path.clone())
+        .map(|scope| scope.path.as_slice())
 }
 
 fn insert_seen_focus(
@@ -138,7 +352,132 @@ fn insert_seen_focus(
     inserted
 }
 
+fn focus_target_at<VM>(
+    computed: &crate::ui::widget::ComputedScene<VM>,
+    candidate: &FocusCandidate,
+) -> Option<(FocusedWidget<VM>, Option<Command<VM>>)> {
+    let focus = candidate.location.region(computed)?.focus.as_ref()?;
+    if focus.widget_id != candidate.widget_id
+        || focus.tab_index != candidate.tab_index
+        || focus.order != candidate.order
+        || focus.scope_path != candidate.scope_path
+    {
+        return None;
+    }
+    Some((
+        FocusedWidget {
+            widget_id: focus.widget_id,
+            scope_path: focus.scope_path.clone(),
+            on_blur: focus.on_blur.clone(),
+        },
+        focus.on_focus.clone(),
+    ))
+}
+
 impl<VM: 'static> BoundRuntimeHandler<VM> {
+    fn refresh_focus_navigation_cache_from_current_scene(&mut self) {
+        let Some(computed) = self.cached_scene.as_ref().map(|cached| &cached.computed) else {
+            self.focus_navigation_cache = None;
+            return;
+        };
+        let scene_key = computed.focus_navigation_cache_key();
+        let mut cache = self.focus_navigation_cache.take();
+        #[cfg(any(test, feature = "bench-support"))]
+        let mut built = false;
+        #[cfg(any(test, feature = "bench-support"))]
+        let mut validated = false;
+        #[cfg(any(test, feature = "bench-support"))]
+        let mut hit = false;
+
+        match cache.as_mut() {
+            Some(snapshot) if snapshot.scene_key == scene_key => {
+                #[cfg(any(test, feature = "bench-support"))]
+                {
+                    hit = true;
+                }
+            }
+            Some(snapshot) => {
+                #[cfg(any(test, feature = "bench-support"))]
+                {
+                    validated = true;
+                }
+                if snapshot.matches_scene(computed) {
+                    snapshot.scene_key = scene_key;
+                    #[cfg(any(test, feature = "bench-support"))]
+                    {
+                        hit = true;
+                    }
+                } else {
+                    cache = Some(FocusNavigationSnapshot::from_scene(computed));
+                    #[cfg(any(test, feature = "bench-support"))]
+                    {
+                        built = true;
+                    }
+                }
+            }
+            None => {
+                cache = Some(FocusNavigationSnapshot::from_scene(computed));
+                #[cfg(any(test, feature = "bench-support"))]
+                {
+                    built = true;
+                }
+            }
+        }
+        self.focus_navigation_cache = cache;
+
+        #[cfg(any(test, feature = "bench-support"))]
+        {
+            self.focus_navigation_cache_builds += u64::from(built);
+            self.focus_navigation_cache_validations += u64::from(validated);
+            self.focus_navigation_cache_hits += u64::from(hit);
+        }
+    }
+
+    fn ensure_focus_navigation_cache(&mut self) {
+        let _ = self.computed_scene();
+        self.refresh_focus_navigation_cache_from_current_scene();
+    }
+
+    pub(in crate::runtime) fn retarget_focus_navigation_cache_to_current_scene(&mut self) {
+        let Some(scene_key) = self
+            .cached_scene
+            .as_ref()
+            .map(|cached| cached.computed.focus_navigation_cache_key())
+        else {
+            return;
+        };
+        if let Some(snapshot) = self.focus_navigation_cache.as_mut() {
+            snapshot.scene_key = scene_key;
+        }
+    }
+
+    pub(in crate::runtime) fn cached_focus_target_is_text_input(
+        &self,
+        widget_id: WidgetId,
+    ) -> Option<bool> {
+        let computed = &self.cached_scene.as_ref()?.computed;
+        let snapshot = self.focus_navigation_cache.as_ref()?;
+        if snapshot.scene_key != computed.focus_navigation_cache_key() {
+            return None;
+        }
+        let candidate = snapshot.candidate_for_widget(widget_id)?;
+        let region = candidate.location.region(computed)?;
+        let focus = region.focus.as_ref()?;
+        if focus.widget_id != widget_id {
+            return None;
+        }
+        Some(candidate.is_text_input || snapshot.text_input_widgets.contains(&widget_id))
+    }
+
+    #[cfg(any(test, feature = "bench-support"))]
+    pub(in crate::runtime) fn focus_navigation_cache_stats(&self) -> (u64, u64, u64) {
+        (
+            self.focus_navigation_cache_builds,
+            self.focus_navigation_cache_validations,
+            self.focus_navigation_cache_hits,
+        )
+    }
+
     pub(in crate::runtime) fn clear_focus_after_scene_target_removed(&mut self) {
         self.accessibility_focused_node = None;
         self.active_key_repeat = None;
@@ -251,19 +590,22 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
     }
 
     pub(super) fn active_focus_trap_scope(&mut self) -> Option<Vec<WidgetId>> {
-        active_focus_trap_scope_from_scene(self.computed_scene())
-    }
-
-    fn focus_candidates(&mut self) -> Vec<FocusCandidate<VM>> {
-        FocusNavigationSnapshot::from_scene(self.computed_scene()).candidates
+        self.ensure_focus_navigation_cache();
+        self.focus_navigation_cache
+            .as_ref()
+            .and_then(|snapshot| snapshot.active_trap_scope.clone())
     }
 
     pub(in crate::runtime) fn reconcile_auto_focus_after_scene_update(&mut self) -> bool {
-        let Some(cached) = self.cached_scene.as_ref() else {
+        if self.cached_scene.is_none() {
+            self.active_auto_focus_scope = None;
+            return false;
+        }
+        self.refresh_focus_navigation_cache_from_current_scene();
+        let Some(snapshot) = self.focus_navigation_cache.as_ref() else {
             self.active_auto_focus_scope = None;
             return false;
         };
-        let snapshot = FocusNavigationSnapshot::from_scene(&cached.computed);
         let next_scope = snapshot.active_auto_focus_scope.clone();
         if self.active_auto_focus_scope == next_scope {
             return false;
@@ -277,27 +619,27 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             .focused_widget
             .as_ref()
             .map(|focused| {
-                snapshot.candidates.iter().any(|candidate| {
-                    candidate.widget_id == focused.widget_id
-                        && scope_path_within(&candidate.scope_path, &scope)
-                })
+                snapshot
+                    .candidate_for_widget(focused.widget_id)
+                    .is_some_and(|candidate| scope_path_within(&candidate.scope_path, &scope))
             })
             .unwrap_or(false);
         if current_focus_in_scope {
             return false;
         }
-        let Some(next) = snapshot.first_candidate_in_scope(&scope) else {
+        let Some(candidate) = snapshot.first_candidate_in_scope(&scope) else {
             return false;
         };
-        self.update_focus(
-            Some(FocusedWidget {
-                widget_id: next.widget_id,
-                scope_path: next.scope_path,
-                on_blur: next.on_blur,
-            }),
-            next.on_focus,
-            true,
-        );
+        let candidate = candidate.clone();
+        let Some((next, on_focus)) = self
+            .cached_scene
+            .as_ref()
+            .and_then(|cached| focus_target_at(&cached.computed, &candidate))
+        else {
+            self.focus_navigation_cache = None;
+            return false;
+        };
+        self.update_focus(Some(next), on_focus, true);
         true
     }
 
@@ -308,43 +650,21 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         let Some(focused_id) = self.focused_widget_id() else {
             return false;
         };
-        let interaction = {
-            let computed = self.computed_scene();
-            computed
-                .hit_regions
-                .iter()
-                .chain(computed.overlay_hit_regions.iter())
-                .find_map(|region| match &region.interaction {
-                    HitInteraction::Widget {
-                        id,
-                        interactions,
-                        default_activation,
-                        ..
-                    } if *id == focused_id
-                        && interactions.on_click.is_some()
-                        && ((enter && default_activation.handles_enter())
-                            || (space && default_activation.handles_space())) =>
-                    {
-                        Some(region.interaction.clone())
-                    }
-                    HitInteraction::Checkbox { id, on_change, .. }
-                    | HitInteraction::Radio { id, on_change, .. }
-                    | HitInteraction::Switch { id, on_change, .. }
-                        if *id == focused_id && space && on_change.is_some() =>
-                    {
-                        Some(region.interaction.clone())
-                    }
-                    HitInteraction::SelectTrigger { id, .. } if *id == focused_id && enter => {
-                        Some(region.interaction.clone())
-                    }
-                    HitInteraction::TabTrigger { id, on_change, .. }
-                        if *id == focused_id && (enter || space) && on_change.is_some() =>
-                    {
-                        Some(region.interaction.clone())
-                    }
-                    _ => None,
-                })
-        };
+        self.ensure_focus_navigation_cache();
+        let location = self
+            .focus_navigation_cache
+            .as_ref()
+            .and_then(|snapshot| snapshot.activation_for(focused_id, enter, space));
+        let interaction = location.and_then(|location| {
+            let computed = &self.cached_scene.as_ref()?.computed;
+            let interaction = &location.region(computed)?.interaction;
+            let (id, handles_enter, handles_space) = interaction.keyboard_activation()?;
+            (id == focused_id && ((enter && handles_enter) || (space && handles_space)))
+                .then(|| interaction.clone())
+        });
+        if location.is_some() && interaction.is_none() {
+            self.focus_navigation_cache = None;
+        }
         interaction
             .is_some_and(|interaction| self.dispatch_accessibility_click_interaction(interaction))
     }
@@ -492,53 +812,61 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
     }
 
     pub(in crate::runtime) fn focusable_widgets_in_tab_order(&mut self) -> Vec<FocusedWidget<VM>> {
-        self.focus_candidates()
-            .into_iter()
-            .map(|candidate| FocusedWidget {
-                widget_id: candidate.widget_id,
-                scope_path: candidate.scope_path,
-                on_blur: candidate.on_blur,
+        self.ensure_focus_navigation_cache();
+        let candidates = self
+            .focus_navigation_cache
+            .as_ref()
+            .map(|snapshot| {
+                snapshot
+                    .tab_order
+                    .iter()
+                    .map(|index| snapshot.candidates[*index].clone())
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        let Some(computed) = self.cached_scene.as_ref().map(|cached| &cached.computed) else {
+            return Vec::new();
+        };
+        candidates
+            .iter()
+            .filter_map(|candidate| {
+                focus_target_at(computed, candidate).map(|(focused, _)| focused)
             })
             .collect()
     }
 
     pub(super) fn advance_focus(&mut self, reverse: bool) -> bool {
-        let focusable = self.focus_candidates();
-        if focusable.is_empty() {
+        self.ensure_focus_navigation_cache();
+        let Some(snapshot) = self.focus_navigation_cache.as_ref() else {
+            return false;
+        };
+        if snapshot.tab_order.is_empty() {
             return false;
         }
-
         let current = self.focused_widget_id();
-        let next_index = match current.and_then(|id| {
-            focusable
-                .iter()
-                .position(|candidate| candidate.widget_id == id)
-        }) {
-            Some(index) if reverse => {
-                if index == 0 {
-                    focusable.len() - 1
-                } else {
-                    index - 1
+        let next_position =
+            match current.and_then(|id| snapshot.tab_position_by_widget.get(&id).copied()) {
+                Some(index) if reverse => {
+                    if index == 0 {
+                        snapshot.tab_order.len() - 1
+                    } else {
+                        index - 1
+                    }
                 }
-            }
-            Some(index) => (index + 1) % focusable.len(),
-            None if reverse => focusable.len() - 1,
-            None => 0,
+                Some(index) => (index + 1) % snapshot.tab_order.len(),
+                None if reverse => snapshot.tab_order.len() - 1,
+                None => 0,
+            };
+        let candidate = snapshot.candidates[snapshot.tab_order[next_position]].clone();
+        let Some((next, on_focus)) = self
+            .cached_scene
+            .as_ref()
+            .and_then(|cached| focus_target_at(&cached.computed, &candidate))
+        else {
+            self.focus_navigation_cache = None;
+            return false;
         };
-
-        let next = focusable
-            .into_iter()
-            .nth(next_index)
-            .expect("focus target index should be in bounds");
-        self.update_focus(
-            Some(FocusedWidget {
-                widget_id: next.widget_id,
-                scope_path: next.scope_path,
-                on_blur: next.on_blur,
-            }),
-            next.on_focus,
-            true,
-        );
+        self.update_focus(Some(next), on_focus, true);
         true
     }
 
@@ -564,13 +892,52 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             .as_ref()
             .map(|focused| focused.widget_id);
         let next_id = next_widget.as_ref().map(|focused| focused.widget_id);
-        let previous_single_line_input = current_id
-            .and_then(|widget_id| {
+        // The focus navigation snapshot carries the text-input bit for every keyboard focus
+        // target.  Use it to keep ordinary focus transitions entirely out of the scene collector;
+        // only an unknown target falls back to the exact region lookup.
+        let previous_text_input = current_id.and_then(|widget_id| {
+            self.cached_focus_target_is_text_input(widget_id)
+                .or_else(|| {
+                    self.cached_scene
+                        .as_ref()
+                        .filter(|_| self.text_input_regions.contains_key(&widget_id))
+                        .map(|_| true)
+                })
+        });
+        let next_text_input = next_id.and_then(|widget_id| {
+            self.cached_focus_target_is_text_input(widget_id)
+                .or_else(|| {
+                    self.cached_scene
+                        .as_ref()
+                        .filter(|_| self.text_input_regions.contains_key(&widget_id))
+                        .map(|_| true)
+                })
+        });
+        let previous_single_line_input = match previous_text_input {
+            Some(true) => current_id.and_then(|widget_id| {
                 self.cached_text_input_region_data(widget_id)
                     .or_else(|| self.text_input_region_data(widget_id))
                     .map(|region| (widget_id, region))
-            })
-            .filter(|(_, region)| !region.multiline);
+                    .filter(|(_, region)| !region.multiline)
+            }),
+            Some(false) => None,
+            None => current_id
+                .and_then(|widget_id| {
+                    self.text_input_region_data(widget_id)
+                        .map(|region| (widget_id, region))
+                })
+                .filter(|(_, region)| !region.multiline),
+        };
+        let text_input_state_known = current_id
+            .map(|_| previous_text_input.is_some())
+            .unwrap_or(true)
+            && next_id.map(|_| next_text_input.is_some()).unwrap_or(true);
+        let text_input_transition = !text_input_state_known
+            || previous_text_input == Some(true)
+            || next_text_input == Some(true);
+        let tooltip_focus_transition = current_id
+            .is_some_and(|widget_id| self.widget_has_tooltip_in_computed(widget_id))
+            || next_id.is_some_and(|widget_id| self.widget_has_tooltip_in_computed(widget_id));
 
         if current_id == next_id {
             self.focused_widget = next_widget;
@@ -607,7 +974,14 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             }
         }
 
-        self.invalidate_text_input_scene();
-        self.sync_ime_state();
+        if text_input_transition {
+            self.invalidate_text_input_scene();
+            self.sync_ime_state();
+        } else if tooltip_focus_transition {
+            // Focus-triggered tooltips need one immediate collect to establish the animation's
+            // start time. Ordinary controls without tooltips keep the O(1) focus-cache path.
+            self.invalidate_computed_scene();
+            let _ = self.computed_scene();
+        }
     }
 }

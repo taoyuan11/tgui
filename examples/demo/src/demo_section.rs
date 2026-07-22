@@ -113,15 +113,10 @@ fn component_doc_with_layout(
         DemoLayout::Stacked => children.extend(demo_cards),
     }
 
-    Card::new()
+    Flex::vertical()
         .width(pct(100.0))
-        .style_full(styles::component_card_style)
-        .body(
-            Flex::vertical()
-                .width(pct(100.0))
-                .gap(dp(14.0))
-                .child(children),
-        )
+        .gap(dp(14.0))
+        .child(children)
         .into()
 }
 

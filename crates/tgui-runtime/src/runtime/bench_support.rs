@@ -1724,9 +1724,22 @@ pub struct RuntimeFocusBenchmarkContext {
     pub backend: String,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct RuntimeFocusNavigationCacheStats {
+    pub builds: u64,
+    pub validations: u64,
+    pub hits: u64,
+}
+
 impl RuntimeFocusBenchmarkContext {
     pub fn new(buttons: usize, viewport: Rect) -> Result<Self, String> {
         Self::new_with_command_effect(buttons, viewport, CommandEffect::Conservative)
+    }
+
+    /// Construct the focus benchmark with the explicit effect used by its pure counter command.
+    /// The command only updates benchmark bookkeeping fields and is not read by the widget tree.
+    pub fn new_no_ui_change(buttons: usize, viewport: Rect) -> Result<Self, String> {
+        Self::new_with_command_effect(buttons, viewport, CommandEffect::NoUiChange)
     }
 
     pub fn new_with_command_effect(
@@ -1795,6 +1808,15 @@ impl RuntimeFocusBenchmarkContext {
 
     pub fn focused_index(&self) -> Option<usize> {
         self.focused_index
+    }
+
+    pub fn focus_navigation_cache_stats(&self) -> RuntimeFocusNavigationCacheStats {
+        let (builds, validations, hits) = self.handler.focus_navigation_cache_stats();
+        RuntimeFocusNavigationCacheStats {
+            builds,
+            validations,
+            hits,
+        }
     }
 
     pub fn activation_dispatches(&self) -> usize {
@@ -2525,6 +2547,7 @@ fn interaction_stats(
                 || action == "reactive_property_scene_patch"
                 || action == "animation_reactive_property_slot_write"
                 || action == "toast_prepared_card_scene_patch"
+                || action == "focus_scene_patch"
                 || action == "row_hover_scene_patch"
                 || action == "button_hover_scene_patch"
                 || action == "button_pressed_scene_patch"

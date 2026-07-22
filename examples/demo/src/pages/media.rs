@@ -55,7 +55,8 @@ Button::new("加载").on_click(Command::new(|app: &mut App| {
 }))"#;
 
 const CODE_VIDEO_PLAYER: &str = r#"Video::new(app.video_player.controller.clone())
-    .width(dp(400.0))
+    .width(pct(100.0))
+    .max_width(dp(400.0))
     .fit(ContentFit::Contain)"#;
 
 pub(crate) fn page(app: &App) -> Element<App> {
@@ -170,7 +171,8 @@ fn audio_component(app: &App) -> Element<App> {
                 Flex::vertical().gap(dp(8.0)).child(el![
                     Audio::new(app.audio_controller.clone()),
                     Input::new(app.input_text.clone())
-                        .width(dp(420.0))
+                        .width(pct(100.0))
+                        .max_width(dp(420.0))
                         .placeholder("输入音频文件路径或 URL"),
                     Button::new("加载").on_click(Command::new(App::load_audio_from_input)),
                     Text::new(app.audio_status.signal()),
@@ -210,7 +212,8 @@ fn video_component(app: &App) -> Element<App> {
                 "输入视频文件路径或 URL 后加载，避免启动 demo 时依赖本机文件。",
                 Flex::vertical().gap(dp(8.0)).child(el![
                     Input::new(app.video_player.source.clone())
-                        .width(dp(420.0))
+                        .width(pct(100.0))
+                        .max_width(dp(420.0))
                         .placeholder("输入视频文件路径或 URL"),
                     Button::new("加载").on_click(Command::new(|app: &mut App| {
                         app.video_player.load_from_input();
@@ -224,7 +227,8 @@ fn video_component(app: &App) -> Element<App> {
                 "浏览器式播放器",
                 "Video 在画面底部覆盖 SVG 图标控制栏，组合播放、seek、缓冲、时间、音量和状态文本。",
                 Video::new(app.video_player.controller.clone())
-                    .width(dp(400.0))
+                    .width(pct(100.0))
+                    .max_width(dp(400.0))
                     .fit(ContentFit::Contain),
                 CODE_VIDEO_PLAYER,
             ),

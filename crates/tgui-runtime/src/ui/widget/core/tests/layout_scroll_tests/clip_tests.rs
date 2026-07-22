@@ -255,6 +255,7 @@ fn rounded_overflow_clips_child_focus_ring_overlay() {
         button_id,
         crate::ui::theme::WidgetState {
             focused: true,
+            focus_visible: true,
             ..Default::default()
         },
     );

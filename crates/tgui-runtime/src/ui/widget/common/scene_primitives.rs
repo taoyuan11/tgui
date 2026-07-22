@@ -256,6 +256,87 @@ pub(crate) enum RenderCommand {
     Mesh(MeshPrimitive),
 }
 
+fn render_primitive_eq(left: &RenderPrimitive, right: &RenderPrimitive) -> bool {
+    left.rect == right.rect
+        && left.color == right.color
+        && left.corner_radius == right.corner_radius
+        && left.stroke_width == right.stroke_width
+        && left.clip_rect == right.clip_rect
+        && left.clip_mask == right.clip_mask
+}
+
+fn texture_primitive_eq(left: &TexturePrimitive, right: &TexturePrimitive) -> bool {
+    left.texture == right.texture
+        && left.media_key == right.media_key
+        && left.media_layout == right.media_layout
+        && left.mask_tint == right.mask_tint
+        && left.frame == right.frame
+        && left.quad == right.quad
+        && left.uv_rect == right.uv_rect
+        && left.corner_radius == right.corner_radius
+        && left.opacity == right.opacity
+        && left.clip_rect == right.clip_rect
+        && left.clip_mask == right.clip_mask
+}
+
+fn mesh_primitive_eq(left: &MeshPrimitive, right: &MeshPrimitive) -> bool {
+    left.vertices.as_ref() == right.vertices.as_ref()
+        && left.triangles.as_ref() == right.triangles.as_ref()
+        && left.clip_rect == right.clip_rect
+        && left.clip_mask == right.clip_mask
+}
+
+fn canvas_composite_eq(left: &CanvasCompositePrimitive, right: &CanvasCompositePrimitive) -> bool {
+    left.bounds == right.bounds
+        && left.opacity == right.opacity
+        && left.blend_mode == right.blend_mode
+        && left.blur_radius == right.blur_radius
+        && left.color_filter == right.color_filter
+        && left.inner_shadow_color == right.inner_shadow_color
+        && left.inner_shadow_offset == right.inner_shadow_offset
+        && left.inner_shadow_blur_radius == right.inner_shadow_blur_radius
+        && left.clip_rect == right.clip_rect
+        && left.clip_mask == right.clip_mask
+        && render_command_slices_eq(&left.content_commands, &right.content_commands)
+        && match (&left.mask_commands, &right.mask_commands) {
+            (None, None) => true,
+            (Some(left), Some(right)) => render_command_slices_eq(left, right),
+            _ => false,
+        }
+}
+
+fn render_command_slices_eq(left: &[RenderCommand], right: &[RenderCommand]) -> bool {
+    left.len() == right.len()
+        && left
+            .iter()
+            .zip(right)
+            .all(|(left, right)| render_command_eq(left, right))
+}
+
+fn render_command_eq(left: &RenderCommand, right: &RenderCommand) -> bool {
+    match (left, right) {
+        (RenderCommand::BackdropBlur(left), RenderCommand::BackdropBlur(right)) => left == right,
+        (RenderCommand::Brush(left), RenderCommand::Brush(right)) => left == right,
+        (RenderCommand::CanvasComposite(left), RenderCommand::CanvasComposite(right)) => {
+            canvas_composite_eq(left, right)
+        }
+        (RenderCommand::Shape(left), RenderCommand::Shape(right)) => {
+            render_primitive_eq(left, right)
+        }
+        (RenderCommand::Texture(left), RenderCommand::Texture(right)) => {
+            texture_primitive_eq(left, right)
+        }
+        #[cfg(feature = "video")]
+        (RenderCommand::VideoTexture(_), RenderCommand::VideoTexture(_)) => false,
+        (RenderCommand::Text(left), RenderCommand::Text(right)) => left == right,
+        (RenderCommand::TextDecoration(left), RenderCommand::TextDecoration(right)) => {
+            left == right
+        }
+        (RenderCommand::Mesh(left), RenderCommand::Mesh(right)) => mesh_primitive_eq(left, right),
+        _ => false,
+    }
+}
+
 #[derive(Clone, Default)]
 pub struct ScenePrimitives {
     pub backdrop_blurs: SmallVec<[BackdropBlurPrimitive; 1]>,
@@ -278,6 +359,9 @@ pub struct ScenePrimitives {
     pub(crate) commands: SmallVec<[RenderCommand; 1]>,
     pub(crate) overlay_commands: SmallVec<[RenderCommand; 1]>,
     pub(crate) overlay_command_sources: SmallVec<[Option<WidgetId>; 1]>,
+    /// Semantic origin for each retained overlay command. Shape geometry alone is not a stable
+    /// identity because other widgets can legally emit stroked overlay shapes.
+    pub(crate) overlay_command_provenance: SmallVec<[OverlayCommandProvenance; 1]>,
     pub(crate) command_gpu_scroll_containers: SmallVec<[Option<WidgetId>; 1]>,
     pub(crate) overlay_command_gpu_scroll_containers: SmallVec<[Option<WidgetId>; 1]>,
     pub(crate) command_transform_chains: SmallVec<[TransformChain; 1]>,
@@ -290,6 +374,13 @@ pub struct ScenePrimitives {
     pub(crate) prepare_cache_serial: u64,
     active_gpu_scroll_container: Option<WidgetId>,
     active_transform_chain: TransformChain,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum OverlayCommandProvenance {
+    Generic,
+    FocusRing,
+    Portal,
 }
 
 /// Append-only position inside every retained scene stream.
@@ -317,6 +408,7 @@ pub(crate) struct ScenePrimitiveCursor {
     commands: usize,
     overlay_commands: usize,
     overlay_command_sources: usize,
+    overlay_command_provenance: usize,
     command_gpu_scroll_containers: usize,
     overlay_command_gpu_scroll_containers: usize,
     command_transform_chains: usize,
@@ -367,6 +459,7 @@ impl ScenePrimitives {
         self.overlay_text_decorations.clear();
         self.overlay_commands.clear();
         self.overlay_command_sources.clear();
+        self.overlay_command_provenance.clear();
         self.overlay_command_gpu_scroll_containers.clear();
         self.overlay_command_transform_chains.clear();
     }
@@ -396,6 +489,7 @@ impl ScenePrimitives {
         self.commands.clear();
         self.overlay_commands.clear();
         self.overlay_command_sources.clear();
+        self.overlay_command_provenance.clear();
         self.command_gpu_scroll_containers.clear();
         self.overlay_command_gpu_scroll_containers.clear();
         self.command_transform_chains.clear();
@@ -440,6 +534,11 @@ impl ScenePrimitives {
     #[allow(dead_code)]
     pub(crate) fn overlay_command_sources(&self) -> &[Option<WidgetId>] {
         &self.overlay_command_sources
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn overlay_command_provenance(&self) -> &[OverlayCommandProvenance] {
+        &self.overlay_command_provenance
     }
 
     pub(crate) fn command_transform_chains(&self) -> &[TransformChain] {
@@ -501,8 +600,17 @@ impl ScenePrimitives {
     }
 
     fn push_overlay_command(&mut self, command: RenderCommand) {
+        self.push_overlay_command_with_provenance(command, OverlayCommandProvenance::Generic);
+    }
+
+    fn push_overlay_command_with_provenance(
+        &mut self,
+        command: RenderCommand,
+        provenance: OverlayCommandProvenance,
+    ) {
         self.overlay_commands.push(command);
         self.overlay_command_sources.push(None);
+        self.overlay_command_provenance.push(provenance);
         self.overlay_command_gpu_scroll_containers
             .push(self.active_gpu_scroll_container);
         self.overlay_command_transform_chains
@@ -529,6 +637,7 @@ impl ScenePrimitives {
             commands: self.commands.len(),
             overlay_commands: self.overlay_commands.len(),
             overlay_command_sources: self.overlay_command_sources.len(),
+            overlay_command_provenance: self.overlay_command_provenance.len(),
             command_gpu_scroll_containers: self.command_gpu_scroll_containers.len(),
             overlay_command_gpu_scroll_containers: self.overlay_command_gpu_scroll_containers.len(),
             command_transform_chains: self.command_transform_chains.len(),
@@ -630,6 +739,12 @@ impl ScenePrimitives {
             self.overlay_command_sources
                 .iter()
                 .skip(base.overlay_command_sources)
+                .copied(),
+        );
+        delta.overlay_command_provenance.extend(
+            self.overlay_command_provenance
+                .iter()
+                .skip(base.overlay_command_provenance)
                 .copied(),
         );
         {
@@ -755,6 +870,12 @@ impl ScenePrimitives {
             self.overlay_command_sources
                 .iter()
                 .take(cursor.overlay_command_sources)
+                .copied(),
+        );
+        prefix.overlay_command_provenance.extend(
+            self.overlay_command_provenance
+                .iter()
+                .take(cursor.overlay_command_provenance)
                 .copied(),
         );
         prefix.command_gpu_scroll_containers.extend(
@@ -907,6 +1028,181 @@ impl ScenePrimitives {
         self.push_overlay_command(RenderCommand::Shape(primitive));
     }
 
+    pub(crate) fn push_focus_ring_shape(&mut self, primitive: RenderPrimitive) {
+        self.overlay_shapes.push(primitive);
+        self.push_overlay_command_with_provenance(
+            RenderCommand::Shape(primitive),
+            OverlayCommandProvenance::FocusRing,
+        );
+    }
+
+    /// Return the sole overlay shape when this stream is exactly the shape-only form emitted by
+    /// a focus ring.  Runtime overlays, scrollbar thumbs, switch indicators, and canvas layers
+    /// deliberately fail this gate so callers can fall back to the general retained patch.
+    pub(crate) fn focus_ring_overlay_shape(&self) -> Result<Option<&RenderPrimitive>, ()> {
+        if self.overlay_shapes.len() > 1
+            || !self.overlay_textures.is_empty()
+            || !self.overlay_meshes.is_empty()
+            || !self.overlay_texts.is_empty()
+            || !self.overlay_text_decorations.is_empty()
+            || self.overlay_commands.len() != self.overlay_shapes.len()
+            || self.overlay_command_sources.len() != self.overlay_commands.len()
+            || self.overlay_command_provenance.len() != self.overlay_commands.len()
+            || self.overlay_command_gpu_scroll_containers.len() != self.overlay_commands.len()
+            || self.overlay_command_transform_chains.len() != self.overlay_commands.len()
+        {
+            return Err(());
+        }
+        if self.overlay_shapes.is_empty() {
+            return Ok(None);
+        }
+        let primitive = &self.overlay_shapes[0];
+        if !primitive.stroke_width.is_finite()
+            || primitive.stroke_width <= 0.0
+            || !matches!(self.overlay_commands.first(), Some(RenderCommand::Shape(_)))
+            || self.overlay_command_sources[0].is_some()
+            || self.overlay_command_provenance[0] != OverlayCommandProvenance::FocusRing
+            || self.overlay_command_gpu_scroll_containers[0].is_some()
+            || !self.overlay_command_transform_chains[0].is_empty()
+        {
+            return Err(());
+        }
+        let Some(RenderCommand::Shape(command_primitive)) = self.overlay_commands.first() else {
+            return Err(());
+        };
+        render_primitive_eq(primitive, command_primitive)
+            .then_some(Some(primitive))
+            .ok_or(())
+    }
+
+    /// Replace the shape-only focus-ring stream while retaining every main-scene allocation and
+    /// command index.  The stream is bounded to zero or one command by
+    /// [`Self::focus_ring_overlay_shape`], so rebuilding it is constant-time and cannot shift
+    /// unrelated overlay metadata.
+    pub(crate) fn replace_focus_ring_overlay_from(&mut self, source: &Self) -> bool {
+        let Ok(source_shape) = source.focus_ring_overlay_shape() else {
+            return false;
+        };
+        if self.focus_ring_overlay_shape().is_err() {
+            return false;
+        }
+        self.replace_validated_focus_ring_overlay_shape(source_shape.copied());
+        true
+    }
+
+    /// Commit a focus-ring replacement after qualification has proved that this scene has no
+    /// other overlay semantics. This operation cannot decline, which keeps the cache patch commit
+    /// phase transactional: all fallible checks happen before any cache-owned state is mutated.
+    pub(crate) fn replace_validated_focus_ring_overlay_shape(
+        &mut self,
+        source_shape: Option<RenderPrimitive>,
+    ) {
+        let current_shape = self
+            .focus_ring_overlay_shape()
+            .expect("focus-ring overlay replacement must be qualified first")
+            .copied();
+        let same_shape = match (current_shape, source_shape) {
+            (None, None) => true,
+            (Some(current), Some(source)) => render_primitive_eq(&current, &source),
+            _ => false,
+        };
+        if same_shape {
+            return;
+        }
+
+        let old_len = self.overlay_commands.len();
+        self.overlay_shapes.clear();
+        self.overlay_commands.clear();
+        self.overlay_command_sources.clear();
+        self.overlay_command_provenance.clear();
+        self.overlay_command_gpu_scroll_containers.clear();
+        self.overlay_command_transform_chains.clear();
+        if let Some(shape) = source_shape {
+            self.overlay_shapes.push(shape);
+            self.overlay_commands.push(RenderCommand::Shape(shape));
+            self.overlay_command_sources.push(None);
+            self.overlay_command_provenance
+                .push(OverlayCommandProvenance::FocusRing);
+            self.overlay_command_gpu_scroll_containers.push(None);
+            self.overlay_command_transform_chains
+                .push(TransformChain::new());
+        }
+        self.cache_liveness_dirty = true;
+        let new_len = self.overlay_commands.len();
+        let dirty_end = old_len.max(new_len);
+        if dirty_end != 0 {
+            self.dirty_draw_ranges.push(DirtyDrawRange {
+                stream: SceneDrawStream::Overlay,
+                range: 0..dirty_end,
+            });
+        }
+    }
+
+    pub(crate) fn focus_ring_overlay_equal(&self, other: &Self) -> bool {
+        match (
+            self.focus_ring_overlay_shape(),
+            other.focus_ring_overlay_shape(),
+        ) {
+            (Ok(None), Ok(None)) => true,
+            (Ok(Some(left)), Ok(Some(right))) => render_primitive_eq(left, right),
+            _ => false,
+        }
+    }
+
+    /// Compare all non-overlay draw streams.  Focus-ring patches are allowed to update only the
+    /// overlay stream; a mismatch here means focus state also changed a surface/text/media
+    /// primitive and must use the normal subtree recomposition path.
+    pub(crate) fn main_streams_equal(&self, other: &Self) -> bool {
+        self.backdrop_blurs == other.backdrop_blurs
+            && self.brushes == other.brushes
+            && self.canvas_composites.len() == other.canvas_composites.len()
+            && self
+                .canvas_composites
+                .iter()
+                .zip(&other.canvas_composites)
+                .all(|(left, right)| canvas_composite_eq(left, right))
+            && self.shapes.len() == other.shapes.len()
+            && self
+                .shapes
+                .iter()
+                .zip(&other.shapes)
+                .all(|(left, right)| render_primitive_eq(left, right))
+            && self.meshes.len() == other.meshes.len()
+            && self
+                .meshes
+                .iter()
+                .zip(&other.meshes)
+                .all(|(left, right)| mesh_primitive_eq(left, right))
+            && self.textures.len() == other.textures.len()
+            && self
+                .textures
+                .iter()
+                .zip(&other.textures)
+                .all(|(left, right)| texture_primitive_eq(left, right))
+            && self.texts == other.texts
+            && self.text_decorations == other.text_decorations
+            && self.commands.len() == other.commands.len()
+            && self
+                .commands
+                .iter()
+                .zip(&other.commands)
+                .all(|(left, right)| render_command_eq(left, right))
+            && self.command_gpu_scroll_containers == other.command_gpu_scroll_containers
+            && self.command_transform_chains == other.command_transform_chains
+            && {
+                #[cfg(feature = "video")]
+                {
+                    // Video controllers intentionally do not expose value equality. A focus-only
+                    // patch therefore declines whenever a video stream is present.
+                    self.video_textures.is_empty() && other.video_textures.is_empty()
+                }
+                #[cfg(not(feature = "video"))]
+                {
+                    true
+                }
+            }
+    }
+
     #[allow(dead_code)]
     pub(crate) fn push_overlay_texture(&mut self, primitive: TexturePrimitive) {
         self.overlay_textures.push(primitive.clone());
@@ -959,6 +1255,8 @@ impl ScenePrimitives {
         }
         self.overlay_commands.push(command);
         self.overlay_command_sources.push(source);
+        self.overlay_command_provenance
+            .push(OverlayCommandProvenance::Portal);
     }
 
     pub(crate) fn matching_shape_slots(
@@ -2010,6 +2308,8 @@ impl ScenePrimitives {
             .extend(other.overlay_commands.iter().cloned());
         self.overlay_command_sources
             .extend(other.overlay_command_sources.iter().copied());
+        self.overlay_command_provenance
+            .extend(other.overlay_command_provenance.iter().copied());
         {
             self.command_gpu_scroll_containers
                 .extend(other.command_gpu_scroll_containers.iter().copied());
@@ -2068,34 +2368,30 @@ impl ScenePrimitives {
         offset: &SceneCounts,
         chunk: &ScenePrimitives,
     ) -> bool {
-        fn overwrite<T: Clone>(dst: &mut [T], start: usize, src: &[T]) -> bool {
+        fn can_overwrite<T>(dst: &[T], start: usize, src: &[T]) -> bool {
             let Some(end) = start.checked_add(src.len()) else {
                 return false;
             };
-            if end > dst.len() {
-                return false;
-            }
-            dst[start..end].clone_from_slice(src);
-            true
+            end <= dst.len()
         }
-        let ok = overwrite(
-            &mut self.backdrop_blurs,
+        let valid = can_overwrite(
+            &self.backdrop_blurs,
             offset.backdrop_blurs,
             &chunk.backdrop_blurs,
-        ) && overwrite(&mut self.brushes, offset.brushes, &chunk.brushes)
-            && overwrite(
-                &mut self.canvas_composites,
+        ) && can_overwrite(&self.brushes, offset.brushes, &chunk.brushes)
+            && can_overwrite(
+                &self.canvas_composites,
                 offset.canvas_composites,
                 &chunk.canvas_composites,
             )
-            && overwrite(&mut self.shapes, offset.shapes, &chunk.shapes)
-            && overwrite(&mut self.meshes, offset.meshes, &chunk.meshes)
-            && overwrite(&mut self.textures, offset.textures, &chunk.textures)
+            && can_overwrite(&self.shapes, offset.shapes, &chunk.shapes)
+            && can_overwrite(&self.meshes, offset.meshes, &chunk.meshes)
+            && can_overwrite(&self.textures, offset.textures, &chunk.textures)
             && {
                 #[cfg(feature = "video")]
                 {
-                    overwrite(
-                        &mut self.video_textures,
+                    can_overwrite(
+                        &self.video_textures,
                         offset.video_textures,
                         &chunk.video_textures,
                     )
@@ -2105,24 +2401,72 @@ impl ScenePrimitives {
                     true
                 }
             }
-            && overwrite(&mut self.texts, offset.texts, &chunk.texts)
-            && overwrite(
-                &mut self.text_decorations,
+            && can_overwrite(&self.texts, offset.texts, &chunk.texts)
+            && can_overwrite(
+                &self.text_decorations,
                 offset.text_decorations,
                 &chunk.text_decorations,
             )
-            && overwrite(&mut self.commands, offset.commands, &chunk.commands)
-            && overwrite(
-                &mut self.command_gpu_scroll_containers,
+            && can_overwrite(&self.commands, offset.commands, &chunk.commands)
+            && can_overwrite(
+                &self.command_gpu_scroll_containers,
                 offset.commands,
                 &chunk.command_gpu_scroll_containers,
             )
-            && overwrite(
-                &mut self.command_transform_chains,
+            && can_overwrite(
+                &self.command_transform_chains,
                 offset.commands,
                 &chunk.command_transform_chains,
             );
-        if ok {
+        let dirty_ranges_valid = chunk.dirty_draw_ranges.iter().all(|range| {
+            let (base, destination_len) = match range.stream {
+                SceneDrawStream::Main => (offset.commands, self.commands.len()),
+                SceneDrawStream::Overlay => (offset.overlay_commands, self.overlay_commands.len()),
+            };
+            range.range.start <= range.range.end
+                && range
+                    .range
+                    .start
+                    .checked_add(base)
+                    .and_then(|start| range.range.end.checked_add(base).map(|end| (start, end)))
+                    .is_some_and(|(_, end)| end <= destination_len)
+        });
+        if !valid || !dirty_ranges_valid {
+            return false;
+        }
+
+        self.backdrop_blurs
+            [offset.backdrop_blurs..offset.backdrop_blurs + chunk.backdrop_blurs.len()]
+            .clone_from_slice(&chunk.backdrop_blurs);
+        self.brushes[offset.brushes..offset.brushes + chunk.brushes.len()]
+            .clone_from_slice(&chunk.brushes);
+        self.canvas_composites
+            [offset.canvas_composites..offset.canvas_composites + chunk.canvas_composites.len()]
+            .clone_from_slice(&chunk.canvas_composites);
+        self.shapes[offset.shapes..offset.shapes + chunk.shapes.len()]
+            .clone_from_slice(&chunk.shapes);
+        self.meshes[offset.meshes..offset.meshes + chunk.meshes.len()]
+            .clone_from_slice(&chunk.meshes);
+        self.textures[offset.textures..offset.textures + chunk.textures.len()]
+            .clone_from_slice(&chunk.textures);
+        #[cfg(feature = "video")]
+        self.video_textures
+            [offset.video_textures..offset.video_textures + chunk.video_textures.len()]
+            .clone_from_slice(&chunk.video_textures);
+        self.texts[offset.texts..offset.texts + chunk.texts.len()].clone_from_slice(&chunk.texts);
+        self.text_decorations
+            [offset.text_decorations..offset.text_decorations + chunk.text_decorations.len()]
+            .clone_from_slice(&chunk.text_decorations);
+        self.commands[offset.commands..offset.commands + chunk.commands.len()]
+            .clone_from_slice(&chunk.commands);
+        self.command_gpu_scroll_containers
+            [offset.commands..offset.commands + chunk.command_gpu_scroll_containers.len()]
+            .clone_from_slice(&chunk.command_gpu_scroll_containers);
+        self.command_transform_chains
+            [offset.commands..offset.commands + chunk.command_transform_chains.len()]
+            .clone_from_slice(&chunk.command_transform_chains);
+
+        {
             // Splice can replace text content, font attributes, texture identities, or nested
             // composites. Qualification proves counts, not cache-key equality.
             self.cache_liveness_dirty = true;
@@ -2142,7 +2486,7 @@ impl ScenePrimitives {
                     range
                 }));
         }
-        ok
+        true
     }
 }
 
@@ -2341,6 +2685,12 @@ mod culling_tests {
         }
     }
 
+    fn stroked_shape() -> RenderPrimitive {
+        let mut shape = shape(Rect::new(1.0, 2.0, 20.0, 12.0), None);
+        shape.stroke_width = 2.0;
+        shape
+    }
+
     fn text(content: &str, color: Color) -> TextPrimitive {
         TextPrimitive {
             content: Arc::from(content),
@@ -2413,6 +2763,26 @@ mod culling_tests {
     }
 
     #[test]
+    fn failed_splice_does_not_partially_overwrite_earlier_streams() {
+        let original = shape(Rect::new(10.0, 10.0, 20.0, 20.0), None);
+        let mut target = ScenePrimitives::default();
+        target.push_shape(original);
+
+        let mut replacement = ScenePrimitives::default();
+        let mut changed = original;
+        changed.color = Color::RED;
+        replacement.push_shape(changed);
+        replacement.push_text(text("late stream", Color::WHITE));
+
+        assert!(!target.splice_in_place(&SceneCounts::default(), &replacement));
+        assert!(render_primitive_eq(&target.shapes[0], &original));
+        match &target.commands[0] {
+            RenderCommand::Shape(command) => assert!(render_primitive_eq(command, &original)),
+            _ => panic!("expected original shape command"),
+        }
+    }
+
+    #[test]
     fn gpu_scroll_active_keeps_clipped_out_shape_and_tags_command() {
         let mut scene = ScenePrimitives::default();
         let scroll_id = WidgetId::from_raw(42);
@@ -2424,6 +2794,87 @@ mod culling_tests {
         assert_eq!(scene.shapes.len(), 1);
         assert_eq!(scene.commands.len(), 1);
         assert_eq!(scene.command_gpu_scroll_containers(), &[Some(scroll_id)]);
+    }
+
+    #[test]
+    fn generic_stroked_overlay_is_not_a_focus_ring() {
+        let mut scene = ScenePrimitives::default();
+        scene.push_overlay_shape(stroked_shape());
+
+        assert_eq!(
+            scene.overlay_command_provenance(),
+            &[OverlayCommandProvenance::Generic]
+        );
+        assert!(scene.focus_ring_overlay_shape().is_err());
+    }
+
+    #[test]
+    fn explicit_focus_ring_overlay_is_eligible() {
+        let mut scene = ScenePrimitives::default();
+        let expected = stroked_shape();
+        scene.push_focus_ring_shape(expected);
+
+        assert_eq!(
+            scene.overlay_command_provenance(),
+            &[OverlayCommandProvenance::FocusRing]
+        );
+        let actual = scene
+            .focus_ring_overlay_shape()
+            .expect("explicit focus-ring stream should be eligible")
+            .expect("focus-ring shape");
+        assert!(render_primitive_eq(actual, &expected));
+    }
+
+    #[test]
+    fn rejected_focus_ring_replacement_leaves_target_unchanged() {
+        let mut target = ScenePrimitives::default();
+        let expected = stroked_shape();
+        target.push_focus_ring_shape(expected);
+
+        let mut generic = ScenePrimitives::default();
+        let mut replacement = stroked_shape();
+        replacement.color = Color::RED;
+        generic.push_overlay_shape(replacement);
+
+        assert!(!target.replace_focus_ring_overlay_from(&generic));
+        assert_eq!(
+            target.overlay_command_provenance(),
+            &[OverlayCommandProvenance::FocusRing]
+        );
+        let actual = target
+            .focus_ring_overlay_shape()
+            .expect("target remains eligible")
+            .expect("target retains its focus ring");
+        assert!(render_primitive_eq(actual, &expected));
+    }
+
+    #[test]
+    fn focus_ring_provenance_survives_cursor_slices_and_extend() {
+        let mut scene = ScenePrimitives::default();
+        scene.push_overlay_shape(stroked_shape());
+        let cursor = scene.cursor();
+        scene.push_focus_ring_shape(stroked_shape());
+
+        let prefix = scene.prefix_at_cursor(&cursor);
+        assert_eq!(
+            prefix.overlay_command_provenance(),
+            &[OverlayCommandProvenance::Generic]
+        );
+
+        let delta = scene.delta_since_cursor(&cursor);
+        assert_eq!(
+            delta.overlay_command_provenance(),
+            &[OverlayCommandProvenance::FocusRing]
+        );
+        assert!(matches!(delta.focus_ring_overlay_shape(), Ok(Some(_))));
+
+        let mut extended = ScenePrimitives::default();
+        extended.extend(&delta);
+        assert_eq!(
+            extended.overlay_command_provenance(),
+            &[OverlayCommandProvenance::FocusRing]
+        );
+        assert!(matches!(extended.focus_ring_overlay_shape(), Ok(Some(_))));
     }
 
     #[test]

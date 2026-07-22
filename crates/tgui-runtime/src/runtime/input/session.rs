@@ -165,7 +165,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         session
     }
 
-    pub(super) fn cached_text_input_region_data(
+    pub(in crate::runtime) fn cached_text_input_region_data(
         &self,
         widget_id: WidgetId,
     ) -> Option<TextInputRegionData<VM>> {

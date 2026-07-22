@@ -13,6 +13,10 @@ mod vertex_pool;
 
 #[cfg(feature = "bench-support")]
 pub(crate) use prepare::TransformTranslatePrepareProbe;
+#[cfg(feature = "bench-support")]
+pub use texture::{
+    renderer_texture_diagnostics, reset_renderer_texture_diagnostics, RendererTextureDiagnostics,
+};
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;

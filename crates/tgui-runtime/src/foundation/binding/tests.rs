@@ -4,7 +4,7 @@ use std::sync::{
 };
 use std::time::{Duration, Instant};
 
-use crate::animation::{AnimationCoordinator, Transition};
+use crate::animation::{AnimatedValue, AnimationCoordinator, Transition};
 
 use super::{
     track_dependency_scope, track_property_scope, with_dependency_collection, DependencyOwner,
@@ -62,6 +62,41 @@ fn invalidation_wake_permit_is_shared_by_clones_and_rolls_back_failed_send() {
         true
     }));
     assert_eq!(attempts.load(Ordering::Relaxed), 2);
+}
+
+#[test]
+fn silent_wakeup_guard_keeps_revision_work_without_queueing_proxy_event() {
+    let invalidation = InvalidationSignal::new();
+    let unrelated = InvalidationSignal::new();
+    let before = invalidation.revision();
+    invalidation.debug_reset_wake_dispatch_attempts();
+    unrelated.debug_reset_wake_dispatch_attempts();
+
+    {
+        let _guard = invalidation.suppress_wakeups_without_dispatch();
+        invalidation.mark_dirty();
+        unrelated.mark_dirty();
+        assert_eq!(invalidation.revision(), before + 1);
+    }
+
+    // The synchronous caller still leaves the normal dirty revision available to the redraw
+    // drain, while the guard must not consume a future proxy wake permit on its behalf.
+    assert!(!invalidation.debug_wake_queued());
+    assert_eq!(invalidation.debug_wake_dispatch_attempts(), 0);
+    assert_eq!(
+        unrelated.debug_wake_dispatch_attempts(),
+        1,
+        "the silent scope must not swallow a different invalidation signal"
+    );
+    let sends = AtomicUsize::new(0);
+    assert!(invalidation.debug_try_send_wake(|| {
+        sends.fetch_add(1, Ordering::Relaxed);
+        true
+    }));
+    assert_eq!(sends.load(Ordering::Relaxed), 1);
+    let (kind, dependencies) = invalidation.dirty_dependencies_since(before);
+    assert!(matches!(kind, DirtyDependencySet::Global));
+    assert!(dependencies.is_empty());
 }
 
 #[test]
@@ -190,6 +225,34 @@ fn state_set_queues_subscribed_reactive_target() {
 
     let targets = ctx.invalidation().drain_reactive_targets();
     assert_eq!(targets, vec![target]);
+}
+
+#[test]
+fn animated_value_reuses_signal_source_without_duplicate_target_edges() {
+    let invalidation = InvalidationSignal::new();
+    let value = AnimatedValue::new(1_i32, invalidation.clone());
+    let first = value.signal();
+    let second = value.signal();
+    let target = ReactiveTarget::Custom(701);
+
+    // Each `signal()` handle must point at the same source. The graph's set-based edge
+    // storage then keeps repeated handles from widening the subscription fan-out.
+    first.subscribe_target(target);
+    second.subscribe_target(target);
+    assert_eq!(
+        invalidation.reactive_target_source_count(target),
+        1,
+        "repeated AnimatedValue::signal calls must share one source edge"
+    );
+
+    assert_eq!(first.get(), 1);
+    assert_eq!(second.get(), 1);
+    value.set(2);
+
+    let targets = invalidation.drain_reactive_targets();
+    assert_eq!(targets, vec![target]);
+    assert_eq!(first.get(), 2);
+    assert_eq!(second.get(), 2);
 }
 
 #[test]

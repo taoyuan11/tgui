@@ -59,7 +59,11 @@ pub(crate) fn with_widget_stack<R>(f: impl FnOnce() -> R) -> R {
 pub(crate) fn with_widget_stack_frame<R>(f: impl FnOnce() -> R) -> R {
     #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
     {
-        const FRAME_RED_ZONE: usize = 1024 * 1024;
+        // `resolve_with_previous_inner` can reserve nearly 1 MiB in debug builds
+        // before its first child call. Keep a full frame of headroom so the
+        // stack switch itself happens before that reservation reaches the guard
+        // page (rather than exactly at the red-zone boundary).
+        const FRAME_RED_ZONE: usize = 2 * 1024 * 1024;
         const FRAME_GROW_SIZE: usize = 4 * 1024 * 1024;
         return stacker::maybe_grow(FRAME_RED_ZONE, FRAME_GROW_SIZE, f);
     }

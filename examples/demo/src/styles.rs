@@ -113,39 +113,16 @@ pub(crate) fn nav_item_style(ctx: &StyleContext<'_>, active: bool) -> ContainerS
     style
 }
 
-pub(crate) fn nav_badge_style(ctx: &StyleContext<'_>, active: bool) -> ContainerStyle {
-    let mut style = ContainerStyle::default_for_theme(ctx.theme);
-    style.surface.background = Some(
-        if active {
-            demo_colors(ctx).primary
-        } else {
-            demo_colors(ctx).surface_low
-        }
-        .into(),
-    );
-    style.surface.border_color = Some(
-        if active {
-            demo_colors(ctx).primary
-        } else {
-            demo_colors(ctx).outline_muted
-        }
-        .into(),
-    );
-    style.surface.border_width = Some(ctx.theme.border.thin.into());
-    style.surface.border_radius = Some(ctx.theme.radius.full.into());
+pub(crate) fn nav_icon_style(ctx: &StyleContext<'_>, active: bool) -> IconStyle {
+    let mut style = IconStyle::default_for_theme(ctx.theme);
+    style.color = if active {
+        demo_colors(ctx).on_primary_container
+    } else {
+        demo_colors(ctx).on_surface_muted
+    }
+    .into();
+    style.size = ctx.theme.spacing.md + ctx.theme.spacing.xxs;
     style
-}
-
-pub(crate) fn nav_badge_text_style(ctx: &StyleContext<'_>, active: bool) -> TextWidgetStyle {
-    text_style(
-        ctx,
-        ctx.theme.typography.label_small.clone(),
-        if active {
-            demo_colors(ctx).on_primary
-        } else {
-            demo_colors(ctx).on_surface_muted
-        },
-    )
 }
 
 pub(crate) fn nav_title_style(ctx: &StyleContext<'_>, active: bool) -> TextWidgetStyle {
@@ -172,20 +149,9 @@ pub(crate) fn nav_description_style(ctx: &StyleContext<'_>, active: bool) -> Tex
     )
 }
 
-pub(crate) fn component_card_style(ctx: &StyleContext<'_>) -> CardStyle {
-    let mut style = CardStyle::default_for_theme(ctx.theme);
-    style.background = demo_colors(ctx).surface.into();
-    style.border = demo_colors(ctx).outline_muted.into();
-    style.border_width = ctx.theme.border.thin;
-    style.radius = ctx.theme.radius.xl;
-    style.padding = Insets::all(ctx.theme.spacing.md);
-    style.gap = ctx.theme.spacing.md;
-    style
-}
-
 pub(crate) fn usage_card_style(ctx: &StyleContext<'_>) -> CardStyle {
     let mut style = CardStyle::default_for_theme(ctx.theme);
-    style.background = demo_colors(ctx).surface_low.into();
+    style.background = demo_colors(ctx).surface.into();
     style.border = demo_colors(ctx).outline_muted.into();
     style.border_width = ctx.theme.border.thin;
     style.radius = ctx.theme.radius.lg;
@@ -197,10 +163,8 @@ pub(crate) fn usage_card_style(ctx: &StyleContext<'_>) -> CardStyle {
 
 pub(crate) fn preview_style(ctx: &StyleContext<'_>) -> ContainerStyle {
     let mut style = ContainerStyle::default_for_theme(ctx.theme);
-    style.surface.background = Some(demo_colors(ctx).surface.into());
-    style.surface.border_color = Some(demo_colors(ctx).outline_muted.into());
-    style.surface.border_width = Some(ctx.theme.border.thin.into());
-    style.surface.border_radius = Some(ctx.theme.radius.lg.into());
+    style.surface.background = Some(demo_colors(ctx).surface_low.into());
+    style.surface.border_radius = Some(ctx.theme.radius.md.into());
     style
 }
 
@@ -241,11 +205,11 @@ mod tests {
         assert_eq!(light_title.color.resolve(), light.colors.on_background);
         assert_eq!(dark_title.color.resolve(), dark.colors.on_background);
 
-        let light_card = component_card_style(&light_context);
-        let dark_card = component_card_style(&dark_context);
+        let light_card = usage_card_style(&light_context);
+        let dark_card = usage_card_style(&dark_context);
         assert_eq!(light_card.background.resolve(), light.colors.surface);
         assert_eq!(dark_card.background.resolve(), dark.colors.surface);
-        assert_eq!(light_card.radius, light.radius.xl);
+        assert_eq!(light_card.radius, light.radius.lg);
         assert_eq!(light_card.shadow, light.elevation.none);
         assert_eq!(dark_card.shadow, dark.elevation.none);
     }
@@ -266,7 +230,8 @@ mod tests {
 
         let light_root = root_style(&light_context);
         let light_sidebar = sidebar_style(&light_context);
-        let light_card = component_card_style(&light_context);
+        let light_card = usage_card_style(&light_context);
+        let light_preview = preview_style(&light_context);
         assert_eq!(
             light_root.surface.background.unwrap().resolve(),
             light_tokens.background
@@ -277,6 +242,12 @@ mod tests {
         );
         assert_eq!(light_card.background.resolve(), light_tokens.surface);
         assert_eq!(
+            light_preview.surface.background.unwrap().resolve(),
+            light_tokens.surface_low
+        );
+        assert!(light_preview.surface.border_color.is_none());
+        assert!(light_preview.surface.border_width.is_none());
+        assert_eq!(
             title_style(&light_context).color.resolve(),
             light_tokens.on_background
         );
@@ -285,7 +256,8 @@ mod tests {
         let dark_context = StyleContext::from_theme(&dark_theme);
         let dark_root = root_style(&dark_context);
         let dark_sidebar = sidebar_style(&dark_context);
-        let dark_card = component_card_style(&dark_context);
+        let dark_card = usage_card_style(&dark_context);
+        let dark_preview = preview_style(&dark_context);
         assert_eq!(
             dark_root.surface.background.unwrap().resolve(),
             dark_tokens.background
@@ -295,6 +267,12 @@ mod tests {
             dark_tokens.surface
         );
         assert_eq!(dark_card.background.resolve(), dark_tokens.surface);
+        assert_eq!(
+            dark_preview.surface.background.unwrap().resolve(),
+            dark_tokens.surface_low
+        );
+        assert!(dark_preview.surface.border_color.is_none());
+        assert!(dark_preview.surface.border_width.is_none());
 
         assert_ne!(light_tokens.background, dark_tokens.background);
         assert_ne!(light_tokens.surface, dark_tokens.surface);
@@ -302,22 +280,25 @@ mod tests {
 
     #[test]
     fn active_navigation_uses_primary_theme_tokens() {
-        let theme = Theme::light();
-        let context = StyleContext::from_theme(&theme);
-        let item = nav_item_style(&context, true);
-        let badge = nav_badge_style(&context, true);
+        for theme in [Theme::light(), Theme::dark()] {
+            let context = StyleContext::from_theme(&theme);
+            let item = nav_item_style(&context, true);
+            let active_icon = nav_icon_style(&context, true);
+            let inactive_icon = nav_icon_style(&context, false);
 
-        assert_eq!(
-            item.surface.background.unwrap().resolve(),
-            theme.colors.primary_container
-        );
-        assert_eq!(
-            badge.surface.background.unwrap().resolve(),
-            theme.colors.primary
-        );
-        assert_eq!(
-            nav_title_style(&context, true).color.resolve(),
-            theme.colors.on_primary_container
-        );
+            assert_eq!(
+                item.surface.background.unwrap().resolve(),
+                theme.colors.primary_container
+            );
+            assert_eq!(
+                active_icon.color.resolve(),
+                theme.colors.on_primary_container
+            );
+            assert_eq!(inactive_icon.color.resolve(), theme.colors.on_surface_muted);
+            assert_eq!(
+                nav_title_style(&context, true).color.resolve(),
+                theme.colors.on_primary_container
+            );
+        }
     }
 }

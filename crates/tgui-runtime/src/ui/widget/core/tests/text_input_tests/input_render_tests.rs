@@ -1,6 +1,52 @@
 use super::*;
 
 #[test]
+fn pointer_focused_input_uses_active_border_without_focus_ring() {
+    let theme = Theme::default();
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let input: Element<()> = Input::new("focused").size(dp(220.0), dp(40.0)).into();
+    let input_id = input.id;
+    let tree = WidgetTree::new(input);
+    let mut states = WidgetStateMap::default();
+    states.set(
+        input_id,
+        crate::ui::theme::WidgetState {
+            hovered: true,
+            focused: true,
+            focus_visible: false,
+            ..Default::default()
+        },
+    );
+
+    let rendered = tree.render_output_with_widget_state(
+        &font_manager,
+        &theme,
+        &media,
+        &mut AnimationEngine::default(),
+        false,
+        None,
+        None,
+        &states,
+        &HashMap::new(),
+        &HashMap::new(),
+        Rect::new(0.0, 0.0, 220.0, 40.0),
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+
+    assert!(rendered.primitives.shapes.iter().any(|shape| {
+        shape.stroke_width == theme.border.thin.get() && shape.color == theme.colors.primary
+    }));
+    assert!(!rendered.primitives.overlay_shapes.iter().any(|shape| {
+        shape.color == theme.focus_ring.color && shape.stroke_width == theme.focus_ring.width.get()
+    }));
+}
+
+#[test]
 fn keyboard_focused_input_renders_theme_focus_ring_without_layout_inset() {
     let theme = Theme::default();
     let font_manager = FontManager::new(&FontCatalog::default());

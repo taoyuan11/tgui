@@ -100,6 +100,7 @@ fn focused_switch_keeps_pressed_colors_and_renders_focus_ring() {
             hovered: true,
             pressed: true,
             focused: true,
+            focus_visible: true,
             ..Default::default()
         },
     );
@@ -132,6 +133,7 @@ fn focused_switch_keeps_pressed_colors_and_renders_focus_ring() {
         hovered: true,
         pressed: true,
         focused: true,
+        focus_visible: true,
         ..Default::default()
     };
 
@@ -183,6 +185,7 @@ fn button_focus_ring_override_changes_overlay_without_affecting_layout() {
         button_id,
         crate::ui::theme::WidgetState {
             focused: true,
+            focus_visible: true,
             ..Default::default()
         },
     );
@@ -232,6 +235,7 @@ fn focus_ring_overlay_is_not_clipped() {
         button_id,
         crate::ui::theme::WidgetState {
             focused: true,
+            focus_visible: true,
             ..Default::default()
         },
     );

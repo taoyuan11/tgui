@@ -165,7 +165,8 @@ fn tabs_component(app: &App) -> Element<App> {
                         )
                         .overflow_mode(TabsOverflowMode::More)
                         .reorderable(true)
-                        .width(dp(430.0))
+                        .width(pct(100.0))
+                        .max_width(dp(430.0))
                         .on_change(ValueCommand::new(|app: &mut App, (key, _label)| {
                             app.tabs_selected.set(key);
                         }))

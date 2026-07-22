@@ -1,3 +1,7 @@
+use std::sync::{
+    atomic::{AtomicUsize, Ordering},
+    Arc,
+};
 use std::time::{Duration, Instant};
 
 use crate::foundation::binding::InvalidationSignal;
@@ -9,7 +13,7 @@ use super::controller::sample_timeline;
 use super::{
     AnimatedValue, AnimationControllerBuilder, AnimationCoordinator, AnimationCurve,
     AnimationEngine, AnimationKey, AnimationSpec, AnimationStatus, FillMode, Keyframes, Playback,
-    PlaybackDirection, Transition, WidgetProperty,
+    PlaybackDirection, Transition, WidgetProperty, WindowProperty,
 };
 
 fn key(property: WidgetProperty) -> AnimationKey {
@@ -221,6 +225,281 @@ fn timeline_sampling_exact_cycle_boundary_stays_on_previous_cycle() {
 }
 
 #[test]
+fn reversed_controllers_use_directional_delay_and_completion_endpoints() {
+    for direction in [
+        PlaybackDirection::Reverse,
+        PlaybackDirection::AlternateReverse,
+    ] {
+        let invalidation = InvalidationSignal::new();
+        let coordinator = AnimationCoordinator::default();
+        let value = AnimatedValue::new(-1.0_f32, invalidation.clone());
+        let handle = AnimationControllerBuilder::new(coordinator.clone(), invalidation)
+            .playback(
+                Playback::default()
+                    .direction(direction)
+                    .delay(Duration::from_millis(10))
+                    .fill_mode(FillMode::Both),
+            )
+            .track(
+                value.clone(),
+                AnimationSpec::from(
+                    Keyframes::timed(Duration::from_millis(100))
+                        .at(Duration::ZERO, 0.0)
+                        .at(Duration::from_millis(100), 1.0),
+                ),
+            )
+            .build();
+        let start = Instant::now();
+
+        handle.play_at(start);
+        coordinator.refresh(start + Duration::from_millis(5), true);
+        assert_eq!(value.get(), 1.0, "{direction:?} backwards fill");
+        coordinator.refresh(start + Duration::from_millis(10), true);
+        assert_eq!(value.get(), 1.0, "{direction:?} active start");
+        coordinator.refresh(start + Duration::from_millis(110), true);
+        assert_eq!(handle.status(), AnimationStatus::Completed);
+        assert_eq!(value.get(), 0.0, "{direction:?} completion");
+    }
+}
+
+#[test]
+fn reversed_declarative_forwards_fill_does_not_restart_after_completion() {
+    for direction in [
+        PlaybackDirection::Reverse,
+        PlaybackDirection::AlternateReverse,
+    ] {
+        let mut engine = AnimationEngine::default();
+        let key = key(WidgetProperty::Opacity);
+        let start = Instant::now();
+        let transition = Transition::linear(Duration::from_millis(100)).direction(direction);
+
+        engine.resolve_f32(key, 0.0, None, start);
+        assert_eq!(
+            engine.resolve_f32(key, 1.0, Some(transition), start),
+            1.0,
+            "{direction:?} active start"
+        );
+
+        let completed = engine.refresh(start + Duration::from_millis(101));
+        assert!(completed.changed);
+        assert!(!engine.has_active_animations());
+
+        assert_eq!(
+            engine.resolve_f32(
+                key,
+                1.0,
+                Some(transition),
+                start + Duration::from_millis(200),
+            ),
+            0.0,
+            "{direction:?} forwards fill"
+        );
+        assert!(!engine.has_active_animations());
+
+        let refresh_again = engine.refresh(start + Duration::from_millis(300));
+        assert!(!refresh_again.changed);
+        assert!(!engine.has_active_animations());
+    }
+}
+
+#[test]
+fn timeline_sampling_applies_two_and_half_speed_once() {
+    let duration = Duration::from_millis(100);
+    let twice = sample_timeline(
+        duration,
+        Playback::default().speed(2.0),
+        Duration::from_millis(25),
+    )
+    .expect("2x sample should exist");
+    let half = sample_timeline(
+        duration,
+        Playback::default().speed(0.5),
+        Duration::from_millis(50),
+    )
+    .expect("0.5x sample should exist");
+
+    assert_eq!(twice.local_time, Duration::from_millis(50));
+    assert_eq!(half.local_time, Duration::from_millis(25));
+}
+
+#[test]
+fn controller_applies_two_and_half_speed_once() {
+    fn controller_at_speed(
+        speed: f32,
+    ) -> (
+        AnimationCoordinator,
+        AnimatedValue<f32>,
+        super::AnimationControllerHandle,
+    ) {
+        let invalidation = InvalidationSignal::new();
+        let coordinator = AnimationCoordinator::default();
+        let value = AnimatedValue::new(0.0f32, invalidation.clone());
+        let handle = AnimationControllerBuilder::new(coordinator.clone(), invalidation)
+            .playback(Playback::default().speed(speed))
+            .track(
+                value.clone(),
+                AnimationSpec::from(
+                    Keyframes::timed(Duration::from_millis(100))
+                        .at(Duration::ZERO, 0.0)
+                        .at(Duration::from_millis(100), 100.0),
+                ),
+            )
+            .build();
+        (coordinator, value, handle)
+    }
+
+    let start = Instant::now();
+    let (twice_coordinator, twice_value, twice) = controller_at_speed(2.0);
+    twice.play_at(start);
+    twice_coordinator.refresh(start + Duration::from_millis(25), true);
+    assert_eq!(twice_value.get(), 50.0);
+
+    let (half_coordinator, half_value, half) = controller_at_speed(0.5);
+    half.play_at(start);
+    half_coordinator.refresh(start + Duration::from_millis(50), true);
+    assert_eq!(half_value.get(), 25.0);
+}
+
+#[test]
+fn zero_speed_controller_does_not_arm_frame_clock_and_resumes_when_enabled() {
+    let invalidation = InvalidationSignal::new();
+    let coordinator = AnimationCoordinator::default();
+    let value = AnimatedValue::new(0.0f32, invalidation.clone());
+    let handle = AnimationControllerBuilder::new(coordinator.clone(), invalidation)
+        .playback(Playback::default().speed(0.0))
+        .track(
+            value.clone(),
+            AnimationSpec::from(
+                Keyframes::timed(Duration::from_millis(100))
+                    .at(Duration::ZERO, 0.0)
+                    .at(Duration::from_millis(100), 1.0),
+            ),
+        )
+        .build();
+    let start = Instant::now();
+
+    handle.play_at(start);
+    let frozen = coordinator.refresh_and_next_frame_deadline(start, true);
+    assert!(!frozen.active);
+    assert_eq!(frozen.next_deadline, None);
+    assert_eq!(frozen.visited_controllers, 0);
+    assert!(!coordinator.has_active_controllers());
+    assert_eq!(value.get(), 0.0);
+
+    handle.set_speed_at(start + Duration::from_millis(500), 1.0);
+    let resumed = coordinator.refresh_and_next_frame_deadline(start, false);
+    assert!(resumed.active);
+    assert_eq!(resumed.visited_controllers, 1);
+    coordinator.refresh(start + Duration::from_millis(550), true);
+    assert_eq!(value.get(), 0.5);
+}
+
+#[test]
+fn running_controller_samples_the_freeze_instant_before_zero_speed() {
+    let invalidation = InvalidationSignal::new();
+    let coordinator = AnimationCoordinator::default();
+    let value = AnimatedValue::new(0.0f32, invalidation.clone());
+    let handle = AnimationControllerBuilder::new(coordinator.clone(), invalidation)
+        .track(
+            value.clone(),
+            AnimationSpec::from(
+                Keyframes::timed(Duration::from_millis(100))
+                    .at(Duration::ZERO, 0.0)
+                    .at(Duration::from_millis(100), 1.0),
+            ),
+        )
+        .build();
+    let start = Instant::now();
+
+    handle.play_at(start);
+    coordinator.refresh(start + Duration::from_millis(25), true);
+    assert_eq!(value.get(), 0.25);
+
+    handle.set_speed_at(start + Duration::from_millis(50), 0.0);
+    assert_eq!(value.get(), 0.5);
+    assert_eq!(handle.progress_at(start + Duration::from_secs(1)), 0.5);
+    let frozen = coordinator.refresh_and_next_frame_deadline(start + Duration::from_secs(1), true);
+    assert!(!frozen.active);
+    assert_eq!(frozen.next_deadline, None);
+
+    handle.set_speed_at(start + Duration::from_secs(1), 1.0);
+    coordinator.refresh(start + Duration::from_millis(1050), true);
+    assert_eq!(value.get(), 1.0);
+    assert_eq!(handle.status(), AnimationStatus::Completed);
+}
+
+#[test]
+fn zero_speed_declarative_transition_settles_without_frame_loop() {
+    let mut engine = AnimationEngine::default();
+    let animation_key = key(WidgetProperty::Opacity);
+    let start = Instant::now();
+    let transition = Transition::linear(Duration::from_millis(100)).speed(0.0);
+
+    engine.resolve_f32(animation_key, 0.0, None, start);
+    assert_eq!(
+        engine.resolve_f32(animation_key, 1.0, Some(transition), start),
+        1.0
+    );
+    assert!(!engine.has_active_animations());
+    let refresh = engine.refresh(start + Duration::from_secs(10));
+    assert!(!refresh.changed);
+    assert!(!engine.has_active_animations());
+}
+
+#[test]
+fn zero_duration_infinite_controller_completes_without_frame_loop() {
+    let invalidation = InvalidationSignal::new();
+    let coordinator = AnimationCoordinator::default();
+    let value = AnimatedValue::new(0.0_f32, invalidation.clone());
+    let handle = AnimationControllerBuilder::new(coordinator.clone(), invalidation)
+        .playback(Playback::default().repeat_forever().speed(0.0))
+        .track(
+            value.clone(),
+            AnimationSpec::from(Keyframes::timed(Duration::ZERO).at(Duration::ZERO, 1.0_f32)),
+        )
+        .build();
+    let start = Instant::now();
+
+    handle.play_at(start);
+    let frame = coordinator.refresh_and_next_frame_deadline(start, true);
+
+    assert!(frame.changed);
+    assert!(!frame.active);
+    assert_eq!(frame.next_deadline, None);
+    assert_eq!(handle.status(), AnimationStatus::Completed);
+    assert_eq!(value.get(), 1.0);
+}
+
+#[test]
+fn running_controller_speed_change_preserves_progress() {
+    let invalidation = InvalidationSignal::new();
+    let coordinator = AnimationCoordinator::default();
+    let value = AnimatedValue::new(0.0f32, invalidation.clone());
+    let handle = AnimationControllerBuilder::new(coordinator.clone(), invalidation)
+        .track(
+            value,
+            AnimationSpec::from(
+                Keyframes::timed(Duration::from_secs(1))
+                    .at(Duration::ZERO, 0.0)
+                    .at(Duration::from_secs(1), 1.0),
+            ),
+        )
+        .build();
+    let start = Instant::now();
+    let changed_at = start + Duration::from_millis(200);
+
+    handle.play_at(start);
+    coordinator.refresh(changed_at, true);
+    assert!((handle.progress_at(changed_at) - 0.2).abs() < f32::EPSILON);
+
+    handle.set_speed_at(changed_at, 2.0);
+    assert!((handle.progress_at(changed_at) - 0.2).abs() < f32::EPSILON);
+    assert!(
+        (handle.progress_at(changed_at + Duration::from_millis(100)) - 0.4).abs() < f32::EPSILON
+    );
+}
+
+#[test]
 fn controller_updates_animated_value_and_completes() {
     let invalidation = InvalidationSignal::new();
     let coordinator = AnimationCoordinator::default();
@@ -246,6 +525,62 @@ fn controller_updates_animated_value_and_completes() {
     assert!(value.get() > 0.0);
     coordinator.refresh_and_next_frame_deadline(Instant::now() + Duration::from_millis(150), true);
     assert_eq!(handle.status(), AnimationStatus::Completed);
+}
+
+#[test]
+fn stopping_controller_does_not_replay_start_callback() {
+    let invalidation = InvalidationSignal::new();
+    let coordinator = AnimationCoordinator::default();
+    let starts = Arc::new(AtomicUsize::new(0));
+    let stops = Arc::new(AtomicUsize::new(0));
+    let starts_callback = starts.clone();
+    let stops_callback = stops.clone();
+    let value = AnimatedValue::new(0.0f32, invalidation.clone());
+    let handle = AnimationControllerBuilder::new(coordinator, invalidation)
+        .track(
+            value,
+            AnimationSpec::from(
+                Keyframes::timed(Duration::from_millis(100))
+                    .at(Duration::ZERO, 0.0)
+                    .at(Duration::from_millis(100), 1.0),
+            ),
+        )
+        .on_start(move || {
+            starts_callback.fetch_add(1, Ordering::Relaxed);
+        })
+        .on_stop(move || {
+            stops_callback.fetch_add(1, Ordering::Relaxed);
+        })
+        .build();
+
+    handle.stop();
+
+    assert_eq!(starts.load(Ordering::Relaxed), 0);
+    assert_eq!(stops.load(Ordering::Relaxed), 1);
+}
+
+#[test]
+fn completed_controller_keeps_terminal_progress() {
+    let invalidation = InvalidationSignal::new();
+    let coordinator = AnimationCoordinator::default();
+    let value = AnimatedValue::new(0.0_f32, invalidation.clone());
+    let handle = AnimationControllerBuilder::new(coordinator.clone(), invalidation)
+        .track(
+            value,
+            AnimationSpec::from(
+                Keyframes::timed(Duration::from_millis(100))
+                    .at(Duration::ZERO, 0.0)
+                    .at(Duration::from_millis(100), 1.0),
+            ),
+        )
+        .build();
+    let start = Instant::now();
+
+    handle.play_at(start);
+    coordinator.refresh(start + Duration::from_millis(101), true);
+
+    assert_eq!(handle.status(), AnimationStatus::Completed);
+    assert_eq!(handle.progress_at(start + Duration::from_millis(200)), 1.0);
 }
 
 #[test]
@@ -325,6 +660,136 @@ fn fill_mode_none_hides_values_outside_range() {
         Duration::ZERO,
     )
     .is_none());
+}
+
+#[test]
+fn fill_mode_none_stays_hidden_during_delay_then_completes_controller() {
+    let invalidation = InvalidationSignal::new();
+    let coordinator = AnimationCoordinator::default();
+    let value = AnimatedValue::new(-1.0f32, invalidation.clone());
+    let handle = AnimationControllerBuilder::new(coordinator.clone(), invalidation)
+        .playback(
+            Playback::default()
+                .delay(Duration::from_millis(50))
+                .fill_mode(FillMode::None),
+        )
+        .track(
+            value.clone(),
+            AnimationSpec::from(
+                Keyframes::timed(Duration::from_millis(100))
+                    .at(Duration::ZERO, 0.0)
+                    .at(Duration::from_millis(100), 1.0),
+            ),
+        )
+        .build();
+    let start = Instant::now();
+
+    handle.play_at(start);
+    let delayed =
+        coordinator.refresh_and_next_frame_deadline(start + Duration::from_millis(25), true);
+    assert!(delayed.active);
+    assert!(delayed.next_deadline.is_some());
+    assert_eq!(handle.status(), AnimationStatus::Running);
+    assert_eq!(value.get(), -1.0, "hidden delay must not write a keyframe");
+
+    let completed =
+        coordinator.refresh_and_next_frame_deadline(start + Duration::from_millis(151), true);
+    assert!(!completed.active);
+    assert_eq!(completed.next_deadline, None);
+    assert_eq!(handle.status(), AnimationStatus::Completed);
+    assert_eq!(
+        value.get(),
+        -1.0,
+        "hidden completion restores the play baseline"
+    );
+    assert_eq!(handle.progress_at(start + Duration::from_millis(151)), 1.0);
+}
+
+#[test]
+fn non_forward_fill_modes_prune_completed_controllers() {
+    for fill_mode in [FillMode::None, FillMode::Backwards] {
+        let invalidation = InvalidationSignal::new();
+        let coordinator = AnimationCoordinator::default();
+        let value = AnimatedValue::new(-1.0f32, invalidation.clone());
+        let handle = AnimationControllerBuilder::new(coordinator.clone(), invalidation)
+            .playback(Playback::default().fill_mode(fill_mode))
+            .track(
+                value.clone(),
+                AnimationSpec::from(
+                    Keyframes::timed(Duration::from_millis(100))
+                        .at(Duration::ZERO, 0.0)
+                        .at(Duration::from_millis(100), 1.0),
+                ),
+            )
+            .build();
+        let start = Instant::now();
+
+        handle.play_at(start);
+        coordinator.refresh(start + Duration::from_millis(50), true);
+        assert_eq!(value.get(), 0.5, "fill mode {fill_mode:?} active sample");
+        let completed =
+            coordinator.refresh_and_next_frame_deadline(start + Duration::from_millis(101), true);
+
+        assert!(!completed.active, "fill mode {fill_mode:?}");
+        assert_eq!(completed.next_deadline, None, "fill mode {fill_mode:?}");
+        assert_eq!(
+            handle.status(),
+            AnimationStatus::Completed,
+            "fill mode {fill_mode:?}"
+        );
+        assert_eq!(
+            value.get(),
+            -1.0,
+            "fill mode {fill_mode:?} restores the play baseline"
+        );
+        assert_eq!(
+            handle.progress_at(start + Duration::from_millis(101)),
+            1.0,
+            "fill mode {fill_mode:?} keeps terminal progress"
+        );
+        assert!(!coordinator.has_active_controllers());
+    }
+}
+
+#[test]
+fn non_forward_fill_modes_prune_completed_declarative_transitions() {
+    for fill_mode in [FillMode::None, FillMode::Backwards] {
+        let mut engine = AnimationEngine::default();
+        let animation_key = key(WidgetProperty::Opacity);
+        let start = Instant::now();
+        let transition = Transition::linear(Duration::from_millis(100))
+            .delay(Duration::from_millis(20))
+            .fill_mode(fill_mode);
+
+        assert_eq!(
+            engine.resolve_f32(animation_key, 0.0, Some(transition), start),
+            0.0
+        );
+        assert_eq!(
+            engine.resolve_f32(animation_key, 1.0, Some(transition), start),
+            0.0
+        );
+        assert!(engine.has_active_animations());
+
+        let delayed = engine.refresh(start + Duration::from_millis(10));
+        assert!(!delayed.changed);
+        assert!(engine.has_active_animations());
+
+        let completed = engine.refresh(start + Duration::from_millis(121));
+        assert!(completed.changed);
+        assert!(!engine.has_active_animations());
+        assert_eq!(
+            engine.resolve_f32(
+                animation_key,
+                1.0,
+                Some(transition),
+                start + Duration::from_millis(121),
+            ),
+            1.0,
+            "a completed hidden-fill transition must remain settled at its target"
+        );
+        assert!(!engine.has_active_animations());
+    }
 }
 
 #[test]
@@ -564,6 +1029,47 @@ fn refresh_marks_only_accessibility_geometry_animations() {
     let refresh = paint_only.refresh(start + Duration::from_millis(501));
     assert!(refresh.changed);
     assert!(!refresh.accessibility_geometry_changed);
+}
+
+#[test]
+fn window_color_animation_refresh_is_scene_only() {
+    let mut engine = AnimationEngine::default();
+    let key = AnimationKey::Window(WindowProperty::ThemeBackground);
+    let start = Instant::now();
+    let transition = Transition::linear(Duration::from_millis(100));
+
+    engine.resolve_color(key, Color::BLACK, None, start);
+    engine.resolve_color(key, Color::WHITE, Some(transition), start);
+    let refresh = engine.refresh(start + Duration::from_millis(50));
+
+    assert!(refresh.changed);
+    assert!(!refresh.layout_changed);
+    assert!(refresh.layout_widget_ids.is_empty());
+    assert!(refresh.scene_widget_ids.is_empty());
+    assert_eq!(
+        refresh.window_properties.as_slice(),
+        &[WindowProperty::ThemeBackground]
+    );
+    assert!(refresh.scene_changed());
+}
+
+#[test]
+fn clear_color_animation_is_renderer_only() {
+    let mut engine = AnimationEngine::default();
+    let key = AnimationKey::Window(WindowProperty::ClearColor);
+    let start = Instant::now();
+    let transition = Transition::linear(Duration::from_millis(100));
+
+    engine.resolve_color(key, Color::BLACK, None, start);
+    engine.resolve_color(key, Color::WHITE, Some(transition), start);
+    let refresh = engine.refresh(start + Duration::from_millis(50));
+
+    assert!(refresh.changed);
+    assert_eq!(
+        refresh.window_properties.as_slice(),
+        &[WindowProperty::ClearColor]
+    );
+    assert!(!refresh.scene_changed());
 }
 
 #[test]

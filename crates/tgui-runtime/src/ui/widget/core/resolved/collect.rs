@@ -1683,7 +1683,7 @@ impl<VM: 'static> ResolvedElement<VM> {
                     // bounded subtree fallback instead of leaving those primitives stale.
                     if visual.widget_state.focus_visible
                         || self.tree_node.is_some()
-                        || (self.list_item.is_some() && visual.widget_state.focused)
+                        || (self.list_item.is_some() && visual.widget_state.focus_visible)
                     {
                         return None;
                     }

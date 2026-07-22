@@ -544,6 +544,7 @@ fn focused_unchecked_checkbox_keeps_default_box_colors() {
         checkbox_id,
         crate::ui::theme::WidgetState {
             focused: true,
+            focus_visible: true,
             ..Default::default()
         },
     );

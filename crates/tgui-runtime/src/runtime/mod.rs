@@ -40,12 +40,13 @@ mod windows;
 #[cfg(feature = "bench-support")]
 pub use self::bench_support::{
     RuntimeButtonHoverBenchmarkContext, RuntimeDataGridBenchmarkContext,
-    RuntimeDataGridHoverTarget, RuntimeFocusBenchmarkContext, RuntimeInteractionBenchmarkVm,
-    RuntimeInteractionFrameStats, RuntimeRowHoverBenchmarkContext, RuntimeRowHoverKind,
-    RuntimeRowSelectionBenchmarkContext, RuntimeRowSelectionKind, RuntimeRowSelectionMode,
-    RuntimeScrollBenchmarkContext, RuntimeScrollBenchmarkVm, RuntimeScrollFrameStats,
-    RuntimeSliderValueBenchmarkContext, RuntimeTextContentBenchmarkContext,
-    RuntimeToastBenchmarkContext, RuntimeTreeCheckedBenchmarkContext,
+    RuntimeDataGridHoverTarget, RuntimeFocusBenchmarkContext, RuntimeFocusNavigationCacheStats,
+    RuntimeInteractionBenchmarkVm, RuntimeInteractionFrameStats, RuntimeRowHoverBenchmarkContext,
+    RuntimeRowHoverKind, RuntimeRowSelectionBenchmarkContext, RuntimeRowSelectionKind,
+    RuntimeRowSelectionMode, RuntimeScrollBenchmarkContext, RuntimeScrollBenchmarkVm,
+    RuntimeScrollFrameStats, RuntimeSliderValueBenchmarkContext,
+    RuntimeTextContentBenchmarkContext, RuntimeToastBenchmarkContext,
+    RuntimeTreeCheckedBenchmarkContext,
 };
 
 #[cfg(test)]
@@ -80,8 +81,8 @@ use self::theme::{resolve_theme, resolve_window_theme};
 use self::windows::MultiWindowHandler;
 use crate::accessibility::AccessibilityNodeRegistry;
 use crate::animation::{
-    default_theme_transition, AdaptiveFrameClock, AnimationCoordinator, AnimationEngine,
-    AnimationKey, AnimationRefresh, Transition, WindowProperty,
+    theme_transition, AdaptiveFrameClock, AnimationCoordinator, AnimationEngine, AnimationKey,
+    AnimationRefresh, Transition, WindowProperty,
 };
 use crate::application::{
     build_root_element, ApplicationConfig, RootViewFactory, ThemeSelection, WindowClosePolicy,
@@ -399,6 +400,13 @@ pub struct BoundRuntimeHandler<VM> {
     focused_widget: Option<FocusedWidget<VM>>,
     focus_visible: bool,
     active_auto_focus_scope: Option<Vec<WidgetId>>,
+    focus_navigation_cache: Option<input::FocusNavigationSnapshot>,
+    #[cfg(any(test, feature = "bench-support"))]
+    focus_navigation_cache_builds: u64,
+    #[cfg(any(test, feature = "bench-support"))]
+    focus_navigation_cache_validations: u64,
+    #[cfg(any(test, feature = "bench-support"))]
+    focus_navigation_cache_hits: u64,
     selected_text: Option<WidgetId>,
     text_edit_states: HashMap<WidgetId, TextEditState>,
     text_input_buffers: HashMap<WidgetId, TextInputBufferState>,
@@ -564,6 +572,13 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             focused_widget: None,
             focus_visible: false,
             active_auto_focus_scope: None,
+            focus_navigation_cache: None,
+            #[cfg(any(test, feature = "bench-support"))]
+            focus_navigation_cache_builds: 0,
+            #[cfg(any(test, feature = "bench-support"))]
+            focus_navigation_cache_validations: 0,
+            #[cfg(any(test, feature = "bench-support"))]
+            focus_navigation_cache_hits: 0,
             selected_text: None,
             text_edit_states: HashMap::new(),
             text_input_buffers: HashMap::new(),

@@ -108,7 +108,7 @@ fn scene_layout_cache_survives_visual_only_animation_epoch_change() {
 }
 
 #[test]
-fn theme_animation_invalidates_cached_layout() {
+fn layout_animation_epoch_invalidates_cached_layout() {
     let invalidation = InvalidationSignal::new();
     let mut handler = test_handler(None, invalidation);
     let viewport = handler.viewport_rect();

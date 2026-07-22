@@ -347,9 +347,23 @@ impl<T> Signal<T> {
     where
         T: Clone + Send + Sync + 'static,
     {
+        Self::from_existing_source(
+            move || state.get_untracked(),
+            invalidation,
+            dependency,
+            signal_id,
+        )
+    }
+
+    pub(crate) fn from_existing_source(
+        reader: impl Fn() -> T + Send + Sync + 'static,
+        invalidation: InvalidationSignal,
+        dependency: DependencyId,
+        signal_id: SignalId,
+    ) -> Self {
         let graph = invalidation.reactive_graph();
         Self::new_with_parts(
-            Arc::new(move || state.get_untracked()),
+            Arc::new(reader),
             invalidation,
             graph,
             signal_id,

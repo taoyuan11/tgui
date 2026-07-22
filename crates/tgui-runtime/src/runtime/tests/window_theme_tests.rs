@@ -1,4 +1,5 @@
 use super::*;
+use crate::animation::{theme_transition, AnimationKey, WindowProperty};
 use raw_window_handle::{
     DisplayHandle, HandleError, HasDisplayHandle, HasWindowHandle, WindowHandle,
 };
@@ -159,6 +160,119 @@ fn bound_theme_modes_resolve_through_configured_theme_set() {
     handler.window_bindings.theme_mode = Some(Signal::new(|| ThemeMode::Dark, invalidation));
     handler.sync_theme_binding();
     assert_eq!(handler.theme, dark);
+}
+
+#[test]
+fn theme_color_motion_uses_live_token_and_respects_reduced_motion() {
+    let invalidation = InvalidationSignal::new();
+    let mut handler = test_handler(None, invalidation);
+    handler.theme.motion.normal_ms = 40;
+    let target = handler.theme.colors.background;
+    let previous = if target == Color::BLACK {
+        Color::WHITE
+    } else {
+        Color::BLACK
+    };
+    let start = Instant::now();
+    let key = AnimationKey::Window(WindowProperty::ThemeBackground);
+
+    handler
+        .animation_engine
+        .resolve_color(key, previous, None, start);
+    assert_eq!(handler.animated_theme(start).colors.background, previous);
+    assert!(handler.animation_engine.has_active_animations());
+    assert_eq!(
+        handler
+            .animated_theme(start + Duration::from_millis(41))
+            .colors
+            .background,
+        target
+    );
+    assert!(!handler.animation_engine.has_active_animations());
+
+    handler
+        .animation_engine
+        .resolve_color(key, previous, None, start + Duration::from_millis(50));
+    handler.reduced_motion = true;
+    assert_eq!(
+        handler
+            .animated_theme(start + Duration::from_millis(51))
+            .colors
+            .background,
+        target
+    );
+    assert!(!handler.animation_engine.has_active_animations());
+    assert_eq!(
+        handler.next_deadline(start + Duration::from_millis(51)),
+        None
+    );
+}
+
+#[test]
+fn theme_color_animation_tick_preserves_cached_layout() {
+    let invalidation = InvalidationSignal::new();
+    let tree = WidgetTree::new(Text::new("theme animation"));
+    let mut handler = test_handler(Some(tree), invalidation);
+    let _ = handler.computed_scene();
+    let start = Instant::now();
+    let target = handler.theme.colors.background;
+    let previous = if target == Color::BLACK {
+        Color::WHITE
+    } else {
+        Color::BLACK
+    };
+    let key = AnimationKey::Window(WindowProperty::ThemeBackground);
+    handler
+        .animation_engine
+        .resolve_color(key, previous, None, start);
+    handler
+        .animation_engine
+        .resolve_color(key, target, Some(theme_transition(80)), start);
+    let layout_epoch = handler.layout_animation_epoch;
+    let deadline = handler
+        .next_deadline(start)
+        .expect("active theme animation should arm the frame clock");
+    let middle = (start + Duration::from_millis(40)).max(deadline + Duration::from_millis(1));
+
+    assert!(handler.drive_animations(&TestEventLoop, middle));
+    assert_eq!(handler.layout_animation_epoch, layout_epoch);
+    let cached = handler.cached_scene.as_ref().expect("cached scene");
+    assert!(cached.layout_valid);
+    assert!(!cached.computed_valid);
+    assert!(handler.scene_layout_cache_matches(
+        cached,
+        handler.viewport_rect(),
+        handler.unit_context(),
+    ));
+}
+
+#[test]
+fn clear_color_animation_tick_preserves_cached_scene() {
+    let invalidation = InvalidationSignal::new();
+    let tree = WidgetTree::new(Text::new("clear color animation"));
+    let mut handler = test_handler(Some(tree), invalidation);
+    let _ = handler.computed_scene();
+    let start = Instant::now();
+    let key = AnimationKey::Window(WindowProperty::ClearColor);
+    handler
+        .animation_engine
+        .resolve_color(key, Color::BLACK, None, start);
+    handler
+        .animation_engine
+        .resolve_color(key, Color::WHITE, Some(theme_transition(80)), start);
+    let animation_epoch = handler.animation_epoch;
+    let layout_animation_epoch = handler.layout_animation_epoch;
+    let deadline = handler
+        .next_deadline(start)
+        .expect("active clear-color animation should arm the frame clock");
+    let middle = (start + Duration::from_millis(40)).max(deadline + Duration::from_millis(1));
+
+    assert!(handler.drive_animations(&TestEventLoop, middle));
+    assert_eq!(handler.animation_epoch, animation_epoch);
+    assert_eq!(handler.layout_animation_epoch, layout_animation_epoch);
+    let cached = handler.cached_scene.as_ref().expect("cached scene");
+    assert!(cached.layout_valid);
+    assert!(cached.computed_valid);
 }
 
 #[test]

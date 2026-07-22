@@ -1037,6 +1037,107 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         patched
     }
 
+    /// Recollect only the old and new focus subtrees when keyboard focus changes between ordinary
+    /// controls.  Focus metadata/layout is immutable for this path; the retained collector still
+    /// performs all normal scene-count and hit-region checks and returns `false` on any uncertain
+    /// prerequisite, so the caller cleanly falls back to a full recollect.
+    fn try_retained_focus_fast_path(
+        &mut self,
+        viewport: Rect,
+        units: UnitContext,
+        caret_visible: bool,
+        active_scrollbar: Option<ScrollbarHandle>,
+        now: Instant,
+    ) -> bool {
+        let current_focus = self.focused_widget_id();
+        let roots = {
+            let Some(cached) = self.cached_scene.as_ref() else {
+                return false;
+            };
+            let focus_changed = cached.focused_widget != current_focus
+                || cached.focus_visible != self.focus_visible;
+            if !focus_changed
+                || !cached.computed_valid
+                || !cached.layout_valid
+                || cached.gpu_scroll_deferred
+                || self.invalidation.revision() != self.last_invalidation_revision
+                || self.invalidation.root_rebuild_revision() != self.last_root_rebuild_revision
+                || self.animation_engine.has_active_animations()
+                || self.next_tooltip_wakeup_deadline.is_some()
+                || self.next_toast_wakeup_deadline.is_some()
+                || self.active_gesture.is_some()
+                || self.active_pinch.is_some()
+                || self.active_scrollbar_drag.is_some()
+                || self.active_touch_scroll.is_some()
+                || self.active_slider_drag.is_some()
+                || self.active_canvas_drag.is_some()
+                || self.active_tab_reorder.is_some()
+                || self.active_tree_drag.is_some()
+                || self.active_data_grid_column_resize.is_some()
+                || self.active_splitter_resize.is_some()
+                || self.active_data_grid_column_reorder.is_some()
+                || self.active_text_selection.is_some()
+                || self.pending_click.is_some()
+                || self.deferred_mouse_click.is_some()
+                || !self.lifecycle_event_states.is_empty()
+                || !self.media_event_states.is_empty()
+                || !self.external_portal_requests.is_empty()
+                || !self.scene_cache_fields_match_ignoring_focus(
+                    cached,
+                    viewport,
+                    units,
+                    caret_visible,
+                    active_scrollbar,
+                )
+            {
+                return false;
+            }
+
+            // A missing snapshot cannot prove that a target is not a text input.  Keep the fast
+            // path strictly conservative in that case.
+            let is_ordinary = |widget_id: Option<WidgetId>| match widget_id {
+                None => true,
+                Some(widget_id) => self.cached_focus_target_is_text_input(widget_id) == Some(false),
+            };
+            if !is_ordinary(cached.focused_widget) || !is_ordinary(current_focus) {
+                return false;
+            }
+
+            let Some(layout) = cached.layout.as_ref() else {
+                return false;
+            };
+            if layout.contains_virtual() {
+                return false;
+            }
+            let mut roots = SmallVec::<[WidgetId; 2]>::new();
+            for widget_id in [cached.focused_widget, current_focus].into_iter().flatten() {
+                if roots.contains(&widget_id)
+                    || layout.path_for(widget_id).is_none()
+                    || !cached.visual_contexts.contains_key(&widget_id)
+                {
+                    return false;
+                }
+                roots.push(widget_id);
+            }
+            roots
+        };
+        if roots.is_empty() {
+            return false;
+        }
+
+        if !self.patch_cached_focus_ring_scene_for_roots(&roots, now, true)
+            && !self.patch_cached_scene_for_roots(&roots, now, true)
+        {
+            return false;
+        }
+
+        // The focus metadata itself was checked through the snapshot and is unchanged by this
+        // paint-only patch.  Retargeting avoids a full hit-stream validation on the next Tab.
+        self.retarget_focus_navigation_cache_to_current_scene();
+        super::action_stats::record("focus_scene_patch");
+        true
+    }
+
     fn try_retained_row_hover_fast_path(
         &mut self,
         viewport: Rect,
@@ -1365,6 +1466,31 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 started_at.map(|_| "no_cached_scene".to_string()),
             )
         };
+        let can_retarget_focus_navigation = self.cached_scene.as_ref().is_some_and(|cached| {
+            self.can_retarget_focus_navigation_after_focus_paint_recollect(
+                cached,
+                viewport,
+                units,
+                caret_visible,
+                active_scrollbar,
+            )
+        });
+        if !cache_valid
+            && layout_cache_valid
+            && self.try_retained_focus_fast_path(
+                viewport,
+                units,
+                caret_visible,
+                active_scrollbar,
+                now,
+            )
+        {
+            return &self
+                .cached_scene
+                .as_ref()
+                .expect("focus patch should preserve cached scene")
+                .computed;
+        }
         if self.try_toast_prepared_card_fast_path(
             viewport,
             units,
@@ -1955,6 +2081,10 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             self.scroll_dirty_widgets.clear();
             let _ = self.consume_scroll_view_requests_from_cached_scene();
 
+            if can_retarget_focus_navigation {
+                self.retarget_focus_navigation_cache_to_current_scene();
+            }
+
             if self.reconcile_auto_focus_after_scene_update() {
                 self.invalidate_computed_scene();
                 return self.computed_scene();
@@ -2031,13 +2161,11 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             state.pressed = true;
             states.set(id, state);
         }
-        if self.focus_visible {
-            if let Some(focused) = self.focused_widget.as_ref() {
-                let mut state = states.get(focused.widget_id);
-                state.focused = true;
-                state.focus_visible = true;
-                states.set(focused.widget_id, state);
-            }
+        if let Some(focused) = self.focused_widget.as_ref() {
+            let mut state = states.get(focused.widget_id);
+            state.focused = true;
+            state.focus_visible = self.focus_visible;
+            states.set(focused.widget_id, state);
         }
         if let Some(handle) = self.hovered_scrollbar {
             let mut state = states.get(handle.id);

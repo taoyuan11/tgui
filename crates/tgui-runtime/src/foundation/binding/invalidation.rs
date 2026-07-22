@@ -14,6 +14,7 @@ use super::reactive::{ReactiveDrain, ReactiveGraph, ReactiveTarget, SignalId};
 struct InvalidationWakeState {
     depth: usize,
     pending_wake: bool,
+    silent_wake_keys: Vec<usize>,
 }
 
 thread_local! {
@@ -41,6 +42,8 @@ struct InvalidationRevisions {
 struct InvalidationWakeFlags {
     redraw_requested: std::sync::atomic::AtomicBool,
     wake_queued: std::sync::atomic::AtomicBool,
+    #[cfg(test)]
+    wake_dispatch_attempts: std::sync::atomic::AtomicUsize,
 }
 
 impl InvalidationSignal {
@@ -108,6 +111,10 @@ impl InvalidationSignal {
     }
 
     fn wake_proxy(&self) {
+        #[cfg(test)]
+        self.wake_flags
+            .wake_dispatch_attempts
+            .fetch_add(1, Ordering::Relaxed);
         if let Some(proxy) = self.proxy.lock().as_ref().cloned() {
             self.try_send_wake(|| proxy.wake_up());
         }
@@ -150,9 +157,27 @@ impl InvalidationSignal {
         self.wake_flags.wake_queued.load(Ordering::Acquire)
     }
 
+    #[cfg(test)]
+    pub(crate) fn debug_wake_dispatch_attempts(&self) -> usize {
+        self.wake_flags
+            .wake_dispatch_attempts
+            .load(Ordering::Relaxed)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn debug_reset_wake_dispatch_attempts(&self) {
+        self.wake_flags
+            .wake_dispatch_attempts
+            .store(0, Ordering::Relaxed);
+    }
+
     fn should_wake_now(&self) -> bool {
+        let wake_key = Arc::as_ptr(&self.wake_flags) as usize;
         INVALIDATION_WAKE_STATE.with(|state| {
             let mut state = state.borrow_mut();
+            if state.silent_wake_keys.contains(&wake_key) {
+                return false;
+            }
             if state.depth == 0 {
                 true
             } else {
@@ -189,6 +214,22 @@ impl InvalidationSignal {
         });
         InvalidationWakeGuard {
             signal: self.clone(),
+            silent_wake_key: None,
+        }
+    }
+
+    /// Suppress event-loop proxy wakeups for a synchronous batch that is already running on the
+    /// event-loop thread. Revision counters, dependency logs and the reactive graph are still
+    /// updated normally; the caller is responsible for requesting a redraw or otherwise draining
+    /// the resulting work before returning to the event loop.
+    pub(crate) fn suppress_wakeups_without_dispatch(&self) -> InvalidationWakeGuard {
+        let wake_key = Arc::as_ptr(&self.wake_flags) as usize;
+        INVALIDATION_WAKE_STATE.with(|state| {
+            state.borrow_mut().silent_wake_keys.push(wake_key);
+        });
+        InvalidationWakeGuard {
+            signal: self.clone(),
+            silent_wake_key: Some(wake_key),
         }
     }
 
@@ -275,10 +316,24 @@ impl InvalidationSignal {
 
 pub(crate) struct InvalidationWakeGuard {
     signal: InvalidationSignal,
+    silent_wake_key: Option<usize>,
 }
 
 impl Drop for InvalidationWakeGuard {
     fn drop(&mut self) {
+        if let Some(wake_key) = self.silent_wake_key {
+            INVALIDATION_WAKE_STATE.with(|state| {
+                let mut state = state.borrow_mut();
+                let index = state
+                    .silent_wake_keys
+                    .iter()
+                    .rposition(|candidate| *candidate == wake_key)
+                    .expect("silent invalidation wake scope must remain registered");
+                state.silent_wake_keys.swap_remove(index);
+            });
+            return;
+        }
+
         let should_wake = INVALIDATION_WAKE_STATE.with(|state| {
             let mut state = state.borrow_mut();
             state.depth = state.depth.saturating_sub(1);

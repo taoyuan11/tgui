@@ -24,11 +24,11 @@ fn focused_text_input_schedules_caret_blink_deadline() {
     });
     handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Left);
 
-    let deadline = handler.next_deadline(Instant::now());
+    let deadline = handler.next_caret_blink_deadline(Instant::now());
     assert!(deadline.is_some());
 
     handler.update_focus(None, None, false);
-    let deadline = handler.next_deadline(Instant::now());
+    let deadline = handler.next_caret_blink_deadline(Instant::now());
     assert!(deadline.is_none());
 }
 

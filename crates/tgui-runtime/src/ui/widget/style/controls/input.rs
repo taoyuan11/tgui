@@ -26,6 +26,13 @@ impl InputStyle {
     pub(crate) fn default_for_density(theme: &Theme, density: Density) -> Self {
         let palette = palette_from_theme(theme);
         let metrics = control_density_metrics(theme, density);
+        let mut border = stateful_colors(
+            palette.outline_muted,
+            palette.outline,
+            palette.primary,
+            palette.disabled_surface,
+        );
+        border.focused = Some(Value::Static(palette.primary));
         Self {
             surface: WidgetSurfaceStyle::default(),
             background: stateful_colors(
@@ -46,12 +53,7 @@ impl InputStyle {
                 palette.on_surface_muted,
                 palette.disabled_content,
             ),
-            border: stateful_colors(
-                palette.outline_muted,
-                palette.outline,
-                palette.primary,
-                palette.disabled_surface,
-            ),
+            border,
             selection: Some(Value::Static(theme.colors.selection)),
             caret: Some(Value::Static(theme.colors.primary)),
             border_width: Value::Static(theme.border.thin),

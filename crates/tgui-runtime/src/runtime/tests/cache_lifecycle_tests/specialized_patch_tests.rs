@@ -1,8 +1,10 @@
 use super::*;
 #[cfg(feature = "bench-support")]
+use crate::animation::{AnimatedValue, AnimationControllerBuilder, AnimationSpec, Keyframes};
+#[cfg(feature = "bench-support")]
 use crate::animation::{AnimationKey, AnimationRefresh, Transition, WidgetProperty};
 #[cfg(feature = "bench-support")]
-use crate::foundation::binding::PropertySlot;
+use crate::foundation::binding::{DirtyDependencySet, PropertySlot};
 use crate::foundation::view_model::CommandEffect;
 #[cfg(feature = "bench-support")]
 use crate::runtime::state::StrictCapabilityKind;
@@ -6419,6 +6421,262 @@ fn animation_refresh_routes_width_through_batched_layout_slot_and_matches_static
     let mut expected_handler = test_handler(Some(expected_tree), expected_invalidation);
     let expected = shape_fingerprints(expected_handler.computed_scene());
     assert_eq!(actual, expected);
+}
+
+#[test]
+#[cfg(feature = "bench-support")]
+fn timeline_opacity_tick_uses_strict_reactive_slot_without_epoch_or_global_invalidation() {
+    let invalidation = InvalidationSignal::new();
+    let opacity = AnimatedValue::new(0.20_f32, invalidation.clone());
+    let tree = WidgetTree::try_new_strict(
+        Stack::<TestVm>::new()
+            .size(dp(48.0), dp(48.0))
+            .opacity(opacity.signal())
+            .style_full(|ctx| {
+                let mut style = ContainerStyle::default_for_theme(ctx.theme);
+                style.surface.background = Some(Color::WHITE.into());
+                style
+            }),
+    )
+    .expect("strict timeline opacity tree");
+    let mut handler = test_handler(Some(tree), invalidation.clone());
+    let _ = handler.computed_scene();
+
+    let controller =
+        AnimationControllerBuilder::new(handler.animations.clone(), invalidation.clone())
+            .track(
+                opacity.clone(),
+                AnimationSpec::from(
+                    Keyframes::timed(Duration::from_millis(200))
+                        .at(Duration::ZERO, 0.20_f32)
+                        .at(Duration::from_millis(200), 1.0_f32),
+                ),
+            )
+            .build();
+    controller.play();
+
+    // Controller operations remain conservatively unscoped. Consume play's one-time global
+    // invalidation before measuring the frame ticks themselves.
+    let armed_at = Instant::now();
+    handler.request_redraw_if_dirty(armed_at);
+    let _ = handler.computed_scene();
+    let before_alpha = handler
+        .cached_scene
+        .as_ref()
+        .expect("baseline scene")
+        .computed
+        .scene
+        .shapes
+        .iter()
+        .find(|shape| shape.color.r == 255 && shape.color.g == 255 && shape.color.b == 255)
+        .expect("white animated surface")
+        .color
+        .a;
+    let animation_epoch = handler.animation_epoch;
+    let layout_animation_epoch = handler.layout_animation_epoch;
+
+    // The first drive arms the adaptive clock. The second one is the first sampled frame.
+    let _ = handler.drive_animations(&TestEventLoop, armed_at);
+    let tick_at = armed_at + handler.frame_clock.interval() + Duration::from_millis(1);
+    invalidation.debug_reset_wake_dispatch_attempts();
+    crate::runtime::action_stats::reset();
+    assert!(handler.drive_animations(&TestEventLoop, tick_at));
+    let actions = crate::runtime::action_stats::snapshot();
+
+    assert_action_count(&actions, "reactive_property_slot_write", 1);
+    assert_action_count(&actions, "reactive_slot_update", 1);
+    assert_action_absent(&actions, "global_full_rebuild");
+    assert_action_absent(&actions, "reactive_global_full_rebuild");
+    assert!(
+        actions
+            .iter()
+            .all(|(action, _)| !action.starts_with("strict_reactive")),
+        "strict timeline opacity update must use its retained target: {actions:?}"
+    );
+    assert_eq!(handler.animation_epoch, animation_epoch);
+    assert_eq!(handler.layout_animation_epoch, layout_animation_epoch);
+    assert_eq!(
+        invalidation.debug_wake_dispatch_attempts(),
+        0,
+        "a synchronous controller tick must not enqueue a redundant proxy wake"
+    );
+
+    let cached = handler.cached_scene.as_ref().expect("retained scene cache");
+    assert!(cached.layout_valid && cached.computed_valid);
+    assert!(cached.layout.is_some());
+    let after_alpha = cached
+        .computed
+        .scene
+        .shapes
+        .iter()
+        .find(|shape| shape.color.r == 255 && shape.color.g == 255 && shape.color.b == 255)
+        .expect("patched white animated surface")
+        .color
+        .a;
+    assert!(
+        after_alpha > before_alpha,
+        "opacity tick must update scene alpha"
+    );
+    assert!(opacity.get() > 0.20_f32);
+
+    let (dirty_kind, dirty_dependencies) =
+        invalidation.dirty_dependencies_since(handler.last_invalidation_revision);
+    assert_eq!(dirty_kind, DirtyDependencySet::Clean);
+    assert!(dirty_dependencies.is_empty());
+
+    crate::runtime::scene_runtime::frame_path_probe::begin();
+    let _ = handler.computed_scene();
+    let path = crate::runtime::scene_runtime::frame_path_probe::finish();
+    assert_eq!(path.cache_hits, 1);
+    assert_eq!(path.scene_recollects, 0);
+    assert_eq!(path.layout_builds, 0);
+}
+
+#[test]
+#[cfg(feature = "bench-support")]
+fn timeline_callback_invalidation_is_drained_when_track_value_is_unchanged() {
+    let invalidation = InvalidationSignal::new();
+    let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+    let color = context.state(Color::BLACK);
+    let value = AnimatedValue::new(1.0_f32, invalidation.clone());
+    let tree = nested_color_tree(&color);
+    let mut handler = test_handler(Some(tree), invalidation.clone());
+    let _ = handler.computed_scene();
+
+    let completion_color = color.clone();
+    let controller =
+        AnimationControllerBuilder::new(handler.animations.clone(), invalidation.clone())
+            .track(
+                value,
+                AnimationSpec::from(Keyframes::timed(Duration::ZERO).at(Duration::ZERO, 1.0_f32)),
+            )
+            .on_complete(move || completion_color.set(Color::WHITE))
+            .build();
+    controller.play();
+
+    let armed_at = Instant::now();
+    handler.request_redraw_if_dirty(armed_at);
+    let _ = handler.computed_scene();
+    let _ = handler.drive_animations(&TestEventLoop, armed_at);
+    let tick_at = armed_at + handler.frame_clock.interval() + Duration::from_millis(1);
+    invalidation.debug_reset_wake_dispatch_attempts();
+
+    assert!(handler.drive_animations(&TestEventLoop, tick_at));
+    assert_eq!(color.get(), Color::WHITE);
+    assert_eq!(handler.last_invalidation_revision, invalidation.revision());
+    assert_eq!(invalidation.debug_wake_dispatch_attempts(), 0);
+
+    let scene = handler.computed_scene();
+    assert!(scene
+        .scene
+        .shapes
+        .iter()
+        .any(|shape| shape.color == Color::WHITE));
+}
+
+#[test]
+#[cfg(feature = "bench-support")]
+fn timeline_width_tick_uses_strict_reactive_layout_slot_without_global_invalidation() {
+    let invalidation = InvalidationSignal::new();
+    let width = AnimatedValue::new(dp(48.0), invalidation.clone());
+    let animated_color = Color::hexa(0x111827FF);
+    let tree = WidgetTree::try_new_strict(
+        Flex::<TestVm>::new(Axis::Vertical)
+            .size(dp(220.0), dp(80.0))
+            .child(
+                Flex::<TestVm>::new(Axis::Horizontal)
+                    .size(dp(180.0), dp(48.0))
+                    .child(
+                        filled_stack(animated_color)
+                            .width(width.signal())
+                            .height(dp(24.0)),
+                    )
+                    .child(filled_stack(Color::hexa(0x38BDF8FF)).size(dp(24.0), dp(24.0))),
+            ),
+    )
+    .expect("strict timeline width tree");
+    let mut handler = test_handler(Some(tree), invalidation.clone());
+    let _ = handler.computed_scene();
+
+    let controller =
+        AnimationControllerBuilder::new(handler.animations.clone(), invalidation.clone())
+            .track(
+                width.clone(),
+                AnimationSpec::from(
+                    Keyframes::timed(Duration::from_millis(200))
+                        .at(Duration::ZERO, dp(48.0))
+                        .at(Duration::from_millis(200), dp(96.0)),
+                ),
+            )
+            .build();
+    controller.play();
+
+    let armed_at = Instant::now();
+    handler.request_redraw_if_dirty(armed_at);
+    let _ = handler.computed_scene();
+    let before_width = handler
+        .cached_scene
+        .as_ref()
+        .expect("baseline scene")
+        .computed
+        .scene
+        .shapes
+        .iter()
+        .find(|shape| shape.color == animated_color)
+        .expect("animated width surface")
+        .rect
+        .width;
+    let animation_epoch = handler.animation_epoch;
+    let layout_animation_epoch = handler.layout_animation_epoch;
+
+    let _ = handler.drive_animations(&TestEventLoop, armed_at);
+    let tick_at = armed_at + handler.frame_clock.interval() + Duration::from_millis(1);
+    crate::runtime::action_stats::reset();
+    assert!(handler.drive_animations(&TestEventLoop, tick_at));
+    let actions = crate::runtime::action_stats::snapshot();
+
+    assert_action_count(&actions, "reactive_layout_slot_update", 1);
+    assert_action_count(&actions, "reactive_slot_update", 1);
+    assert_action_absent(&actions, "global_full_rebuild");
+    assert_action_absent(&actions, "reactive_global_full_rebuild");
+    assert_action_absent(&actions, "strict_reactive_layout_rejected");
+    assert_eq!(handler.animation_epoch, animation_epoch);
+    assert_eq!(handler.layout_animation_epoch, layout_animation_epoch);
+
+    let animated_width = width.get();
+    let cached = handler
+        .cached_scene
+        .as_ref()
+        .expect("retained layout cache");
+    assert!(cached.layout_valid && cached.computed_valid);
+    assert!(cached.layout.is_some());
+    let after_width = cached
+        .computed
+        .scene
+        .shapes
+        .iter()
+        .find(|shape| shape.color == animated_color)
+        .expect("patched animated width surface")
+        .rect
+        .width;
+    assert!(after_width > before_width);
+    assert_eq!(
+        after_width,
+        animated_width.round(),
+        "the scene uses the unit-scale layout engine's physical-pixel rounding"
+    );
+
+    let (dirty_kind, dirty_dependencies) =
+        invalidation.dirty_dependencies_since(handler.last_invalidation_revision);
+    assert_eq!(dirty_kind, DirtyDependencySet::Clean);
+    assert!(dirty_dependencies.is_empty());
+
+    crate::runtime::scene_runtime::frame_path_probe::begin();
+    let _ = handler.computed_scene();
+    let path = crate::runtime::scene_runtime::frame_path_probe::finish();
+    assert_eq!(path.cache_hits, 1);
+    assert_eq!(path.scene_recollects, 0);
+    assert_eq!(path.layout_builds, 0);
 }
 
 #[test]

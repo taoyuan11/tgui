@@ -455,7 +455,7 @@ fn shift_tab_moves_focus_backward() {
 }
 
 #[test]
-fn mouse_focus_does_not_mark_widget_as_focused_for_styling() {
+fn mouse_focus_marks_focused_without_focus_visible() {
     let invalidation = InvalidationSignal::new();
     let button: Element<TestVm> = Button::new("First").size(dp(80.0), dp(30.0)).into();
     let button_id = button.id;
@@ -470,11 +470,13 @@ fn mouse_focus_does_not_mark_widget_as_focused_for_styling() {
     );
 
     assert_eq!(handler.focused_widget_id(), Some(button_id));
-    assert!(!handler.widget_state_map(None).get(button_id).focused);
+    let state = handler.widget_state_map(None).get(button_id);
+    assert!(state.focused);
+    assert!(!state.focus_visible);
 }
 
 #[test]
-fn tab_focus_marks_widget_as_focused_for_styling() {
+fn tab_focus_marks_focused_and_focus_visible() {
     let invalidation = InvalidationSignal::new();
     let button: Element<TestVm> = Button::new("First").size(dp(80.0), dp(30.0)).into();
     let button_id = button.id;
@@ -484,7 +486,9 @@ fn tab_focus_marks_widget_as_focused_for_styling() {
     handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::Tab)));
 
     assert_eq!(handler.focused_widget_id(), Some(button_id));
-    assert!(handler.widget_state_map(None).get(button_id).focused);
+    let state = handler.widget_state_map(None).get(button_id);
+    assert!(state.focused);
+    assert!(state.focus_visible);
 }
 
 #[test]

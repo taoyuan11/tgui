@@ -3,6 +3,44 @@ use crate::theme::WidgetState;
 use crate::ui::layout::Value;
 
 #[test]
+fn default_select_keeps_active_border_for_focus_and_open_state() {
+    for theme in [Theme::light(), Theme::dark()] {
+        let focused = default_select_style(
+            &theme,
+            WidgetState {
+                hovered: true,
+                focused: true,
+                ..Default::default()
+            },
+        );
+        assert_eq!(focused.border, theme.colors.primary);
+        assert!(focused.focus_ring.is_none());
+
+        let keyboard_focused = default_select_style(
+            &theme,
+            WidgetState {
+                focused: true,
+                focus_visible: true,
+                ..Default::default()
+            },
+        );
+        assert_eq!(keyboard_focused.border, theme.colors.primary);
+        assert_eq!(keyboard_focused.focus_ring, Some(theme.focus_ring.clone()));
+
+        let open = default_select_style(
+            &theme,
+            WidgetState {
+                open: true,
+                hovered: true,
+                ..Default::default()
+            },
+        );
+        assert_eq!(open.border, theme.colors.primary);
+        assert!(open.focus_ring.is_none());
+    }
+}
+
+#[test]
 fn default_select_arrow_stays_neutral_across_interactive_states() {
     for theme in [Theme::light(), Theme::dark()] {
         let style = crate::ui::widget::SelectStyle::default_for_theme(&theme);

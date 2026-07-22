@@ -167,7 +167,7 @@ impl<VM> ResolvedElement<VM> {
                 })
             }
             _ if (self.list_item.is_some() || self.tree_node.is_some())
-                && visual.widget_state.focused =>
+                && visual.widget_state.focus_visible =>
             {
                 Some(context.theme.focus_ring.clone())
             }

@@ -54,7 +54,7 @@ pub(crate) fn push_focus_ring_primitives(
         return;
     }
 
-    scene.push_overlay_shape(RenderPrimitive {
+    scene.push_focus_ring_shape(RenderPrimitive {
         rect: ring_frame,
         color: focus_ring.color.with_alpha_factor(opacity),
         corner_radius: border_radius + expansion,

@@ -270,12 +270,18 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 .unwrap_or(self.config.clear_color);
             let key = AnimationKey::Window(WindowProperty::ClearColor);
             if !self.binding_sync.clear_color_animation_initialized
+                || self.last_synced_clear_color != Some(target)
                 || !self.animation_engine.color_settled_at(key, target)
             {
                 self.binding_sync.clear_color_animation_initialized = true;
+                let transition = if self.reduced_motion {
+                    None
+                } else {
+                    signal.transition()
+                };
                 Some(
                     self.animation_engine
-                        .resolve_color(key, target, signal.transition(), now),
+                        .resolve_color(key, target, transition, now),
                 )
             } else {
                 None

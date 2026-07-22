@@ -9,7 +9,9 @@ use super::Animatable;
 
 mod timeline;
 
-pub(crate) use self::timeline::{sample_timeline, AnimationCoordinator};
+#[cfg(any(test, feature = "bench-support"))]
+pub(crate) use self::timeline::sample_timeline;
+pub(crate) use self::timeline::{evaluate_timeline, AnimationCoordinator};
 
 /// 表示控制器当前的生命周期状态。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -76,6 +78,7 @@ impl AnimationControllerBuilder {
         self.tracks.push(Box::new(TypedTrack {
             target: value,
             keyframes: spec.keyframes,
+            baseline: None,
         }));
         self
     }
@@ -145,13 +148,17 @@ pub struct AnimationControllerHandle {
 impl AnimationControllerHandle {
     /// 开始播放动画。
     pub fn play(&self) {
+        self.play_at(Instant::now());
+    }
+
+    pub(super) fn play_at(&self, now: Instant) {
         let enqueue = {
             let mut state = self
                 .state
                 .lock()
                 .expect("animation controller lock poisoned");
-            state.play(Instant::now());
-            state.mark_queued_if_running()
+            state.play(now);
+            state.mark_queued_if_needed()
         };
         if enqueue {
             self.coordinator.enqueue(&self.state);
@@ -175,7 +182,7 @@ impl AnimationControllerHandle {
                 .lock()
                 .expect("animation controller lock poisoned");
             state.resume(Instant::now());
-            state.mark_queued_if_running()
+            state.mark_queued_if_needed()
         };
         if enqueue {
             self.coordinator.enqueue(&self.state);
@@ -199,7 +206,7 @@ impl AnimationControllerHandle {
                 .lock()
                 .expect("animation controller lock poisoned");
             state.restart(Instant::now());
-            state.mark_queued_if_running()
+            state.mark_queued_if_needed()
         };
         if enqueue {
             self.coordinator.enqueue(&self.state);
@@ -235,11 +242,21 @@ impl AnimationControllerHandle {
 
     /// 设置播放速度。
     pub fn set_speed(&self, speed: f32) {
-        let mut state = self
-            .state
-            .lock()
-            .expect("animation controller lock poisoned");
-        state.set_speed(Instant::now(), speed);
+        self.set_speed_at(Instant::now(), speed);
+    }
+
+    pub(super) fn set_speed_at(&self, now: Instant, speed: f32) {
+        let enqueue = {
+            let mut state = self
+                .state
+                .lock()
+                .expect("animation controller lock poisoned");
+            state.set_speed(now, speed);
+            state.mark_queued_if_needed()
+        };
+        if enqueue {
+            self.coordinator.enqueue(&self.state);
+        }
     }
 
     /// 设置有限循环次数。
@@ -270,26 +287,44 @@ impl AnimationControllerHandle {
 
     /// 查询当前周期内的进度百分比。
     pub fn progress(&self) -> f32 {
+        self.progress_at(Instant::now())
+    }
+
+    pub(super) fn progress_at(&self, now: Instant) -> f32 {
         self.state
             .lock()
             .expect("animation controller lock poisoned")
-            .progress(Instant::now())
+            .progress(now)
     }
 }
 
 trait TrackRunner {
     fn total_duration(&self) -> Duration;
+    fn capture_baseline(&mut self);
+    fn restore_baseline(&mut self) -> bool;
     fn apply_sample(&mut self, cycle_time: Duration, reversed: bool) -> bool;
 }
 
 struct TypedTrack<T> {
     target: AnimatedValue<T>,
     keyframes: Keyframes<T>,
+    baseline: Option<T>,
 }
 
 impl<T: Animatable> TrackRunner for TypedTrack<T> {
     fn total_duration(&self) -> Duration {
         self.keyframes.total_duration()
+    }
+
+    fn capture_baseline(&mut self) {
+        self.baseline = Some(self.target.snapshot());
+    }
+
+    fn restore_baseline(&mut self) -> bool {
+        self.baseline
+            .as_ref()
+            .cloned()
+            .is_some_and(|value| self.target.set_if_changed(value))
     }
 
     fn apply_sample(&mut self, cycle_time: Duration, reversed: bool) -> bool {
@@ -336,6 +371,9 @@ impl AnimationControllerState {
             self.status,
             AnimationStatus::Idle | AnimationStatus::Stopped | AnimationStatus::Completed
         ) {
+            for track in &mut self.tracks {
+                track.capture_baseline();
+            }
             self.accumulated = Duration::ZERO;
             self.last_cycle_index = None;
             self.started_once = false;
@@ -368,8 +406,11 @@ impl AnimationControllerState {
         self.accumulated = Duration::ZERO;
         self.status = AnimationStatus::Stopped;
         self.last_cycle_index = None;
-        self.started_once = false;
+        // Reset the sampled value without replaying the start lifecycle callback.
+        self.started_once = true;
         self.apply_sample(now);
+        self.started_once = false;
+        self.last_cycle_index = None;
         if let Some(callback) = self.on_stop.clone() {
             callback();
         }
@@ -377,6 +418,14 @@ impl AnimationControllerState {
     }
 
     fn restart(&mut self, now: Instant) {
+        if !matches!(
+            self.status,
+            AnimationStatus::Running | AnimationStatus::Paused
+        ) {
+            for track in &mut self.tracks {
+                track.capture_baseline();
+            }
+        }
         self.accumulated = Duration::ZERO;
         self.started_at = Some(now);
         self.status = AnimationStatus::Running;
@@ -418,12 +467,12 @@ impl AnimationControllerState {
 
     fn set_speed(&mut self, now: Instant, speed: f32) {
         self.accumulated = self.elapsed_at(now);
-        self.started_at = if matches!(self.status, AnimationStatus::Running) {
-            Some(now)
-        } else {
-            None
-        };
+        let was_running = matches!(self.status, AnimationStatus::Running);
+        self.started_at = if was_running { Some(now) } else { None };
         self.playback = self.playback.speed(speed);
+        if was_running {
+            self.apply_sample(now);
+        }
         self.invalidation.mark_dirty();
     }
 
@@ -448,11 +497,12 @@ impl AnimationControllerState {
     }
 
     fn progress(&self, now: Instant) -> f32 {
-        let Some(sample) =
-            sample_timeline(self.cycle_duration, self.playback, self.elapsed_at(now))
-        else {
-            return 0.0;
-        };
+        let sample = evaluate_timeline(
+            self.cycle_duration,
+            self.sampling_playback(),
+            self.elapsed_at(now),
+        )
+        .sample;
         if self.cycle_duration.is_zero() {
             return if sample.completed { 1.0 } else { 0.0 };
         }
@@ -462,9 +512,8 @@ impl AnimationControllerState {
     fn apply_sample(&mut self, now: Instant) -> bool {
         let mut changed = false;
         let elapsed = self.elapsed_at(now);
-        let Some(sample) = sample_timeline(self.cycle_duration, self.playback, elapsed) else {
-            return false;
-        };
+        let evaluation = evaluate_timeline(self.cycle_duration, self.sampling_playback(), elapsed);
+        let sample = evaluation.sample;
 
         if sample.active && !self.started_once {
             self.started_once = true;
@@ -482,11 +531,18 @@ impl AnimationControllerState {
         }
         self.last_cycle_index = Some(sample.cycle_index);
 
-        for track in &mut self.tracks {
-            changed |= track.apply_sample(sample.local_time, sample.reversed);
+        if evaluation.visible {
+            for track in &mut self.tracks {
+                changed |= track.apply_sample(sample.local_time, sample.reversed);
+            }
+        } else {
+            for track in &mut self.tracks {
+                changed |= track.restore_baseline();
+            }
         }
 
         if sample.completed && matches!(self.status, AnimationStatus::Running) {
+            self.accumulated = elapsed;
             self.status = AnimationStatus::Completed;
             self.started_at = None;
             if let Some(callback) = self.on_complete.clone() {
@@ -497,23 +553,30 @@ impl AnimationControllerState {
         changed
     }
 
+    fn sampling_playback(&self) -> Playback {
+        // `elapsed_at` already accumulates speed-adjusted timeline time so speed changes can
+        // preserve the exact current position. The shared sampler also supports raw wall-clock
+        // callers (notably declarative transitions), so normalize only the controller's copy.
+        self.playback.speed(1.0)
+    }
+
     fn tick(&mut self, now: Instant) -> bool {
         if !matches!(self.status, AnimationStatus::Running) {
             return false;
         }
-        let changed = self.apply_sample(now);
-        if changed {
-            self.invalidation.mark_dirty();
-        }
-        changed
+        self.apply_sample(now)
     }
 
     fn is_running(&self) -> bool {
         matches!(self.status, AnimationStatus::Running)
     }
 
-    fn mark_queued_if_running(&mut self) -> bool {
-        if self.is_running() && !self.queued_in_coordinator {
+    fn needs_frames(&self) -> bool {
+        self.is_running() && (self.cycle_duration.is_zero() || self.playback.speed_factor() > 0.0)
+    }
+
+    fn mark_queued_if_needed(&mut self) -> bool {
+        if self.needs_frames() && !self.queued_in_coordinator {
             self.queued_in_coordinator = true;
             true
         } else {

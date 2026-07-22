@@ -265,12 +265,13 @@ pub mod prelude {
     #[cfg(feature = "bench-support")]
     pub use crate::runtime::{
         RuntimeButtonHoverBenchmarkContext, RuntimeDataGridBenchmarkContext,
-        RuntimeDataGridHoverTarget, RuntimeFocusBenchmarkContext, RuntimeInteractionBenchmarkVm,
-        RuntimeInteractionFrameStats, RuntimeRowHoverBenchmarkContext, RuntimeRowHoverKind,
-        RuntimeRowSelectionBenchmarkContext, RuntimeRowSelectionKind, RuntimeRowSelectionMode,
-        RuntimeScrollBenchmarkContext, RuntimeScrollBenchmarkVm, RuntimeScrollFrameStats,
-        RuntimeSliderValueBenchmarkContext, RuntimeTextContentBenchmarkContext,
-        RuntimeToastBenchmarkContext, RuntimeTreeCheckedBenchmarkContext,
+        RuntimeDataGridHoverTarget, RuntimeFocusBenchmarkContext, RuntimeFocusNavigationCacheStats,
+        RuntimeInteractionBenchmarkVm, RuntimeInteractionFrameStats,
+        RuntimeRowHoverBenchmarkContext, RuntimeRowHoverKind, RuntimeRowSelectionBenchmarkContext,
+        RuntimeRowSelectionKind, RuntimeRowSelectionMode, RuntimeScrollBenchmarkContext,
+        RuntimeScrollBenchmarkVm, RuntimeScrollFrameStats, RuntimeSliderValueBenchmarkContext,
+        RuntimeTextContentBenchmarkContext, RuntimeToastBenchmarkContext,
+        RuntimeTreeCheckedBenchmarkContext,
     };
     pub use crate::theme::{
         BorderScale, ColorScheme, ComponentStyle, ComponentThemes, ControlSize, Density,
@@ -364,12 +365,13 @@ pub mod widgets {
     #[cfg(feature = "bench-support")]
     pub use crate::runtime::{
         RuntimeButtonHoverBenchmarkContext, RuntimeDataGridBenchmarkContext,
-        RuntimeDataGridHoverTarget, RuntimeFocusBenchmarkContext, RuntimeInteractionBenchmarkVm,
-        RuntimeInteractionFrameStats, RuntimeRowHoverBenchmarkContext, RuntimeRowHoverKind,
-        RuntimeRowSelectionBenchmarkContext, RuntimeRowSelectionKind, RuntimeRowSelectionMode,
-        RuntimeScrollBenchmarkContext, RuntimeScrollBenchmarkVm, RuntimeScrollFrameStats,
-        RuntimeSliderValueBenchmarkContext, RuntimeTextContentBenchmarkContext,
-        RuntimeToastBenchmarkContext, RuntimeTreeCheckedBenchmarkContext,
+        RuntimeDataGridHoverTarget, RuntimeFocusBenchmarkContext, RuntimeFocusNavigationCacheStats,
+        RuntimeInteractionBenchmarkVm, RuntimeInteractionFrameStats,
+        RuntimeRowHoverBenchmarkContext, RuntimeRowHoverKind, RuntimeRowSelectionBenchmarkContext,
+        RuntimeRowSelectionKind, RuntimeRowSelectionMode, RuntimeScrollBenchmarkContext,
+        RuntimeScrollBenchmarkVm, RuntimeScrollFrameStats, RuntimeSliderValueBenchmarkContext,
+        RuntimeTextContentBenchmarkContext, RuntimeToastBenchmarkContext,
+        RuntimeTreeCheckedBenchmarkContext,
     };
     #[cfg(feature = "bench-support")]
     pub use crate::ui::widget::{

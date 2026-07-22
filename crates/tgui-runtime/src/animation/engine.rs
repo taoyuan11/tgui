@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 use crate::foundation::binding::PropertySlot;
@@ -6,15 +5,15 @@ use crate::foundation::color::Color;
 use crate::ui::layout::Insets;
 use crate::ui::unit::{Dp, Sp};
 use crate::ui::widget::{Point, WidgetId};
+use hashbrown::HashMap;
 use smallvec::SmallVec;
 
 #[cfg(feature = "bench-support")]
 use std::cell::Cell;
 
-use super::controller::sample_timeline;
+use super::controller::evaluate_timeline;
 use super::spec::{AnimationCurve, Keyframe, Keyframes, Transition};
 
-const THEME_DURATION_MS: u64 = 240;
 const INACTIVE_SLOT_INDEX: usize = usize::MAX;
 
 #[cfg(feature = "bench-support")]
@@ -204,8 +203,10 @@ impl AnimationKey {
     pub(crate) const fn affects_layout(self) -> bool {
         match self {
             Self::Widget { property, .. } => property.affects_layout(),
-            Self::Window(WindowProperty::ClearColor) => false,
-            Self::Window(_) => true,
+            // Every window animation key currently represents a color. Theme binding changes
+            // invalidate layout once when typography/spacing/density switch; interpolating these
+            // paint tokens afterwards must preserve the retained layout.
+            Self::Window(_) => false,
         }
     }
 }
@@ -408,14 +409,22 @@ impl<T: Animatable> SlotState<T> {
             return;
         };
 
-        let Some(sample) = sample_timeline(
+        let evaluation = evaluate_timeline(
             animation.transition.duration(),
             animation.transition.playback_mode(),
             now.saturating_duration_since(animation.started_at),
-        ) else {
-            self.displayed = animation.from.clone();
+        );
+        let sample = evaluation.sample;
+        if !evaluation.visible {
+            if sample.completed {
+                self.displayed = animation.to.clone();
+                self.target = animation.to.clone();
+                self.animation = None;
+            } else {
+                self.displayed = animation.from.clone();
+            }
             return;
-        };
+        }
 
         let progress = if animation.transition.duration().is_zero() {
             1.0
@@ -435,7 +444,7 @@ impl<T: Animatable> SlotState<T> {
             } else {
                 animation.to.clone()
             };
-            self.target = self.displayed.clone();
+            self.target = animation.to.clone();
             self.animation = None;
         }
     }
@@ -525,8 +534,9 @@ impl<T: Animatable> AnimationStore<T> {
         transition: Option<Transition>,
         now: Instant,
     ) -> T {
-        let Some(transition) = transition.filter(|transition| !transition.duration().is_zero())
-        else {
+        let Some(transition) = transition.filter(|transition| {
+            !transition.duration().is_zero() && transition.playback_mode().speed_factor() > 0.0
+        }) else {
             if let Some(state) = self.slots.get_mut(&key) {
                 let was_active = state.animation.take().is_some();
                 state.last_touch = now;
@@ -630,6 +640,8 @@ impl<T: Animatable> AnimationStore<T> {
                     if property.affects_accessibility_geometry() {
                         refresh.accessibility_geometry_changed = true;
                     }
+                } else if let AnimationKey::Window(property) = key {
+                    refresh.push_window_property(property);
                 }
             }
 
@@ -682,11 +694,33 @@ pub(crate) struct AnimationRefresh {
     pub(crate) scene_widget_ids: SmallVec<[u64; 16]>,
     pub(crate) scene_property_targets: SmallVec<[(WidgetId, PropertySlot); 16]>,
     pub(crate) has_unscoped_scene_changes: bool,
+    /// Window-level animation channels changed during this refresh. Keeping the channel identity
+    /// lets the runtime distinguish renderer-only clear-color updates from theme paints that must
+    /// invalidate the retained scene.
+    pub(crate) window_properties: SmallVec<[WindowProperty; 4]>,
     #[cfg(test)]
     pub(crate) visited_slots: usize,
 }
 
 impl AnimationRefresh {
+    pub(crate) fn scene_changed(&self) -> bool {
+        self.changed
+            && (self.layout_changed
+                || !self.layout_widget_ids.is_empty()
+                || !self.scene_widget_ids.is_empty()
+                || self.has_unscoped_layout_changes
+                || self.has_unscoped_scene_changes
+                || self.window_properties.is_empty()
+                || self
+                    .window_properties
+                    .iter()
+                    .any(|property| *property != WindowProperty::ClearColor))
+    }
+
+    fn push_window_property(&mut self, property: WindowProperty) {
+        self.window_properties.push(property);
+    }
+
     fn push_layout_widget(&mut self, widget_id: u64, property: WidgetProperty) {
         #[cfg(feature = "bench-support")]
         if legacy_refresh_widget_dedup_enabled() {
@@ -799,6 +833,9 @@ impl AnimationRefresh {
         self.scene_property_targets
             .sort_unstable_by_key(|(widget_id, property)| (widget_id.raw(), *property as u8));
         self.scene_property_targets.dedup();
+        self.window_properties
+            .sort_unstable_by_key(|property| *property as u8);
+        self.window_properties.dedup();
     }
 }
 
@@ -890,7 +927,9 @@ impl AnimationEngine {
         self.points.refresh(now, &mut refresh);
         self.insets.refresh(now, &mut refresh);
         self.gc_stale_settled_slots_if_due(now);
-        refresh.normalize_widget_ids();
+        if refresh.changed {
+            refresh.normalize_widget_ids();
+        }
         refresh
     }
 
@@ -987,6 +1026,6 @@ impl AnimationEngine {
     }
 }
 
-pub(crate) fn default_theme_transition() -> Transition {
-    Transition::ease_in_out(Duration::from_millis(THEME_DURATION_MS))
+pub(crate) fn theme_transition(duration_ms: u64) -> Transition {
+    Transition::ease_in_out(Duration::from_millis(duration_ms))
 }

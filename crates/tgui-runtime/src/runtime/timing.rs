@@ -146,13 +146,22 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 window.request_redraw();
             }
         }
-        let controller_frame = self.animations.refresh(now, frame_clock_due);
+        // Controller ticks run synchronously on the event-loop thread. Their AnimatedValue writes
+        // still advance revisions and reactive dirty queues, but do not need to enqueue a second
+        // proxy user event for every track; the redraw/invalidation drain below handles the batch.
+        let controller_revision_before = self.invalidation.revision();
+        let controller_frame = {
+            let _wake_guard = self.invalidation.suppress_wakeups_without_dispatch();
+            self.animations.refresh(now, frame_clock_due)
+        };
         let controller_changed = controller_frame.changed;
-        if controller_changed {
+        let controller_invalidated = self.invalidation.revision() != controller_revision_before;
+        if controller_changed || controller_invalidated {
             frame_advanced = true;
-            self.animation_epoch = self.animation_epoch.wrapping_add(1);
-            self.layout_animation_epoch = self.layout_animation_epoch.wrapping_add(1);
-            self.invalidate_computed_scene();
+            // AnimatedValue tracks concrete scene/layout dependencies. Consume the invalidation
+            // produced by the controller tick before requesting the redraw so the retained scene
+            // can patch only the affected targets instead of rebuilding the whole tree.
+            self.request_redraw_if_dirty(now);
             if let Some(window) = self.window.as_ref() {
                 window.request_redraw();
             }
@@ -166,17 +175,22 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         if animation_refresh.changed {
             self.toast_motion_patch_pending = false;
             frame_advanced = true;
-            self.animation_epoch = self.animation_epoch.wrapping_add(1);
-            if animation_refresh.accessibility_geometry_changed {
-                self.accessibility_animation_epoch =
-                    self.accessibility_animation_epoch.wrapping_add(1);
-            }
-            if animation_refresh.layout_changed {
-                self.layout_animation_epoch = self.layout_animation_epoch.wrapping_add(1);
-            }
-            let patched = self.patch_animation_refresh(&animation_refresh, now);
-            if !patched {
-                self.invalidate_computed_scene();
+            // A clear-color animation only touches the renderer's surface state. Keep the
+            // retained scene valid in that case; theme/widget channels still advance the scene
+            // epochs and use their bounded patch/full-recollect fallback below.
+            if animation_refresh.scene_changed() {
+                self.animation_epoch = self.animation_epoch.wrapping_add(1);
+                if animation_refresh.accessibility_geometry_changed {
+                    self.accessibility_animation_epoch =
+                        self.accessibility_animation_epoch.wrapping_add(1);
+                }
+                if animation_refresh.layout_changed {
+                    self.layout_animation_epoch = self.layout_animation_epoch.wrapping_add(1);
+                }
+                let patched = self.patch_animation_refresh(&animation_refresh, now);
+                if !patched {
+                    self.invalidate_computed_scene();
+                }
             }
             if let Some(window) = self.window.as_ref() {
                 window.request_redraw();
@@ -263,7 +277,8 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         if self.theme_colors_settled() {
             return self.theme.clone();
         }
-        let transition = Some(default_theme_transition());
+        let transition =
+            (!self.reduced_motion).then(|| theme_transition(self.theme.motion.normal_ms));
         let mut theme = self.theme.clone();
         theme.colors.background = self.resolve_theme_color(
             WindowProperty::ThemeBackground,
@@ -338,7 +353,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             self.resolve_theme_color(
                 WindowProperty::ThemeBackground,
                 self.theme.colors.background,
-                Some(default_theme_transition()),
+                (!self.reduced_motion).then(|| theme_transition(self.theme.motion.normal_ms)),
                 now,
             )
         }

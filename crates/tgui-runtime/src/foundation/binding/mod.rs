@@ -21,4 +21,4 @@ pub(crate) use dependency::{
     DirtyDependencySet, PropertySlot,
 };
 pub(crate) use invalidation::InvalidationSignal;
-pub(crate) use reactive::ReactiveTarget;
+pub(crate) use reactive::{ReactiveTarget, SignalId};

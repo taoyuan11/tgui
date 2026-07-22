@@ -45,14 +45,14 @@ impl AnimationCoordinator {
             let mut controller = controller
                 .lock()
                 .expect("animation controller lock poisoned");
-            if !controller.is_running() {
+            if !controller.needs_frames() {
                 controller.queued_in_coordinator = false;
                 return false;
             }
             if tick {
                 changed |= controller.tick(now);
             }
-            let running = controller.is_running();
+            let running = controller.needs_frames();
             if !running {
                 controller.queued_in_coordinator = false;
             }
@@ -95,7 +95,7 @@ impl AnimationCoordinator {
                 controller
                     .lock()
                     .expect("animation controller lock poisoned")
-                    .is_running()
+                    .needs_frames()
             })
     }
 }
@@ -109,11 +109,27 @@ pub(crate) struct TimelineSample {
     pub(crate) reversed: bool,
 }
 
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct TimelineEvaluation {
+    pub(crate) sample: TimelineSample,
+    pub(crate) visible: bool,
+}
+
+#[cfg(any(test, feature = "bench-support"))]
 pub(crate) fn sample_timeline(
     total_duration: Duration,
     playback: Playback,
     elapsed: Duration,
 ) -> Option<TimelineSample> {
+    let evaluation = evaluate_timeline(total_duration, playback, elapsed);
+    evaluation.visible.then_some(evaluation.sample)
+}
+
+pub(crate) fn evaluate_timeline(
+    total_duration: Duration,
+    playback: Playback,
+    elapsed: Duration,
+) -> TimelineEvaluation {
     let direction = playback.direction_mode();
     let fill = playback.fill();
     let repeat = playback.repeat_mode();
@@ -121,13 +137,19 @@ pub(crate) fn sample_timeline(
     let start_reversed = direction.starts_reversed();
 
     if total_duration.is_zero() {
-        return Some(TimelineSample {
-            active: true,
-            completed: playback.repeat_mode().finite_cycles().is_some(),
-            cycle_index: 0,
-            local_time: Duration::ZERO,
-            reversed: start_reversed,
-        });
+        return TimelineEvaluation {
+            sample: TimelineSample {
+                active: true,
+                // There is no meaningful next frame for a zero-duration timeline. Treat even an
+                // infinite repeat as a single completed sample so a caller cannot leave the frame
+                // clock armed forever on a degenerate animation.
+                completed: true,
+                cycle_index: 0,
+                local_time: Duration::ZERO,
+                reversed: start_reversed,
+            },
+            visible: true,
+        };
     }
 
     let speed = playback.speed_factor().max(0.0);
@@ -140,19 +162,15 @@ pub(crate) fn sample_timeline(
     };
 
     if scaled_elapsed < delay {
-        return match fill {
-            FillMode::Backwards | FillMode::Both => Some(TimelineSample {
+        return TimelineEvaluation {
+            sample: TimelineSample {
                 active: false,
                 completed: false,
                 cycle_index: 0,
-                local_time: if start_reversed {
-                    total_duration
-                } else {
-                    Duration::ZERO
-                },
+                local_time: Duration::ZERO,
                 reversed: start_reversed,
-            }),
-            FillMode::None | FillMode::Forwards => None,
+            },
+            visible: matches!(fill, FillMode::Backwards | FillMode::Both),
         };
     }
 
@@ -161,44 +179,44 @@ pub(crate) fn sample_timeline(
 
     if let Some(cycle_count) = cycles {
         if cycle_count == 1 && active_elapsed < total_duration {
-            return Some(TimelineSample {
-                active: true,
-                completed: false,
-                cycle_index: 0,
-                local_time: active_elapsed,
-                reversed: is_cycle_reversed(direction, 0),
-            });
+            return TimelineEvaluation {
+                sample: TimelineSample {
+                    active: true,
+                    completed: false,
+                    cycle_index: 0,
+                    local_time: active_elapsed,
+                    reversed: is_cycle_reversed(direction, 0),
+                },
+                visible: true,
+            };
         } else if elapsed_reaches_cycle_count(active_elapsed, total_duration, cycle_count) {
-            return match fill {
-                FillMode::Forwards | FillMode::Both => {
-                    let cycle_index = cycle_count.saturating_sub(1);
-                    let reversed = is_cycle_reversed(direction, cycle_index);
-                    Some(TimelineSample {
-                        active: false,
-                        completed: true,
-                        cycle_index,
-                        local_time: if reversed {
-                            Duration::ZERO
-                        } else {
-                            total_duration
-                        },
-                        reversed,
-                    })
-                }
-                FillMode::None | FillMode::Backwards => None,
+            let cycle_index = cycle_count.saturating_sub(1);
+            let reversed = is_cycle_reversed(direction, cycle_index);
+            return TimelineEvaluation {
+                sample: TimelineSample {
+                    active: false,
+                    completed: true,
+                    cycle_index,
+                    local_time: total_duration,
+                    reversed,
+                },
+                visible: matches!(fill, FillMode::Forwards | FillMode::Both),
             };
         }
     }
 
     let (cycle_index, cycle_time) = cycle_position(active_elapsed, total_duration);
 
-    Some(TimelineSample {
-        active: true,
-        completed: false,
-        cycle_index,
-        local_time: cycle_time,
-        reversed: is_cycle_reversed(direction, cycle_index),
-    })
+    TimelineEvaluation {
+        sample: TimelineSample {
+            active: true,
+            completed: false,
+            cycle_index,
+            local_time: cycle_time,
+            reversed: is_cycle_reversed(direction, cycle_index),
+        },
+        visible: true,
+    }
 }
 
 fn elapsed_reaches_cycle_count(

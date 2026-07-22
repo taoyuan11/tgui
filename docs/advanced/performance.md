@@ -93,4 +93,6 @@ Application::new()
 - 纯滚动 GPU 平移需要 adapter 支持 wgpu IMMEDIATES；不支持时自动走 CPU 子树重收集。
 - virtual、嵌套滚动、overlay/portal、IME、可见 scrollbar、复杂 clip 或 composite 等前置不满足时会回退，结果仍与全量重收集一致。
 
-> 性能数字与基线方法见仓库根目录的 `FINE_GRAINED_ROADMAP.md`（不随 crate 发布）；相关基准为 `single_property_patch`（需 `bench-support`）。
+> 性能数字的记录方法见 [基准测试结果](./benchmark-results.md)；细粒度路径重点使用
+> `single_property_patch`、`animation_frame_pipeline` 和 `interaction_frame_pipeline`
+>（需 `bench-support`）做同机 A/B 对照。

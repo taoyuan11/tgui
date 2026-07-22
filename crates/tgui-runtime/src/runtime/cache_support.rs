@@ -1,6 +1,75 @@
 use super::*;
 
 impl<VM: 'static> BoundRuntimeHandler<VM> {
+    pub(in crate::runtime) fn can_retarget_focus_navigation_after_focus_paint_recollect(
+        &self,
+        cached: &CachedScene<VM>,
+        viewport: Rect,
+        units: UnitContext,
+        caret_visible: bool,
+        active_scrollbar: Option<ScrollbarHandle>,
+    ) -> bool {
+        let current_focus = self.focused_widget_id();
+        let focus_changed =
+            cached.focused_widget != current_focus || cached.focus_visible != self.focus_visible;
+        if !focus_changed || !cached.computed_valid || !cached.layout_valid {
+            return false;
+        }
+
+        let focus_is_not_text_input = |widget_id: Option<WidgetId>| match widget_id {
+            None => true,
+            Some(widget_id) => self.cached_focus_target_is_text_input(widget_id) == Some(false),
+        };
+        if !focus_is_not_text_input(cached.focused_widget)
+            || !focus_is_not_text_input(current_focus)
+        {
+            return false;
+        }
+
+        // Focus state only changes paint for ordinary controls. Commands and explicit
+        // invalidations clear `computed_valid`, while every other runtime field is checked here;
+        // those paths retain the exact semantic validator instead of trusting this hand-off.
+        self.scene_cache_fields_match_ignoring_focus(
+            cached,
+            viewport,
+            units,
+            caret_visible,
+            active_scrollbar,
+        )
+    }
+
+    /// Match every retained-scene field except the two fields whose only consumer is focus paint.
+    /// This is intentionally stricter than the general cache matcher: a focus patch is allowed
+    /// only when no text-input, scroll, hover, animation, portal, or style state changed.
+    pub(in crate::runtime) fn scene_cache_fields_match_ignoring_focus(
+        &self,
+        cached: &CachedScene<VM>,
+        viewport: Rect,
+        units: UnitContext,
+        caret_visible: bool,
+        active_scrollbar: Option<ScrollbarHandle>,
+    ) -> bool {
+        cached.viewport == viewport
+            && cached.units == units
+            && cached.pressed_widget == self.pressed_widget
+            && cached.selected_text == self.selected_text
+            && cached.caret_visible == caret_visible
+            && cached.theme_epoch == self.theme_store.version()
+            && cached.style_sheet_version == self.config.style_sheet.version()
+            && cached.density == self.theme.density
+            && cached.reduced_motion == self.reduced_motion
+            && cached.text_scale_bits == units.font_scale().to_bits()
+            && cached.animation_epoch == self.animation_epoch
+            && cached.layout_animation_epoch == self.layout_animation_epoch
+            && cached.accessibility_animation_epoch == self.accessibility_animation_epoch
+            && cached.scroll_epoch == self.scroll_epoch
+            && cached.hover_epoch == self.hover_epoch
+            && cached.text_input_epoch == self.text_input_epoch
+            && cached.external_portal_revision == self.external_portal_revision
+            && cached.hovered_scrollbar == self.hovered_scrollbar
+            && cached.active_scrollbar == active_scrollbar
+    }
+
     pub(in crate::runtime) fn scroll_mismatch_requires_layout_rebuild(
         &self,
         cached: &CachedScene<VM>,

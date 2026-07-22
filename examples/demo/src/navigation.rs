@@ -31,7 +31,7 @@ pub(crate) struct NavigationItem {
     pub page: DemoPage,
     pub title: &'static str,
     pub description: &'static str,
-    pub badge: &'static str,
+    pub icon: BuiltinIcon,
 }
 
 pub(crate) const NAV_ITEMS: [NavigationItem; 7] = [
@@ -39,43 +39,43 @@ pub(crate) const NAV_ITEMS: [NavigationItem; 7] = [
         page: DemoPage::Forms,
         title: "Forms",
         description: "Inputs and validation",
-        badge: "F",
+        icon: BuiltinIcon::Edit,
     },
     NavigationItem {
         page: DemoPage::Basics,
         title: "Basics",
         description: "Text, Button, Divider",
-        badge: "B",
+        icon: BuiltinIcon::Home,
     },
     NavigationItem {
         page: DemoPage::Icons,
         title: "Icons",
         description: "Common built-in icons",
-        badge: "I",
+        icon: BuiltinIcon::Star,
     },
     NavigationItem {
         page: DemoPage::Feedback,
         title: "Feedback",
         description: "Toast and notification",
-        badge: "!",
+        icon: BuiltinIcon::Bell,
     },
     NavigationItem {
         page: DemoPage::Overlays,
         title: "Overlays",
         description: "Floating UI layers",
-        badge: "O",
+        icon: BuiltinIcon::MoreHorizontal,
     },
     NavigationItem {
         page: DemoPage::Data,
         title: "Data",
         description: "Lists, tabs, tables",
-        badge: "D",
+        icon: BuiltinIcon::SortAsc,
     },
     NavigationItem {
         page: DemoPage::MediaCanvas,
         title: "Media & Canvas",
         description: "Canvas and playback",
-        badge: "M",
+        icon: BuiltinIcon::Image,
     },
 ];
 
@@ -112,8 +112,7 @@ fn nav_item(app: &App, item: NavigationItem) -> Element<App> {
         .signal()
         .map(move |current| current == page);
     let active_for_item = active.clone();
-    let active_for_badge = active.clone();
-    let active_for_badge_text = active.clone();
+    let active_for_icon = active.clone();
     let active_for_title = active.clone();
     let active_for_description = active;
 
@@ -130,13 +129,11 @@ fn nav_item(app: &App, item: NavigationItem) -> Element<App> {
                 .gap(dp(10.0))
                 .align(Align::Center)
                 .child(
-                    Stack::new()
-                        .size(dp(32.0), dp(32.0))
-                        .center()
-                        .style_full(move |ctx| styles::nav_badge_style(ctx, active_for_badge.get()))
-                        .child(Text::new(item.badge).style_full(move |ctx| {
-                            styles::nav_badge_text_style(ctx, active_for_badge_text.get())
-                        })),
+                    Stack::new().size(dp(32.0), dp(32.0)).center().child(
+                        Icon::builtin(item.icon).style_full(move |ctx| {
+                            styles::nav_icon_style(ctx, active_for_icon.get())
+                        }),
+                    ),
                 )
                 .child(
                     Flex::vertical()

@@ -187,7 +187,7 @@ impl ScrollRegionLookupIndex {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct ScrollRegion {
     pub id: WidgetId,
     pub content_viewport: Rect,
@@ -259,6 +259,9 @@ pub(crate) struct ComputedScene<VM> {
     pub virtual_state_updates: SmallVec<[VirtualSceneStateUpdate; 1]>,
     pub(crate) transform_records: HashMap<WidgetId, TransformRecord>,
     pub(crate) dependencies: DependencyGraph,
+    /// Changes only when keyboard focus-navigation metadata may have changed. Paint and retained
+    /// transform writes deliberately leave this epoch untouched.
+    focus_navigation_epoch: u64,
     hit_test_index: OnceLock<Box<HitTestIndex>>,
     scroll_region_lookup_index: OnceLock<Box<ScrollRegionLookupIndex>>,
 }
@@ -318,6 +321,7 @@ impl<VM> Clone for ComputedScene<VM> {
             virtual_state_updates: self.virtual_state_updates.clone(),
             transform_records: self.transform_records.clone(),
             dependencies: self.dependencies.clone(),
+            focus_navigation_epoch: self.focus_navigation_epoch,
             hit_test_index: OnceLock::new(),
             scroll_region_lookup_index: OnceLock::new(),
         }
@@ -327,6 +331,17 @@ impl<VM> Clone for ComputedScene<VM> {
 impl<VM> ComputedScene<VM> {
     pub(crate) fn assign_new_prepare_cache_serial(&mut self) {
         self.scene.assign_new_prepare_cache_serial();
+    }
+
+    pub(crate) fn focus_navigation_cache_key(&self) -> (u64, u64) {
+        (
+            self.scene.prepare_cache_serial(),
+            self.focus_navigation_epoch,
+        )
+    }
+
+    fn mark_focus_navigation_metadata_changed(&mut self) {
+        self.focus_navigation_epoch = self.focus_navigation_epoch.wrapping_add(1);
     }
 }
 
@@ -833,6 +848,7 @@ impl<VM> Default for ComputedScene<VM> {
             virtual_state_updates: SmallVec::new(),
             dependencies: DependencyGraph::default(),
             transform_records: HashMap::new(),
+            focus_navigation_epoch: 0,
             hit_test_index: OnceLock::new(),
             scroll_region_lookup_index: OnceLock::new(),
         }
@@ -898,6 +914,7 @@ impl<VM> ComputedScene<VM> {
     /// keeping that sentinel makes scene-splice conservatively fall back to
     /// ancestor recomposition, where this gate is applied again.
     pub(crate) fn clear_interactive_subtree_channels(&mut self) {
+        self.mark_focus_navigation_metadata_changed();
         self.scene.clear_overlay_streams();
         self.hit_regions.clear();
         self.overlay_hit_regions.clear();
@@ -938,6 +955,7 @@ impl<VM> ComputedScene<VM> {
     /// the legacy clone-based path. Only storage ownership changes: the old flat ancestor chunk is
     /// moved out of the cache and becomes the output buffer for its replacement.
     pub(crate) fn clear_for_recompose(&mut self, seed: &Self) {
+        self.mark_focus_navigation_metadata_changed();
         self.scene.clear_for_recompose(&seed.scene);
         self.hit_regions.clear();
         self.overlay_hit_regions.clear();
@@ -1227,6 +1245,12 @@ impl<VM> ComputedScene<VM> {
     }
 
     pub(crate) fn extend(&mut self, other: &ComputedScene<VM>) {
+        if !other.hit_regions.is_empty()
+            || !other.overlay_hit_regions.is_empty()
+            || !other.focus_scopes.is_empty()
+        {
+            self.mark_focus_navigation_metadata_changed();
+        }
         self.invalidate_hit_test_index();
         self.invalidate_scroll_region_lookup_index();
         let graph_offsets = OverlayLayerGraphOffsets {
@@ -1285,6 +1309,13 @@ impl<VM> ComputedScene<VM> {
     }
 
     pub(crate) fn finalize_overlay_layers(&mut self) {
+        if self
+            .overlay_layers
+            .iter()
+            .any(|layer| !layer.hits.is_empty() || !layer.focus_scopes.is_empty())
+        {
+            self.mark_focus_navigation_metadata_changed();
+        }
         self.invalidate_hit_test_index();
         for layer in crate::runtime::overlay::OverlayLayer::ALL {
             let bucket = std::mem::take(&mut self.overlay_layers[layer.index()]);
@@ -1327,6 +1358,9 @@ impl<VM> ComputedScene<VM> {
     }
 
     pub(crate) fn finalize_portals(&mut self, viewport: Rect) {
+        if !self.portal_entries.is_empty() {
+            self.mark_focus_navigation_metadata_changed();
+        }
         self.invalidate_hit_test_index();
         let base_shapes = self
             .scene
@@ -1384,6 +1418,9 @@ impl<VM> ComputedScene<VM> {
             .truncate(base_text_decorations);
         self.scene.overlay_commands.truncate(base_commands);
         self.scene.overlay_command_sources.truncate(base_commands);
+        self.scene
+            .overlay_command_provenance
+            .truncate(base_commands);
         self.overlay_hit_regions.truncate(base_hits);
         self.overlay_close_handlers.truncate(base_close_handlers);
         self.focus_scopes.truncate(base_focus_scopes);
@@ -1436,6 +1473,7 @@ impl<VM> ComputedScene<VM> {
         viewport: Rect,
         entries: impl IntoIterator<Item = PortalEntry<VM>>,
     ) {
+        self.mark_focus_navigation_metadata_changed();
         self.invalidate_hit_test_index();
         let base_shapes = self.scene.overlay_shapes.len();
         let base_textures = self.scene.overlay_textures.len();
@@ -1525,6 +1563,94 @@ impl<VM> ComputedScene<VM> {
     /// 各主渲染流命令数量。Splice：沿 root→target 路径累加，定位子树区间起点。
     pub(crate) fn scene_counts(&self) -> crate::ui::widget::common::SceneCounts {
         self.scene.counts()
+    }
+
+    /// Strict eligibility for the bounded focus-ring patch.  Only the single shape overlay
+    /// emitted by `push_focus_ring_primitives` is permitted; every structural or interactive
+    /// overlay channel forces the caller back to the general subtree patch.
+    pub(crate) fn allows_focus_ring_overlay_patch(&self) -> bool {
+        self.scene.focus_ring_overlay_shape().is_ok()
+            && self.overlay_hit_regions.is_empty()
+            && self.overlay_close_handlers.is_empty()
+            && self.focus_scopes.is_empty()
+            && self.accessibility_fragments.is_empty()
+            && self.carousel_auto_play.is_empty()
+            && self.overlay_anchors.is_empty()
+            && self.portal_entries.is_empty()
+            && self.external_portal_requests.is_empty()
+            && self.ime_cursor_area.is_none()
+            && self.virtual_state_updates.is_empty()
+            && self.transform_records.is_empty()
+            && self.portal_overlay_counts.shapes == 0
+            && self.portal_overlay_counts.textures == 0
+            && self.portal_overlay_counts.meshes == 0
+            && self.portal_overlay_counts.texts == 0
+            && self.portal_overlay_counts.text_decorations == 0
+            && self.portal_overlay_counts.commands == 0
+            && self.portal_overlay_counts.hits == 0
+            && self.portal_overlay_counts.close_handlers == 0
+            && self.portal_overlay_counts.focus_scopes == 0
+            && self.portal_overlay_counts.accessibility_fragments == 0
+            && self.overlay_layers.iter().all(|bucket| {
+                bucket.commands.is_empty()
+                    && bucket.command_sources.is_empty()
+                    && bucket.backdrop_blurs.is_empty()
+                    && bucket.shapes.is_empty()
+                    && bucket.textures.is_empty()
+                    && bucket.meshes.is_empty()
+                    && bucket.texts.is_empty()
+                    && bucket.text_decorations.is_empty()
+                    && bucket.hits.is_empty()
+                    && bucket.close_handlers.is_empty()
+                    && bucket.focus_scopes.is_empty()
+                    && bucket.accessibility_fragments.is_empty()
+            })
+            && self.overlay_layer_graph.layers.is_empty()
+            && self.overlay_layer_graph.anchor_slots.is_empty()
+    }
+
+    /// Prove that focus changed only the shape-only overlay stream.  Main draw commands, hit
+    /// geometry, focus-navigation metadata, and scroll geometry must remain item-identical.
+    pub(crate) fn focus_ring_overlay_patch_compatible_with(&self, next: &Self) -> bool {
+        self.allows_focus_ring_overlay_patch()
+            && next.allows_focus_ring_overlay_patch()
+            && self.scene.main_streams_equal(&next.scene)
+            && self.hit_regions.len() == next.hit_regions.len()
+            && self
+                .hit_regions
+                .iter()
+                .zip(&next.hit_regions)
+                .all(|(current, replacement)| current.focus_overlay_patch_metadata_eq(replacement))
+            && self.scroll_regions == next.scroll_regions
+    }
+
+    /// A subtree recollection starts with a fresh focus-order counter, while the retained scene
+    /// stores orders assigned during the full-tree walk. Focus-ring patches change only paint; keep
+    /// the existing global order in the replacement chunks so a later ancestor recomposition
+    /// cannot make Tab order depend on which subtree was recollected first.
+    pub(crate) fn preserve_focus_orders_from(&mut self, source: &Self) -> bool {
+        fn preserve<VM>(target: &mut [HitRegion<VM>], source: &[HitRegion<VM>]) -> bool {
+            if target.len() != source.len() {
+                return false;
+            }
+            for (target, source) in target.iter_mut().zip(source) {
+                match (&source.focus, &mut target.focus) {
+                    (None, None) => {}
+                    (Some(source), Some(target))
+                        if source.widget_id == target.widget_id
+                            && source.tab_index == target.tab_index
+                            && source.scope_path == target.scope_path =>
+                    {
+                        target.order = source.order;
+                    }
+                    _ => return false,
+                }
+            }
+            true
+        }
+
+        preserve(&mut self.hit_regions, &source.hit_regions)
+            && preserve(&mut self.overlay_hit_regions, &source.overlay_hit_regions)
     }
 
     pub(crate) fn can_write_shape_color_slot(
@@ -1819,9 +1945,6 @@ impl<VM> ComputedScene<VM> {
         scroll_offset: usize,
         chunk: &ComputedScene<VM>,
     ) -> bool {
-        if !self.scene.splice_in_place(offset, &chunk.scene) {
-            return false;
-        }
         let Some(hit_end) = hit_offset.checked_add(chunk.hit_regions.len()) else {
             return false;
         };
@@ -1833,6 +1956,16 @@ impl<VM> ComputedScene<VM> {
         };
         if scroll_end > self.scroll_regions.len() {
             return false;
+        }
+        if !self.scene.splice_in_place(offset, &chunk.scene) {
+            return false;
+        }
+        let focus_navigation_changed = !self.hit_regions[hit_offset..hit_end]
+            .iter()
+            .zip(chunk.hit_regions.iter())
+            .all(|(current, replacement)| current.focus_navigation_metadata_eq(replacement));
+        if focus_navigation_changed {
+            self.mark_focus_navigation_metadata_changed();
         }
         self.invalidate_hit_test_index();
         self.invalidate_scroll_region_lookup_index();

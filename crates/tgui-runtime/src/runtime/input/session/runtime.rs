@@ -11,6 +11,26 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         computed: &ComputedScene<VM>,
     ) -> Option<WidgetId> {
         let focused = self.focused_widget_id()?;
+
+        // The navigation snapshot is keyed by the scene's focus metadata serial.  When it
+        // matches this computed scene, the text-input bit is an exact O(1) answer and avoids
+        // walking every normal/overlay hit region on each frame.
+        let is_current_cached_scene = self
+            .cached_scene
+            .as_ref()
+            .is_some_and(|cached| std::ptr::eq(&cached.computed, computed));
+        if is_current_cached_scene {
+            if let Some(is_text_input) = self.cached_focus_target_is_text_input(focused) {
+                return is_text_input.then_some(focused);
+            }
+            // `text_input_regions` is synchronized from the same computed scene.  It can answer
+            // the positive case without allocation; a miss is intentionally inconclusive and
+            // falls back to the exact hit-stream scan below.
+            if self.text_input_regions.contains_key(&focused) {
+                return Some(focused);
+            }
+        }
+
         computed
             .hit_regions
             .iter()

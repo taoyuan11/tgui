@@ -671,6 +671,36 @@ impl<VM> Clone for HitInteraction<VM> {
 }
 
 impl<VM> HitInteraction<VM> {
+    /// Keyboard activation capabilities used by the runtime focus-navigation index.
+    ///
+    /// Handler payloads and control state are read from the current `HitRegion` at dispatch time,
+    /// so replacing a command or toggling a control cannot leave a stale cached interaction.
+    pub(crate) fn keyboard_activation(&self) -> Option<(WidgetId, bool, bool)> {
+        let (id, enter, space) = match self {
+            Self::Widget {
+                id,
+                interactions,
+                default_activation,
+                ..
+            } if interactions.on_click.is_some() => (
+                *id,
+                default_activation.handles_enter(),
+                default_activation.handles_space(),
+            ),
+            Self::Checkbox { id, on_change, .. }
+            | Self::Radio { id, on_change, .. }
+            | Self::Switch { id, on_change, .. }
+                if on_change.is_some() =>
+            {
+                (*id, false, true)
+            }
+            Self::SelectTrigger { id, .. } => (*id, true, false),
+            Self::TabTrigger { id, on_change, .. } if on_change.is_some() => (*id, true, true),
+            _ => return None,
+        };
+        (enter || space).then_some((id, enter, space))
+    }
+
     pub(crate) fn widget_id(&self) -> WidgetId {
         match self.target_id() {
             HitTargetId::Widget(id) => id,
@@ -821,6 +851,15 @@ impl HitGeometry {
                 .any(|triangle| point_in_triangle(point, triangle[0], triangle[1], triangle[2])),
         }
     }
+
+    pub(crate) fn focus_overlay_patch_eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Rect, Self::Rect) => true,
+            (Self::Quad(left), Self::Quad(right)) => left == right,
+            (Self::Triangles(left), Self::Triangles(right)) => left.as_ref() == right.as_ref(),
+            _ => false,
+        }
+    }
 }
 
 pub(crate) struct HitRegion<VM> {
@@ -850,6 +889,52 @@ impl<VM> Clone for HitRegion<VM> {
 }
 
 impl<VM> HitRegion<VM> {
+    /// Equality for metadata consumed by cached keyboard focus navigation.
+    ///
+    /// Geometry, transforms, visual state, handlers, and mutable control payloads are excluded:
+    /// dispatch fetches those from the current scene. Paint-only and transform-only patches can
+    /// therefore retain the cache while tab order, scope membership, and key capability cannot.
+    pub(crate) fn focus_navigation_metadata_eq(&self, other: &Self) -> bool {
+        let focus_eq = match (&self.focus, &other.focus) {
+            (None, None) => true,
+            (Some(left), Some(right)) => {
+                left.widget_id == right.widget_id
+                    && left.tab_index == right.tab_index
+                    && left.order == right.order
+                    && left.scope_path == right.scope_path
+            }
+            (None, Some(_)) | (Some(_), None) => false,
+        };
+        focus_eq
+            && self.interaction.keyboard_activation() == other.interaction.keyboard_activation()
+    }
+
+    /// Equality for the geometry and interaction shape retained by the focus-ring-only patch.
+    /// Callback payloads are intentionally not compared (they are opaque commands), while a
+    /// change in target kind, focus metadata, or keyboard capability rejects the bounded path.
+    pub(crate) fn focus_overlay_patch_metadata_eq(&self, other: &Self) -> bool {
+        let focus_eq = match (&self.focus, &other.focus) {
+            (None, None) => true,
+            (Some(left), Some(right)) => {
+                left.widget_id == right.widget_id
+                    && left.tab_index == right.tab_index
+                    && left.scope_path == right.scope_path
+            }
+            _ => false,
+        };
+        self.rect == other.rect
+            && self.clip_rect == other.clip_rect
+            && self.geometry.focus_overlay_patch_eq(&other.geometry)
+            && self.transform_chain == other.transform_chain
+            && self.scope_path == other.scope_path
+            && self.gpu_scroll_container == other.gpu_scroll_container
+            && focus_eq
+            && self.interaction.keyboard_activation() == other.interaction.keyboard_activation()
+            && self.interaction.target_id() == other.interaction.target_id()
+            && std::mem::discriminant(&self.interaction)
+                == std::mem::discriminant(&other.interaction)
+    }
+
     pub(crate) fn transform_delta(
         &self,
         transform_records: &std::collections::HashMap<WidgetId, TransformRecord>,

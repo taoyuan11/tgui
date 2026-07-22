@@ -53,6 +53,7 @@ use crate::ui::widget::{
     Rect, ScrollbarAxis, ScrollbarHandle, TextEditState, WidgetId, WidgetTree,
 };
 pub(super) const INPUT_CARET_WIDTH: f32 = 2.0;
+pub(in crate::runtime) use self::focus::FocusNavigationSnapshot;
 use self::platform_keys::is_key_physically_pressed;
 use self::session::text_replacement_bounds;
 use self::text_input::{refresh_session_buffer, text_edit_display_text};
@@ -528,8 +529,13 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             }
             ElementState::Pressed if event.repeat => false,
             ElementState::Pressed => {
+                // Evaluate repeatability while the pre-event scene/cache is still valid.  A
+                // keyboard activation command may conservatively invalidate the scene; asking
+                // the same question after dispatch would synchronously rebuild a large tree just
+                // to decide that Enter/Space is not repeatable.
+                let allows_repeat = self.allows_repeated_keyboard_input(event);
                 let handled = self.handle_keyboard_input(event);
-                if handled && self.allows_repeated_keyboard_input(event) {
+                if handled && allows_repeat {
                     self.arm_key_repeat(event, Instant::now());
                 }
                 handled

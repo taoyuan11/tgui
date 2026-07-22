@@ -3,6 +3,20 @@ use super::*;
 impl<VM: 'static> BoundRuntimeHandler<VM> {
     pub(in crate::runtime) fn focused_text_input_id(&mut self) -> Option<WidgetId> {
         let focused = self.focused_widget_id()?;
+
+        // Keyboard focus navigation maintains an exact, scene-keyed index of focus metadata.
+        // Consult it before touching `computed_scene`; ordinary controls must not trigger a
+        // whole-scene recollect merely because a key handler asks whether IME applies.
+        if let Some(is_text_input) = self.cached_focus_target_is_text_input(focused) {
+            return is_text_input.then_some(focused);
+        }
+        // A freshly collected scene synchronizes this map before the next event.  It is a useful
+        // O(1) positive answer even when the navigation snapshot has not been built yet; absence
+        // is deliberately not treated as proof of a non-input and falls through to the exact scan.
+        if self.cached_text_input_region_data(focused).is_some() {
+            return Some(focused);
+        }
+
         let computed = self.computed_scene();
         computed
             .hit_regions

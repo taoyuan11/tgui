@@ -549,6 +549,14 @@ impl SelectStyle {
     pub(crate) fn default_for_density(theme: &Theme, density: Density) -> Self {
         let palette = palette_from_theme(theme);
         let metrics = control_density_metrics(theme, density);
+        let mut border = stateful_colors(
+            palette.outline_muted,
+            palette.outline,
+            palette.primary,
+            palette.disabled_surface,
+        );
+        border.focused = Some(Value::Static(palette.primary));
+        border.open = Some(Value::Static(palette.primary));
         Self {
             surface: WidgetSurfaceStyle::default(),
             background: stateful_colors(
@@ -569,12 +577,7 @@ impl SelectStyle {
                 palette.on_surface_muted,
                 palette.disabled_content,
             ),
-            border: stateful_colors(
-                palette.outline_muted,
-                palette.outline,
-                palette.primary,
-                palette.disabled_surface,
-            ),
+            border,
             focus_ring: None,
             arrow: stateful_single(
                 palette.on_surface_muted,
@@ -1368,6 +1371,16 @@ mod tests {
         let input = InputStyle::default_for_theme(&theme);
         assert_eq!(input.background.normal.resolve(), theme.colors.surface);
         assert_eq!(
+            input
+                .border
+                .resolve(WidgetState {
+                    focused: true,
+                    ..Default::default()
+                })
+                .resolve(),
+            theme.colors.primary
+        );
+        assert_eq!(
             input.caret.as_ref().map(Value::resolve),
             Some(theme.colors.primary)
         );
@@ -1380,6 +1393,18 @@ mod tests {
 
         let select = SelectStyle::default_for_theme(&theme);
         assert_eq!(select.background.normal.resolve(), theme.colors.surface);
+        for state in [
+            WidgetState {
+                focused: true,
+                ..Default::default()
+            },
+            WidgetState {
+                open: true,
+                ..Default::default()
+            },
+        ] {
+            assert_eq!(select.border.resolve(state).resolve(), theme.colors.primary);
+        }
         assert_eq!(
             select.selected_option_background.resolve(),
             theme.colors.primary_container
