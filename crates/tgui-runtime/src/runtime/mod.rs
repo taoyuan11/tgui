@@ -72,10 +72,10 @@ use self::state::{
     ClipboardService, DeferredMouseClick, DispatchedLifecycleState, DispatchedMediaState,
     FocusedWidget, HoverMoveHandler, HoverTargetId, HoverTransitionHandler, HoveredWidget,
     PendingClick, PendingLifecycleEvent, PendingMediaEvent, PendingSplitterClick,
-    RetainedButtonHoverPatch, RetainedButtonPressedPatch, RetainedRowHoverPatch, ScrollbarDrag,
-    SliderDrag, SmoothScrollState, StrictCapabilityEntry, StrictCapabilityKind,
-    StrictCapabilityReport, TextInputBufferState, TextInputSessionConfig, TextSelectionDrag,
-    TooltipState, TouchScrollDrag, TouchScrollInertiaState,
+    RetainedButtonHoverPatch, RetainedButtonPressedPatch, RetainedHoverPatch,
+    RetainedRowHoverPatch, ScrollbarDrag, SliderDrag, SmoothScrollState, StrictCapabilityEntry,
+    StrictCapabilityKind, StrictCapabilityReport, TextInputBufferState, TextInputSessionConfig,
+    TextSelectionDrag, TooltipState, TouchScrollDrag, TouchScrollInertiaState,
 };
 use self::theme::{resolve_theme, resolve_window_theme};
 use self::windows::MultiWindowHandler;
@@ -144,6 +144,7 @@ use std::time::{Duration, Instant};
 
 pub(super) const DOUBLE_CLICK_THRESHOLD: Duration = Duration::from_millis(300);
 const CARET_BLINK_INTERVAL: Duration = Duration::from_millis(500);
+const IDLE_REDRAW_INTERVAL: Duration = Duration::from_secs(1);
 const KEY_REPEAT_INITIAL_DELAY: Duration = Duration::from_millis(300);
 const KEY_REPEAT_INTERVAL: Duration = Duration::from_millis(33);
 pub(super) const TOUCH_SCROLL_ACTIVATION_THRESHOLD: f32 = 8.0;
@@ -323,6 +324,9 @@ pub struct BoundRuntimeHandler<VM> {
     animation_engine: AnimationEngine,
     frame_clock: AdaptiveFrameClock,
     last_frame_clock_probe: Option<Instant>,
+    next_idle_redraw_deadline: Option<Instant>,
+    window_occluded: bool,
+    surface_occluded: bool,
     animation_epoch: u64,
     layout_animation_epoch: u64,
     accessibility_animation_epoch: u64,
@@ -331,6 +335,7 @@ pub struct BoundRuntimeHandler<VM> {
     modifiers: ModifiersState,
     hovered_widgets: SmallVec<[HoveredWidget<VM>; 8]>,
     button_hover_patch_pending: Option<RetainedButtonHoverPatch>,
+    hover_patch_pending: Option<RetainedHoverPatch>,
     button_pressed_patch_pending: Option<RetainedButtonPressedPatch>,
     row_hover_patch_pending: Option<RetainedRowHoverPatch>,
     /// Widget 进入 hover 的时间戳（按 `WidgetId` 索引）。
@@ -518,6 +523,9 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             animation_engine: AnimationEngine::default(),
             frame_clock: AdaptiveFrameClock::new(Instant::now()),
             last_frame_clock_probe: None,
+            next_idle_redraw_deadline: None,
+            window_occluded: false,
+            surface_occluded: false,
             animation_epoch: 0,
             layout_animation_epoch: 0,
             accessibility_animation_epoch: 0,
@@ -526,6 +534,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             modifiers: ModifiersState::default(),
             hovered_widgets: SmallVec::new(),
             button_hover_patch_pending: None,
+            hover_patch_pending: None,
             button_pressed_patch_pending: None,
             row_hover_patch_pending: None,
             tooltip_hover_started_at: HashMap::new(),

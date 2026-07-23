@@ -114,6 +114,27 @@ pub(in crate::runtime) mod button_hover_patch_probe {
 }
 
 #[cfg(test)]
+pub(in crate::runtime) mod retained_hover_patch_probe {
+    use std::cell::Cell;
+
+    thread_local! {
+        static HITS: Cell<u64> = const { Cell::new(0) };
+    }
+
+    pub(in crate::runtime) fn reset() {
+        HITS.with(|hits| hits.set(0));
+    }
+
+    pub(in crate::runtime) fn record_hit() {
+        HITS.with(|hits| hits.set(hits.get() + 1));
+    }
+
+    pub(in crate::runtime) fn hits() -> u64 {
+        HITS.with(Cell::get)
+    }
+}
+
+#[cfg(test)]
 pub(in crate::runtime) mod button_pressed_patch_probe {
     use std::cell::Cell;
 
@@ -1320,6 +1341,104 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         true
     }
 
+    fn try_retained_hover_fast_path(
+        &mut self,
+        viewport: Rect,
+        units: UnitContext,
+        caret_visible: bool,
+        active_scrollbar: Option<ScrollbarHandle>,
+        now: Instant,
+    ) -> bool {
+        let Some(pending) = self.hover_patch_pending.take() else {
+            return false;
+        };
+        if !self.button_hover_runtime_is_idle()
+            || self.invalidation.revision() != pending.source_invalidation_revision
+            || self.last_invalidation_revision != pending.source_invalidation_revision
+            || self.invalidation.root_rebuild_revision() != pending.source_root_rebuild_revision
+            || self.last_root_rebuild_revision != pending.source_root_rebuild_revision
+            || self.hover_epoch != pending.source_hover_epoch.wrapping_add(1)
+        {
+            super::action_stats::record("retained_hover_patch_reject_guard");
+            return false;
+        }
+        let roots = {
+            let Some(cached) = self.cached_scene.as_ref() else {
+                return false;
+            };
+            if !cached.computed_valid
+                || !cached.layout_valid
+                || cached.gpu_scroll_deferred
+                || cached.hover_epoch != pending.source_hover_epoch
+                || cached.scroll_epoch != self.scroll_epoch
+                || cached.accessibility_animation_epoch != self.accessibility_animation_epoch
+                || !Self::button_hover_path_is_passive(&self.hovered_widgets)
+                || !self.scene_cache_fields_match_ignoring_scroll_and_hover(
+                    cached,
+                    viewport,
+                    units,
+                    caret_visible,
+                    active_scrollbar,
+                )
+            {
+                super::action_stats::record("retained_hover_patch_reject_cache");
+                return false;
+            }
+            let Some(layout) = cached.layout.as_ref() else {
+                return false;
+            };
+            if layout.contains_virtual() {
+                return false;
+            }
+            if pending.next_root.is_some_and(|root| {
+                !self
+                    .hovered_widgets
+                    .iter()
+                    .any(|hovered| hovered.target_id == HoverTargetId::Widget(root))
+            }) {
+                return false;
+            }
+
+            let mut roots = SmallVec::<[WidgetId; 2]>::new();
+            for root in [pending.previous_root, pending.next_root]
+                .into_iter()
+                .flatten()
+            {
+                if roots.contains(&root)
+                    || !Self::is_simple_retained_hover_root(layout, root)
+                    || !cached
+                        .scene_chunks
+                        .get(&root)
+                        .is_some_and(|chunk| chunk.is_simple_for_button_hover_recompose())
+                    || !cached.visual_contexts.contains_key(&root)
+                {
+                    return false;
+                }
+                roots.push(root);
+            }
+            if roots.len() == 2 {
+                let Some(first_path) = layout.path_for(roots[0]) else {
+                    return false;
+                };
+                let Some(second_path) = layout.path_for(roots[1]) else {
+                    return false;
+                };
+                if first_path.starts_with(second_path) || second_path.starts_with(first_path) {
+                    return false;
+                }
+            }
+            roots
+        };
+        if roots.is_empty() || !self.patch_cached_scene_for_roots(&roots, now, true) {
+            super::action_stats::record("retained_hover_patch_reject_patch");
+            return false;
+        }
+        #[cfg(test)]
+        retained_hover_patch_probe::record_hit();
+        super::action_stats::record("retained_hover_scene_patch");
+        true
+    }
+
     fn try_retained_button_pressed_fast_path(
         &mut self,
         viewport: Rect,
@@ -1534,6 +1653,22 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 .cached_scene
                 .as_ref()
                 .expect("Button hover patch should preserve cached scene")
+                .computed;
+        }
+        if !cache_valid
+            && layout_cache_valid
+            && self.try_retained_hover_fast_path(
+                viewport,
+                units,
+                caret_visible,
+                active_scrollbar,
+                now,
+            )
+        {
+            return &self
+                .cached_scene
+                .as_ref()
+                .expect("retained hover patch should preserve cached scene")
                 .computed;
         }
         if !cache_valid
@@ -2185,8 +2320,11 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
 fn with_runtime_scene_stack<R>(f: impl FnOnce() -> R) -> R {
     #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
     {
+        // Scene collection is a frame hot path. Keep the stack guard, but allocate a segmented
+        // stack only when the current stack is actually near its limit.
+        const RUNTIME_SCENE_STACK_RED_ZONE: usize = 2 * 1024 * 1024;
         const RUNTIME_SCENE_STACK_SIZE: usize = 16 * 1024 * 1024;
-        return stacker::grow(RUNTIME_SCENE_STACK_SIZE, f);
+        return stacker::maybe_grow(RUNTIME_SCENE_STACK_RED_ZONE, RUNTIME_SCENE_STACK_SIZE, f);
     }
 
     #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]

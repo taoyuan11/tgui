@@ -418,9 +418,16 @@ fn assert_button_hover_scene_equivalent(
     actual: &crate::ui::widget::ComputedScene<TestVm>,
     expected: &crate::ui::widget::ComputedScene<TestVm>,
 ) {
-    super::super::table_tests::assert_data_grid_scene_equivalent(actual, expected);
     assert!(actual.is_simple_for_button_hover_recompose());
     assert!(expected.is_simple_for_button_hover_recompose());
+    assert_retained_hover_scene_equivalent(actual, expected);
+}
+
+fn assert_retained_hover_scene_equivalent(
+    actual: &crate::ui::widget::ComputedScene<TestVm>,
+    expected: &crate::ui::widget::ComputedScene<TestVm>,
+) {
+    super::super::table_tests::assert_data_grid_scene_equivalent(actual, expected);
     assert_eq!(
         button_command_fingerprints(&actual.scene.commands),
         button_command_fingerprints(&expected.scene.commands)
@@ -478,6 +485,97 @@ fn button_hover_fixture(second_tooltip: bool) -> (WidgetTree<TestVm>, WidgetId, 
     )
 }
 
+fn passive_container_hover_fixture(
+    second_tooltip: bool,
+) -> (WidgetTree<TestVm>, WidgetId, WidgetId) {
+    let make_item = |label: &'static str, color: Color, tooltip: bool| {
+        let item = Stack::new()
+            .size(dp(92.0), dp(44.0))
+            .cursor(CursorStyle::Pointer)
+            .style_full(move |ctx| {
+                let mut style = ContainerStyle::default_for_theme(ctx.theme);
+                style.surface.background = Some(color.into());
+                style
+            })
+            .on_click(Command::new(|_: &mut TestVm| {}))
+            .child(Text::new(label));
+        let mut element: Element<TestVm> = item.into();
+        if tooltip {
+            element = element.with_tooltip(Tooltip::new("hint").delay(Duration::ZERO));
+        }
+        element
+    };
+    let first = make_item("First", Color::hexa(0x334155FF), false);
+    let second = make_item("Second", Color::hexa(0x475569FF), second_tooltip);
+    let first_id = first.id;
+    let second_id = second.id;
+    (
+        WidgetTree::new(
+            Flex::new(Axis::Horizontal)
+                .size(dp(220.0), dp(56.0))
+                .gap(dp(12.0))
+                .child(first)
+                .child(second),
+        ),
+        first_id,
+        second_id,
+    )
+}
+
+fn passive_container_hover_fixture_with_input() -> (WidgetTree<TestVm>, WidgetId, WidgetId) {
+    let make_item = |label: &'static str, color: Color| {
+        Stack::new()
+            .size(dp(92.0), dp(44.0))
+            .cursor(CursorStyle::Pointer)
+            .style_full(move |ctx| {
+                let mut style = ContainerStyle::default_for_theme(ctx.theme);
+                style.surface.background = Some(color.into());
+                style
+            })
+            .on_click(Command::new(|_: &mut TestVm| {}))
+            .child(Text::new(label))
+    };
+    let first: Element<TestVm> = make_item("First", Color::hexa(0x334155FF)).into();
+    let second: Element<TestVm> = make_item("Second", Color::hexa(0x475569FF)).into();
+    let first_id = first.id;
+    let second_id = second.id;
+    let sibling = Stack::new()
+        .size(dp(200.0), dp(44.0))
+        .focus_scope(FocusScopeOptions::new().trap(true))
+        .on_mount(Command::new(|_: &mut TestVm| {}))
+        .child(Input::<TestVm>::new("sibling input"));
+    (
+        WidgetTree::new(
+            Flex::vertical()
+                .size(dp(240.0), dp(120.0))
+                .child(
+                    Flex::new(Axis::Horizontal)
+                        .size(dp(220.0), dp(56.0))
+                        .gap(dp(12.0))
+                        .child(first)
+                        .child(second),
+                )
+                .child(sibling),
+        ),
+        first_id,
+        second_id,
+    )
+}
+
+fn input_hover_fixture() -> (WidgetTree<TestVm>, WidgetId) {
+    let input: Element<TestVm> = Input::new("hover me").size(dp(200.0), dp(40.0)).into();
+    let input_id = input.id;
+    (
+        WidgetTree::new(
+            Flex::vertical()
+                .size(dp(240.0), dp(80.0))
+                .padding(Insets::all(dp(12.0)))
+                .child(input),
+        ),
+        input_id,
+    )
+}
+
 fn button_hit_center(handler: &mut BoundRuntimeHandler<TestVm>, id: WidgetId) -> Point {
     handler
         .computed_scene()
@@ -491,6 +589,21 @@ fn button_hit_center(handler: &mut BoundRuntimeHandler<TestVm>, id: WidgetId) ->
                 ))
         })
         .expect("Button should expose a visible hit region")
+}
+
+fn widget_hit_center(handler: &mut BoundRuntimeHandler<TestVm>, id: WidgetId) -> Point {
+    handler
+        .computed_scene()
+        .hit_regions
+        .iter()
+        .find_map(|region| {
+            (region.interaction.target_id() == crate::ui::widget::HitTargetId::Widget(id))
+                .then_some(Point::new(
+                    region.rect.x + region.rect.width * 0.5,
+                    region.rect.y + region.rect.height * 0.5,
+                ))
+        })
+        .expect("container should expose a visible hit region")
 }
 
 fn move_button_pointer(handler: &mut BoundRuntimeHandler<TestVm>, point: Point) {
@@ -590,6 +703,129 @@ fn simple_button_hover_single_and_two_root_patches_match_full_recollect() {
     handler.invalidate_computed_scene();
     let full = handler.computed_scene().clone();
     assert_button_hover_scene_equivalent(&retained, &full);
+}
+
+#[test]
+fn passive_container_hover_patch_matches_full_recollect() {
+    let invalidation = InvalidationSignal::new();
+    let (tree, first_id, second_id) = passive_container_hover_fixture(false);
+    let mut handler = test_handler(Some(tree), invalidation);
+    handler.reduced_motion = true;
+    let first = widget_hit_center(&mut handler, first_id);
+    let second = widget_hit_center(&mut handler, second_id);
+    handler.request_redraw_if_dirty(Instant::now());
+
+    crate::runtime::scene_runtime::retained_hover_patch_probe::reset();
+    move_button_pointer(&mut handler, first);
+    assert!(handler.hover_patch_pending.is_some());
+    let _ = handler.computed_scene();
+    assert_eq!(
+        crate::runtime::scene_runtime::retained_hover_patch_probe::hits(),
+        1,
+        "none -> passive Stack should patch its changed subtree"
+    );
+
+    crate::runtime::scene_runtime::retained_hover_patch_probe::reset();
+    move_button_pointer(&mut handler, second);
+    assert!(handler.hover_patch_pending.is_some());
+    let retained = handler.computed_scene().clone();
+    assert_eq!(
+        crate::runtime::scene_runtime::retained_hover_patch_probe::hits(),
+        1,
+        "passive Stack A -> B should patch both changed subtrees"
+    );
+
+    handler.invalidate_computed_scene();
+    let full = handler.computed_scene().clone();
+    assert_button_hover_scene_equivalent(&retained, &full);
+}
+
+#[test]
+fn input_hover_border_patch_matches_full_recollect() {
+    let invalidation = InvalidationSignal::new();
+    let (tree, input_id) = input_hover_fixture();
+    let mut handler = test_handler(Some(tree), invalidation);
+    handler.reduced_motion = true;
+    let input = widget_hit_center(&mut handler, input_id);
+    handler.request_redraw_if_dirty(Instant::now());
+
+    crate::runtime::scene_runtime::retained_hover_patch_probe::reset();
+    move_button_pointer(&mut handler, input);
+    assert!(handler.hover_patch_pending.is_some());
+    let retained = handler.computed_scene().clone();
+    assert_eq!(
+        crate::runtime::scene_runtime::retained_hover_patch_probe::hits(),
+        1,
+        "Input hover should patch its border-bearing subtree"
+    );
+
+    handler.invalidate_computed_scene();
+    let full = handler.computed_scene().clone();
+    assert_retained_hover_scene_equivalent(&retained, &full);
+}
+
+#[test]
+fn passive_container_hover_patch_rejects_tooltip_overlay() {
+    let invalidation = InvalidationSignal::new();
+    let (tree, first_id, second_id) = passive_container_hover_fixture(true);
+    let mut handler = test_handler(Some(tree), invalidation);
+    handler.reduced_motion = true;
+    let first = widget_hit_center(&mut handler, first_id);
+    let second = widget_hit_center(&mut handler, second_id);
+    handler.request_redraw_if_dirty(Instant::now());
+    move_button_pointer(&mut handler, first);
+    let _ = handler.computed_scene();
+    move_button_pointer(&mut handler, second);
+    assert!(handler.hover_patch_pending.is_none());
+    crate::runtime::scene_runtime::retained_hover_patch_probe::reset();
+    let fallback = handler.computed_scene().clone();
+    assert_eq!(
+        crate::runtime::scene_runtime::retained_hover_patch_probe::hits(),
+        0
+    );
+    handler.invalidate_computed_scene();
+    let full = handler.computed_scene().clone();
+    assert_retained_hover_scene_equivalent(&fallback, &full);
+}
+
+#[test]
+fn passive_container_hover_patch_ignores_unrelated_input_and_lifecycle_state() {
+    let invalidation = InvalidationSignal::new();
+    let (tree, first_id, second_id) = passive_container_hover_fixture_with_input();
+    let mut handler = test_handler(Some(tree), invalidation);
+    handler.reduced_motion = true;
+    let _ = handler.computed_scene();
+    handler.dispatch_lifecycle_events_if_needed();
+    let cached = handler
+        .cached_scene
+        .as_ref()
+        .expect("complex sibling cache");
+    assert!(!cached.lifecycle_states.is_empty());
+    assert!(!cached.computed.is_simple_for_button_hover_recompose());
+    let first = widget_hit_center(&mut handler, first_id);
+    let second = widget_hit_center(&mut handler, second_id);
+    handler.request_redraw_if_dirty(Instant::now());
+
+    crate::runtime::scene_runtime::retained_hover_patch_probe::reset();
+    move_button_pointer(&mut handler, first);
+    assert!(handler.hover_patch_pending.is_some());
+    let _ = handler.computed_scene();
+    assert_eq!(
+        crate::runtime::scene_runtime::retained_hover_patch_probe::hits(),
+        1,
+        "unrelated input/lifecycle state must not disable passive container patching"
+    );
+
+    crate::runtime::scene_runtime::retained_hover_patch_probe::reset();
+    move_button_pointer(&mut handler, second);
+    let retained = handler.computed_scene().clone();
+    assert_eq!(
+        crate::runtime::scene_runtime::retained_hover_patch_probe::hits(),
+        1
+    );
+    handler.invalidate_computed_scene();
+    let full = handler.computed_scene().clone();
+    assert_retained_hover_scene_equivalent(&retained, &full);
 }
 
 #[test]

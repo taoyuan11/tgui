@@ -30,6 +30,12 @@ impl<VM: ViewModel> ApplicationHandler for BoundRuntimeHandler<VM> {
             return;
         }
 
+        // `Occluded` is intentionally kept out of the public platform event enum, but it
+        // controls whether the internal idle redraw heartbeat should remain armed.
+        if let winit::event::WindowEvent::Occluded(occluded) = &event {
+            self.set_window_occluded(*occluded);
+        }
+
         if matches!(
             &event,
             winit::event::WindowEvent::Moved(_)

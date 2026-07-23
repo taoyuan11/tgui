@@ -394,6 +394,14 @@ impl<VM: ViewModel> ApplicationHandler for MultiWindowHandler<VM> {
             return;
         };
 
+        // Keep winit's occlusion signal internal: it only controls the per-window idle
+        // heartbeat and must not become part of the public `WindowEvent` API.
+        if let winit::event::WindowEvent::Occluded(occluded) = &event {
+            if let Some(window) = self.windows_by_key.get_mut(&key) {
+                window.set_window_occluded(*occluded);
+            }
+        }
+
         if matches!(
             &event,
             winit::event::WindowEvent::Moved(_)

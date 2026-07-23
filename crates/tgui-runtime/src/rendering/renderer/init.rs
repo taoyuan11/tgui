@@ -72,6 +72,7 @@ impl Renderer {
         let mut renderer = Box::new(Self {
             window: Some(window),
             surface: Some(surface),
+            surface_occluded: false,
             device,
             queue,
             config,
@@ -252,6 +253,7 @@ impl Renderer {
         let mut renderer = Box::new(Self {
             window: None,
             surface: None,
+            surface_occluded: false,
             device,
             queue,
             config,

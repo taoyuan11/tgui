@@ -219,6 +219,11 @@ impl SvgDocument {
         }
     }
 
+    #[cfg(test)]
+    pub(in crate::media) fn font_database(&self) -> &Arc<usvg::fontdb::Database> {
+        self.tree.fontdb()
+    }
+
     fn texture_for(
         &mut self,
         raster_request: RasterRequest,

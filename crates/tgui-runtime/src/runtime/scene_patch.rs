@@ -1213,8 +1213,15 @@ fn computed_allows_direct_scene_splice<VM>(computed: &ComputedScene<VM>) -> bool
 fn with_runtime_scene_patch_stack<R>(f: impl FnOnce() -> R) -> R {
     #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
     {
+        // Patch collection can be entered for every hover/interaction update. Preserve the
+        // overflow guard without paying for a new stack on every successful fast-path call.
+        const RUNTIME_SCENE_PATCH_STACK_RED_ZONE: usize = 2 * 1024 * 1024;
         const RUNTIME_SCENE_PATCH_STACK_SIZE: usize = 16 * 1024 * 1024;
-        return stacker::grow(RUNTIME_SCENE_PATCH_STACK_SIZE, f);
+        return stacker::maybe_grow(
+            RUNTIME_SCENE_PATCH_STACK_RED_ZONE,
+            RUNTIME_SCENE_PATCH_STACK_SIZE,
+            f,
+        );
     }
 
     #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]

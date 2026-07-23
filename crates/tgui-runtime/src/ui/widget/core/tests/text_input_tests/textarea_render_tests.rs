@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-fn keyboard_focused_textarea_renders_theme_focus_ring() {
+fn keyboard_focused_textarea_uses_active_border_without_second_focus_ring() {
     let theme = Theme::default();
     let font_manager = FontManager::new(&FontCatalog::default());
     let media = test_media();
@@ -39,11 +39,11 @@ fn keyboard_focused_textarea_renders_theme_focus_ring() {
         false,
     );
 
-    assert!(rendered.primitives.overlay_shapes.iter().any(|shape| {
-        shape.color == theme.focus_ring.color
-            && shape.stroke_width == theme.focus_ring.width.get()
-            && shape.rect.width > dp(220.0)
-            && shape.rect.height > dp(72.0)
+    assert!(rendered.primitives.shapes.iter().any(|shape| {
+        shape.stroke_width == theme.border.thin.get() && shape.color == theme.colors.primary
+    }));
+    assert!(!rendered.primitives.overlay_shapes.iter().any(|shape| {
+        shape.color == theme.focus_ring.color && shape.stroke_width == theme.focus_ring.width.get()
     }));
 }
 

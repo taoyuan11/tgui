@@ -1004,8 +1004,11 @@ fn accessibility_focus_candidate<VM>(
 fn with_accessibility_action_stack<R>(f: impl FnOnce() -> R) -> R {
     #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
     {
+        // Accessibility polling is performed on every event-loop turn. Grow lazily so an idle
+        // poll does not allocate and tear down a 16 MiB temporary stack.
+        const ACTION_STACK_RED_ZONE: usize = 2 * 1024 * 1024;
         const ACTION_STACK_SIZE: usize = 16 * 1024 * 1024;
-        return stacker::grow(ACTION_STACK_SIZE, f);
+        return stacker::maybe_grow(ACTION_STACK_RED_ZONE, ACTION_STACK_SIZE, f);
     }
 
     #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]

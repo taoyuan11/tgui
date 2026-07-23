@@ -849,24 +849,34 @@ fn all_stale_allocation_metadata_is_valid(
     page_width: u32,
     page_height: u32,
 ) -> bool {
-    if pages.iter().enumerate().any(|(index, page)| {
-        pages[..index]
-            .iter()
-            .any(|other| other.page_id == page.page_id)
-    }) || allocations.len()
-        != pages
-            .iter()
-            .map(|page| page.live_allocations)
-            .sum::<usize>()
-    {
+    let mut pages_by_id = std::collections::HashMap::with_capacity(pages.len());
+    let mut expected_allocation_count = 0usize;
+    for page in pages {
+        if pages_by_id
+            .insert(page.page_id, (page.format, page.live_allocations))
+            .is_some()
+        {
+            return false;
+        }
+        let Some(next_expected_allocation_count) =
+            expected_allocation_count.checked_add(page.live_allocations)
+        else {
+            return false;
+        };
+        expected_allocation_count = next_expected_allocation_count;
+    }
+    if allocations.len() != expected_allocation_count {
         return false;
     }
 
-    for (index, allocation) in allocations.iter().enumerate() {
-        let Some(page) = pages.iter().find(|page| page.page_id == allocation.page_id) else {
+    let mut seen_allocations = std::collections::HashSet::with_capacity(allocations.len());
+    let mut allocations_by_page =
+        std::collections::HashMap::<u64, usize>::with_capacity(pages.len());
+    for allocation in allocations {
+        let Some((page_format, _)) = pages_by_id.get(&allocation.page_id) else {
             return false;
         };
-        if allocation.format != page.format
+        if allocation.format != *page_format
             || allocation.width == 0
             || allocation.height == 0
             || allocation
@@ -877,18 +887,21 @@ fn all_stale_allocation_metadata_is_valid(
                 .y
                 .checked_add(allocation.height)
                 .is_none_or(|bottom| bottom > page_height)
-            || allocations[..index].contains(allocation)
+            || !seen_allocations.insert((
+                allocation.page_id,
+                allocation.x,
+                allocation.y,
+                allocation.width,
+                allocation.height,
+            ))
         {
             return false;
         }
+        *allocations_by_page.entry(allocation.page_id).or_default() += 1;
     }
 
     pages.iter().all(|page| {
-        allocations
-            .iter()
-            .filter(|allocation| allocation.page_id == page.page_id)
-            .count()
-            == page.live_allocations
+        allocations_by_page.get(&page.page_id).copied().unwrap_or(0) == page.live_allocations
     })
 }
 
@@ -2415,6 +2428,15 @@ mod tests {
             64,
         ));
 
+        let mut wrong_page_count = allocations.clone();
+        wrong_page_count[1] = allocation(22, TextAtlasFormat::Rgba, 24);
+        assert!(!all_stale_allocation_metadata_is_valid(
+            &pages,
+            &wrong_page_count,
+            64,
+            64,
+        ));
+
         let mut out_of_bounds = allocations.clone();
         out_of_bounds[0].x = 60;
         assert!(!all_stale_allocation_metadata_is_valid(
@@ -2430,6 +2452,33 @@ mod tests {
             &allocations[..4],
             64,
             64,
+        ));
+    }
+
+    #[test]
+    fn text_atlas_all_stale_metadata_handles_dense_page() {
+        const SIDE: u32 = 64;
+        let pages = [TextAtlasPageReleaseMetadata {
+            page_id: 7,
+            format: TextAtlasFormat::R8Coverage,
+            live_allocations: (SIDE * SIDE) as usize,
+        }];
+        let allocations = (0..SIDE * SIDE)
+            .map(|index| TextAtlasAllocation {
+                page_id: 7,
+                format: TextAtlasFormat::R8Coverage,
+                x: index % SIDE,
+                y: index / SIDE,
+                width: 1,
+                height: 1,
+            })
+            .collect::<Vec<_>>();
+
+        assert!(all_stale_allocation_metadata_is_valid(
+            &pages,
+            &allocations,
+            SIDE,
+            SIDE,
         ));
     }
 

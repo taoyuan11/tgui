@@ -339,6 +339,21 @@ pub(super) struct RetainedButtonHoverPatch {
     pub(super) source_root_rebuild_revision: u64,
 }
 
+/// A conservative retained patch for a passive hover-path transition on an arbitrary widget.
+///
+/// Buttons and data-grid rows have specialized variants because they expose additional runtime
+/// state.  Ordinary containers (for example navigation rows built from `Stack`) only need their
+/// changed hover subtrees recollected; all other scene metadata remains unchanged and the normal
+/// patch validator still decides whether the operation can be committed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct RetainedHoverPatch {
+    pub(super) previous_root: Option<WidgetId>,
+    pub(super) next_root: Option<WidgetId>,
+    pub(super) source_hover_epoch: u64,
+    pub(super) source_invalidation_revision: u64,
+    pub(super) source_root_rebuild_revision: u64,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct RetainedButtonPressedPatch {
     pub(super) button: WidgetId,

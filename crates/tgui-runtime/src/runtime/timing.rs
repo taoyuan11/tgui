@@ -47,10 +47,14 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         let had_hovered_widgets = !self.hovered_widgets.is_empty();
         let previous_scrollbar = self.hovered_scrollbar;
         self.button_hover_patch_pending = None;
+        self.hover_patch_pending = None;
         self.button_pressed_patch_pending = None;
         if had_hovered_widgets {
             self.button_hover_patch_pending = self.retained_button_hover_patch_candidate(&[]);
             self.row_hover_patch_pending = self.retained_row_hover_patch_candidate(&[]);
+            if self.button_hover_patch_pending.is_none() && self.row_hover_patch_pending.is_none() {
+                self.hover_patch_pending = self.retained_hover_patch_candidate(&[]);
+            }
         }
         for hovered in std::mem::take(&mut self.hovered_widgets).into_iter().rev() {
             if let Some(command) = hovered.on_mouse_leave {
@@ -73,6 +77,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         self.flush_pending_click_if_due(now);
         let _ = self.flush_pending_long_press_if_due(now);
         let _ = self.flush_tooltip_release_if_due(now);
+        let idle_redraw_requested = self.drive_idle_redraw(now);
 
         let mut frame_advanced = false;
         let mut smooth_scroll_advanced = false;
@@ -215,6 +220,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         let carousel_deadline = self.next_carousel_wakeup_deadline;
         let tooltip_deadline = self.next_tooltip_wakeup_deadline;
         let toast_deadline = self.next_toast_wakeup_deadline;
+        let idle_redraw_deadline = self.next_idle_redraw_deadline;
         let next_deadline = super::handler_support::earliest_deadline([
             animation_deadline,
             media_deadline,
@@ -226,6 +232,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             tooltip_deadline,
             toast_deadline,
             carousel_deadline,
+            idle_redraw_deadline,
         ]);
 
         self.set_control_flow_for_deadline(event_loop, next_deadline, now);
@@ -247,13 +254,14 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 "textarea_animation",
                 started_at.elapsed(),
                 format!(
-                    "smooth_scroll_advanced={} touch_scroll_inertia_advanced={} controller_changed={} engine_changed={} engine_layout_changed={} frame_advanced={} animation_active={} controller_active={} media_active={} pending_click={} gesture_deadline={} tooltip_release_deadline={} caret_deadline={} key_repeat_deadline={} carousel_deadline={} smooth_scroll_deadline={} touch_scroll_inertia_deadline={} next_deadline={}",
+                    "smooth_scroll_advanced={} touch_scroll_inertia_advanced={} controller_changed={} engine_changed={} engine_layout_changed={} frame_advanced={} idle_redraw_requested={} animation_active={} controller_active={} media_active={} pending_click={} gesture_deadline={} tooltip_release_deadline={} caret_deadline={} key_repeat_deadline={} carousel_deadline={} smooth_scroll_deadline={} touch_scroll_inertia_deadline={} next_deadline={}",
                     smooth_scroll_advanced,
                     touch_scroll_inertia_advanced,
                     controller_changed,
                     animation_refresh.changed,
                     animation_refresh.layout_changed,
                     frame_advanced,
+                    idle_redraw_requested,
                     animation_deadline.is_some(),
                     controller_frame.active,
                     media_deadline.is_some(),

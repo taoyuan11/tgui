@@ -3,6 +3,92 @@ use super::*;
 const FRAME_CLOCK_REFRESH_PROBE_INTERVAL: Duration = Duration::from_millis(250);
 
 impl<VM: 'static> BoundRuntimeHandler<VM> {
+    fn idle_redraw_eligible(&self) -> bool {
+        !self.window_occluded
+            && !self.surface_occluded
+            && self.renderer.is_some()
+            && self.window.as_ref().is_some_and(|window| {
+                let size = window.surface_size();
+                size.width > 0 && size.height > 0
+            })
+    }
+
+    pub(super) fn arm_idle_redraw(&mut self, now: Instant) {
+        self.next_idle_redraw_deadline = self
+            .idle_redraw_eligible()
+            .then(|| now.checked_add(IDLE_REDRAW_INTERVAL).unwrap_or(now));
+    }
+
+    pub(super) fn disarm_idle_redraw(&mut self) {
+        self.next_idle_redraw_deadline = None;
+    }
+
+    pub(super) fn update_idle_redraw_after_render(&mut self, status: &RenderStatus, now: Instant) {
+        match status {
+            RenderStatus::Rendered => {
+                self.surface_occluded = false;
+                self.arm_idle_redraw(now);
+            }
+            RenderStatus::ReconfigureSurface | RenderStatus::SkipFrame => {}
+        }
+    }
+
+    pub(super) fn mark_surface_occluded(&mut self) {
+        self.surface_occluded = true;
+        self.disarm_idle_redraw();
+    }
+
+    pub(super) fn set_window_occluded(&mut self, occluded: bool) {
+        if self.window_occluded == occluded {
+            if !occluded && self.surface_occluded {
+                if let Some(window) = self.window.as_ref() {
+                    window.request_redraw();
+                }
+            }
+            return;
+        }
+
+        self.window_occluded = occluded;
+        if occluded {
+            self.disarm_idle_redraw();
+            return;
+        }
+
+        if let Some(window) = self.window.as_ref() {
+            window.request_redraw();
+        }
+    }
+
+    pub(super) fn drive_idle_redraw(&mut self, now: Instant) -> bool {
+        let eligible = self.idle_redraw_eligible();
+        self.drive_idle_redraw_inner(now, eligible)
+    }
+
+    pub(super) fn drive_idle_redraw_inner(&mut self, now: Instant, eligible: bool) -> bool {
+        if !eligible {
+            self.disarm_idle_redraw();
+            return false;
+        }
+
+        let Some(deadline) = self.next_idle_redraw_deadline else {
+            return false;
+        };
+        if deadline > now {
+            return false;
+        }
+
+        self.next_idle_redraw_deadline = Some(next_periodic_deadline_after(
+            deadline,
+            IDLE_REDRAW_INTERVAL,
+            now,
+        ));
+        if let Some(window) = self.window.as_ref() {
+            window.request_redraw();
+            return true;
+        }
+        false
+    }
+
     pub(super) fn refresh_frame_clock_from_monitor(&mut self, now: Instant, force: bool) -> bool {
         if !force
             && self.last_frame_clock_probe.is_some_and(|last| {
@@ -79,6 +165,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         let tooltip_deadline = self.next_tooltip_wakeup_deadline;
         let toast_deadline = self.next_toast_wakeup_deadline;
         let carousel_deadline = self.next_carousel_wakeup_deadline;
+        let idle_redraw_deadline = self.next_idle_redraw_deadline;
         earliest_deadline([
             animation_deadline,
             media_deadline,
@@ -90,6 +177,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             tooltip_deadline,
             toast_deadline,
             carousel_deadline,
+            idle_redraw_deadline,
         ])
     }
 
@@ -343,4 +431,17 @@ pub(super) fn earliest_deadline<const N: usize>(
     deadlines: [Option<Instant>; N],
 ) -> Option<Instant> {
     deadlines.into_iter().flatten().min()
+}
+
+fn next_periodic_deadline_after(deadline: Instant, interval: Duration, now: Instant) -> Instant {
+    let interval_nanos = interval.as_nanos().max(1);
+    let elapsed_nanos = now.saturating_duration_since(deadline).as_nanos();
+    let periods = elapsed_nanos / interval_nanos + 1;
+    let delta_nanos = interval_nanos
+        .saturating_mul(periods)
+        .min(u128::from(u64::MAX));
+    deadline
+        .checked_add(Duration::from_nanos(delta_nanos as u64))
+        .or_else(|| now.checked_add(interval))
+        .unwrap_or(now)
 }

@@ -452,8 +452,12 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
 fn with_runtime_redraw_stack<R>(f: impl FnOnce() -> R) -> R {
     #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
     {
+        // Redraw checks run from every event-loop idle turn. Only switch stacks when the
+        // current stack is close to exhaustion; an unconditional `grow` allocates a fresh
+        // 16 MiB stack for every turn and is particularly costly in debug builds.
+        const RUNTIME_REDRAW_STACK_RED_ZONE: usize = 2 * 1024 * 1024;
         const RUNTIME_REDRAW_STACK_SIZE: usize = 16 * 1024 * 1024;
-        return stacker::grow(RUNTIME_REDRAW_STACK_SIZE, f);
+        return stacker::maybe_grow(RUNTIME_REDRAW_STACK_RED_ZONE, RUNTIME_REDRAW_STACK_SIZE, f);
     }
 
     #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]

@@ -160,6 +160,7 @@ pub struct Icon<VM> {
 
 impl<VM> Icon<VM> {
     pub fn builtin(icon: BuiltinIcon) -> Self {
+        crate::media::preload_svg_system_fonts();
         Self::new(IconSource::Builtin(icon))
     }
 
@@ -173,10 +174,12 @@ impl<VM> Icon<VM> {
     }
 
     pub fn svg(bytes: &'static [u8]) -> Self {
+        crate::media::preload_svg_system_fonts();
         Self::new(IconSource::Svg(MediaBytes::from_static(bytes)))
     }
 
     pub fn svg_owned(bytes: Vec<u8>) -> Self {
+        crate::media::preload_svg_system_fonts();
         Self::new(IconSource::Svg(MediaBytes::from_shared(Arc::from(
             bytes.into_boxed_slice(),
         ))))
@@ -187,6 +190,7 @@ impl<VM> Icon<VM> {
     /// The SVG's original RGB paint is intentionally ignored. Use [`Icon::svg`] for multicolor
     /// artwork that must preserve its authored colors.
     pub fn monochrome_svg(bytes: &'static [u8]) -> Self {
+        crate::media::preload_svg_system_fonts();
         Self {
             source: IconSourceKind::MonochromeSvg(MediaBytes::from_static(bytes)),
             style: None,
@@ -199,6 +203,7 @@ impl<VM> Icon<VM> {
 
     /// Owned-byte variant of [`Icon::monochrome_svg`].
     pub fn monochrome_svg_owned(bytes: Vec<u8>) -> Self {
+        crate::media::preload_svg_system_fonts();
         Self {
             source: IconSourceKind::MonochromeSvg(MediaBytes::from_shared(Arc::from(
                 bytes.into_boxed_slice(),
@@ -223,6 +228,7 @@ impl<VM> Icon<VM> {
     }
 
     pub(crate) fn internal(source: SvgIconId) -> Self {
+        crate::media::preload_svg_system_fonts();
         Self {
             source: IconSourceKind::Internal(source),
             style: None,

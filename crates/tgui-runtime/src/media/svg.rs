@@ -1,5 +1,5 @@
 use std::path::Path;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use reqwest::Url;
 use resvg::{self, tiny_skia, usvg};
@@ -12,6 +12,38 @@ use super::manager::{DocumentContent, DocumentEntry, SvgDocument};
 use super::types::{IntrinsicSize, RasterRequest, TextureFrame};
 
 type ExternalErrorSlot = Arc<Mutex<Option<String>>>;
+
+/// `fontdb::Database::load_system_fonts` scans every platform font directory and parses the
+/// metadata of every discovered face. SVG parsing used to repeat that scan for every document,
+/// including the tiny path-only SVGs backing built-in icons. A page containing dozens of icons
+/// consequently spent seconds in the scene collector in an unoptimized build.
+///
+/// A font database is immutable once installed in `usvg::Options`, and `usvg` already represents
+/// it as an `Arc`. Keep one process-wide snapshot so all SVG documents retain identical text
+/// support while paying the system scan only once.
+static SVG_SYSTEM_FONTS: OnceLock<Arc<usvg::fontdb::Database>> = OnceLock::new();
+static SVG_SYSTEM_FONTS_PRELOAD: OnceLock<()> = OnceLock::new();
+
+fn svg_system_fonts() -> Arc<usvg::fontdb::Database> {
+    SVG_SYSTEM_FONTS
+        .get_or_init(|| {
+            let mut fontdb = usvg::fontdb::Database::new();
+            fontdb.load_system_fonts();
+            Arc::new(fontdb)
+        })
+        .clone()
+}
+
+pub(crate) fn preload_svg_system_fonts() {
+    if SVG_SYSTEM_FONTS.get().is_some() {
+        return;
+    }
+    SVG_SYSTEM_FONTS_PRELOAD.get_or_init(|| {
+        std::thread::spawn(|| {
+            let _ = svg_system_fonts();
+        });
+    });
+}
 
 #[derive(Clone)]
 struct SvgHrefResolver {
@@ -77,7 +109,7 @@ impl<'a> HrefStringResolver<'a> for SvgHrefResolver {
 pub(super) fn load_svg_document(source: &LoadedSource<'_>) -> Result<DocumentEntry, TguiError> {
     let errors = Arc::new(Mutex::new(None));
     let mut options = svg_options(source, errors.clone());
-    options.fontdb_mut().load_system_fonts();
+    options.fontdb = svg_system_fonts();
 
     let tree = usvg::Tree::from_data(source.bytes(), &options)
         .map_err(|error| TguiError::Media(format!("failed to parse SVG image: {error}")))?;
@@ -236,4 +268,52 @@ fn take_external_error(errors: &ExternalErrorSlot) -> Option<String> {
         .lock()
         .expect("external SVG error lock poisoned")
         .take()
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use crate::media::loader::load_media_document;
+    use crate::media::manager::DocumentContent;
+    use crate::media::MediaSource;
+
+    use super::{preload_svg_system_fonts, svg_system_fonts};
+
+    #[test]
+    fn svg_documents_share_one_system_font_database() {
+        const FIRST: &[u8] =
+            br#"<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"><path d="M0 0h8v8Z"/></svg>"#;
+        const SECOND: &[u8] =
+            br#"<svg xmlns="http://www.w3.org/2000/svg" width="12" height="8"><text x="0" y="7">A</text></svg>"#;
+
+        let first = load_media_document(&MediaSource::bytes(FIRST)).expect("first SVG should load");
+        let second =
+            load_media_document(&MediaSource::bytes(SECOND)).expect("second SVG should load");
+        let DocumentContent::Svg(first) = first.content else {
+            panic!("first document should be SVG");
+        };
+        let DocumentContent::Svg(second) = second.content else {
+            panic!("second document should be SVG");
+        };
+
+        assert!(Arc::ptr_eq(first.font_database(), second.font_database()));
+        assert!(Arc::ptr_eq(first.font_database(), &svg_system_fonts()));
+        assert!(first.font_database().faces().next().is_some());
+    }
+
+    #[test]
+    fn svg_font_preload_is_concurrent_and_idempotent() {
+        let callers = (0..16)
+            .map(|_| std::thread::spawn(preload_svg_system_fonts))
+            .collect::<Vec<_>>();
+        for caller in callers {
+            caller.join().expect("preload caller should not panic");
+        }
+
+        let first = svg_system_fonts();
+        preload_svg_system_fonts();
+        let second = svg_system_fonts();
+        assert!(Arc::ptr_eq(&first, &second));
+    }
 }

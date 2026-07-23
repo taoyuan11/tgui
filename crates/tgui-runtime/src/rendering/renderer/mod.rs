@@ -155,6 +155,37 @@ fn active_video_yuv_keys(scene: &ScenePrimitives) -> HashSet<u64> {
     keys
 }
 
+/// Video frames can change without changing the retained scene serial, so a scene that contains
+/// video primitives must refresh its YUV cache on every rendered frame. Static scenes compiled with
+/// the `video` feature do not need that scan: keeping the feature enabled only adds the optional
+/// widget/backend code and must not turn every ordinary frame into a recursive command walk.
+#[cfg(feature = "video")]
+#[inline]
+fn texture_liveness_needs_video_refresh(scene: &ScenePrimitives) -> bool {
+    !scene.video_textures.is_empty() || commands_contain_video(&scene.overlay_commands)
+}
+
+#[cfg(feature = "video")]
+fn commands_contain_video(commands: &[RenderCommand]) -> bool {
+    commands.iter().any(|command| match command {
+        RenderCommand::CanvasComposite(composite) => {
+            commands_contain_video(&composite.content_commands)
+                || composite
+                    .mask_commands
+                    .as_deref()
+                    .is_some_and(commands_contain_video)
+        }
+        RenderCommand::VideoTexture(_) => true,
+        RenderCommand::BackdropBlur(_)
+        | RenderCommand::Brush(_)
+        | RenderCommand::Shape(_)
+        | RenderCommand::TextDecoration(_)
+        | RenderCommand::Text(_)
+        | RenderCommand::Texture(_)
+        | RenderCommand::Mesh(_) => false,
+    })
+}
+
 #[cfg(feature = "video")]
 fn collect_video_yuv_keys_from_commands(commands: &[RenderCommand], keys: &mut HashSet<u64>) {
     for command in commands {
@@ -218,6 +249,7 @@ fn collect_texture_keys_from_commands(commands: &[RenderCommand], keys: &mut Has
 pub struct Renderer {
     window: Option<Arc<dyn Window>>,
     surface: Option<wgpu::Surface<'static>>,
+    surface_occluded: bool,
     device: wgpu::Device,
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
@@ -496,6 +528,25 @@ mod video_yuv_key_tests {
         assert!(yuv_keys.contains(&20));
         assert!(!yuv_keys.contains(&10));
     }
+
+    #[test]
+    fn video_liveness_scan_is_only_required_for_video_primitives() {
+        let mut static_scene = ScenePrimitives::default();
+        assert!(!texture_liveness_needs_video_refresh(&static_scene));
+
+        let controller = controller_for_frame(VideoRenderFrame::rgba(Arc::new(
+            TextureFrame::with_id_and_revision(30, 1, 1, 1, vec![255; 4]),
+        )));
+        static_scene.push_video_texture(video_primitive(controller.clone()));
+        assert!(texture_liveness_needs_video_refresh(&static_scene));
+
+        let mut overlay_scene = ScenePrimitives::default();
+        overlay_scene.push_portal_overlay_command(
+            RenderCommand::VideoTexture(video_primitive(controller)),
+            None,
+        );
+        assert!(texture_liveness_needs_video_refresh(&overlay_scene));
+    }
 }
 
 impl Renderer {
@@ -548,6 +599,10 @@ impl Renderer {
         self.push_constants_supported
     }
 
+    pub(crate) fn surface_occluded(&self) -> bool {
+        self.surface_occluded
+    }
+
     pub fn new(
         window: Arc<dyn Window>,
         clear_color: TguiColor,
@@ -588,6 +643,7 @@ impl Renderer {
         scroll_regions: &[crate::ui::widget::ScrollRegion],
         transform_records: &HashMap<WidgetId, TransformRecord>,
     ) -> Result<RenderStatus, TguiError> {
+        self.surface_occluded = false;
         if self.config.width == 0 || self.config.height == 0 {
             return Ok(RenderStatus::SkipFrame);
         }
@@ -601,9 +657,13 @@ impl Renderer {
             wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost => {
                 return Ok(RenderStatus::ReconfigureSurface);
             }
-            wgpu::CurrentSurfaceTexture::Timeout
-            | wgpu::CurrentSurfaceTexture::Occluded
-            | wgpu::CurrentSurfaceTexture::Validation => return Ok(RenderStatus::SkipFrame),
+            wgpu::CurrentSurfaceTexture::Occluded => {
+                self.surface_occluded = true;
+                return Ok(RenderStatus::SkipFrame);
+            }
+            wgpu::CurrentSurfaceTexture::Timeout | wgpu::CurrentSurfaceTexture::Validation => {
+                return Ok(RenderStatus::SkipFrame);
+            }
         };
 
         let view = frame
@@ -683,7 +743,8 @@ impl Renderer {
         }
 
         #[cfg(feature = "video")]
-        let refresh_texture_liveness = true;
+        let refresh_texture_liveness =
+            refresh_static_liveness || texture_liveness_needs_video_refresh(scene);
         #[cfg(not(feature = "video"))]
         let refresh_texture_liveness = refresh_static_liveness;
 

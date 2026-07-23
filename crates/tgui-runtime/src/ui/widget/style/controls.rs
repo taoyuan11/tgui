@@ -1370,6 +1370,8 @@ mod tests {
 
         let input = InputStyle::default_for_theme(&theme);
         assert_eq!(input.background.normal.resolve(), theme.colors.surface);
+        assert_eq!(input.border.normal.resolve(), theme.colors.outline_muted);
+        assert_eq!(input.border.hovered.resolve(), theme.colors.outline);
         assert_eq!(
             input
                 .border

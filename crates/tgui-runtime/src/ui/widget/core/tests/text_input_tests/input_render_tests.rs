@@ -47,7 +47,7 @@ fn pointer_focused_input_uses_active_border_without_focus_ring() {
 }
 
 #[test]
-fn keyboard_focused_input_renders_theme_focus_ring_without_layout_inset() {
+fn keyboard_focused_input_uses_active_border_without_second_focus_ring() {
     let theme = Theme::default();
     let font_manager = FontManager::new(&FontCatalog::default());
     let media = test_media();
@@ -83,17 +83,12 @@ fn keyboard_focused_input_renders_theme_focus_ring_without_layout_inset() {
         false,
     );
 
-    let ring = rendered
-        .primitives
-        .overlay_shapes
-        .iter()
-        .find(|shape| {
-            shape.color == theme.focus_ring.color
-                && shape.stroke_width == theme.focus_ring.width.get()
-        })
-        .expect("keyboard-focused Input should render the theme focus ring");
-    assert!(ring.rect.width > dp(220.0));
-    assert!(ring.rect.height > dp(40.0));
+    assert!(rendered.primitives.shapes.iter().any(|shape| {
+        shape.stroke_width == theme.border.thin.get() && shape.color == theme.colors.primary
+    }));
+    assert!(!rendered.primitives.overlay_shapes.iter().any(|shape| {
+        shape.color == theme.focus_ring.color && shape.stroke_width == theme.focus_ring.width.get()
+    }));
 }
 
 #[test]

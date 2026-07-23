@@ -22,6 +22,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
     pub(in crate::runtime) fn invalidate_scene_with_reason(&mut self, reason: &'static str) {
         self.toast_motion_patch_pending = false;
         self.button_hover_patch_pending = None;
+        self.hover_patch_pending = None;
         self.button_pressed_patch_pending = None;
         self.row_hover_patch_pending = None;
         if text_profile_enabled() {
@@ -48,6 +49,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
     pub(in crate::runtime) fn invalidate_computed_scene(&mut self) {
         self.toast_motion_patch_pending = false;
         self.button_hover_patch_pending = None;
+        self.hover_patch_pending = None;
         self.button_pressed_patch_pending = None;
         self.row_hover_patch_pending = None;
         if let Some(cached) = self.cached_scene.as_mut() {
@@ -140,7 +142,13 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             }
             status
         };
+        let surface_occluded = renderer.surface_occluded();
         self.renderer = Some(renderer);
+        if surface_occluded {
+            self.mark_surface_occluded();
+        } else if let Ok(status) = &status {
+            self.update_idle_redraw_after_render(status, Instant::now());
+        }
         self.sync_accessibility_tree();
         if !self.first_frame_logged {
             if matches!(&status, Ok(RenderStatus::Rendered)) {
@@ -227,6 +235,8 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
     }
 
     pub(in crate::runtime) fn suspend(&mut self) {
+        self.disarm_idle_redraw();
+        self.surface_occluded = false;
         #[cfg(feature = "video")]
         {
             self.notify_video_app_background();

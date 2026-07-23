@@ -689,6 +689,7 @@ mod file_drop_tests;
 mod focus_navigation_cache_tests;
 mod focus_selection_tests;
 mod gesture_tests;
+mod idle_redraw_tests;
 mod list_tests;
 mod menu_tests;
 mod modal_tests;

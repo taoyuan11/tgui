@@ -404,6 +404,7 @@ impl RuntimeButtonHoverBenchmarkContext {
         }
         if !allow_retained_hover_patch {
             self.handler.button_hover_patch_pending = None;
+            self.handler.hover_patch_pending = None;
         }
         let profile = event_changed.then(|| self.render_scene()).transpose()?;
         let (paths, actions) = finish_interaction_probe();
@@ -710,6 +711,7 @@ impl RuntimeRowHoverBenchmarkContext {
         let event_handling = event_started.elapsed();
         if !allow_retained_hover_patch {
             self.handler.row_hover_patch_pending = None;
+            self.handler.hover_patch_pending = None;
         }
         let profile = event_changed.then(|| self.render_scene()).transpose()?;
         let (paths, actions) = finish_interaction_probe();
@@ -2110,6 +2112,7 @@ impl RuntimeDataGridBenchmarkContext {
         let event_handling = event_started.elapsed();
         if !allow_retained_hover_patch {
             self.handler.row_hover_patch_pending = None;
+            self.handler.hover_patch_pending = None;
         }
         let profile = if event_changed {
             Some(self.render_scene(true))
@@ -2550,6 +2553,7 @@ fn interaction_stats(
                 || action == "focus_scene_patch"
                 || action == "row_hover_scene_patch"
                 || action == "button_hover_scene_patch"
+                || action == "retained_hover_scene_patch"
                 || action == "button_pressed_scene_patch"
         }),
         reactive_property_slot_writes: action_count(|action| {

@@ -1,7 +1,7 @@
 use super::select_state::HoverMoveOrTransition;
 use super::*;
 use crate::runtime::state::{
-    RetainedButtonHoverPatch, RetainedButtonPressedPatch, RetainedRowHoverPatch,
+    RetainedButtonHoverPatch, RetainedButtonPressedPatch, RetainedHoverPatch, RetainedRowHoverPatch,
 };
 use crate::ui::widget::HitPath;
 use smallvec::SmallVec;
@@ -170,6 +170,74 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         })
     }
 
+    fn is_simple_retained_hover_widget(widget: &crate::ui::widget::ResolvedElement<VM>) -> bool {
+        let interactions = &widget.interactions;
+        widget.tooltip.is_none()
+            && widget.popover.is_none()
+            && widget.menu.is_none()
+            && widget.context_menu.is_none()
+            && widget.modal.is_none()
+            && widget.drawer.is_none()
+            && widget.tab_trigger.is_none()
+            && widget.list_item.is_none()
+            && widget.tree_root.is_none()
+            && widget.tree_node.is_none()
+            && widget.data_grid_root.is_none()
+            && widget.data_grid_cell.is_none()
+            && widget.data_grid_header.is_none()
+            && widget.data_grid_resize_handle.is_none()
+            && widget.splitter_handle.is_none()
+            && widget.carousel_auto_play.is_none()
+            && widget.focus.scope.is_none()
+            && interactions.on_double_click.is_none()
+            && interactions.on_focus.is_none()
+            && interactions.on_blur.is_none()
+            && interactions.on_mouse_enter.is_none()
+            && interactions.on_mouse_leave.is_none()
+            && interactions.on_mouse_move.is_none()
+            && interactions.on_file_drop.is_none()
+            && interactions.gesture.is_none()
+            && !widget.lifecycle_events.has_any()
+            && !widget.media_events.has_any()
+    }
+
+    pub(in crate::runtime) fn is_simple_retained_hover_root(
+        layout: &crate::ui::widget::ResolvedSceneLayout<VM>,
+        root: WidgetId,
+    ) -> bool {
+        let ids = layout.subtree_widget_ids(root);
+        !ids.is_empty()
+            && ids.into_iter().all(|id| {
+                layout
+                    .resolved_widget(id)
+                    .is_some_and(Self::is_simple_retained_hover_widget)
+            })
+    }
+
+    /// Returns the shallowest changed widget in a divergent hover-path suffix. Recollecting this
+    /// widget covers every remaining changed state as long as all suffix entries are descendants.
+    pub(in crate::runtime) fn retained_hover_suffix_root(
+        layout: &crate::ui::widget::ResolvedSceneLayout<VM>,
+        suffix: &[HoveredWidget<VM>],
+    ) -> Option<Option<WidgetId>> {
+        let Some(first) = suffix.first() else {
+            return Some(None);
+        };
+        let HoverTargetId::Widget(root) = first.target_id else {
+            return None;
+        };
+        let root_path = layout.path_for(root)?;
+        for hovered in suffix {
+            let HoverTargetId::Widget(id) = hovered.target_id else {
+                return None;
+            };
+            if !layout.path_for(id)?.starts_with(root_path) {
+                return None;
+            }
+        }
+        Some(Some(root))
+    }
+
     pub(in crate::runtime) fn retained_button_hover_patch_candidate(
         &self,
         next_hovered: &[HoveredWidget<VM>],
@@ -238,6 +306,65 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         Some(RetainedButtonHoverPatch {
             previous_button,
             next_button,
+            source_hover_epoch: self.hover_epoch,
+            source_invalidation_revision: self.invalidation.revision(),
+            source_root_rebuild_revision: self.invalidation.root_rebuild_revision(),
+        })
+    }
+
+    pub(in crate::runtime) fn retained_hover_patch_candidate(
+        &self,
+        next_hovered: &[HoveredWidget<VM>],
+    ) -> Option<RetainedHoverPatch> {
+        if self.invalidation.revision() != self.last_invalidation_revision
+            || self.invalidation.root_rebuild_revision() != self.last_root_rebuild_revision
+            || !self.button_hover_runtime_is_idle()
+        {
+            return None;
+        }
+        let cached = self.cached_scene.as_ref()?;
+        if !cached.computed_valid
+            || !cached.layout_valid
+            || cached.gpu_scroll_deferred
+            || cached.hover_epoch != self.hover_epoch
+            || !Self::button_hover_path_is_passive(&self.hovered_widgets)
+            || !Self::button_hover_path_is_passive(next_hovered)
+        {
+            return None;
+        }
+        let layout = cached.layout.as_ref()?;
+        if layout.contains_virtual() {
+            return None;
+        }
+
+        let mut prefix_len = 0usize;
+        while prefix_len < self.hovered_widgets.len()
+            && prefix_len < next_hovered.len()
+            && self.hovered_widgets[prefix_len].target_id == next_hovered[prefix_len].target_id
+        {
+            prefix_len += 1;
+        }
+        let previous_root =
+            Self::retained_hover_suffix_root(layout, &self.hovered_widgets[prefix_len..])?;
+        let next_root = Self::retained_hover_suffix_root(layout, &next_hovered[prefix_len..])?;
+        if previous_root == next_root || (previous_root.is_none() && next_root.is_none()) {
+            return None;
+        }
+        for root in [previous_root, next_root].into_iter().flatten() {
+            if !Self::is_simple_retained_hover_root(layout, root)
+                || !cached
+                    .scene_chunks
+                    .get(&root)
+                    .is_some_and(|chunk| chunk.is_simple_for_button_hover_recompose())
+                || !cached.visual_contexts.contains_key(&root)
+            {
+                return None;
+            }
+        }
+
+        Some(RetainedHoverPatch {
+            previous_root,
+            next_root,
             source_hover_epoch: self.hover_epoch,
             source_invalidation_revision: self.invalidation.revision(),
             source_root_rebuild_revision: self.invalidation.root_rebuild_revision(),
@@ -528,10 +655,14 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 .any(|(previous, next)| previous.target_id != next.target_id);
         self.button_pressed_patch_pending = None;
         self.button_hover_patch_pending = None;
+        self.hover_patch_pending = None;
         if hover_path_changed {
             self.button_hover_patch_pending =
                 self.retained_button_hover_patch_candidate(&next_hovered);
             self.row_hover_patch_pending = self.retained_row_hover_patch_candidate(&next_hovered);
+            if self.button_hover_patch_pending.is_none() && self.row_hover_patch_pending.is_none() {
+                self.hover_patch_pending = self.retained_hover_patch_candidate(&next_hovered);
+            }
         }
         let mut prefix_len = 0usize;
         while prefix_len < self.hovered_widgets.len()

@@ -10,6 +10,7 @@ pub use types::{ContentFit, MediaBytes, MediaPlaybackSource, MediaSource};
 
 pub(crate) use loader::{media_placeholder_color, media_placeholder_label};
 pub(crate) use manager::MediaManager;
+pub(crate) use svg::preload_svg_system_fonts;
 #[cfg(any(feature = "audio", feature = "video"))]
 pub(crate) use types::normalize_media_extension_hint;
 pub(crate) use types::{

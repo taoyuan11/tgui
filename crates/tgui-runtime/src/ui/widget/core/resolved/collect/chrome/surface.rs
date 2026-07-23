@@ -151,9 +151,7 @@ impl<VM> ResolvedElement<VM> {
                 .slider_style
                 .as_ref()
                 .and_then(|style| style.focus_ring.clone()),
-            ResolvedWidgetKind::TextEditor { .. } | ResolvedWidgetKind::Container { .. }
-                if visual.widget_state.focus_visible =>
-            {
+            ResolvedWidgetKind::Container { .. } if visual.widget_state.focus_visible => {
                 Some(context.theme.focus_ring.clone())
             }
             ResolvedWidgetKind::TextEditor { .. } => None,

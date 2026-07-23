@@ -1,10 +1,12 @@
 use super::*;
 use crate::animation::{theme_transition, AnimationKey, WindowProperty};
+use crate::rendering::renderer::RenderStatus;
 use raw_window_handle::{
     DisplayHandle, HandleError, HasDisplayHandle, HasWindowHandle, WindowHandle,
 };
 
 struct BindingProbeWindow {
+    redraw_calls: AtomicUsize,
     title_calls: AtomicUsize,
     title: Mutex<String>,
     theme_calls: AtomicUsize,
@@ -14,6 +16,7 @@ struct BindingProbeWindow {
 impl BindingProbeWindow {
     fn new(theme: Option<crate::platform::window::Theme>) -> Self {
         Self {
+            redraw_calls: AtomicUsize::new(0),
             title_calls: AtomicUsize::new(0),
             title: Mutex::new(String::new()),
             theme_calls: AtomicUsize::new(0),
@@ -43,7 +46,9 @@ impl Window for BindingProbeWindow {
         1.0
     }
 
-    fn request_redraw(&self) {}
+    fn request_redraw(&self) {
+        self.redraw_calls.fetch_add(1, Ordering::Relaxed);
+    }
 
     fn pre_present_notify(&self) {}
 
@@ -103,6 +108,98 @@ impl Window for BindingProbeWindow {
 
     #[cfg(target_os = "windows")]
     fn set_enable(&self, _enabled: bool) {}
+}
+
+#[test]
+fn window_occlusion_disarms_idle_redraw_and_unocclusion_requests_recovery_frame() {
+    let invalidation = InvalidationSignal::new();
+    let mut handler = test_handler(None, invalidation);
+    let window = Arc::new(BindingProbeWindow::new(None));
+    handler.window = Some(window.clone());
+    handler.next_idle_redraw_deadline = Some(Instant::now() + Duration::from_secs(1));
+
+    handler.set_window_occluded(true);
+
+    assert!(handler.window_occluded);
+    assert_eq!(handler.next_idle_redraw_deadline, None);
+    assert_eq!(window.redraw_calls.load(Ordering::Relaxed), 0);
+
+    handler.set_window_occluded(false);
+
+    assert!(!handler.window_occluded);
+    assert_eq!(handler.next_idle_redraw_deadline, None);
+    assert_eq!(window.redraw_calls.load(Ordering::Relaxed), 1);
+}
+
+#[test]
+fn successful_present_clears_only_surface_occlusion() {
+    let invalidation = InvalidationSignal::new();
+    let mut handler = test_handler(None, invalidation);
+    handler.window_occluded = true;
+    handler.surface_occluded = true;
+
+    handler.update_idle_redraw_after_render(&RenderStatus::Rendered, Instant::now());
+
+    assert!(handler.window_occluded);
+    assert!(!handler.surface_occluded);
+    assert_eq!(handler.next_idle_redraw_deadline, None);
+
+    handler.next_idle_redraw_deadline = Some(Instant::now());
+    handler.mark_surface_occluded();
+
+    assert!(handler.window_occluded);
+    assert!(handler.surface_occluded);
+    assert_eq!(handler.next_idle_redraw_deadline, None);
+}
+
+#[test]
+fn idempotent_unocclusion_requests_recovery_for_surface_occlusion() {
+    let invalidation = InvalidationSignal::new();
+    let mut handler = test_handler(None, invalidation);
+    let window = Arc::new(BindingProbeWindow::new(None));
+    handler.window = Some(window.clone());
+    handler.surface_occluded = true;
+
+    handler.set_window_occluded(false);
+
+    assert_eq!(window.redraw_calls.load(Ordering::Relaxed), 1);
+    assert!(handler.surface_occluded);
+    assert_eq!(handler.next_idle_redraw_deadline, None);
+}
+
+#[test]
+fn zero_surface_resize_disarms_idle_redraw_and_still_requests_redraw() {
+    let invalidation = InvalidationSignal::new();
+    let mut handler = test_handler(None, invalidation);
+    let window = Arc::new(BindingProbeWindow::new(None));
+    handler.window = Some(window.clone());
+    handler.next_idle_redraw_deadline = Some(Instant::now() + Duration::from_secs(1));
+
+    assert!(!handler.handle_bound_window_event(
+        &TestEventLoop,
+        WindowEvent::SurfaceResized(PhysicalSize::new(0, 120)),
+    ));
+
+    assert_eq!(handler.next_idle_redraw_deadline, None);
+    assert_eq!(window.redraw_calls.load(Ordering::Relaxed), 1);
+}
+
+#[test]
+fn suspend_disarms_idle_redraw_without_losing_occlusion_state() {
+    let invalidation = InvalidationSignal::new();
+    let mut handler = test_handler(None, invalidation);
+    let window = Arc::new(BindingProbeWindow::new(None));
+    handler.window = Some(window);
+    handler.window_occluded = true;
+    handler.surface_occluded = true;
+    handler.next_idle_redraw_deadline = Some(Instant::now() + Duration::from_secs(1));
+
+    handler.suspend();
+
+    assert!(handler.window_occluded);
+    assert!(!handler.surface_occluded);
+    assert_eq!(handler.next_idle_redraw_deadline, None);
+    assert!(handler.renderer.is_none());
 }
 
 #[test]

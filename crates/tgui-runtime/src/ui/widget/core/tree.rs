@@ -42,8 +42,11 @@ pub struct WidgetTree<VM> {
 pub(crate) fn with_widget_stack<R>(f: impl FnOnce() -> R) -> R {
     #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
     {
+        // Widget-tree entry points are reached repeatedly during retained collection. Keep a
+        // generous guard for debug stack frames, but only allocate the fallback stack on demand.
+        const WIDGET_STACK_RED_ZONE: usize = 2 * 1024 * 1024;
         const WIDGET_STACK_SIZE: usize = 16 * 1024 * 1024;
-        return stacker::grow(WIDGET_STACK_SIZE, f);
+        return stacker::maybe_grow(WIDGET_STACK_RED_ZONE, WIDGET_STACK_SIZE, f);
     }
 
     #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]

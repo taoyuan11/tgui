@@ -57,6 +57,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
     fn clear_rebuilt_tree_runtime_state(&mut self) {
         self.hovered_widgets.clear();
         self.button_hover_patch_pending = None;
+        self.hover_patch_pending = None;
         self.button_pressed_patch_pending = None;
         self.row_hover_patch_pending = None;
         self.tooltip_hover_started_at.clear();

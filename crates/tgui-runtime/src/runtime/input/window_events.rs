@@ -336,6 +336,9 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 }
             }
             WindowEvent::SurfaceResized(size) => {
+                if size.width == 0 || size.height == 0 {
+                    self.disarm_idle_redraw();
+                }
                 self.invalidate_scene_with_reason("window_surface_resized");
                 if let Some(renderer) = self.renderer.as_mut() {
                     let scale_factor = self
