@@ -6,6 +6,7 @@ use std::time::{Duration, Instant};
 
 use crate::foundation::binding::InvalidationSignal;
 use crate::foundation::color::Color;
+use crate::ui::layout::Insets;
 use crate::ui::unit::dp;
 use crate::ui::widget::{Point, WidgetId};
 
@@ -36,6 +37,57 @@ fn unchanged_target_does_not_restart_animation() {
 
     assert_eq!(animated, repeated);
     assert!(engine.has_active_animations());
+}
+
+#[test]
+fn active_animation_predicate_covers_every_typed_store() {
+    let mut engine = AnimationEngine::default();
+    let start = Instant::now();
+    let animate_at = start + Duration::from_millis(1);
+    let transition = Transition::linear(Duration::from_secs(60));
+    let keys = [
+        AnimationKey::Window(WindowProperty::ThemeBackground),
+        key(WidgetProperty::Opacity),
+        key(WidgetProperty::Width),
+        key(WidgetProperty::Offset),
+        key(WidgetProperty::Padding),
+    ];
+    let settled_key = AnimationKey::Widget {
+        id: 99,
+        property: WidgetProperty::Opacity,
+    };
+
+    engine.resolve_color(keys[0], Color::BLACK, None, start);
+    engine.resolve_f32(keys[1], 0.0, None, start);
+    engine.resolve_dp(keys[2], dp(0.0), None, start);
+    engine.resolve_point(keys[3], Point::ZERO, None, start);
+    engine.resolve_insets(keys[4], Insets::ZERO, None, start);
+    engine.resolve_f32(settled_key, 1.0, None, start);
+
+    engine.resolve_color(keys[0], Color::WHITE, Some(transition), animate_at);
+    engine.resolve_f32(keys[1], 1.0, Some(transition), animate_at);
+    engine.resolve_dp(keys[2], dp(1.0), Some(transition), animate_at);
+    engine.resolve_point(
+        keys[3],
+        Point::new(dp(1.0), dp(1.0)),
+        Some(transition),
+        animate_at,
+    );
+    engine.resolve_insets(keys[4], Insets::all(dp(1.0)), Some(transition), animate_at);
+
+    let mut visited = Vec::new();
+    assert!(engine.all_active_animations_match(|key| {
+        visited.push(key);
+        key != settled_key
+    }));
+    assert_eq!(visited.len(), keys.len());
+    for key in keys {
+        assert!(
+            visited.contains(&key),
+            "missing active animation key {key:?}"
+        );
+    }
+    assert!(!engine.all_active_animations_match(|key| { !matches!(key, AnimationKey::Window(_)) }));
 }
 
 #[test]

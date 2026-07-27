@@ -1239,7 +1239,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         let Some(pending) = self.button_hover_patch_pending.take() else {
             return false;
         };
-        if !self.button_hover_runtime_is_idle()
+        if !self.button_hover_non_animation_runtime_is_idle()
             || self.invalidation.revision() != pending.source_invalidation_revision
             || self.last_invalidation_revision != pending.source_invalidation_revision
             || self.invalidation.root_rebuild_revision() != pending.source_root_rebuild_revision
@@ -1324,6 +1324,10 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     return false;
                 }
                 roots.push(id);
+            }
+            if !self.button_hover_animations_are_local_to_roots(layout, &roots) {
+                super::action_stats::record("button_hover_patch_reject_animation");
+                return false;
             }
             roots
         };

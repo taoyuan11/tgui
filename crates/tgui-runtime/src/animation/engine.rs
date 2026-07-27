@@ -673,6 +673,12 @@ impl<T: Animatable> AnimationStore<T> {
             .is_some_and(|active_keys| !active_keys.is_empty())
     }
 
+    fn active_keys_match(&self, predicate: &mut impl FnMut(AnimationKey) -> bool) -> bool {
+        self.active_keys
+            .as_ref()
+            .is_none_or(|active_keys| active_keys.iter().copied().all(predicate))
+    }
+
     fn settled_at(&self, key: AnimationKey, target: &T) -> bool {
         self.slots
             .get(&key)
@@ -985,6 +991,18 @@ impl AnimationEngine {
             || self.dps.has_active()
             || self.points.has_active()
             || self.insets.has_active()
+    }
+
+    /// Returns whether every currently running animation, across all typed stores, matches.
+    pub(crate) fn all_active_animations_match(
+        &self,
+        mut predicate: impl FnMut(AnimationKey) -> bool,
+    ) -> bool {
+        self.colors.active_keys_match(&mut predicate)
+            && self.floats.active_keys_match(&mut predicate)
+            && self.dps.active_keys_match(&mut predicate)
+            && self.points.active_keys_match(&mut predicate)
+            && self.insets.active_keys_match(&mut predicate)
     }
 
     pub(crate) fn active_keys_summary(&self) -> String {

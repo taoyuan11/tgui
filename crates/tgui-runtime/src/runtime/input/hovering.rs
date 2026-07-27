@@ -1,5 +1,6 @@
 use super::select_state::HoverMoveOrTransition;
 use super::*;
+use crate::animation::AnimationKey;
 use crate::runtime::state::{
     RetainedButtonHoverPatch, RetainedButtonPressedPatch, RetainedHoverPatch, RetainedRowHoverPatch,
 };
@@ -54,7 +55,16 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
 
     pub(in crate::runtime) fn button_visual_runtime_is_idle_ignoring_pressed(&self) -> bool {
         !self.animation_engine.has_active_animations()
-            && self.next_tooltip_wakeup_deadline.is_none()
+            && self.button_visual_non_animation_runtime_is_idle_ignoring_pressed()
+    }
+
+    pub(in crate::runtime) fn button_hover_non_animation_runtime_is_idle(&self) -> bool {
+        self.pressed_widget.is_none()
+            && self.button_visual_non_animation_runtime_is_idle_ignoring_pressed()
+    }
+
+    fn button_visual_non_animation_runtime_is_idle_ignoring_pressed(&self) -> bool {
+        self.next_tooltip_wakeup_deadline.is_none()
             && self.next_toast_wakeup_deadline.is_none()
             && self.active_gesture.is_none()
             && self.active_pinch.is_none()
@@ -70,6 +80,29 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             && self.active_text_selection.is_none()
             && self.pending_click.is_none()
             && self.deferred_mouse_click.is_none()
+    }
+
+    pub(in crate::runtime) fn button_hover_animations_are_local_to_roots(
+        &self,
+        layout: &crate::ui::widget::ResolvedSceneLayout<VM>,
+        roots: &[WidgetId],
+    ) -> bool {
+        self.animation_engine.all_active_animations_match(|key| {
+            let AnimationKey::Widget { id, property } = key else {
+                return false;
+            };
+            if !property.affects_scene() {
+                return false;
+            }
+            let Some(animation_path) = layout.path_for(WidgetId::from_raw(id)) else {
+                return false;
+            };
+            roots.iter().any(|root| {
+                layout
+                    .path_for(*root)
+                    .is_some_and(|root_path| animation_path.starts_with(root_path))
+            })
+        })
     }
 
     pub(in crate::runtime) fn is_simple_button_pressed_root(
@@ -244,7 +277,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
     ) -> Option<RetainedButtonHoverPatch> {
         if self.invalidation.revision() != self.last_invalidation_revision
             || self.invalidation.root_rebuild_revision() != self.last_root_rebuild_revision
-            || !self.button_hover_runtime_is_idle()
+            || !self.button_hover_non_animation_runtime_is_idle()
         {
             return None;
         }
@@ -291,6 +324,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         if previous_button == next_button || (previous_button.is_none() && next_button.is_none()) {
             return None;
         }
+        let mut roots = SmallVec::<[WidgetId; 2]>::new();
         for id in [previous_button, next_button].into_iter().flatten() {
             if !Self::is_simple_button_hover_root(layout, id)
                 || !cached
@@ -301,6 +335,10 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             {
                 return None;
             }
+            roots.push(id);
+        }
+        if !self.button_hover_animations_are_local_to_roots(layout, &roots) {
+            return None;
         }
 
         Some(RetainedButtonHoverPatch {

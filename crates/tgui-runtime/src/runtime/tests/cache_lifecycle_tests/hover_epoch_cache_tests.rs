@@ -706,6 +706,164 @@ fn simple_button_hover_single_and_two_root_patches_match_full_recollect() {
 }
 
 #[test]
+fn default_motion_button_hover_patches_local_scene_animations() {
+    let invalidation = InvalidationSignal::new();
+    let (tree, first_id, second_id) = button_hover_fixture(false);
+    let mut handler = test_handler(Some(tree), invalidation);
+    assert!(!handler.reduced_motion);
+    let first = button_hit_center(&mut handler, first_id);
+    let second = button_hit_center(&mut handler, second_id);
+    handler.request_redraw_if_dirty(Instant::now());
+
+    move_button_pointer(&mut handler, first);
+    let _ = handler.computed_scene();
+    assert!(
+        handler.animation_engine.has_active_animations(),
+        "the default Button hover must exercise the production motion path"
+    );
+
+    crate::runtime::scene_runtime::button_hover_patch_probe::reset();
+    move_button_pointer(&mut handler, second);
+    assert!(
+        handler.button_hover_patch_pending.is_some(),
+        "Button A -> B should accept animations owned by the two patch roots"
+    );
+    let _ = handler.computed_scene();
+    assert_eq!(
+        crate::runtime::scene_runtime::button_hover_patch_probe::hits(),
+        1
+    );
+
+    let settled_at = Instant::now() + Duration::from_secs(1);
+    let refresh = handler.animation_engine.refresh(settled_at);
+    assert!(refresh.changed);
+    assert!(!refresh.layout_changed);
+    handler.animation_epoch = handler.animation_epoch.wrapping_add(1);
+    if refresh.accessibility_geometry_changed {
+        handler.accessibility_animation_epoch =
+            handler.accessibility_animation_epoch.wrapping_add(1);
+    }
+    assert!(handler.patch_animation_refresh(&refresh, settled_at));
+    assert!(!handler.animation_engine.has_active_animations());
+
+    let retained = handler.computed_scene().clone();
+    handler.invalidate_computed_scene();
+    let full = handler.computed_scene().clone();
+    assert_button_hover_scene_equivalent(&retained, &full);
+}
+
+#[test]
+fn button_hover_patch_rejects_nonlocal_scene_animation_at_candidate_and_commit() {
+    let make_handler = || {
+        let invalidation = InvalidationSignal::new();
+        let (tree, first_id, second_id) = button_hover_fixture(false);
+        let mut handler = test_handler(Some(tree), invalidation);
+        handler.reduced_motion = true;
+        let first = button_hit_center(&mut handler, first_id);
+        let second = button_hit_center(&mut handler, second_id);
+        handler.request_redraw_if_dirty(Instant::now());
+        move_button_pointer(&mut handler, first);
+        let _ = handler.computed_scene();
+        (handler, second)
+    };
+    let start_unrelated_animation = |handler: &mut BoundRuntimeHandler<TestVm>| {
+        let key = crate::animation::AnimationKey::Widget {
+            id: WidgetId::next().raw(),
+            property: crate::animation::WidgetProperty::Opacity,
+        };
+        let start = Instant::now();
+        handler.animation_engine.resolve_f32(key, 0.0, None, start);
+        handler.animation_engine.resolve_f32(
+            key,
+            1.0,
+            Some(crate::animation::Transition::linear(Duration::from_secs(
+                60,
+            ))),
+            start + Duration::from_millis(1),
+        );
+    };
+
+    let (mut candidate_handler, second) = make_handler();
+    start_unrelated_animation(&mut candidate_handler);
+    move_button_pointer(&mut candidate_handler, second);
+    assert!(candidate_handler.button_hover_patch_pending.is_none());
+
+    let (mut commit_handler, second) = make_handler();
+    move_button_pointer(&mut commit_handler, second);
+    assert!(commit_handler.button_hover_patch_pending.is_some());
+    start_unrelated_animation(&mut commit_handler);
+    crate::runtime::scene_runtime::button_hover_patch_probe::reset();
+    let fallback = commit_handler.computed_scene().clone();
+    assert_eq!(
+        crate::runtime::scene_runtime::button_hover_patch_probe::hits(),
+        0,
+        "an animation started after candidate creation must reject the commit"
+    );
+    commit_handler.invalidate_computed_scene();
+    let full = commit_handler.computed_scene().clone();
+    assert_button_hover_scene_equivalent(&fallback, &full);
+}
+
+#[test]
+fn button_hover_patch_rejects_local_layout_and_window_animations() {
+    for window_animation in [false, true] {
+        let invalidation = InvalidationSignal::new();
+        let (tree, first_id, second_id) = button_hover_fixture(false);
+        let mut handler = test_handler(Some(tree), invalidation);
+        handler.reduced_motion = true;
+        let first = button_hit_center(&mut handler, first_id);
+        let second = button_hit_center(&mut handler, second_id);
+        handler.request_redraw_if_dirty(Instant::now());
+        move_button_pointer(&mut handler, first);
+        let _ = handler.computed_scene();
+
+        let start = Instant::now();
+        let transition = crate::animation::Transition::linear(Duration::from_secs(60));
+        if window_animation {
+            let key = crate::animation::AnimationKey::Window(
+                crate::animation::WindowProperty::ThemeBackground,
+            );
+            handler
+                .animation_engine
+                .resolve_color(key, Color::BLACK, None, start);
+            handler.animation_engine.resolve_color(
+                key,
+                Color::WHITE,
+                Some(transition),
+                start + Duration::from_millis(1),
+            );
+        } else {
+            let key = crate::animation::AnimationKey::Widget {
+                id: first_id.raw(),
+                property: crate::animation::WidgetProperty::Width,
+            };
+            handler
+                .animation_engine
+                .resolve_dp(key, dp(84.0), None, start);
+            handler.animation_engine.resolve_dp(
+                key,
+                dp(96.0),
+                Some(transition),
+                start + Duration::from_millis(1),
+            );
+        }
+
+        move_button_pointer(&mut handler, second);
+        assert!(
+            handler.button_hover_patch_pending.is_none(),
+            "{} animation must retain the full-recollect fallback",
+            if window_animation { "window" } else { "layout" }
+        );
+        crate::runtime::scene_runtime::button_hover_patch_probe::reset();
+        let _ = handler.computed_scene();
+        assert_eq!(
+            crate::runtime::scene_runtime::button_hover_patch_probe::hits(),
+            0
+        );
+    }
+}
+
+#[test]
 fn passive_container_hover_patch_matches_full_recollect() {
     let invalidation = InvalidationSignal::new();
     let (tree, first_id, second_id) = passive_container_hover_fixture(false);
