@@ -184,6 +184,7 @@ impl PartialEq for LifecycleWidgetKind {
             (
                 Self::Slider {
                     value: left_value,
+                    label: left_label,
                     min: left_min,
                     max: left_max,
                     step: left_step,
@@ -198,6 +199,7 @@ impl PartialEq for LifecycleWidgetKind {
                 },
                 Self::Slider {
                     value: right_value,
+                    label: right_label,
                     min: right_min,
                     max: right_max,
                     step: right_step,
@@ -212,6 +214,7 @@ impl PartialEq for LifecycleWidgetKind {
                 },
             ) => {
                 left_value == right_value
+                    && left_label == right_label
                     && left_min == right_min
                     && left_max == right_max
                     && left_step == right_step

@@ -212,7 +212,7 @@ fn normalized_gradient_stops(
         .iter()
         .map(|stop| {
             (
-                stop.offset.clamp(0.0, 1.0),
+                normalized_unit_interval(stop.offset),
                 color_to_f32(stop.color.with_alpha_factor(opacity)),
             )
         })

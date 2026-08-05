@@ -14,8 +14,9 @@ use crate::text::font::TextFontRequest;
 use crate::ui::layout::Insets;
 use crate::ui::unit::Dp;
 use crate::ui::widget::common::{
-    ComputedScene, FocusScopeState, HitGeometry, HitInteraction, HitRegion, Rect, RenderPrimitive,
-    TextPrimitive, TexturePrimitive,
+    AccessibilityFragment, AccessibilityFragmentNode, AccessibilitySyntheticRole,
+    AccessibilitySyntheticSemantics, ComputedScene, FocusScopeState, FocusTargetMeta, HitGeometry,
+    HitInteraction, HitRegion, Rect, RenderPrimitive, TextPrimitive, TexturePrimitive, WidgetId,
 };
 use crate::ui::widget::menu::{
     menu_item_state_owner, ContextMenuDescriptor, MenuDescriptor, MenuIcon, MenuItemKind,
@@ -28,6 +29,7 @@ use crate::ui::widget::overlay::{
 use crate::ui::widget::style::MenuStyle;
 use crate::ui::widget::{CanvasTextHorizontalAlign, CanvasTextOverflow, CanvasTextVerticalAlign};
 use crate::ui::widget::{FocusScopeOptions, OverlayPlacementOptions};
+use smallvec::{smallvec, SmallVec};
 
 use super::super::scene::CollectContext;
 use super::super::types::ResolvedElement;
@@ -52,6 +54,7 @@ impl<VM> ResolvedElement<VM> {
                     &style,
                     Anchor::Key(AnchorKey::widget(self.id)),
                     None,
+                    menu.open.is_some(),
                 );
             }
         }
@@ -85,6 +88,7 @@ impl<VM> ResolvedElement<VM> {
             &style,
             Anchor::Point(anchor),
             Some(OverlayId::new(self.id.raw() ^ CONTEXT_MENU_OVERLAY_TAG)),
+            false,
         );
     }
 
@@ -156,6 +160,7 @@ pub(crate) fn emit_menu_layer<VM>(
     style: &MenuStyle,
     anchor: Anchor,
     overlay_id_override: Option<OverlayId>,
+    close_via_callback: bool,
 ) {
     emit_menu_layer_at_path(
         element,
@@ -166,6 +171,7 @@ pub(crate) fn emit_menu_layer<VM>(
         style,
         anchor,
         overlay_id_override,
+        close_via_callback,
         &[],
     );
 }
@@ -180,6 +186,7 @@ fn emit_menu_layer_at_path<VM>(
     style: &MenuStyle,
     anchor: Anchor,
     overlay_id_override: Option<OverlayId>,
+    close_via_callback: bool,
     parent_path: &[usize],
 ) {
     if menu.items.is_empty() {
@@ -412,6 +419,24 @@ fn emit_menu_layer_at_path<VM>(
     let menu_id = element.id;
     let state_owner = menu_item_state_owner(menu_id, parent_path);
     let on_open_change = menu.on_open_change.clone();
+    let accessibility_root_id = menu_accessibility_node_id(menu_id, parent_path, None);
+    let mut accessibility_nodes = vec![AccessibilityFragmentNode {
+        widget_id: accessibility_root_id,
+        resolved_path: SmallVec::new(),
+        bounds: bg_rect,
+        clip_rect: None,
+        hits: SmallVec::new(),
+        scroll_regions: SmallVec::new(),
+        children: SmallVec::new(),
+        synthetic_semantics: Some(AccessibilitySyntheticSemantics {
+            role: AccessibilitySyntheticRole::Menu,
+            label: None,
+            disabled: false,
+            checked: None,
+            expanded: None,
+            has_menu_popup: false,
+        }),
+    }];
     // 收集子菜单候选：(parent_item_index, item_rect)。emit_overlay 后用它递归 emit 子菜单。
     let mut submenu_candidates: Vec<(usize, Rect)> = Vec::new();
 
@@ -447,6 +472,7 @@ fn emit_menu_layer_at_path<VM>(
                 shortcut,
                 shortcut_w,
             } => {
+                let accessibility_label = label.clone();
                 let item_rect = Rect::new(item_left, cursor_y, item_width, height);
                 let disabled = menu.items[index].disabled.resolve();
                 let is_checked = menu.items[index]
@@ -667,15 +693,31 @@ fn emit_menu_layer_at_path<VM>(
                 }
 
                 let on_select = menu.items[index].on_select.clone();
-                hits.push(HitRegion {
+                let has_submenu = matches!(menu.items[index].kind, MenuItemKind::Submenu)
+                    && !menu.items[index].submenu.is_empty();
+                let mut menu_path = SmallVec::<[usize; 4]>::from_slice(parent_path);
+                menu_path.push(index);
+                let accessibility_id =
+                    menu_accessibility_node_id(menu_id, parent_path, Some(index));
+                let focus = (!disabled).then(|| FocusTargetMeta {
+                    widget_id: accessibility_id,
+                    tab_index: Some(-1),
+                    order: index,
+                    scope_path: Vec::new(),
+                    on_focus: None,
+                    on_blur: None,
+                });
+                let hit = HitRegion {
                     rect: item_rect,
                     clip_rect: None,
                     geometry: HitGeometry::Rect,
                     transform_chain: Default::default(),
                     scope_path: context.focus_scope_path(),
-                    focus: None,
+                    focus,
                     interaction: if disabled {
-                        HitInteraction::Disabled { id: menu_id }
+                        HitInteraction::Disabled {
+                            id: accessibility_id,
+                        }
                     } else {
                         HitInteraction::SelectOption {
                             id: menu_id,
@@ -684,16 +726,38 @@ fn emit_menu_layer_at_path<VM>(
                             interactions: Default::default(),
                             on_select,
                             on_open_change: on_open_change.clone(),
+                            menu_path: Some(menu_path.clone()),
                         }
                     },
                     gpu_scroll_container: context.gpu_scroll_container,
+                };
+                hits.push(hit.clone());
+                let node_index = accessibility_nodes.len();
+                accessibility_nodes[0].children.push((index, node_index));
+                accessibility_nodes.push(AccessibilityFragmentNode {
+                    widget_id: accessibility_id,
+                    resolved_path: smallvec![index],
+                    bounds: item_rect,
+                    clip_rect: None,
+                    hits: smallvec![hit],
+                    scroll_regions: SmallVec::new(),
+                    children: SmallVec::new(),
+                    synthetic_semantics: Some(AccessibilitySyntheticSemantics {
+                        role: if matches!(menu.items[index].kind, MenuItemKind::Checkable) {
+                            AccessibilitySyntheticRole::MenuItemCheckbox
+                        } else {
+                            AccessibilitySyntheticRole::MenuItem
+                        },
+                        label: Some(accessibility_label),
+                        disabled,
+                        checked: matches!(menu.items[index].kind, MenuItemKind::Checkable)
+                            .then_some(is_checked),
+                        expanded: has_submenu.then_some(widget_state.open),
+                        has_menu_popup: has_submenu,
+                    }),
                 });
                 // 收子菜单候选：父项为 Submenu kind + widget_state.hovered + submenu 非空
-                if !disabled
-                    && matches!(menu.items[index].kind, MenuItemKind::Submenu)
-                    && !menu.items[index].submenu.is_empty()
-                    && widget_state.hovered
-                {
+                if !disabled && has_submenu && widget_state.hovered {
                     submenu_candidates.push((index, item_rect));
                 }
                 cursor_y += height;
@@ -723,8 +787,10 @@ fn emit_menu_layer_at_path<VM>(
         .close_on_escape(true)
         .return_focus_to(menu_id)
         .focus_scope(focus_scope);
-    if let Some(cmd) = on_open_change.clone() {
-        overlay = overlay.on_close(cmd);
+    if close_via_callback {
+        if let Some(cmd) = on_open_change.clone() {
+            overlay = overlay.on_close(cmd);
+        }
     }
 
     let solved = emit_overlay(
@@ -732,10 +798,21 @@ fn emit_menu_layer_at_path<VM>(
         context.viewport,
         overlay,
         (overlay_w, overlay_h),
-        OverlayContent::Batch {
+        OverlayContent::AccessibleBatch {
             primitives,
             hits,
             clip_rect: None,
+            fragment: AccessibilityFragment {
+                source_window_instance_id: None,
+                source_publication_generation: None,
+                source_open: None,
+                owner_path: SmallVec::new(),
+                scope_path: Vec::new(),
+                clip_rect: Some(bg_rect),
+                has_duplicate_widget_ids: false,
+                resolved_root: Arc::new(element.clone()),
+                nodes: accessibility_nodes,
+            },
         },
     );
 
@@ -784,10 +861,31 @@ fn emit_menu_layer_at_path<VM>(
                 style,
                 crate::ui::widget::overlay::Anchor::Rect(absolute_item_rect),
                 Some(nested_overlay_id),
+                close_via_callback,
                 &submenu_path,
             );
         }
     }
+}
+
+fn menu_accessibility_node_id(
+    menu_id: WidgetId,
+    parent_path: &[usize],
+    item_index: Option<usize>,
+) -> WidgetId {
+    const OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
+    const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
+    const MENU_ACCESSIBILITY_DOMAIN: u64 = 0x4d45_4e55_4143_4345; // "MENUACCE"
+
+    let mut hash =
+        (OFFSET_BASIS ^ MENU_ACCESSIBILITY_DOMAIN ^ menu_id.raw()).wrapping_mul(FNV_PRIME);
+    for &index in parent_path {
+        hash = (hash ^ (index as u64).wrapping_add(1)).wrapping_mul(FNV_PRIME);
+    }
+    let discriminator = item_index
+        .map(|index| (index as u64).wrapping_add(1))
+        .unwrap_or(0);
+    WidgetId::from_raw((hash ^ discriminator).wrapping_mul(FNV_PRIME))
 }
 
 enum RowMetrics {

@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use parking_lot::RwLock;
 
+use crate::foundation::binding::Signal;
 use crate::foundation::color::Color;
 use crate::foundation::view_model::{Command, ValueCommand};
 use crate::theme::{StyleContext, WidgetState};
@@ -20,8 +21,8 @@ use super::r#virtual::{ItemLayout, ItemSource, VirtualList};
 use super::style::palette::palette_from_theme;
 use super::style::{StyleResolver, StyleSheet, WidgetSurfaceStyle};
 use super::{
-    ContainerStyle, ContextMenuDescriptor, Flex, GestureRecognizer, LongPressEvent, MenuItem,
-    MenuItemState, Stack, Text, TextWidgetStyle,
+    ContainerStyle, ContextMenuDescriptor, Flex, For, GestureRecognizer, LongPressEvent, MenuItem,
+    MenuItemState, Stack, Text, TextWidgetStyle, ViewSwitch,
 };
 
 pub type Table<T, VM> = DataGrid<T, VM>;
@@ -860,20 +861,43 @@ where
     VM: 'static,
 {
     fn into_element(self) -> Element<VM> {
-        if self.loading.resolve() {
-            return self
-                .loading_view
-                .unwrap_or_else(|| Stack::new().child(Text::new("Loading...")).into());
-        }
-        if self
+        let loading_is_reactive = matches!(&self.loading, Value::Signal(_));
+        let has_rows = self
             .rows
             .iter()
-            .all(|row| matches!(row, DataGridVirtualRow::Section(_)))
-        {
-            return self
-                .empty_view
-                .unwrap_or_else(|| Stack::new().child(Text::new("No rows")).into());
+            .any(|row| matches!(row, DataGridVirtualRow::Row { .. }));
+        if !loading_is_reactive {
+            if self.loading.resolve() {
+                return self
+                    .loading_view
+                    .clone()
+                    .unwrap_or_else(|| Stack::new().child(Text::new("Loading...")).into());
+            }
+            if !has_rows {
+                return self
+                    .empty_view
+                    .clone()
+                    .unwrap_or_else(|| Stack::new().child(Text::new("No rows")).into());
+            }
         }
+        let reactive_slot_index = match &self.loading {
+            Value::Signal(signal) => Some(signal.map(move |loading| {
+                if loading {
+                    0
+                } else if has_rows {
+                    2
+                } else {
+                    1
+                }
+            })),
+            Value::Static(_) => None,
+        };
+        let loading_view = self
+            .loading_view
+            .unwrap_or_else(|| Stack::new().child(Text::new("Loading...")).into());
+        let empty_view = self
+            .empty_view
+            .unwrap_or_else(|| Stack::new().child(Text::new("No rows")).into());
 
         let grid_id = WidgetId::next();
         let style_resolver = self.style.clone();
@@ -906,10 +930,7 @@ where
         };
         let sort = self.sort.clone();
         let columns = Arc::new(ordered_columns(self.columns));
-        let total_width = columns
-            .iter()
-            .map(|column| resolved_column_width(column))
-            .fold(Dp::ZERO, |acc, width| acc + width);
+        let total_width = total_column_width_value(columns.clone());
         let body_id = WidgetId::next();
         let row_keys: Arc<[WidgetKey]> = self
             .rows
@@ -964,7 +985,7 @@ where
             self.on_sort_change.clone(),
             self.on_column_width_change.clone(),
             self.on_column_reorder.clone(),
-            total_width,
+            total_width.clone(),
         );
         let selection_mode = self.selection_mode;
         let on_selection_change = self.on_selection_change.clone();
@@ -976,13 +997,15 @@ where
         let row_style_resolver = style_resolver.clone();
         let body_style_resolver = style_resolver.clone();
         let row_runtime_metrics = runtime_metrics.clone();
+        let row_total_width = total_width.clone();
         let mut virtual_rows: Element<VM> =
             VirtualList::new(source, move |_visible, row| match row {
                 DataGridVirtualRow::Section(header) => {
                     let mut section = header.clone();
                     let row_height = row_runtime_metrics.read().row_height;
-                    section.layout.width =
-                        Some(Value::Static(crate::ui::layout::Length::Px(total_width)));
+                    section.layout.width = Some(Value::Static(crate::ui::layout::Length::Px(
+                        row_total_width.resolve(),
+                    )));
                     section.layout.height =
                         Some(Value::Static(crate::ui::layout::Length::Px(row_height)));
                     section
@@ -1010,7 +1033,7 @@ where
                     on_cell_action.clone(),
                     on_cell_edit_commit.clone(),
                     context_menu.clone(),
-                    total_width,
+                    row_total_width.resolve(),
                 ),
             })
             .item_layout(initial_item_layout)
@@ -1054,8 +1077,8 @@ where
 
         let root_style_resolver = style_resolver.clone();
         let root_runtime_metrics = runtime_metrics;
-        let mut root: Element<VM> = Flex::vertical()
-            .runtime_layout(move |_, _, context, style_sheet, visual| {
+        let root_builder =
+            Flex::vertical().runtime_layout(move |_, _, context, style_sheet, visual| {
                 let style = resolve_data_grid_style_with_sheet(
                     root_style_resolver.as_ref(),
                     context,
@@ -1065,7 +1088,8 @@ where
                 );
                 *root_runtime_metrics.write() =
                     DataGridRuntimeMetrics::resolve(&style, density, row_height_override);
-            })
+            });
+        let mut root: Element<VM> = root_builder
             .child(header)
             .child(virtual_rows)
             .align(Align::Stretch)
@@ -1089,7 +1113,17 @@ where
             selection: root_selection,
         });
         apply_data_grid_root_style(&mut root, style_resolver);
-        root
+        match reactive_slot_index {
+            Some(index) => Stack::new()
+                .child(
+                    ViewSwitch::new(index)
+                        .case(loading_view)
+                        .case(empty_view)
+                        .case(root),
+                )
+                .into(),
+            None => root,
+        }
     }
 }
 
@@ -1103,25 +1137,81 @@ fn build_header<T, VM: 'static>(
     on_sort_change: Option<ValueCommand<VM, DataGridSortChange>>,
     on_column_width_change: Option<ValueCommand<VM, DataGridColumnWidthChange>>,
     on_column_reorder: Option<ValueCommand<VM, DataGridColumnReorderEvent>>,
-    total_width: Dp,
+    total_width: Value<Dp>,
 ) -> Element<VM>
 where
     T: Clone + Send + Sync + 'static,
 {
     let initial_metrics = *runtime_metrics.read();
     let header_metrics = runtime_metrics.clone();
-    let mut header = Flex::horizontal()
+    let cell_columns = columns;
+    let cell_sort = sort;
+    let cell_runtime_metrics = runtime_metrics;
+    let cell_style_resolver = style_resolver.clone();
+    let cells = For::new_with_resolver(
+        move || {
+            build_header_cells(
+                grid_id,
+                scroll_container_id,
+                cell_columns.as_ref(),
+                &cell_sort,
+                cell_runtime_metrics.clone(),
+                cell_style_resolver.clone(),
+                on_sort_change.clone(),
+                on_column_width_change.clone(),
+                on_column_reorder.clone(),
+            )
+        },
+        |cell: &Element<VM>| {
+            cell.key
+                .clone()
+                .expect("DataGrid header cells always carry their column key")
+        },
+        |_index, cell: &Element<VM>| cell.clone(),
+    );
+    let mut header: Element<VM> = Flex::horizontal()
         .height(initial_metrics.header_height)
         .runtime_layout(move |layout, _, _, _, _| {
             layout.height = Some(Value::Static(crate::ui::layout::Length::Px(
                 header_metrics.read().header_height,
             )));
         })
-        .width(total_width);
+        .width(total_width)
+        .child(cells)
+        .into();
+    apply_data_grid_header_container_style(&mut header, style_resolver);
+    header
+}
+
+#[allow(clippy::too_many_arguments)]
+fn build_header_cells<T, VM: 'static>(
+    grid_id: WidgetId,
+    scroll_container_id: WidgetId,
+    columns: &[DataGridColumn<T, VM>],
+    sort: &Value<Vec<DataGridSort>>,
+    runtime_metrics: Arc<RwLock<DataGridRuntimeMetrics>>,
+    style_resolver: Option<StyleResolver<DataGridStyle>>,
+    on_sort_change: Option<ValueCommand<VM, DataGridSortChange>>,
+    on_column_width_change: Option<ValueCommand<VM, DataGridColumnWidthChange>>,
+    on_column_reorder: Option<ValueCommand<VM, DataGridColumnReorderEvent>>,
+) -> Vec<Element<VM>>
+where
+    T: Clone + Send + Sync + 'static,
+{
+    let initial_metrics = *runtime_metrics.read();
     let pin_metrics = column_pin_metrics(columns.as_ref());
+    let sort_state = sort.resolve();
+    let first_keyboard_column = on_sort_change
+        .is_some()
+        .then(|| columns.iter().position(|column| column.sortable))
+        .flatten();
+    let first_resize_column = on_column_width_change
+        .is_some()
+        .then(|| columns.iter().position(|column| column.resizable))
+        .flatten();
+    let mut cells = Vec::with_capacity(columns.len());
     for (column_index, column) in columns.iter().enumerate() {
         let width = resolved_column_width(column);
-        let sort_state = sort.resolve();
         let sort_position = sort_state
             .iter()
             .position(|entry| entry.column_key == column.key);
@@ -1165,8 +1255,14 @@ where
                 container.padding = Some(Value::Static(metrics.cell_padding));
             })
             .into();
-        let header_focusable = Some(column.sortable || column.reorderable);
-        let header_tab_index = Some(if column_index == 0 { 0 } else { -1 });
+        let header_focusable = Some(column.sortable && on_sort_change.is_some());
+        let header_tab_index = header_focusable.and_then(|focusable| {
+            focusable.then_some(if Some(column_index) == first_keyboard_column {
+                0
+            } else {
+                -1
+            })
+        });
         let header_cursor = Some(Value::Static(if column.sortable {
             CursorStyle::Pointer
         } else {
@@ -1187,8 +1283,8 @@ where
             reorderable: column.reorderable,
             sort: sort.clone(),
             width,
-            min_width: column.min_width,
-            max_width: column.max_width,
+            min_width: resolved_column_bounds(column).0,
+            max_width: resolved_column_bounds(column).1,
             on_sort_change: on_sort_change.clone(),
             on_column_width_change: on_column_width_change.clone(),
             on_column_reorder: on_column_reorder.clone(),
@@ -1208,13 +1304,22 @@ where
                 .cursor(CursorStyle::EwResize)
                 .into();
             handle.background = Some(Value::Static(Color::TRANSPARENT));
+            let resize_focusable = on_column_width_change.is_some();
+            handle.focus.focusable = Some(resize_focusable);
+            handle.focus.tab_index =
+                resize_focusable.then_some(if Some(column_index) == first_resize_column {
+                    0
+                } else {
+                    -1
+                });
             handle.data_grid_resize_handle = Some(DataGridResizeHandleState {
                 grid_id,
                 column_index,
                 column_key: column.key.clone(),
                 width,
-                min_width: column.min_width,
-                max_width: column.max_width,
+                min_width: resolved_column_bounds(column).0,
+                max_width: resolved_column_bounds(column).1,
+                step: dp(8.0),
                 on_column_width_change: on_column_width_change.clone(),
             });
             let wrapper_metrics = runtime_metrics.clone();
@@ -1241,11 +1346,10 @@ where
             cell.interactions.cursor_style = header_cursor;
             cell.data_grid_header = Some(header_state);
         }
-        header = header.child(cell);
+        cell.key = Some(column.key.clone());
+        cells.push(cell);
     }
-    let mut header: Element<VM> = header.into();
-    apply_data_grid_header_container_style(&mut header, style_resolver);
-    header
+    cells
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1327,18 +1431,7 @@ where
             .into();
         apply_data_grid_cell_container_style(&mut cell, style_resolver.clone());
         cell.key = Some(WidgetKey::from(format!("{row_key:?}:{:?}", column.key)));
-        cell.focus.focusable = Some(!disabled_now);
-        cell.focus.tab_index = Some(if row_index == 0 && column_index == 0 {
-            0
-        } else {
-            -1
-        });
-        cell.interactions.cursor_style = Some(Value::Static(if disabled_now {
-            CursorStyle::Default
-        } else {
-            CursorStyle::Pointer
-        }));
-        cell.data_grid_cell = Some(DataGridCellState {
+        let cell_state = DataGridCellState {
             grid_id,
             row_id,
             scroll_container_id,
@@ -1362,17 +1455,32 @@ where
             on_selection_change: on_selection_change.clone(),
             on_cell_action: on_cell_action.clone(),
             on_cell_edit_commit: on_cell_edit_commit.clone(),
-        });
+        };
+        let enabled = !disabled_now;
+        let actionable = enabled && cell_state.is_actionable();
+        // Read-only ARIA grids still need one page-level entry point so assistive technology and
+        // arrow-key navigation can inspect their cells. Mutation capability only controls Click
+        // semantics and the pointer cursor.
+        cell.focus.focusable = Some(enabled);
+        cell.focus.tab_index = Some(if enabled && column_index == 0 { 0 } else { -1 });
+        cell.interactions.cursor_style = Some(Value::Static(if actionable {
+            CursorStyle::Pointer
+        } else {
+            CursorStyle::Default
+        }));
+        cell.data_grid_cell = Some(cell_state);
         if !context_menu.is_empty() {
-            let on_show = ValueCommand::new(|_: &mut VM, _: LongPressEvent| {});
+            let noop = || ValueCommand::new(|_: &mut VM, _: LongPressEvent| {});
             cell.interactions.gesture = Some(match cell.interactions.gesture.take() {
-                Some(existing) => existing.on_long_press(on_show),
-                None => GestureRecognizer::new().on_long_press(on_show),
+                Some(existing) if existing.on_long_press.is_some() => existing,
+                Some(existing) => existing.on_long_press(noop()),
+                None => GestureRecognizer::new().on_long_press(noop()),
             });
             cell.context_menu = Some(Box::new(ContextMenuDescriptor {
                 items: context_menu.as_ref().to_vec(),
+                on_show: None,
                 on_open_change: None,
-                disabled: Value::Static(false),
+                disabled: disabled.clone(),
                 style: None,
             }));
         }
@@ -1671,9 +1779,66 @@ fn column_pin_metrics<T, VM>(columns: &[DataGridColumn<T, VM>]) -> DataGridColum
     }
 }
 
+fn total_column_width_value<T, VM>(columns: Arc<Vec<DataGridColumn<T, VM>>>) -> Value<Dp>
+where
+    T: Clone + Send + Sync + 'static,
+    VM: 'static,
+{
+    let sources = columns
+        .iter()
+        .filter_map(|column| match &column.width {
+            Value::Static(_) => None,
+            Value::Signal(signal) => Some(signal.clone()),
+        })
+        .collect::<Vec<_>>();
+    if sources.is_empty() {
+        return Value::Static(resolved_total_column_width(columns.as_ref()));
+    }
+
+    let source_columns = columns.clone();
+    Signal::derive_many(sources, move || {
+        resolved_total_column_width(source_columns.as_ref())
+    })
+    .map(Value::Signal)
+    .unwrap_or_else(|| Value::Static(resolved_total_column_width(columns.as_ref())))
+}
+
+fn resolved_total_column_width<T, VM>(columns: &[DataGridColumn<T, VM>]) -> Dp {
+    let width = columns
+        .iter()
+        .map(resolved_column_width)
+        .fold(0.0f64, |total, width| total + f64::from(width.get()));
+    if width.is_finite() {
+        Dp::new((width.min(f32::MAX as f64)) as f32)
+    } else {
+        Dp::ZERO
+    }
+}
+
+fn resolved_column_bounds<T, VM>(column: &DataGridColumn<T, VM>) -> (Dp, Option<Dp>) {
+    let min_width = if column.min_width.get().is_finite() {
+        column.min_width.max(Dp::ZERO)
+    } else {
+        Dp::ZERO
+    };
+    let max_width = column.max_width.and_then(|max_width| {
+        max_width
+            .get()
+            .is_finite()
+            .then(|| max_width.max(min_width))
+    });
+    (min_width, max_width)
+}
+
 fn resolved_column_width<T, VM>(column: &DataGridColumn<T, VM>) -> Dp {
-    let mut width = column.width.resolve().max(column.min_width);
-    if let Some(max_width) = column.max_width {
+    let (min_width, max_width) = resolved_column_bounds(column);
+    let resolved = column.width.resolve();
+    let mut width = if resolved.get().is_finite() {
+        resolved.max(min_width)
+    } else {
+        min_width
+    };
+    if let Some(max_width) = max_width {
         width = width.min(max_width);
     }
     width

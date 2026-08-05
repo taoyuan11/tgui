@@ -67,6 +67,397 @@ fn tree_default_style_follows_theme_density() {
 }
 
 #[test]
+fn tree_loading_signal_switches_slots_on_the_existing_tree() {
+    let context = test_context();
+    let loading = context.state(true);
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let theme = Theme::default();
+    let mut animations = AnimationEngine::default();
+    let viewport = Rect::new(0.0, 0.0, 240.0, 120.0);
+    let tree: WidgetTree<()> = WidgetTree::new(
+        Tree::<&'static str, ()>::new(vec![TreeNode::keyed("root", "Root")], |ctx| {
+            Text::new(ctx.item).into()
+        })
+        .loading(loading.signal())
+        .loading_view(Text::new("loading"))
+        .size(dp(240.0), dp(120.0)),
+    );
+    let render_labels = |animations: &mut AnimationEngine| {
+        tree.render_output(
+            &font_manager,
+            &theme,
+            &media,
+            animations,
+            None,
+            None,
+            &HashMap::new(),
+            viewport,
+            None,
+            None,
+            None,
+            None,
+            false,
+        )
+        .primitives
+        .texts
+        .iter()
+        .map(|text| text.content.to_string())
+        .collect::<Vec<_>>()
+    };
+
+    let first = render_labels(&mut animations);
+    assert!(first.iter().any(|label| label == "loading"));
+    assert!(!first.iter().any(|label| label == "Root"));
+    let loading_layout = tree.build_scene_layout(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        UnitContext::default(),
+        &HashMap::new(),
+        &HashMap::new(),
+        viewport,
+    );
+    let ResolvedWidgetKind::Container {
+        children: loading_children,
+        ..
+    } = &loading_layout.resolved_root.kind
+    else {
+        panic!("reactive Tree slots should resolve through a retained container");
+    };
+    assert_eq!(loading_children.len(), 1);
+    assert!(loading_children[0].tree_root.is_none());
+    assert!(!matches!(
+        loading_children[0].kind,
+        ResolvedWidgetKind::Virtual { .. }
+    ));
+
+    loading.set(false);
+    let loaded = render_labels(&mut animations);
+    assert!(loaded.iter().any(|label| label == "Root"));
+    assert!(!loaded.iter().any(|label| label == "loading"));
+    let loaded_layout = tree.build_scene_layout(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        UnitContext::default(),
+        &HashMap::new(),
+        &HashMap::new(),
+        viewport,
+    );
+    let ResolvedWidgetKind::Container {
+        children: loaded_children,
+        ..
+    } = &loaded_layout.resolved_root.kind
+    else {
+        panic!("reactive Tree should keep its retained container");
+    };
+    assert_eq!(loaded_children.len(), 1);
+    assert_eq!(
+        loaded_children[0]
+            .tree_root
+            .as_ref()
+            .expect("loaded Tree root metadata")
+            .node_count,
+        1
+    );
+
+    loading.set(true);
+    let loading_again = render_labels(&mut animations);
+    assert!(loading_again.iter().any(|label| label == "loading"));
+    assert!(!loading_again.iter().any(|label| label == "Root"));
+}
+
+#[test]
+fn tree_loading_signal_prioritizes_loading_over_empty_on_the_existing_tree() {
+    let context = test_context();
+    let loading = context.state(false);
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let theme = Theme::default();
+    let mut animations = AnimationEngine::default();
+    let viewport = Rect::new(0.0, 0.0, 240.0, 220.0);
+    let tree: WidgetTree<()> = WidgetTree::new(
+        Tree::<&'static str, ()>::new(Vec::<TreeNode<&'static str>>::new(), |ctx| {
+            Text::new(ctx.item).into()
+        })
+        .loading(loading.signal())
+        .loading_view(
+            Stack::new()
+                .child(Text::new("loading"))
+                .size(dp(240.0), dp(160.0)),
+        )
+        .empty(
+            Stack::new()
+                .child(Text::new("empty"))
+                .size(dp(240.0), dp(150.0)),
+        )
+        .size(dp(240.0), dp(220.0)),
+    );
+    let render_labels = |animations: &mut AnimationEngine| {
+        tree.render_output(
+            &font_manager,
+            &theme,
+            &media,
+            animations,
+            None,
+            None,
+            &HashMap::new(),
+            viewport,
+            None,
+            None,
+            None,
+            None,
+            false,
+        )
+        .primitives
+        .texts
+        .iter()
+        .map(|text| text.content.to_string())
+        .collect::<Vec<_>>()
+    };
+
+    let empty = render_labels(&mut animations);
+    assert!(empty.iter().any(|label| label == "empty"));
+    assert!(!empty.iter().any(|label| label == "loading"));
+    let empty_layout = tree.build_scene_layout(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        UnitContext::default(),
+        &HashMap::new(),
+        &HashMap::new(),
+        viewport,
+    );
+    let ResolvedWidgetKind::Container {
+        children: empty_children,
+        ..
+    } = &empty_layout.resolved_root.kind
+    else {
+        panic!("reactive Tree slots should resolve through a retained container");
+    };
+    assert_eq!(empty_children.len(), 1);
+    assert_eq!(
+        empty_children[0]
+            .layout
+            .height
+            .as_ref()
+            .map(|height| height.resolve()),
+        Some(crate::ui::layout::Length::Px(dp(150.0)))
+    );
+    assert!(empty_children[0].tree_root.is_none());
+
+    loading.set(true);
+    let loading_labels = render_labels(&mut animations);
+    assert!(loading_labels.iter().any(|label| label == "loading"));
+    assert!(!loading_labels.iter().any(|label| label == "empty"));
+    let loading_layout = tree.build_scene_layout(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        UnitContext::default(),
+        &HashMap::new(),
+        &HashMap::new(),
+        viewport,
+    );
+    let ResolvedWidgetKind::Container {
+        children: loading_children,
+        ..
+    } = &loading_layout.resolved_root.kind
+    else {
+        panic!("reactive Tree slots should keep their retained container");
+    };
+    assert_eq!(loading_children.len(), 1);
+    assert_eq!(
+        loading_children[0]
+            .layout
+            .height
+            .as_ref()
+            .map(|height| height.resolve()),
+        Some(crate::ui::layout::Length::Px(dp(160.0)))
+    );
+    assert!(loading_children[0].tree_root.is_none());
+
+    loading.set(false);
+    let empty_again = render_labels(&mut animations);
+    assert!(empty_again.iter().any(|label| label == "empty"));
+    assert!(!empty_again.iter().any(|label| label == "loading"));
+}
+
+#[test]
+fn tree_expanded_checked_and_checkable_signals_update_on_the_same_tree() {
+    let context = test_context();
+    let expanded = context.state(Vec::<WidgetKey>::new());
+    let checked = context.state(Vec::<WidgetKey>::new());
+    let checkable = context.state(false);
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let theme = Theme::default();
+    let mut animations = AnimationEngine::default();
+    let viewport = Rect::new(0.0, 0.0, 240.0, 120.0);
+    let tree: WidgetTree<()> = WidgetTree::new(
+        Tree::<&'static str, ()>::new(
+            vec![TreeNode::keyed("root", "Root").child(TreeNode::keyed("child", "Child"))],
+            |ctx| Text::new(ctx.item).into(),
+        )
+        .expanded_keys(expanded.signal())
+        .checked_keys(checked.signal())
+        .checkable(checkable.signal())
+        .size(dp(240.0), dp(120.0)),
+    );
+
+    let initial_layout = tree.build_scene_layout(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        UnitContext::default(),
+        &HashMap::new(),
+        &HashMap::new(),
+        viewport,
+    );
+    let ResolvedWidgetKind::Virtual {
+        children: initial_rows,
+        ..
+    } = &initial_layout.resolved_root.kind
+    else {
+        panic!("Tree should resolve to a virtual widget");
+    };
+    assert_eq!(initial_rows.len(), 1);
+    let initial_root = initial_rows[0]
+        .tree_node
+        .as_ref()
+        .expect("root tree node state");
+    assert!(!initial_root.expanded);
+    assert!(!initial_root.checkable.resolve());
+    assert_eq!(initial_root.check_state, TreeCheckState::Unchecked);
+    let initial_root_id = initial_rows[0].id;
+    let initial_scene = tree.render_output(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        None,
+        None,
+        &HashMap::new(),
+        viewport,
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+    let initial_label_x = initial_scene
+        .primitives
+        .texts
+        .iter()
+        .find(|text| text.content.as_ref() == "Root")
+        .expect("root label should render")
+        .frame
+        .x;
+
+    checkable.set(true);
+    expanded.set(vec![WidgetKey::from("root")]);
+    checked.set(vec![WidgetKey::from("root"), WidgetKey::from("child")]);
+    let updated_layout = tree.build_scene_layout_at_with_previous(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        UnitContext::default(),
+        &HashMap::new(),
+        &HashMap::new(),
+        viewport,
+        Instant::now(),
+        Some(&initial_layout),
+    );
+    let ResolvedWidgetKind::Virtual {
+        children: updated_rows,
+        ..
+    } = &updated_layout.resolved_root.kind
+    else {
+        panic!("Tree should remain a virtual widget");
+    };
+    assert_eq!(updated_rows.len(), 2);
+    assert_eq!(updated_rows[0].id, initial_root_id);
+    let updated_root = updated_rows[0]
+        .tree_node
+        .as_ref()
+        .expect("updated root tree node state");
+    assert!(updated_root.expanded);
+    assert!(updated_root.checkable.resolve());
+    assert_eq!(updated_root.check_state, TreeCheckState::Checked);
+    assert_eq!(
+        updated_rows[1]
+            .tree_node
+            .as_ref()
+            .expect("expanded child state")
+            .key,
+        WidgetKey::from("child")
+    );
+    let updated_scene = tree.render_output(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        None,
+        None,
+        &HashMap::new(),
+        viewport,
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+    let updated_label_x = updated_scene
+        .primitives
+        .texts
+        .iter()
+        .find(|text| text.content.as_ref() == "Root")
+        .expect("updated root label should render")
+        .frame
+        .x;
+    assert_eq!(
+        updated_label_x - initial_label_x,
+        TreeStyle::default_for_theme(&theme).checkbox_width
+    );
+
+    checked.set(vec![WidgetKey::from("child")]);
+    let partial_layout = tree.build_scene_layout_at_with_previous(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        UnitContext::default(),
+        &HashMap::new(),
+        &HashMap::new(),
+        viewport,
+        Instant::now(),
+        Some(&updated_layout),
+    );
+    let ResolvedWidgetKind::Virtual {
+        children: partial_rows,
+        ..
+    } = &partial_layout.resolved_root.kind
+    else {
+        panic!("Tree should remain a virtual widget");
+    };
+    assert_eq!(
+        partial_rows[0]
+            .tree_node
+            .as_ref()
+            .expect("partially checked root state")
+            .check_state,
+        TreeCheckState::Indeterminate
+    );
+}
+
+#[test]
 fn compact_tree_selected_scene_uses_density_geometry() {
     let font_manager = FontManager::new(&FontCatalog::default());
     let media = test_media();

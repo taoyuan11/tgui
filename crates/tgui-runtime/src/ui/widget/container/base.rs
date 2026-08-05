@@ -439,7 +439,7 @@ impl<VM> Container<VM> {
     /// 设置滚动条样式。
     pub fn scrollbar_style(mut self, style: impl Into<Value<ScrollbarStyle>>) -> Self {
         if let WidgetKind::Container { layout, .. } = &mut self.element.kind {
-            layout.scrollbar_style = style.into().resolve();
+            layout.scrollbar_style_override = Some(style.into());
         }
         self
     }

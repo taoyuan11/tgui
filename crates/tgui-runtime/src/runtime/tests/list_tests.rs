@@ -581,6 +581,134 @@ fn list_keyboard_navigation_skips_disabled_rows_from_root_focus() {
 }
 
 #[test]
+fn list_uses_viewport_as_its_only_default_tab_stop() {
+    let invalidation = InvalidationSignal::new();
+    let list: Element<TestVm> = List::<&'static str, TestVm>::new(
+        vec![
+            ListItem::keyed("a", "Alpha"),
+            ListItem::keyed("b", "Beta").disable(true),
+            ListItem::keyed("c", "Gamma"),
+        ],
+        |ctx| Text::new(ctx.item).into(),
+    )
+    .size(dp(240.0), dp(144.0))
+    .into();
+    let list_id = list.id;
+    let mut handler = test_handler(Some(WidgetTree::new(list)), invalidation);
+
+    let tab_order = handler
+        .focusable_widgets_in_tab_order()
+        .into_iter()
+        .map(|focused| focused.widget_id)
+        .collect::<Vec<_>>();
+    assert_eq!(tab_order, vec![list_id]);
+
+    let rows = handler
+        .computed_scene()
+        .hit_regions
+        .iter()
+        .filter_map(|region| match &region.interaction {
+            HitInteraction::ListItem { state, .. } => Some((
+                state.key.clone(),
+                region.focus.as_ref().map(|focus| focus.tab_index),
+            )),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        rows,
+        vec![
+            (WidgetKey::from("a"), Some(Some(-1))),
+            (WidgetKey::from("b"), Some(Some(-1))),
+            (WidgetKey::from("c"), Some(Some(-1))),
+        ]
+    );
+
+    assert!(handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::Tab))));
+    assert_eq!(handler.focused_widget_id(), Some(list_id));
+    assert!(
+        handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::ArrowDown)))
+    );
+    let focused_id = handler.focused_widget_id();
+    let focused_key = handler
+        .computed_scene()
+        .hit_regions
+        .iter()
+        .find_map(|region| match &region.interaction {
+            HitInteraction::ListItem { id, state, .. } if Some(*id) == focused_id => {
+                Some(state.key.clone())
+            }
+            _ => None,
+        });
+    assert_eq!(focused_key, Some(WidgetKey::from("a")));
+}
+
+#[test]
+fn list_focus_moves_to_nearest_enabled_row_after_live_disable() {
+    let invalidation = InvalidationSignal::new();
+    let disabled = State::new(false, invalidation.clone());
+    let list: Element<TestVm> = List::<&'static str, TestVm>::new(
+        vec![
+            ListItem::keyed("a", "Alpha"),
+            ListItem::keyed("b", "Beta").disable(disabled.signal()),
+            ListItem::keyed("c", "Gamma"),
+        ],
+        |ctx| Text::new(ctx.item).into(),
+    )
+    .size(dp(240.0), dp(144.0))
+    .into();
+    let mut handler = test_handler(Some(WidgetTree::new(list)), invalidation);
+    let viewport = handler.viewport_rect();
+    let (_, beta) = list_row_center(&mut handler, "b");
+    handler.cursor_position = Some(beta);
+    handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Left);
+
+    disabled.set(true);
+    handler.request_redraw_if_dirty(Instant::now());
+    let _ = handler.computed_scene();
+    let focused_id = handler.focused_widget_id();
+    let focused_key = handler
+        .computed_scene()
+        .hit_regions
+        .iter()
+        .find_map(|region| match &region.interaction {
+            HitInteraction::ListItem { id, state, .. } if Some(*id) == focused_id => {
+                Some(state.key.clone())
+            }
+            _ => None,
+        });
+    assert_eq!(focused_key, Some(WidgetKey::from("c")));
+}
+
+#[test]
+fn list_focus_returns_to_root_when_all_rows_become_disabled() {
+    let invalidation = InvalidationSignal::new();
+    let disabled = State::new(false, invalidation.clone());
+    let list: Element<TestVm> = List::<&'static str, TestVm>::new(
+        vec![
+            ListItem::keyed("a", "Alpha").disable(true),
+            ListItem::keyed("b", "Beta").disable(disabled.signal()),
+            ListItem::keyed("c", "Gamma").disable(true),
+        ],
+        |ctx| Text::new(ctx.item).into(),
+    )
+    .size(dp(240.0), dp(144.0))
+    .into();
+    let list_id = list.id;
+    let mut handler = test_handler(Some(WidgetTree::new(list)), invalidation);
+    let viewport = handler.viewport_rect();
+    let (_, beta) = list_row_center(&mut handler, "b");
+    handler.cursor_position = Some(beta);
+    handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Left);
+
+    disabled.set(true);
+    handler.request_redraw_if_dirty(Instant::now());
+    let _ = handler.computed_scene();
+    assert_eq!(handler.focused_widget_id(), Some(list_id));
+    assert!(handler.list_focus_state.is_none());
+}
+
+#[test]
 fn list_disabled_row_does_not_select_or_fire_action() {
     let invalidation = InvalidationSignal::new();
     let selection_count = Arc::new(AtomicUsize::new(0));
@@ -682,6 +810,66 @@ fn list_row_context_menu_opens_on_right_click() {
     assert!(
         labels.iter().any(|label| label == "Delete"),
         "expected Delete in overlay labels: {labels:?}"
+    );
+}
+
+#[test]
+fn list_live_disabled_row_blocks_context_menu_right_click_and_long_press() {
+    let invalidation = InvalidationSignal::new();
+    let disabled = Arc::new(Mutex::new(false));
+    let disabled_for_signal = Arc::clone(&disabled);
+    let disabled_signal = Signal::new(
+        move || {
+            *disabled_for_signal
+                .lock()
+                .expect("disabled lock should succeed")
+        },
+        invalidation.clone(),
+    );
+    let tree = WidgetTree::new(
+        List::<&'static str, TestVm>::new(
+            vec![ListItem::keyed("a", "Alpha").disable(disabled_signal)],
+            |ctx| Text::new(ctx.item).into(),
+        )
+        .context_menu(vec![MenuItem::new("Rename")])
+        .size(dp(240.0), dp(48.0)),
+    );
+    let mut handler = test_handler(Some(tree), invalidation.clone());
+    let viewport = handler.viewport_rect();
+    let (row_id, point) = list_row_center(&mut handler, "a");
+
+    *disabled.lock().expect("disabled lock should succeed") = true;
+    invalidation.mark_dirty();
+
+    handler.cursor_position = Some(point);
+    let _ = handler.handle_hover(viewport);
+    handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Right);
+    assert!(
+        !handler.context_menu_anchor_states.contains_key(&row_id),
+        "a row disabled after construction must reject a right-click context menu"
+    );
+
+    let long_press_started = Instant::now();
+    handler.handle_bound_window_event(
+        &TestEventLoop,
+        WindowEvent::PointerButton {
+            device_id: None,
+            position: PhysicalPosition::new(f64::from(point.x.get()), f64::from(point.y.get())),
+            state: ElementState::Pressed,
+            button: ButtonSource::Touch {
+                finger_id: FingerId::from_raw(1),
+                force: None,
+            },
+            primary: true,
+        },
+    );
+    let _ = handler.drive_animations(
+        &TestEventLoop,
+        long_press_started + crate::runtime::LONG_PRESS_THRESHOLD + Duration::from_millis(10),
+    );
+    assert!(
+        !handler.context_menu_anchor_states.contains_key(&row_id),
+        "a row disabled after construction must reject a long-press context menu"
     );
 }
 

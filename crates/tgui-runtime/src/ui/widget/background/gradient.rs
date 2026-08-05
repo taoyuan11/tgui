@@ -25,7 +25,7 @@ impl BackgroundGradientStop {
     /// 返回新的渐变色标。
     pub fn new(offset: f32, color: Color) -> Self {
         Self {
-            offset: offset.clamp(0.0, 1.0),
+            offset: finite_unit_interval(offset),
             color,
         }
     }
@@ -55,8 +55,8 @@ impl BackgroundLinearGradient {
         stops: impl Into<Vec<BackgroundGradientStop>>,
     ) -> Self {
         Self {
-            start: start.into(),
-            end: end.into(),
+            start: finite_point(start.into()),
+            end: finite_point(end.into()),
             stops: clamp_background_stops(stops.into()),
         }
     }
@@ -86,8 +86,8 @@ impl BackgroundRadialGradient {
         stops: impl Into<Vec<BackgroundGradientStop>>,
     ) -> Self {
         Self {
-            center: center.into(),
-            radius: radius.into(),
+            center: finite_point(center.into()),
+            radius: finite_non_negative_dp(radius.into()),
             stops: clamp_background_stops(stops.into()),
         }
     }
@@ -184,9 +184,65 @@ fn clamp_background_stops(mut stops: Vec<BackgroundGradientStop>) -> Vec<Backgro
         ];
     }
 
+    for stop in &mut stops {
+        stop.offset = finite_unit_interval(stop.offset);
+    }
     stops.sort_by(|left, right| left.offset.total_cmp(&right.offset));
     if stops.len() > MAX_BACKGROUND_GRADIENT_STOPS {
         stops.truncate(MAX_BACKGROUND_GRADIENT_STOPS);
     }
     stops
+}
+
+fn finite_unit_interval(value: f32) -> f32 {
+    if value.is_finite() {
+        value.clamp(0.0, 1.0)
+    } else {
+        0.0
+    }
+}
+
+fn finite_dp(value: Dp) -> Dp {
+    if value.get().is_finite() {
+        value
+    } else {
+        Dp::ZERO
+    }
+}
+
+fn finite_non_negative_dp(value: Dp) -> Dp {
+    finite_dp(value).max(Dp::ZERO)
+}
+
+fn finite_point(point: Point) -> Point {
+    Point::new(finite_dp(point.x), finite_dp(point.y))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn constructors_normalize_non_finite_gradient_geometry_and_stops() {
+        let linear = BackgroundLinearGradient::new(
+            Point::new(f32::NAN, f32::INFINITY),
+            Point::new(f32::NEG_INFINITY, 12.0),
+            vec![BackgroundGradientStop::new(f32::NAN, Color::WHITE)],
+        );
+        assert_eq!(linear.start, Point::ZERO);
+        assert_eq!(linear.end, Point::new(0.0, 12.0));
+        assert_eq!(linear.stops[0].offset, 0.0);
+
+        let radial = BackgroundRadialGradient::new(
+            Point::new(f32::INFINITY, f32::NAN),
+            f32::INFINITY,
+            vec![BackgroundGradientStop {
+                offset: f32::NEG_INFINITY,
+                color: Color::BLACK,
+            }],
+        );
+        assert_eq!(radial.center, Point::ZERO);
+        assert_eq!(radial.radius, Dp::ZERO);
+        assert_eq!(radial.stops[0].offset, 0.0);
+    }
 }

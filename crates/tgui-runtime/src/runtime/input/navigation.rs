@@ -1,6 +1,32 @@
 use super::*;
 
 impl<VM: 'static> BoundRuntimeHandler<VM> {
+    pub(in crate::runtime) fn adjust_focused_number_input(&mut self, direction: i32) -> bool {
+        let Some(widget_id) = self.focused_text_input_id() else {
+            return false;
+        };
+        let computed = self.computed_scene();
+        let behavior = computed
+            .hit_regions
+            .iter()
+            .chain(computed.overlay_hit_regions.iter())
+            .find_map(|region| match &region.interaction {
+                HitInteraction::TextInput {
+                    id, interactions, ..
+                } if *id == widget_id => interactions.number_input.clone(),
+                _ => None,
+            });
+        let Some(behavior) = behavior else {
+            return false;
+        };
+        if direction >= 0 {
+            self.execute_command(&behavior.increment);
+        } else {
+            self.execute_command(&behavior.decrement);
+        }
+        true
+    }
+
     pub(in crate::runtime) fn move_focused_input_cursor(
         &mut self,
         next_index: impl FnOnce(&str, bool, &TextEditState) -> usize,

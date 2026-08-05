@@ -2,22 +2,17 @@
 //!
 //! ContextMenu 是一个修饰符，把任意 child element 包起来并挂上 `context_menu`
 //! 描述符。长按 / 鼠标右键自动通过 `GestureRecognizer::on_long_press` 触发
-//! `on_show(LongPressEvent)` 回调——调用方在 callback 里写入自己的
-//! `State<bool>`（open）与 `State<Point>`（anchor），然后这两个 State
-//! 信号驱动菜单浮层的可见性。点击外部 / Esc 会通过 overlay 的统一关闭
-//! 通道触发 `on_open_change(false)`，调用方在那里清掉 open State。
-//!
-//! 这是当前 MVP 接法。把 open / anchor 收编进 runtime 内部状态（无需用户
-//! 维护两个 State）属于路线图长尾——需要给 `CollectContext` 加 anchor 字段
-//! 并贯穿调用链 + 在 gesture 派发里直接写入 runtime state，单独 PR 落地。
+//! `on_show(LongPressEvent)` 回调。打开状态与锚点由 runtime 维护；`on_show` 用于观察
+//! 触发来源/坐标，`on_open_change` 会收到实际的开合通知。点击外部 / Esc 或选择菜单项
+//! 都会关闭浮层。
 //!
 //! ```ignore
-//! use tgui::mvvm::{State, ViewModelContext};
+//! use tgui::core::Point;
 //! use tgui::widgets::{ContextMenu, Image, LongPressEvent, MenuItem};
 //!
 //! struct PhotoVm {
-//!     ctx_open: State<bool>,
-//!     ctx_anchor: State<tgui::core::Point>,
+//!     context_open: bool,
+//!     last_context_position: Option<Point>,
 //! }
 //!
 //! impl PhotoVm {
@@ -27,16 +22,15 @@
 //!                 MenuItem::new("复制").on_select(/* ... */),
 //!                 MenuItem::new("删除").on_select(/* ... */),
 //!             ])
-//!             // 长按/右键时写两个 State
+//!             // 可选：观察长按/右键来源与坐标
 //!             .on_show(tgui::mvvm::ValueCommand::new(
 //!                 |vm: &mut Self, ev: LongPressEvent| {
-//!                     vm.ctx_open.set(true);
-//!                     vm.ctx_anchor.set(ev.position);
+//!                     vm.last_context_position = Some(ev.position);
 //!                 },
 //!             ))
-//!             // 外部点击 / Esc / item 选中 → on_open_change(false)
+//!             // 外部点击 / Esc / item 选中也会通知 false
 //!             .on_open_change(tgui::mvvm::ValueCommand::new(
-//!                 |vm: &mut Self, open: bool| vm.ctx_open.set(open),
+//!                 |vm: &mut Self, open: bool| vm.context_open = open,
 //!             ))
 //!             .into()
 //!     }
@@ -88,14 +82,14 @@ impl<VM> ContextMenu<VM> {
         self
     }
 
-    /// 长按 / 右键触发时的回调，参数携带触发坐标。调用方应在 callback 里
-    /// 写入自己的 open / anchor State。
+    /// 长按 / 右键触发时的回调，参数携带触发来源与坐标。开合状态与锚点由 runtime
+    /// 维护，调用方无需额外保存它们。
     pub fn on_show(mut self, command: ValueCommand<VM, LongPressEvent>) -> Self {
         self.on_show = Some(command);
         self
     }
 
-    /// 菜单关闭时的回调（外部点击 / Esc / item 选中触发）。
+    /// 菜单开合变化回调（右键/长按打开，以及外部点击 / Esc / item 选中关闭）。
     pub fn on_open_change(mut self, command: ValueCommand<VM, bool>) -> Self {
         self.on_open_change = Some(command);
         self
@@ -143,18 +137,20 @@ where
             style,
         } = ctx_menu;
 
-        // 始终接长按手势：runtime 会据此自动打开内部 ContextMenu。
-        // 若调用方提供 on_show，自动打开后仍会收到触发事件。
-        let on_show =
-            on_show.unwrap_or_else(|| ValueCommand::new(|_: &mut VM, _: LongPressEvent| {}));
+        // 始终保证存在长按识别器，让 runtime 能自动打开内部 ContextMenu。用户已经
+        // 安装的 long-press handler 必须保留；ContextMenu 自己的 `on_show` 存在描述符
+        // 中，由 runtime 对长按和右键统一派发，避免真实右键序列重复调用。
+        let noop = || ValueCommand::new(|_: &mut VM, _: LongPressEvent| {});
         let recognizer = match child.interactions.gesture.take() {
-            Some(existing) => existing.on_long_press(on_show),
-            None => GestureRecognizer::new().on_long_press(on_show),
+            Some(existing) if existing.on_long_press.is_some() => existing,
+            Some(existing) => existing.on_long_press(noop()),
+            None => GestureRecognizer::new().on_long_press(noop()),
         };
         child.interactions.gesture = Some(recognizer);
 
         let descriptor = ContextMenuDescriptor {
             items: items.into_iter().map(MenuItemState::from_public).collect(),
+            on_show,
             on_open_change,
             disabled,
             style,

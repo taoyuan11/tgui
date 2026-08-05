@@ -1,11 +1,12 @@
 use std::sync::{Arc, Mutex};
 
+use crate::foundation::binding::{InvalidationSignal, State};
 use crate::foundation::view_model::{Command, ValueCommand};
 use crate::theme::{StyleContext, WidgetState};
 use crate::ui::layout::{Insets, LayoutStyle, Length, Overflow, Value};
 use crate::ui::unit::{dp, Dp};
 
-use super::common::VisualStyle;
+use super::common::{AccessibilityRole, VisualStyle};
 use super::core::Element;
 use super::icon::SvgIconId;
 use super::p3_support::{
@@ -14,15 +15,15 @@ use super::p3_support::{
 use super::style::{
     CollapseStyle, ContainerStyle, IconStyle, StyleResolver, StyleSheet, TextWidgetStyle,
 };
-use super::{CursorStyle, Flex, Icon, Stack, Text, WidgetKey};
+use super::{CursorStyle, Flex, FocusScopeOptions, Icon, Stack, Text, ViewSwitch, WidgetKey};
 
 const COLLAPSE_ICON_SIZE: Dp = dp(20.0);
-const COLLAPSE_PANEL_MAX_HEIGHT: Dp = dp(320.0);
 
 pub struct Collapse<VM> {
     title: Value<String>,
     content: Element<VM>,
     expanded: Value<bool>,
+    disabled: Value<bool>,
     on_change: Option<ValueCommand<VM, bool>>,
     style: Option<StyleResolver<CollapseStyle>>,
     layout: LayoutStyle,
@@ -36,6 +37,7 @@ impl<VM> Collapse<VM> {
             title: title.into(),
             content: content.into(),
             expanded: Value::Static(false),
+            disabled: Value::Static(false),
             on_change: None,
             style: None,
             layout: LayoutStyle::default(),
@@ -52,6 +54,17 @@ impl<VM> Collapse<VM> {
     pub fn on_change(mut self, command: ValueCommand<VM, bool>) -> Self {
         self.on_change = Some(command);
         self
+    }
+
+    /// Disables disclosure activation while preserving the current panel state.
+    pub fn disable(mut self, disabled: impl Into<Value<bool>>) -> Self {
+        self.disabled = disabled.into();
+        self
+    }
+
+    /// Alias for [`Collapse::disable`].
+    pub fn disabled(self, disabled: impl Into<Value<bool>>) -> Self {
+        self.disable(disabled)
     }
 
     pub fn style(
@@ -78,36 +91,28 @@ impl<VM> Collapse<VM> {
 
 impl<VM: 'static> From<Collapse<VM>> for Element<VM> {
     fn from(collapse: Collapse<VM>) -> Self {
-        let expanded = collapse.expanded.resolve();
-        let expanded_for_click = collapse.expanded.clone();
-        let progress = collapse_progress_value(collapse.expanded.clone());
-        let panel_max_height = collapse_progress_max_height(progress.clone());
-        let on_change = collapse.on_change.clone();
+        // A static value is the uncontrolled initial value. Signals remain caller-owned,
+        // controlled bindings. This keeps the simple `Collapse::new(...)` form usable while
+        // preserving the existing MVVM path for `expanded(signal).on_change(...)`.
+        let (expanded, internal_expanded) = interactive_value(collapse.expanded.clone());
+        let expanded_for_click = expanded.clone();
+        let progress = collapse_progress_value(expanded.clone());
+        let panel_max_height = collapse_expanded_max_height(expanded.clone());
+        let on_change = disclosure_change_command(internal_expanded, collapse.on_change.clone());
         let header_style = collapse.style.clone();
         let header_identity = collapse.visual.clone();
-        let icon_source = if expanded {
-            SvgIconId::ChevronUp
-        } else {
-            SvgIconId::ChevronDown
-        };
-        let header_icon = Icon::internal(icon_source)
-            .size(COLLAPSE_ICON_SIZE)
-            .style_full_with_style_sheet({
-                let header_style = header_style.clone();
-                move |context, style_sheet, visual, state| {
-                    let resolved = resolve_collapse_style_with_sheet(
-                        header_style.as_ref(),
-                        context,
-                        style_sheet,
-                        visual,
-                        state,
-                    );
-                    let mut icon = IconStyle::default_for_theme(context.theme);
-                    icon.color = resolved.header_foreground.clone();
-                    icon.size = COLLAPSE_ICON_SIZE;
-                    icon
-                }
-            });
+        let icon_index = collapse_icon_index_value(&expanded);
+        let header_icon = ViewSwitch::new(icon_index)
+            .case(collapse_header_icon(
+                SvgIconId::ChevronDown,
+                header_style.clone(),
+            ))
+            .case(collapse_header_icon(
+                SvgIconId::ChevronUp,
+                header_style.clone(),
+            ));
+        let enabled = inverted_bool_value(&collapse.disabled);
+        let header_opacity = enabled_opacity_value(&enabled);
         let header = Flex::horizontal()
             .width(Length::Percent(1.0))
             .align(crate::ui::layout::Align::Center)
@@ -147,17 +152,12 @@ impl<VM: 'static> From<Collapse<VM>> for Element<VM> {
                 container.surface.background = Some(resolved.header_background.resolve(state));
                 container
             })
-            .cursor(CursorStyle::Pointer)
-            .focusable(true)
-            .on_click(Command::new_with_context(move |vm, context| {
-                if let Some(command) = on_change.as_ref() {
-                    command.execute_with_context(
-                        vm,
-                        !expanded_for_click.resolve_untracked(),
-                        context,
-                    );
-                }
-            }))
+            .opacity(header_opacity)
+            .focus_scope(
+                FocusScopeOptions::new()
+                    .active(enabled)
+                    .suppress_interactions_when_inactive(),
+            )
             .child(
                 Text::new(collapse.title.clone())
                     .style_full_with_style_sheet({
@@ -179,8 +179,31 @@ impl<VM: 'static> From<Collapse<VM>> for Element<VM> {
                     .grow(1.0),
             )
             .child(header_icon);
-        let mut children: Vec<Element<VM>> =
-            vec![with_visual_identity(header.into(), &header_identity)];
+        let header_interactive = on_change.is_some();
+        let header = if let Some(on_change) = on_change {
+            header
+                .cursor(CursorStyle::Pointer)
+                .focusable(true)
+                .on_click(Command::new_with_context(move |vm, context| {
+                    on_change.execute_with_context(
+                        vm,
+                        !expanded_for_click.resolve_untracked(),
+                        context,
+                    );
+                }))
+        } else {
+            header
+        };
+        let mut header: Element<VM> = header.into();
+        header.visual.accessibility_role = Some(AccessibilityRole::Button);
+        header.visual.accessibility_label = Some(collapse.title.clone());
+        header.visual.accessibility_expanded = Some(expanded.clone());
+        header.visual.accessibility_disabled = Some(if header_interactive {
+            collapse.disabled.clone()
+        } else {
+            Value::Static(true)
+        });
+        let mut children: Vec<Element<VM>> = vec![with_visual_identity(header, &header_identity)];
         let style = collapse.style.clone();
         let panel_identity = collapse.visual.clone();
         let panel_padding_cache = Arc::new(Mutex::new(
@@ -189,6 +212,12 @@ impl<VM: 'static> From<Collapse<VM>> for Element<VM> {
         children.push(with_visual_identity(
             Stack::new()
                 .overflow(Overflow::Hidden)
+                .focus_scope(
+                    FocusScopeOptions::new()
+                        .active(expanded.clone())
+                        .suppress_interactions_when_inactive()
+                        .hide_from_accessibility_when_inactive(),
+                )
                 .runtime_layout({
                     let style = collapse.style.clone();
                     let progress = progress.clone();
@@ -295,6 +324,7 @@ impl<VM> AccordionItem<VM> {
 pub struct Accordion<VM> {
     items: Vec<AccordionItem<VM>>,
     expanded_key: Value<Option<String>>,
+    disabled: Value<bool>,
     on_change: Option<ValueCommand<VM, Option<String>>>,
     style: Option<StyleResolver<CollapseStyle>>,
     layout: LayoutStyle,
@@ -310,6 +340,7 @@ impl<VM> Accordion<VM> {
         Self {
             items,
             expanded_key: expanded_key.into(),
+            disabled: Value::Static(false),
             on_change: None,
             style: None,
             layout: LayoutStyle::default(),
@@ -321,6 +352,17 @@ impl<VM> Accordion<VM> {
     pub fn on_change(mut self, command: ValueCommand<VM, Option<String>>) -> Self {
         self.on_change = Some(command);
         self
+    }
+
+    /// Disables activation of every accordion header.
+    pub fn disable(mut self, disabled: impl Into<Value<bool>>) -> Self {
+        self.disabled = disabled.into();
+        self
+    }
+
+    /// Alias for [`Accordion::disable`].
+    pub fn disabled(self, disabled: impl Into<Value<bool>>) -> Self {
+        self.disable(disabled)
     }
 
     pub fn style(
@@ -347,26 +389,30 @@ impl<VM> Accordion<VM> {
 
 impl<VM: 'static> From<Accordion<VM>> for Element<VM> {
     fn from(accordion: Accordion<VM>) -> Self {
+        let (expanded_key, internal_expanded_key) = interactive_value(accordion.expanded_key);
+        let accordion_on_change =
+            disclosure_change_command(internal_expanded_key, accordion.on_change.clone());
         let items = accordion
             .items
             .into_iter()
             .map(|item| {
                 let key = item.key.clone();
-                let expanded = accordion_item_expanded_value(&accordion.expanded_key, &item.key);
-                let on_change = accordion.on_change.clone();
+                let expanded = accordion_item_expanded_value(&expanded_key, &item.key);
+                let on_change = accordion_on_change.clone();
                 Collapse {
                     title: item.title,
                     content: item.content,
                     expanded,
-                    on_change: Some(ValueCommand::new_with_context(move |vm, next, context| {
-                        if let Some(command) = on_change.as_ref() {
+                    disabled: accordion.disabled.clone(),
+                    on_change: on_change.map(|command| {
+                        ValueCommand::new_with_context(move |vm, next, context| {
                             command.execute_with_context(
                                 vm,
                                 if next { Some(key.clone()) } else { None },
                                 context,
                             );
-                        }
-                    })),
+                        })
+                    }),
                     style: accordion.style.clone(),
                     layout: LayoutStyle::default(),
                     visual: accordion.visual.clone(),
@@ -434,6 +480,85 @@ fn collapse_progress_value(expanded: Value<bool>) -> Value<f32> {
     }
 }
 
+fn interactive_value<T>(value: Value<T>) -> (Value<T>, Option<State<T>>)
+where
+    T: Clone + PartialEq + Send + Sync + 'static,
+{
+    match value {
+        Value::Static(initial) => {
+            let state = State::new(initial, InvalidationSignal::new());
+            (Value::Signal(state.signal()), Some(state))
+        }
+        Value::Signal(signal) => (Value::Signal(signal), None),
+    }
+}
+
+fn disclosure_change_command<VM: 'static, T>(
+    internal: Option<State<T>>,
+    callback: Option<ValueCommand<VM, T>>,
+) -> Option<ValueCommand<VM, T>>
+where
+    T: Clone + PartialEq + Send + Sync + 'static,
+{
+    if internal.is_none() && callback.is_none() {
+        return None;
+    }
+    Some(ValueCommand::new_with_context(
+        move |vm, next: T, context| {
+            if let Some(internal) = internal.as_ref() {
+                internal.set(next.clone());
+            }
+            if let Some(callback) = callback.as_ref() {
+                callback.execute_with_context(vm, next, context);
+            }
+        },
+    ))
+}
+
+fn collapse_header_icon<VM: 'static>(
+    source: SvgIconId,
+    header_style: Option<StyleResolver<CollapseStyle>>,
+) -> Icon<VM> {
+    Icon::internal(source)
+        .size(COLLAPSE_ICON_SIZE)
+        .style_full_with_style_sheet(move |context, style_sheet, visual, state| {
+            let resolved = resolve_collapse_style_with_sheet(
+                header_style.as_ref(),
+                context,
+                style_sheet,
+                visual,
+                state,
+            );
+            let mut icon = IconStyle::default_for_theme(context.theme);
+            icon.color = resolved.header_foreground.clone();
+            icon.size = COLLAPSE_ICON_SIZE;
+            icon
+        })
+}
+
+fn collapse_icon_index_value(expanded: &Value<bool>) -> Value<usize> {
+    match expanded {
+        Value::Static(expanded) => Value::Static(usize::from(*expanded)),
+        Value::Signal(signal) => Value::Signal(signal.map_memo(usize::from)),
+    }
+}
+
+fn inverted_bool_value(value: &Value<bool>) -> Value<bool> {
+    match value {
+        Value::Static(value) => Value::Static(!*value),
+        Value::Signal(signal) => Value::Signal(signal.map_memo(|value| !value)),
+    }
+}
+
+fn enabled_opacity_value(enabled: &Value<bool>) -> Value<f32> {
+    match enabled {
+        Value::Static(enabled) => Value::Static(if *enabled { 1.0 } else { 0.5 }),
+        Value::Signal(signal) => {
+            Value::Signal(signal.map_memo(|enabled| if enabled { 1.0 } else { 0.5 }))
+        }
+    }
+}
+
 fn accordion_item_expanded_value(expanded_key: &Value<Option<String>>, key: &str) -> Value<bool> {
     match expanded_key {
         Value::Static(current) => Value::Static(current.as_deref() == Some(key)),
@@ -444,10 +569,14 @@ fn accordion_item_expanded_value(expanded_key: &Value<Option<String>>, key: &str
     }
 }
 
-fn collapse_progress_max_height(progress: Value<f32>) -> Value<Length> {
-    match progress {
-        Value::Static(value) => Value::Static(collapse_panel_max_height(value)),
-        Value::Signal(signal) => Value::Signal(signal.map(collapse_panel_max_height)),
+fn collapse_expanded_max_height(expanded: Value<bool>) -> Value<Length> {
+    match expanded {
+        Value::Static(expanded) => Value::Static(collapse_panel_max_height(expanded)),
+        Value::Signal(signal) => Value::Signal(
+            signal
+                .map_memo(collapse_panel_max_height)
+                .without_transition(),
+        ),
     }
 }
 
@@ -467,8 +596,10 @@ fn collapse_progress_padding(progress: Value<f32>, padding: Insets) -> Value<Ins
     }
 }
 
-fn collapse_panel_max_height(progress: f32) -> Length {
-    Length::Px(Dp::new(
-        COLLAPSE_PANEL_MAX_HEIGHT.get() * progress.clamp(0.0, 1.0),
-    ))
+fn collapse_panel_max_height(expanded: bool) -> Length {
+    if expanded {
+        Length::Auto
+    } else {
+        Length::Px(Dp::ZERO)
+    }
 }

@@ -379,16 +379,29 @@ impl<VM: 'static> WidgetTree<VM> {
         )
     }
 
+    #[cfg(test)]
     pub(crate) fn media_event_states(
         &self,
         media: &MediaManager,
         theme: &Theme,
     ) -> Vec<MediaEventState<VM>> {
+        self.media_event_states_with_active_tooltip(media, theme, None)
+    }
+
+    pub(crate) fn media_event_states_with_active_tooltip(
+        &self,
+        media: &MediaManager,
+        theme: &Theme,
+        active_tooltip: Option<WidgetId>,
+    ) -> Vec<MediaEventState<VM>> {
         with_widget_stack(|| {
             let mut states = Vec::new();
-            self.root
-                .resolve(theme)
-                .collect_media_event_states(media, &mut states);
+            self.root.resolve(theme).collect_media_event_states(
+                media,
+                theme,
+                active_tooltip,
+                &mut states,
+            );
             states
         })
     }

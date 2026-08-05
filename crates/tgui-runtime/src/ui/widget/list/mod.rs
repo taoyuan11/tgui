@@ -19,7 +19,7 @@ use super::style::palette::palette_from_theme;
 use super::style::{ContainerStyle, StyleResolver, StyleSheet};
 use super::{
     ContextMenuDescriptor, Flex, GestureRecognizer, LongPressEvent, MenuItem, MenuItemState, Stack,
-    Text,
+    Text, ViewSwitch,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -618,20 +618,43 @@ where
     VM: 'static,
 {
     fn into_element(self) -> Element<VM> {
-        if self.loading.resolve() {
-            return self
-                .loading_view
-                .unwrap_or_else(|| Stack::new().child(Text::new("Loading...")).into());
-        }
-        if self
+        let loading_is_reactive = matches!(&self.loading, Value::Signal(_));
+        let has_items = self
             .rows
             .iter()
-            .all(|row| matches!(row, ListRow::Header(_)))
-        {
-            return self
-                .empty_view
-                .unwrap_or_else(|| Stack::new().child(Text::new("No items")).into());
+            .any(|row| matches!(row, ListRow::Item { .. }));
+        if !loading_is_reactive {
+            if self.loading.resolve() {
+                return self
+                    .loading_view
+                    .clone()
+                    .unwrap_or_else(|| Stack::new().child(Text::new("Loading...")).into());
+            }
+            if !has_items {
+                return self
+                    .empty_view
+                    .clone()
+                    .unwrap_or_else(|| Stack::new().child(Text::new("No items")).into());
+            }
         }
+        let reactive_slot_index = match &self.loading {
+            Value::Signal(signal) => Some(signal.map(move |loading| {
+                if loading {
+                    0
+                } else if has_items {
+                    2
+                } else {
+                    1
+                }
+            })),
+            Value::Static(_) => None,
+        };
+        let loading_view = self
+            .loading_view
+            .unwrap_or_else(|| Stack::new().child(Text::new("Loading...")).into());
+        let empty_view = self
+            .empty_view
+            .unwrap_or_else(|| Stack::new().child(Text::new("No items")).into());
 
         let list_id = WidgetId::next();
         let style_resolver = self.style.clone();
@@ -775,17 +798,26 @@ where
                             on_selection_change: on_selection_change.clone(),
                             on_item_action: on_item_action.clone(),
                         });
+                        // List is a composite widget: Tab enters through the viewport and
+                        // directional navigation moves among rows without adding every row to
+                        // the document tab order. Rows retain programmatic focus metadata so a
+                        // live disabled-state change does not replace a virtual row; the runtime
+                        // immediately moves focus away from disabled rows.
+                        row.focus.focusable = Some(true);
+                        row.focus.tab_index = Some(-1);
                         if !context_menu.is_empty() {
-                            let on_show = ValueCommand::new(|_: &mut VM, _: LongPressEvent| {});
+                            let noop = || ValueCommand::new(|_: &mut VM, _: LongPressEvent| {});
                             row.interactions.gesture =
                                 Some(match row.interactions.gesture.take() {
-                                    Some(existing) => existing.on_long_press(on_show),
-                                    None => GestureRecognizer::new().on_long_press(on_show),
+                                    Some(existing) if existing.on_long_press.is_some() => existing,
+                                    Some(existing) => existing.on_long_press(noop()),
+                                    None => GestureRecognizer::new().on_long_press(noop()),
                                 });
                             let descriptor = ContextMenuDescriptor {
                                 items: context_menu.as_ref().to_vec(),
+                                on_show: None,
                                 on_open_change: None,
-                                disabled: Value::Static(false),
+                                disabled: disabled.clone(),
                                 style: None,
                             };
                             row.context_menu = Some(Box::new(descriptor));
@@ -812,13 +844,23 @@ where
         .into();
         list.key = self.key;
         list.layout = self.layout;
-        list.focus.focusable = self.focusable;
-        list.focus.tab_index = self.tab_index;
+        list.focus.focusable = Some(self.focusable.unwrap_or(true));
+        list.focus.tab_index = Some(self.tab_index.unwrap_or(0));
         list.focus.scope = self.focus_scope;
         list.visual = self.visual;
         list.interactions = self.interactions;
         list.lifecycle_events = self.lifecycle_events;
         list.media_events = self.media_events;
-        list
+        match reactive_slot_index {
+            Some(index) => Stack::new()
+                .child(
+                    ViewSwitch::new(index)
+                        .case(loading_view)
+                        .case(empty_view)
+                        .case(list),
+                )
+                .into(),
+            None => list,
+        }
     }
 }

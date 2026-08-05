@@ -5,7 +5,9 @@ use crate::accessibility::{
     PortalAccessibilityNodeRoute, TreeUpdateKey,
 };
 use crate::foundation::binding::{TextChange, TextChangeSet};
-use crate::ui::widget::{splitter_adjusted_sizes, HitInteraction, SplitterResize};
+use crate::ui::widget::{
+    splitter_adjusted_sizes, HitInteraction, ResolvedWidgetKind, SplitterResize,
+};
 use accesskit::{Action, ActionData, ActionRequest};
 
 impl<VM: 'static> BoundRuntimeHandler<VM> {
@@ -277,6 +279,10 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         match request.action {
             Action::Focus => self.focus_accessibility_widget(widget_id),
             Action::Click => self.click_accessibility_widget(widget_id),
+            Action::ShowContextMenu => self.open_context_menu_semantically(widget_id),
+            Action::Expand | Action::Collapse => {
+                self.set_accessibility_tree_expanded(widget_id, request.action == Action::Expand)
+            }
             Action::Increment | Action::Decrement | Action::SetValue => {
                 self.adjust_accessibility_value(widget_id, request.action, request.data)
             }
@@ -304,9 +310,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             Action::Click => {
                 let interaction = hits
                     .iter()
-                    .filter(|hit| {
-                        hit_interaction_widget_id(&hit.interaction) == Some(route.widget_id)
-                    })
+                    .filter(|hit| accessibility_hit_matches_widget(hit, route.widget_id))
                     .min_by_key(|hit| accessibility_click_priority(&hit.interaction))
                     .map(|hit| hit.interaction.clone());
                 let Some(interaction) = interaction else {
@@ -323,19 +327,88 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 );
                 self.dispatch_accessibility_click_interaction(interaction)
             }
+            Action::Expand | Action::Collapse => {
+                if let Some((menu_id, menu_path)) = hits.iter().find_map(|hit| {
+                    if !accessibility_hit_matches_widget(hit, route.widget_id) {
+                        return None;
+                    }
+                    match &hit.interaction {
+                        HitInteraction::SelectOption {
+                            id,
+                            menu_path: Some(path),
+                            ..
+                        } => Some((*id, path.clone())),
+                        _ => None,
+                    }
+                }) {
+                    return self.set_menu_accessibility_item_expanded(
+                        menu_id,
+                        &menu_path,
+                        action == Action::Expand,
+                    );
+                }
+                let state = hits.iter().find_map(|hit| match &hit.interaction {
+                    HitInteraction::TreeNode { id, state, .. } if *id == route.widget_id => {
+                        Some(state.clone())
+                    }
+                    _ => None,
+                });
+                state.is_some_and(|state| {
+                    self.dispatch_tree_accessibility_expand(&state, action == Action::Expand)
+                })
+            }
             Action::Increment | Action::Decrement | Action::SetValue => {
+                if let Some((number_input, input)) =
+                    hits.iter().find_map(|hit| match &hit.interaction {
+                        HitInteraction::TextInput {
+                            id,
+                            controller,
+                            on_change,
+                            on_change_set,
+                            multiline,
+                            interactions,
+                            ..
+                        } if *id == route.widget_id => {
+                            interactions.number_input.clone().map(|number_input| {
+                                (
+                                    number_input,
+                                    (
+                                        controller.clone(),
+                                        on_change.clone(),
+                                        on_change_set.clone(),
+                                        *multiline,
+                                    ),
+                                )
+                            })
+                        }
+                        _ => None,
+                    })
+                {
+                    return self.apply_accessibility_number_input(
+                        number_input,
+                        input,
+                        action,
+                        data,
+                    );
+                }
                 if let Some(slider) = hits.iter().find_map(|hit| match &hit.interaction {
                     HitInteraction::Slider {
                         id,
                         on_change,
+                        on_change_end,
                         value,
                         min,
                         max,
                         step,
                         ..
-                    } if *id == route.widget_id => {
-                        Some((on_change.clone(), *value, *min, *max, *step))
-                    }
+                    } if *id == route.widget_id => Some((
+                        on_change.clone(),
+                        on_change_end.clone(),
+                        *value,
+                        *min,
+                        *max,
+                        *step,
+                    )),
                     _ => None,
                 }) {
                     return self.apply_accessibility_slider_state(slider, action, data);
@@ -357,10 +430,14 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                         controller,
                         on_change,
                         on_change_set,
+                        multiline,
                         ..
-                    } if *id == route.widget_id => {
-                        Some((controller.clone(), on_change.clone(), on_change_set.clone()))
-                    }
+                    } if *id == route.widget_id => Some((
+                        controller.clone(),
+                        on_change.clone(),
+                        on_change_set.clone(),
+                        *multiline,
+                    )),
                     _ => None,
                 });
                 let Some(input) = input else {
@@ -375,10 +452,14 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                         controller,
                         on_change,
                         on_change_set,
+                        multiline,
                         ..
-                    } if *id == route.widget_id => {
-                        Some((controller.clone(), on_change.clone(), on_change_set.clone()))
-                    }
+                    } if *id == route.widget_id => Some((
+                        controller.clone(),
+                        on_change.clone(),
+                        on_change_set.clone(),
+                        *multiline,
+                    )),
                     _ => None,
                 });
                 let Some(input) = input else {
@@ -411,7 +492,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         };
         let interaction = hits
             .iter()
-            .filter(|hit| hit_interaction_widget_id(&hit.interaction) == Some(route.widget_id))
+            .filter(|hit| accessibility_hit_matches_widget(hit, route.widget_id))
             .min_by_key(|hit| accessibility_click_priority(&hit.interaction))
             .map(|hit| hit.interaction.clone());
         let Some(interaction) = interaction else {
@@ -430,8 +511,15 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             HitInteraction::Checkbox { .. }
             | HitInteraction::Radio { .. }
             | HitInteraction::Switch { .. } => space,
-            HitInteraction::SelectTrigger { .. } => enter,
+            HitInteraction::SelectTrigger {
+                interactions,
+                can_toggle,
+                ..
+            } => (enter || space) && (*can_toggle || interactions.on_click.is_some()),
             HitInteraction::TabTrigger { .. } => enter || space,
+            HitInteraction::SelectOption {
+                menu_path: Some(_), ..
+            } => enter || space,
             _ => false,
         };
         Some(handles_key && self.dispatch_accessibility_click_interaction(interaction))
@@ -525,6 +613,9 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
     }
 
     fn click_accessibility_widget(&mut self, widget_id: WidgetId) -> bool {
+        if self.accessibility_widget_is_disabled(widget_id) {
+            return false;
+        }
         let interaction = {
             let computed = self.computed_scene();
             let active_trap = computed
@@ -560,11 +651,65 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         self.dispatch_accessibility_click_interaction(interaction)
     }
 
+    fn set_accessibility_tree_expanded(&mut self, widget_id: WidgetId, expanded: bool) -> bool {
+        let state = {
+            let computed = self.computed_scene();
+            let state_in = |regions: &[crate::ui::widget::HitRegion<VM>]| {
+                regions.iter().find_map(|region| match &region.interaction {
+                    HitInteraction::TreeNode { id, state, .. } if *id == widget_id => {
+                        Some(state.clone())
+                    }
+                    _ => None,
+                })
+            };
+            let normal_owns_widget = hit_stream_contains_widget(&computed.hit_regions, widget_id);
+            state_in(&computed.hit_regions).or_else(|| {
+                (!normal_owns_widget)
+                    .then(|| state_in(&computed.overlay_hit_regions))
+                    .flatten()
+            })
+        };
+        state.is_some_and(|state| self.dispatch_tree_accessibility_expand(&state, expanded))
+    }
+
+    fn accessibility_widget_is_disabled(&self, widget_id: WidgetId) -> bool {
+        self.cached_scene
+            .as_ref()
+            .and_then(|cached| cached.layout.as_ref())
+            .and_then(|layout| layout.resolved_widget(widget_id))
+            .is_some_and(|resolved| match &resolved.kind {
+                ResolvedWidgetKind::Button { disabled, .. }
+                | ResolvedWidgetKind::Checkbox { disabled, .. }
+                | ResolvedWidgetKind::Radio { disabled, .. }
+                | ResolvedWidgetKind::Switch { disabled, .. }
+                | ResolvedWidgetKind::Select { disabled, .. }
+                | ResolvedWidgetKind::Slider { disabled, .. }
+                | ResolvedWidgetKind::TextEditor { disabled, .. } => disabled.resolve(),
+                ResolvedWidgetKind::SelectOptionRow { option, .. } => option.disabled.resolve(),
+                _ => false,
+            })
+    }
+
     pub(in crate::runtime) fn dispatch_accessibility_click_interaction(
         &mut self,
         interaction: HitInteraction<VM>,
     ) -> bool {
-        match interaction {
+        let trigger_widget_id = match interaction.target_id() {
+            crate::ui::widget::HitTargetId::Widget(widget_id) => Some(widget_id),
+            crate::ui::widget::HitTargetId::SelectOption { .. }
+            | crate::ui::widget::HitTargetId::CanvasItem { .. } => None,
+        };
+        let popover_toggled = match trigger_widget_id {
+            Some(widget_id) => self.toggle_popover_from_trigger_descendant(widget_id),
+            None => false,
+        };
+        let menu_toggled = match trigger_widget_id {
+            Some(widget_id) => self
+                .menu_trigger_ancestor(widget_id)
+                .is_some_and(|menu_id| self.toggle_menu_open_state(menu_id)),
+            None => false,
+        };
+        let handled = match interaction {
             HitInteraction::Widget { interactions, .. } => {
                 if let Some(command) = interactions.on_click {
                     self.execute_command(&command);
@@ -574,31 +719,62 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 }
             }
             HitInteraction::Checkbox {
-                on_change, current, ..
-            }
-            | HitInteraction::Radio {
-                on_change, current, ..
+                interactions,
+                on_change,
+                current,
+                ..
             }
             | HitInteraction::Switch {
-                on_change, current, ..
+                interactions,
+                on_change,
+                current,
+                ..
             } => {
                 if let Some(command) = on_change {
                     self.execute_value_command(&command, !current);
-                    true
-                } else {
-                    false
                 }
+                if let Some(command) = interactions.on_click {
+                    self.execute_command(&command);
+                }
+                true
+            }
+            HitInteraction::Radio {
+                interactions,
+                on_change,
+                current,
+                ..
+            } => {
+                if !current {
+                    if let Some(command) = on_change {
+                        self.execute_value_command(&command, true);
+                    }
+                }
+                if let Some(command) = interactions.on_click {
+                    self.execute_command(&command);
+                }
+                true
             }
             HitInteraction::SelectTrigger {
                 id,
+                interactions,
                 on_open_change,
                 is_open,
-                ..
+                can_toggle,
             } => {
-                let next_open = !is_open;
-                self.close_all_open_selects_except(next_open.then_some(id));
-                let _ = self.set_select_open_state(id, next_open, on_open_change.as_ref());
-                true
+                let toggled = if can_toggle {
+                    // The cached hit interaction can still describe the pre-close scene after Esc.
+                    // Runtime state is authoritative until the next scene collection catches up.
+                    let next_open = !self.resolved_select_open_state(id).unwrap_or(is_open);
+                    self.close_all_open_selects_except(next_open.then_some(id));
+                    self.set_select_open_state(id, next_open, on_open_change.as_ref())
+                } else {
+                    false
+                };
+                let clicked = interactions.on_click.is_some();
+                if let Some(command) = interactions.on_click {
+                    self.execute_command(&command);
+                }
+                toggled || clicked
             }
             HitInteraction::TabTrigger {
                 key,
@@ -616,9 +792,13 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             HitInteraction::ListItem { state, .. } => {
                 self.dispatch_list_item_accessibility_click(&state)
             }
-            HitInteraction::TreeNode { state, .. }
-            | HitInteraction::TreeDisclosure { state, .. }
-            | HitInteraction::TreeCheckbox { state, .. } => {
+            HitInteraction::TreeNode { state, .. } => {
+                self.dispatch_tree_accessibility_click(&state)
+            }
+            HitInteraction::TreeDisclosure { state, .. } => {
+                self.dispatch_tree_accessibility_expand(&state, !state.expanded)
+            }
+            HitInteraction::TreeCheckbox { state, .. } => {
                 self.dispatch_tree_accessibility_click(&state)
             }
             HitInteraction::DataGridCell { state, .. } => {
@@ -637,20 +817,22 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 on_select,
                 on_open_change,
                 id,
+                menu_path,
                 ..
             } => {
-                if let Some(command) = on_select {
-                    self.execute_command(&command);
+                if let Some(path) = menu_path.as_deref() {
+                    return self.activate_menu_accessibility_item(id, path);
                 }
-                if let Some(command) = on_open_change {
-                    self.execute_value_command(&command, false);
-                } else {
-                    let _ = self.set_select_open_state(id, false, None);
-                }
+                let Some(command) = on_select else {
+                    return false;
+                };
+                self.execute_command(&command);
+                let _ = self.set_select_open_state(id, false, on_open_change.as_ref());
                 true
             }
             _ => false,
-        }
+        };
+        handled || popover_toggled || menu_toggled
     }
 
     fn adjust_accessibility_value(
@@ -659,7 +841,15 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         action: Action,
         data: Option<ActionData>,
     ) -> bool {
+        if let Some(handled) =
+            self.adjust_accessibility_number_input(widget_id, action, data.clone())
+        {
+            return handled;
+        }
         if self.adjust_accessibility_slider(widget_id, action, data.clone()) {
+            return true;
+        }
+        if self.adjust_accessibility_data_grid_resize(widget_id, action, data.clone()) {
             return true;
         }
         if self.adjust_accessibility_splitter(widget_id, action, data.clone()) {
@@ -669,6 +859,147 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             return self.set_accessibility_text_value(widget_id, data);
         }
         false
+    }
+
+    fn adjust_accessibility_data_grid_resize(
+        &mut self,
+        widget_id: WidgetId,
+        action: Action,
+        data: Option<ActionData>,
+    ) -> bool {
+        let state = {
+            let computed = self.computed_scene();
+            computed
+                .hit_regions
+                .iter()
+                .chain(computed.overlay_hit_regions.iter())
+                .find_map(|region| match &region.interaction {
+                    HitInteraction::DataGridResizeHandle { id, state, .. } if *id == widget_id => {
+                        Some(state.clone())
+                    }
+                    _ => None,
+                })
+        };
+        let Some(state) = state else {
+            return false;
+        };
+        let Some(command) = state.on_column_width_change.as_ref() else {
+            return false;
+        };
+        let max_width = state
+            .max_width
+            .unwrap_or(crate::ui::unit::Dp::new(f32::MAX));
+        let width = match action {
+            Action::Increment => state.width.get() + state.step.get(),
+            Action::Decrement => state.width.get() - state.step.get(),
+            Action::SetValue => match data {
+                Some(ActionData::NumericValue(value)) => value as f32,
+                Some(ActionData::Value(value)) => match value.parse::<f32>() {
+                    Ok(value) => value,
+                    Err(_) => return false,
+                },
+                _ => return false,
+            },
+            _ => return false,
+        }
+        .clamp(state.min_width.get(), max_width.get());
+        if (width - state.width.get()).abs() <= 0.01 {
+            return false;
+        }
+        self.execute_value_command(
+            command,
+            crate::ui::widget::DataGridColumnWidthChange {
+                column_key: state.column_key,
+                width: crate::ui::unit::Dp::new(width),
+            },
+        );
+        true
+    }
+
+    fn adjust_accessibility_number_input(
+        &mut self,
+        widget_id: WidgetId,
+        action: Action,
+        data: Option<ActionData>,
+    ) -> Option<bool> {
+        let target = {
+            let computed = self.computed_scene();
+            computed
+                .hit_regions
+                .iter()
+                .chain(computed.overlay_hit_regions.iter())
+                .find_map(|region| match &region.interaction {
+                    HitInteraction::TextInput {
+                        id,
+                        controller,
+                        on_change,
+                        on_change_set,
+                        multiline,
+                        interactions,
+                        ..
+                    } if *id == widget_id => interactions.number_input.clone().map(|behavior| {
+                        (
+                            behavior,
+                            (
+                                controller.clone(),
+                                on_change.clone(),
+                                on_change_set.clone(),
+                                *multiline,
+                            ),
+                        )
+                    }),
+                    _ => None,
+                })
+        };
+        let Some((behavior, input)) = target else {
+            return None;
+        };
+        Some(self.apply_accessibility_number_input(behavior, input, action, data))
+    }
+
+    fn apply_accessibility_number_input(
+        &mut self,
+        behavior: crate::ui::widget::NumberInputInteraction<VM>,
+        input: (
+            crate::foundation::binding::TextController,
+            Option<crate::foundation::view_model::Command<VM>>,
+            Option<crate::foundation::view_model::ValueCommand<VM, TextChangeSet>>,
+            bool,
+        ),
+        action: Action,
+        data: Option<ActionData>,
+    ) -> bool {
+        match action {
+            Action::Increment => {
+                self.execute_command(&behavior.increment);
+                true
+            }
+            Action::Decrement => {
+                self.execute_command(&behavior.decrement);
+                true
+            }
+            Action::SetValue => {
+                let value = match data {
+                    Some(ActionData::NumericValue(value)) => value,
+                    Some(ActionData::Value(value)) => match value.trim().parse::<f64>() {
+                        Ok(value) => value,
+                        Err(_) => return false,
+                    },
+                    _ => return false,
+                };
+                let Some(text) = crate::ui::widget::normalize_number_input_accessibility_value(
+                    value,
+                    &input.0.text(),
+                    behavior.min,
+                    behavior.max,
+                    behavior.step,
+                ) else {
+                    return false;
+                };
+                self.apply_accessibility_text_value(input, Some(ActionData::Value(text.into())))
+            }
+            _ => false,
+        }
     }
 
     fn adjust_accessibility_splitter(
@@ -750,12 +1081,20 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     HitInteraction::Slider {
                         id,
                         on_change,
+                        on_change_end,
                         value,
                         min,
                         max,
                         step,
                         ..
-                    } if *id == widget_id => Some((on_change.clone(), *value, *min, *max, *step)),
+                    } if *id == widget_id => Some((
+                        on_change.clone(),
+                        on_change_end.clone(),
+                        *value,
+                        *min,
+                        *max,
+                        *step,
+                    )),
                     _ => None,
                 })
             };
@@ -766,15 +1105,20 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     .flatten()
             })
         };
-        let Some((on_change, value, min, max, step)) = slider else {
+        let Some((on_change, on_change_end, value, min, max, step)) = slider else {
             return false;
         };
-        self.apply_accessibility_slider_state((on_change, value, min, max, step), action, data)
+        self.apply_accessibility_slider_state(
+            (on_change, on_change_end, value, min, max, step),
+            action,
+            data,
+        )
     }
 
     fn apply_accessibility_slider_state(
         &mut self,
-        (on_change, value, min, max, step): (
+        (on_change, on_change_end, value, min, max, step): (
+            Option<crate::foundation::view_model::ValueCommand<VM, f32>>,
             Option<crate::foundation::view_model::ValueCommand<VM, f32>>,
             f32,
             f32,
@@ -784,9 +1128,10 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         action: Action,
         data: Option<ActionData>,
     ) -> bool {
+        let interaction_step = crate::ui::widget::slider_interaction_step(min, max, step);
         let next = match action {
-            Action::Increment => value + step,
-            Action::Decrement => value - step,
+            Action::Increment => value + interaction_step.unwrap_or(0.0),
+            Action::Decrement => value - interaction_step.unwrap_or(0.0),
             Action::SetValue => match data {
                 Some(ActionData::NumericValue(value)) => value as f32,
                 Some(ActionData::Value(value)) => match value.parse::<f32>() {
@@ -797,7 +1142,16 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             },
             _ => return false,
         };
-        self.apply_slider_value(on_change.as_ref(), next, min, max, step, true)
+        let _ = self.complete_slider_value(
+            on_change.as_ref(),
+            on_change_end.as_ref(),
+            value,
+            next,
+            min,
+            max,
+            step,
+        );
+        true
     }
 
     fn set_accessibility_text_value(
@@ -814,10 +1168,14 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                         controller,
                         on_change,
                         on_change_set,
+                        multiline,
                         ..
-                    } if *id == widget_id => {
-                        Some((controller.clone(), on_change.clone(), on_change_set.clone()))
-                    }
+                    } if *id == widget_id => Some((
+                        controller.clone(),
+                        on_change.clone(),
+                        on_change_set.clone(),
+                        *multiline,
+                    )),
                     _ => None,
                 })
             };
@@ -828,23 +1186,26 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     .flatten()
             })
         };
-        let Some((controller, on_change, on_change_set)) = input else {
+        let Some((controller, on_change, on_change_set, multiline)) = input else {
             return false;
         };
-        self.apply_accessibility_text_value((controller, on_change, on_change_set), data)
+        self.apply_accessibility_text_value((controller, on_change, on_change_set, multiline), data)
     }
 
     fn apply_accessibility_text_value(
         &mut self,
-        (controller, on_change, on_change_set): (
+        (controller, on_change, on_change_set, multiline): (
             crate::foundation::binding::TextController,
             Option<crate::foundation::view_model::Command<VM>>,
             Option<crate::foundation::view_model::ValueCommand<VM, TextChangeSet>>,
+            bool,
         ),
         data: Option<ActionData>,
     ) -> bool {
         let text = match data {
-            Some(ActionData::Value(value)) => value.to_string(),
+            Some(ActionData::Value(value)) => {
+                super::input::normalize_text_input_value(&value, multiline)
+            }
             _ => return false,
         };
         let snapshot = controller.snapshot();
@@ -1043,6 +1404,17 @@ fn hit_interaction_widget_id<VM>(interaction: &HitInteraction<VM>) -> Option<Wid
     }
 }
 
+fn accessibility_hit_matches_widget<VM>(
+    hit: &crate::ui::widget::HitRegion<VM>,
+    widget_id: WidgetId,
+) -> bool {
+    hit_interaction_widget_id(&hit.interaction) == Some(widget_id)
+        || hit
+            .focus
+            .as_ref()
+            .is_some_and(|focus| focus.widget_id == widget_id)
+}
+
 fn hit_stream_contains_widget<VM>(
     regions: &[crate::ui::widget::HitRegion<VM>],
     widget_id: WidgetId,
@@ -1066,7 +1438,8 @@ fn accessibility_click_priority<VM>(interaction: &HitInteraction<VM>) -> u8 {
     match interaction {
         HitInteraction::ListItem { .. }
         | HitInteraction::TreeNode { .. }
-        | HitInteraction::DataGridCell { .. } => 0,
+        | HitInteraction::DataGridCell { .. }
+        | HitInteraction::SelectOption { .. } => 0,
         HitInteraction::Widget { .. }
         | HitInteraction::Checkbox { .. }
         | HitInteraction::Radio { .. }
@@ -1075,8 +1448,7 @@ fn accessibility_click_priority<VM>(interaction: &HitInteraction<VM>) -> u8 {
         | HitInteraction::TabTrigger { .. }
         | HitInteraction::DataGridHeader { .. }
         | HitInteraction::DataGridResizeHandle { .. }
-        | HitInteraction::SplitterHandle { .. }
-        | HitInteraction::SelectOption { .. } => 1,
+        | HitInteraction::SplitterHandle { .. } => 1,
         HitInteraction::TreeDisclosure { .. } | HitInteraction::TreeCheckbox { .. } => 2,
         _ => u8::MAX,
     }

@@ -1650,6 +1650,7 @@ fn apply_legacy_scene_dependency_invalidation(
 const STRICT_REACTIVE_ALLOWED_ACTIONS: &[&str] = &[
     "media_texture_slot_write",
     "reactive_layout_slot_update",
+    "reactive_modal_drawer_full_rebuild",
     "reactive_property_slot_write",
     "reactive_slot_update",
     "reactive_structure_slot_update",

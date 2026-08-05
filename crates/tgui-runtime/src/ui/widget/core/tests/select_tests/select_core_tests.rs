@@ -234,6 +234,61 @@ fn select_renders_placeholder_and_arrow_when_unselected() {
 }
 
 #[test]
+fn selected_option_label_updates_without_rebuilding_the_select() {
+    let invalidation = InvalidationSignal::new();
+    let context = ViewModelContext::new(invalidation, AnimationCoordinator::default());
+    let selected_key = context.state(Some("email".to_string()));
+    let label = context.state("Email".to_string());
+    let tree: WidgetTree<()> = WidgetTree::new(
+        Select::<(), String, String>::new(
+            vec![
+                SelectOption::new("email".to_string(), "fallback".to_string())
+                    .label(label.signal()),
+            ],
+            selected_key.signal(),
+        )
+        .size(dp(180.0), dp(40.0)),
+    );
+    let theme = Theme::default();
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let mut animations = AnimationEngine::default();
+    let render_texts = |animations: &mut AnimationEngine| {
+        tree.render_output(
+            &font_manager,
+            &theme,
+            &media,
+            animations,
+            None,
+            None,
+            &HashMap::new(),
+            Rect::new(0.0, 0.0, 180.0, 40.0),
+            None,
+            None,
+            None,
+            None,
+            false,
+        )
+        .primitives
+        .texts
+        .into_iter()
+        .map(|text| text.content.to_string())
+        .collect::<Vec<_>>()
+    };
+
+    assert!(render_texts(&mut animations)
+        .iter()
+        .any(|text| text == "Email"));
+    label.set("Electronic mail".to_string());
+    assert!(
+        render_texts(&mut animations)
+            .iter()
+            .any(|text| text == "Electronic mail"),
+        "a selected option's reactive label must update in the retained WidgetTree"
+    );
+}
+
+#[test]
 fn disabled_select_exposes_disabled_hit_for_cursor_only() {
     let theme = Theme::default();
     let font_manager = FontManager::new(&FontCatalog::default());

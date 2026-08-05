@@ -457,11 +457,16 @@ impl CanvasPointerContext {
 #[derive(Clone)]
 pub(super) enum ClickHandler<VM> {
     Command(Command<VM>),
-    Toggle(ValueCommand<VM, bool>, bool),
+    Toggle {
+        on_change: Option<ValueCommand<VM, bool>>,
+        next: Option<bool>,
+        on_click: Option<Command<VM>>,
+    },
     SelectOption {
         widget_id: WidgetId,
         command: Option<Command<VM>>,
         on_open_change: Option<ValueCommand<VM, bool>>,
+        menu_path: Option<smallvec::SmallVec<[usize; 4]>>,
     },
     Canvas(
         ValueCommand<VM, CanvasMouseEvent>,

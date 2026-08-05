@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 use parking_lot::RwLock;
 
-use crate::foundation::view_model::{Command, CommandContext, ValueCommand};
+use crate::foundation::view_model::{CommandContext, ValueCommand};
 use crate::ui::layout::{Axis, Length, Value};
 use crate::ui::theme::{StateValue, StyleContext, WidgetState};
 use crate::ui::unit::Dp;
@@ -129,7 +129,8 @@ impl<VM> MenuBar<VM> {
     /// 设置 active_index 变更回调。点击 entry 触发：
     /// - 若当前 active_index == Some(我自己)，调用 `cmd(None)`（收起）；
     /// - 否则调用 `cmd(Some(我))`（切到我）。
-    /// 若没接此 callback，MenuBar 的 entry 仍可视、但点击不会打开下拉。
+    /// 未受控 MenuBar 即使没有 callback 也会由 runtime 正常开合；受控 MenuBar 若没有
+    /// callback，则无法请求外部 `active_index` 改变。
     pub fn on_active_change(mut self, command: ValueCommand<VM, Option<usize>>) -> Self {
         self.on_active_change = Some(command);
         self
@@ -216,10 +217,9 @@ where
                 Value::Signal(signal) => Value::Signal(signal.map(move |idx| idx == Some(index))),
             });
 
-            // 点击事件：toggle 我这一项
             let entry_style = style.clone();
             let entry_runtime_metrics = runtime_metrics.clone();
-            let mut button = Button::new(label)
+            let button = Button::new(label)
                 .disable(disabled.clone())
                 .runtime_layout(move |layout, _, _, _| {
                     let metrics = *entry_runtime_metrics.read();
@@ -238,27 +238,13 @@ where
                         context,
                     )
                 });
-            if let Some(on_change) = on_active_change.clone() {
-                if let Some(active_signal) = active_index.clone() {
-                    let click_cmd =
-                        Command::new_with_context(move |vm: &mut VM, ctx: &CommandContext<VM>| {
-                            let current = active_signal.resolve();
-                            let next = if current == Some(index) {
-                                None
-                            } else {
-                                Some(index)
-                            };
-                            on_change.execute_with_context(vm, next, ctx);
-                        });
-                    button = button.on_click(click_cmd);
-                }
-            }
 
             // 菜单 entry 切换关闭回调：用户从菜单内部触发 close（外部点击 / Esc / item 选中）时，
             // 重置 active_index 到 None。
             let mut menu = Menu::new(button)
                 .items(items)
                 .placement(Placement::bottom().align(Alignment::Start))
+                .disable(disabled)
                 .menubar_binding(group, index);
             if let Some(entry_open) = entry_open {
                 menu = menu.open(entry_open);
@@ -272,9 +258,7 @@ where
             if let Some(on_change) = on_active_change.clone() {
                 menu = menu.on_open_change(ValueCommand::new_with_context(
                     move |vm: &mut VM, open: bool, ctx: &CommandContext<VM>| {
-                        if !open {
-                            on_change.execute_with_context(vm, None, ctx);
-                        }
+                        on_change.execute_with_context(vm, open.then_some(index), ctx);
                     },
                 ));
             }

@@ -8,8 +8,6 @@ use crate::ui::widget::overlay::{
 };
 use crate::ui::widget::FocusScopeState;
 
-const SELECT_VIRTUAL_LIST_TAG: u64 = 0x5E1E_C7A1_5157_0001;
-
 struct SelectOverlayOption<VM> {
     index: usize,
     option: SelectOptionState<VM>,
@@ -194,7 +192,7 @@ fn build_virtual_select_menu_overlay<VM: 'static>(
         .map(|(index, option)| SelectOverlayOption { index, option })
         .collect::<Vec<_>>();
     let on_open_change = on_open_change.cloned();
-    let virtual_list_id = WidgetId::from_raw(widget_id.raw() ^ SELECT_VIRTUAL_LIST_TAG);
+    let virtual_list_id = crate::ui::widget::select_virtual_list_id(widget_id);
     let mut root: Element<VM> = crate::ui::widget::VirtualList::new(
         rows,
         move |_visible_index, row: &SelectOverlayOption<VM>| {
@@ -226,13 +224,13 @@ fn build_virtual_select_menu_overlay<VM: 'static>(
         width: menu_width,
         height: full_height,
     };
-    let resolved = root.resolve_with_runtime_state(
+    let resolved = std::sync::Arc::new(root.resolve_with_runtime_state(
         context.theme,
         None,
         context.scroll_offsets,
         context.virtual_states,
         viewport_hint,
-    );
+    ));
     let mut taffy = TaffyTree::new();
     let layout_root = resolved
         .build_layout_tree(
@@ -261,6 +259,7 @@ fn build_virtual_select_menu_overlay<VM: 'static>(
     let mut chunks = std::collections::HashMap::new();
     let mut chunk_parts = std::collections::HashMap::new();
     let mut visual_contexts = std::collections::HashMap::new();
+    let mut accessibility_geometry = Vec::new();
     let mut local_context = CollectContext {
         taffy: &taffy,
         font_manager: context.font_manager,
@@ -301,7 +300,7 @@ fn build_virtual_select_menu_overlay<VM: 'static>(
         gpu_scroll_enabled: false,
         gpu_scroll_container: None,
         transform_stack: context.transform_stack.clone(),
-        portal_accessibility_geometry: None,
+        portal_accessibility_geometry: Some(&mut accessibility_geometry),
         portal_accessibility_path: smallvec::SmallVec::new(),
     };
     let root_id = resolved.collect_subtree_cache(
@@ -319,7 +318,21 @@ fn build_virtual_select_menu_overlay<VM: 'static>(
         &mut chunk_parts,
         &mut visual_contexts,
     );
+    let next_focus_order = local_context.focus.next_order;
+    drop(local_context);
+    context.focus.next_order = next_focus_order;
     let mut scene = chunks.get(&root_id).cloned().unwrap_or_default();
+    if let Some(accessibility_fragment) =
+        super::super::super::portal::collect_accessibility_fragment(
+            std::sync::Arc::clone(&resolved),
+            &layout_root,
+            &accessibility_geometry,
+            &scene.hit_regions,
+            &scene.scroll_regions,
+        )
+    {
+        scene.accessibility_fragments.push(accessibility_fragment);
+    }
     let menu_background = RenderPrimitive {
         rect: Rect::new(Dp::ZERO, Dp::ZERO, menu_width, full_height),
         color: select_style.menu_background.with_alpha_factor(opacity),
@@ -357,12 +370,13 @@ fn select_option_row_element<VM>(
     on_open_change: Option<ValueCommand<VM, bool>>,
     style: common::SelectOptionRowStyle,
 ) -> Element<VM> {
+    let widget_id = option.widget_id;
     let interactions = InteractionHandlers {
         cursor_style: Some(Value::Static(CursorStyle::Pointer)),
         ..Default::default()
     };
     Element {
-        id: WidgetId::next(),
+        id: widget_id,
         key: Some(WidgetKey::from(option_index)),
         layout: LayoutStyle {
             height: Some(Value::Static(Length::Px(style.option_height))),
@@ -447,7 +461,7 @@ impl<VM: 'static> ResolvedElement<VM> {
         };
 
         let progress_value = track_property_scope(PropertySlot::ProgressValue, || {
-            value.resolve().clamp(0.0, 1.0)
+            normalized_progress_value(value.resolve())
         });
         push_progress_bar_primitives(
             visual.frame,
@@ -553,27 +567,39 @@ impl<VM: 'static> ResolvedElement<VM> {
             .as_ref()
             .map(Value::resolve)
             .unwrap_or_else(|| divider_style.color.resolve());
-        let thickness = context
-            .units
-            .resolve_dp(
-                thickness_override
-                    .as_ref()
-                    .map(Value::resolve)
-                    .unwrap_or_else(|| divider_style.thickness.resolve()),
-            )
-            .max(1.0);
-        let inset = context
-            .units
-            .resolve_dp(
-                inset_override
-                    .as_ref()
-                    .map(Value::resolve)
-                    .unwrap_or_else(|| divider_style.inset.resolve()),
-            )
-            .max(0.0);
-        let dash_length = context.units.resolve_dp(divider_style.dash_length);
-        let dash_gap = context.units.resolve_dp(divider_style.dash_gap);
-        let label_gap = context.units.resolve_dp(divider_style.label_gap);
+        let thickness = context.units.resolve_dp(
+            thickness_override
+                .as_ref()
+                .map(Value::resolve)
+                .unwrap_or_else(|| divider_style.thickness.resolve()),
+        );
+        let thickness = if thickness.is_finite() {
+            thickness.max(1.0)
+        } else {
+            1.0
+        };
+        let inset = context.units.resolve_dp(
+            inset_override
+                .as_ref()
+                .map(Value::resolve)
+                .unwrap_or_else(|| divider_style.inset.resolve()),
+        );
+        let inset = if inset.is_finite() {
+            inset.max(0.0)
+        } else {
+            0.0
+        };
+        let nonnegative = |value: crate::ui::unit::Dp| {
+            let value = context.units.resolve_dp(value);
+            if value.is_finite() {
+                value.max(0.0)
+            } else {
+                0.0
+            }
+        };
+        let dash_length = nonnegative(divider_style.dash_length);
+        let dash_gap = nonnegative(divider_style.dash_gap);
+        let label_gap = nonnegative(divider_style.label_gap);
 
         push_divider_primitives(
             visual.frame,
@@ -797,11 +823,6 @@ impl<VM: 'static> ResolvedElement<VM> {
                 .return_focus_to(self.id)
                 .close_on_outside_click(true)
                 .close_on_escape(true);
-                let overlay = if let Some(command) = on_open_change.as_ref().cloned() {
-                    overlay.on_close(command)
-                } else {
-                    overlay
-                };
                 let _ = emit_overlay(computed, context.viewport, overlay, content_size, content);
             }
         }
@@ -819,6 +840,7 @@ impl<VM: 'static> ResolvedElement<VM> {
                     interactions: self.interactions.clone(),
                     on_open_change: on_open_change.clone(),
                     is_open: active,
+                    can_toggle: open.is_none() || on_open_change.is_some(),
                 },
                 gpu_scroll_container: context.gpu_scroll_container,
             });
@@ -848,6 +870,9 @@ impl<VM: 'static> ResolvedElement<VM> {
         let mut option_state = context
             .widget_states
             .get_select_option(*owner_id, *option_index);
+        let row_state = context.widget_states.get(self.id);
+        option_state.focused |= row_state.focused;
+        option_state.focus_visible |= row_state.focus_visible;
         option_state.disabled = option_disabled;
         option_state.selected = selected;
         let hovered_option_color = default_select_menu_option_color(context.theme, option_state);
@@ -907,13 +932,16 @@ impl<VM: 'static> ResolvedElement<VM> {
             cursor_style: Some(Value::Static(CursorStyle::Pointer)),
             ..Default::default()
         };
+        let focus = (!option_disabled)
+            .then(|| context.build_focus_meta(self.id, &self.focus, &self.interactions, true))
+            .flatten();
         computed.hit_regions.push(HitRegion {
             rect: visual.frame,
             clip_rect: visual.primitive_clip,
             geometry: HitGeometry::Rect,
             transform_chain: context.transform_stack.clone(),
             scope_path: context.focus_scope_path(),
-            focus: None,
+            focus,
             interaction: if option_disabled {
                 HitInteraction::Disabled { id: self.id }
             } else {
@@ -924,6 +952,7 @@ impl<VM: 'static> ResolvedElement<VM> {
                     interactions: option_interactions,
                     on_select: option.on_select.clone(),
                     on_open_change: on_open_change.clone(),
+                    menu_path: None,
                 }
             },
             gpu_scroll_container: context.gpu_scroll_container,

@@ -71,6 +71,18 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         };
         let mut affected_ids = HashSet::new();
         affected_ids.insert(drag.widget_id);
+        affected_ids.extend(
+            cached
+                .dependencies
+                .owners_sharing_widget_property(
+                    drag.widget_id.raw(),
+                    DependencyPhase::Scene,
+                    PropertySlot::SliderValue,
+                )
+                .into_iter()
+                .map(|owner| WidgetId::from_raw(owner.widget_id))
+                .filter(|widget_id| layout.resolved_widget(*widget_id).is_some()),
+        );
         let roots = self.highest_layout_roots_smallvec(layout, &affected_ids);
         if roots.is_empty() {
             return false;

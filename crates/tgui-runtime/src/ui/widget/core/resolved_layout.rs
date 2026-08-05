@@ -66,11 +66,12 @@ impl<VM> ResolvedElement<VM> {
             ResolvedWidgetKind::ProgressBar {
                 show_label,
                 label,
+                indeterminate,
                 style,
                 ..
             } => MeasureContext::ProgressBar {
                 id: self.id,
-                show_label: *show_label,
+                show_label: *show_label && (label.is_some() || !indeterminate.resolve()),
                 label: label.clone(),
                 style: style.clone(),
             },

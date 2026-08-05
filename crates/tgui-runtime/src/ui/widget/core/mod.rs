@@ -48,6 +48,7 @@ use super::common::{
     SliderValueFormatter, TextDecorationPrimitive, TextEditState, TextInputContentGeometry,
     TextPrimitive, TexturePrimitive, VisualStyle, WidgetId, WidgetKey, WidgetKind, WidgetStateMap,
 };
+use super::normalized_progress_value;
 #[cfg(feature = "video")]
 use super::style::VideoSurfaceStyle as WidgetVideoSurfaceStyle;
 use super::style::{

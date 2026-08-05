@@ -1,4 +1,5 @@
 use super::*;
+use crate::ui::layout::ScrollbarStyle;
 
 #[test]
 fn wrapped_flex_align_start_packs_lines_from_cross_axis_start() {
@@ -424,6 +425,108 @@ fn scroll_view_hides_scrollbar_when_disabled() {
 }
 
 #[test]
+fn scroll_view_explicit_scrollbar_style_overrides_theme_style() {
+    let theme = Theme::default();
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let mut animations = AnimationEngine::default();
+    let thumb = Color::hexa(0x16A34AFF);
+    let track = Color::hexa(0xFACC15FF);
+    let scroller: Element<()> = ScrollView::new()
+        .size(dp(120.0), dp(120.0))
+        .scrollbar_style(
+            ScrollbarStyle::default()
+                .thumb_color(thumb)
+                .track_color(track)
+                .thickness(dp(9.0)),
+        )
+        .child(Stack::new().size(dp(120.0), dp(260.0)))
+        .into();
+    let tree = WidgetTree::new(scroller);
+
+    let rendered = tree.render_output(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        None,
+        None,
+        &HashMap::new(),
+        Rect::new(0.0, 0.0, 120.0, 120.0),
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+
+    assert!(rendered
+        .primitives
+        .overlay_shapes
+        .iter()
+        .any(|shape| shape.color == thumb && shape.rect.width == dp(9.0)));
+    assert!(rendered
+        .primitives
+        .overlay_shapes
+        .iter()
+        .any(|shape| shape.color == track && shape.rect.width == dp(9.0)));
+}
+
+#[test]
+fn scroll_view_scrollbar_style_signal_updates_on_the_same_tree() {
+    let theme = Theme::default();
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let mut animations = AnimationEngine::default();
+    let context = test_context();
+    let first = Color::hexa(0x2563EBFF);
+    let second = Color::hexa(0xDC2626FF);
+    let style = context.state(ScrollbarStyle::default().thumb_color(first));
+    let scroller: Element<()> = ScrollView::new()
+        .size(dp(120.0), dp(120.0))
+        .scrollbar_style(style.signal())
+        .child(Stack::new().size(dp(120.0), dp(260.0)))
+        .into();
+    let tree = WidgetTree::new(scroller);
+
+    let mut render = || {
+        tree.render_output(
+            &font_manager,
+            &theme,
+            &media,
+            &mut animations,
+            None,
+            None,
+            &HashMap::new(),
+            Rect::new(0.0, 0.0, 120.0, 120.0),
+            None,
+            None,
+            None,
+            None,
+            false,
+        )
+    };
+    assert!(render()
+        .primitives
+        .overlay_shapes
+        .iter()
+        .any(|shape| shape.color == first));
+
+    style.set(ScrollbarStyle::default().thumb_color(second));
+    let updated = render();
+    assert!(updated
+        .primitives
+        .overlay_shapes
+        .iter()
+        .any(|shape| shape.color == second));
+    assert!(!updated
+        .primitives
+        .overlay_shapes
+        .iter()
+        .any(|shape| shape.color == first));
+}
+
+#[test]
 fn scroll_view_controller_binds_widget_and_reports_offset() {
     let theme = Theme::default();
     let font_manager = FontManager::new(&FontCatalog::default());
@@ -463,7 +566,7 @@ fn scroll_view_controller_binds_widget_and_reports_offset() {
         .find(|region| region.id == scroller_id)
         .expect("scroll region should exist");
     controller.bind_widget(scroller_id);
-    controller.sync_offset(region.scroll_offset);
+    controller.sync_offset(region.scroll_offset, None);
 
     assert_eq!(controller.widget_id(), Some(scroller_id));
     assert_eq!(controller.scroll_offset(), region.scroll_offset);

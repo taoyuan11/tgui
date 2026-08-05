@@ -344,6 +344,98 @@ fn textarea_replaces_multibyte_selection_via_rope_buffer() {
 }
 
 #[test]
+fn physical_enter_inserts_newline_in_focused_textarea() {
+    let invalidation = InvalidationSignal::new();
+    let controller = TextController::from("first");
+    let callback_controller = controller.clone();
+    let tree = WidgetTree::new(Textarea::new(controller).on_change(Command::new(
+        move |vm: &mut TextInputVm| {
+            vm.value = callback_controller.text();
+        },
+    )));
+    let mut handler = test_handler_with_vm(TextInputVm::default(), Some(tree), invalidation);
+    let viewport = handler.viewport_rect();
+    let frame = text_input_frame(&mut handler, true);
+
+    handler.cursor_position = Some(Point {
+        x: frame.x + dp(8.0),
+        y: frame.y + dp(8.0),
+    });
+    handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Left);
+
+    let text_id = handler
+        .focused_widget_id()
+        .expect("textarea should be focused after click");
+    handler
+        .text_edit_states
+        .insert(text_id, TextEditState::caret_at("first"));
+
+    assert!(handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::Enter,))));
+    flush_text_input_commits(&mut handler);
+
+    assert_eq!(handler.with_view_model(|vm| vm.value.clone()), "first\n");
+}
+
+#[test]
+fn single_line_input_removes_line_breaks_from_inserted_text() {
+    let invalidation = InvalidationSignal::new();
+    let controller = TextController::from("");
+    let callback_controller = controller.clone();
+    let tree = WidgetTree::new(Input::new(controller).on_change(Command::new(
+        move |vm: &mut TextInputVm| {
+            vm.value = callback_controller.text();
+        },
+    )));
+    let mut handler = test_handler_with_vm(TextInputVm::default(), Some(tree), invalidation);
+    let viewport = handler.viewport_rect();
+    let frame = text_input_frame(&mut handler, false);
+
+    handler.cursor_position = Some(Point {
+        x: frame.x + dp(8.0),
+        y: frame.y + (frame.height * 0.5),
+    });
+    handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Left);
+
+    assert!(
+        handler.handle_keyboard_input(&text_key_event("a\r\nb\nc\rd\u{0085}e\u{2028}f\u{2029}g",))
+    );
+    flush_text_input_commits(&mut handler);
+
+    assert_eq!(handler.with_view_model(|vm| vm.value.clone()), "abcdefg");
+}
+
+#[test]
+fn multiline_input_normalizes_inserted_line_breaks_to_lf() {
+    let invalidation = InvalidationSignal::new();
+    let controller = TextController::from("");
+    let callback_controller = controller.clone();
+    let tree = WidgetTree::new(Textarea::new(controller).on_change(Command::new(
+        move |vm: &mut TextInputVm| {
+            vm.value = callback_controller.text();
+        },
+    )));
+    let mut handler = test_handler_with_vm(TextInputVm::default(), Some(tree), invalidation);
+    let viewport = handler.viewport_rect();
+    let frame = text_input_frame(&mut handler, true);
+
+    handler.cursor_position = Some(Point {
+        x: frame.x + dp(8.0),
+        y: frame.y + dp(8.0),
+    });
+    handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Left);
+
+    assert!(
+        handler.handle_keyboard_input(&text_key_event("a\r\nb\nc\rd\u{0085}e\u{2028}f\u{2029}g",))
+    );
+    flush_text_input_commits(&mut handler);
+
+    assert_eq!(
+        handler.with_view_model(|vm| vm.value.clone()),
+        "a\nb\nc\nd\ne\nf\ng"
+    );
+}
+
+#[test]
 fn input_backspace_deletes_zwj_emoji_as_one_grapheme() {
     let invalidation = InvalidationSignal::new();
     let family = "👨‍👩‍👧‍👦";

@@ -762,6 +762,101 @@ fn table_header_click_dispatches_controlled_sort() {
 }
 
 #[test]
+fn table_keyboard_focus_skips_inert_headers_and_enter_sorts() {
+    let invalidation = InvalidationSignal::new();
+    let changes = Arc::new(Mutex::new(Vec::<DataGridSort>::new()));
+    let changes_for_command = Arc::clone(&changes);
+    let columns: Vec<DataGridColumn<&'static str, TestVm>> = vec![
+        DataGridColumn::new("plain", "Plain".to_string(), |ctx| {
+            Text::new(ctx.row).into()
+        }),
+        DataGridColumn::new("sortable", "Sortable".to_string(), |ctx| {
+            Text::new(ctx.row).into()
+        })
+        .sortable(true),
+    ];
+    let tree = WidgetTree::new(
+        DataGrid::<&'static str, TestVm>::new(vec![DataGridRow::keyed("row", "Alpha")], columns)
+            .on_sort_change(ValueCommand::new(move |_vm, change: DataGridSortChange| {
+                *changes_for_command.lock().unwrap() = change.sort;
+            }))
+            .size(dp(260.0), dp(120.0)),
+    );
+    let mut handler = test_handler(Some(tree), invalidation);
+
+    assert!(handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::Tab))));
+    let focused = handler
+        .focused_widget_id()
+        .expect("a sortable header should receive focus");
+    let focused_column =
+        handler
+            .computed_scene()
+            .hit_regions
+            .iter()
+            .find_map(|region| match &region.interaction {
+                HitInteraction::DataGridHeader { id, state, .. } if *id == focused => {
+                    Some(state.column_key.clone())
+                }
+                _ => None,
+            });
+    assert_eq!(focused_column, Some(WidgetKey::from("sortable")));
+
+    assert!(handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::Enter))));
+    assert_eq!(
+        *changes.lock().unwrap(),
+        vec![DataGridSort {
+            column_key: WidgetKey::from("sortable"),
+            direction: DataGridSortDirection::Ascending,
+        }]
+    );
+}
+
+#[test]
+fn table_resize_handle_supports_keyboard_width_adjustment() {
+    let invalidation = InvalidationSignal::new();
+    let latest = Arc::new(Mutex::new(None::<DataGridColumnWidthChange>));
+    let latest_for_command = Arc::clone(&latest);
+    let columns: Vec<DataGridColumn<&'static str, TestVm>> =
+        vec![
+            DataGridColumn::new("name", "Name".to_string(), |ctx| Text::new(ctx.row).into())
+                .width(dp(120.0))
+                .min_width(dp(80.0))
+                .max_width(dp(160.0))
+                .resizable(true),
+        ];
+    let tree = WidgetTree::new(
+        DataGrid::<&'static str, TestVm>::new(vec![DataGridRow::keyed("row", "Alpha")], columns)
+            .on_column_width_change(ValueCommand::new(move |_vm, change| {
+                *latest_for_command.lock().unwrap() = Some(change);
+            }))
+            .size(dp(220.0), dp(120.0)),
+    );
+    let mut handler = test_handler(Some(tree), invalidation);
+
+    assert!(handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::Tab))));
+    let focused = handler
+        .focused_widget_id()
+        .expect("resize handle should receive focus");
+    assert!(handler.computed_scene().hit_regions.iter().any(|region| {
+        matches!(
+            &region.interaction,
+            HitInteraction::DataGridResizeHandle { id, .. } if *id == focused
+        )
+    }));
+    assert!(
+        handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::ArrowRight)))
+    );
+
+    let change = latest
+        .lock()
+        .unwrap()
+        .clone()
+        .expect("keyboard resize should dispatch");
+    assert_eq!(change.column_key, WidgetKey::from("name"));
+    assert_eq!(change.width, dp(128.0));
+}
+
+#[test]
 fn table_selected_keys_signal_updates_cached_scene_and_matches_full_recollect() {
     let invalidation = InvalidationSignal::new();
     let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
@@ -1221,6 +1316,189 @@ fn table_cell_context_menu_opens_on_right_click() {
     let _ = handler.handle_hover(viewport);
     handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Right);
     assert!(handler.context_menu_anchor_states.contains_key(&cell_id));
+}
+
+#[test]
+fn table_live_disabled_row_blocks_context_menu_right_click_and_long_press() {
+    let invalidation = InvalidationSignal::new();
+    let disabled = Arc::new(Mutex::new(false));
+    let disabled_for_signal = Arc::clone(&disabled);
+    let disabled_signal = Signal::new(
+        move || {
+            *disabled_for_signal
+                .lock()
+                .expect("disabled lock should succeed")
+        },
+        invalidation.clone(),
+    );
+    let tree = WidgetTree::new(
+        DataGrid::new(
+            vec![DataGridRow::keyed("a", "Alpha").disable(disabled_signal)],
+            table_columns(),
+        )
+        .context_menu(vec![MenuItem::new("Rename")])
+        .size(dp(240.0), dp(120.0)),
+    );
+    let mut handler = test_handler(Some(tree), invalidation.clone());
+    let viewport = handler.viewport_rect();
+    let (cell_id, point) = cell_center(&mut handler, "a", "name");
+
+    *disabled.lock().expect("disabled lock should succeed") = true;
+    invalidation.mark_dirty();
+
+    handler.cursor_position = Some(point);
+    let _ = handler.handle_hover(viewport);
+    handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Right);
+    assert!(
+        !handler.context_menu_anchor_states.contains_key(&cell_id),
+        "a data-grid row disabled after construction must reject a right-click context menu"
+    );
+
+    let long_press_started = Instant::now();
+    handler.handle_bound_window_event(
+        &TestEventLoop,
+        WindowEvent::PointerButton {
+            device_id: None,
+            position: PhysicalPosition::new(f64::from(point.x.get()), f64::from(point.y.get())),
+            state: ElementState::Pressed,
+            button: ButtonSource::Touch {
+                finger_id: FingerId::from_raw(1),
+                force: None,
+            },
+            primary: true,
+        },
+    );
+    let _ = handler.drive_animations(
+        &TestEventLoop,
+        long_press_started + crate::runtime::LONG_PRESS_THRESHOLD + Duration::from_millis(10),
+    );
+    assert!(
+        !handler.context_menu_anchor_states.contains_key(&cell_id),
+        "a data-grid row disabled after construction must reject a long-press context menu"
+    );
+}
+
+#[test]
+fn focused_data_grid_cell_uses_live_disabled_state_for_keyboard_activation() {
+    let invalidation = InvalidationSignal::new();
+    let disabled = Arc::new(Mutex::new(false));
+    let disabled_for_signal = Arc::clone(&disabled);
+    let disabled_signal = Signal::new(
+        move || {
+            *disabled_for_signal
+                .lock()
+                .expect("disabled lock should succeed")
+        },
+        invalidation.clone(),
+    );
+    let edit_count = Arc::new(AtomicUsize::new(0));
+    let action_count = Arc::new(AtomicUsize::new(0));
+    let selection_count = Arc::new(AtomicUsize::new(0));
+    let columns = vec![
+        DataGridColumn::new(
+            "edit",
+            "Edit".to_string(),
+            |ctx: DataGridCellContext<&'static str>| Text::new(ctx.row).into(),
+        )
+        .width(dp(100.0))
+        .text_value(|row| row.to_string())
+        .editable(true),
+        DataGridColumn::new(
+            "action",
+            "Action".to_string(),
+            |ctx: DataGridCellContext<&'static str>| Text::new(ctx.row).into(),
+        )
+        .width(dp(100.0)),
+    ];
+    let tree = WidgetTree::new(
+        DataGrid::new(
+            vec![DataGridRow::keyed("row", "Alpha").disable(disabled_signal)],
+            columns,
+        )
+        .selection_mode(DataGridSelectionMode::Multiple)
+        .on_selection_change(ValueCommand::new({
+            let selection_count = Arc::clone(&selection_count);
+            move |_vm: &mut TestVm, _change| {
+                selection_count.fetch_add(1, Ordering::SeqCst);
+            }
+        }))
+        .on_cell_action(ValueCommand::new({
+            let action_count = Arc::clone(&action_count);
+            move |_vm: &mut TestVm, _action| {
+                action_count.fetch_add(1, Ordering::SeqCst);
+            }
+        }))
+        .on_cell_edit_commit(ValueCommand::new({
+            let edit_count = Arc::clone(&edit_count);
+            move |_vm: &mut TestVm, _commit| {
+                edit_count.fetch_add(1, Ordering::SeqCst);
+            }
+        }))
+        .size(dp(200.0), dp(120.0)),
+    );
+    let mut handler = test_handler(Some(tree), invalidation.clone());
+    let (edit_id, _) = cell_center(&mut handler, "row", "edit");
+    let (action_id, _) = cell_center(&mut handler, "row", "action");
+
+    handler.focused_widget = Some(FocusedWidget {
+        widget_id: edit_id,
+        scope_path: Vec::new(),
+        on_blur: None,
+    });
+    assert!(handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::Enter,))));
+    handler.focused_widget = Some(FocusedWidget {
+        widget_id: action_id,
+        scope_path: Vec::new(),
+        on_blur: None,
+    });
+    assert!(handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::Enter,))));
+    handler.focused_widget = Some(FocusedWidget {
+        widget_id: edit_id,
+        scope_path: Vec::new(),
+        on_blur: None,
+    });
+    assert!(handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::Space,))));
+    assert_eq!(edit_count.swap(0, Ordering::SeqCst), 1);
+    assert_eq!(action_count.swap(0, Ordering::SeqCst), 1);
+    assert_eq!(selection_count.swap(0, Ordering::SeqCst), 1);
+
+    *disabled.lock().expect("disabled lock should succeed") = true;
+    invalidation.mark_dirty();
+
+    handler.focused_widget = Some(FocusedWidget {
+        widget_id: edit_id,
+        scope_path: Vec::new(),
+        on_blur: None,
+    });
+    let _ = handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::Enter)));
+    handler.focused_widget = Some(FocusedWidget {
+        widget_id: action_id,
+        scope_path: Vec::new(),
+        on_blur: None,
+    });
+    let _ = handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::Enter)));
+    handler.focused_widget = Some(FocusedWidget {
+        widget_id: edit_id,
+        scope_path: Vec::new(),
+        on_blur: None,
+    });
+    let _ = handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::Space)));
+
+    assert_eq!(
+        edit_count.load(Ordering::SeqCst),
+        0,
+        "Enter must not commit an edit after the focused row becomes disabled"
+    );
+    assert_eq!(
+        action_count.load(Ordering::SeqCst),
+        0,
+        "Enter must not dispatch an action after the focused row becomes disabled"
+    );
+    assert_eq!(
+        selection_count.load(Ordering::SeqCst),
+        0,
+        "Space must not change selection after the focused row becomes disabled"
+    );
 }
 
 fn primary_shortcut_modifier() -> ModifiersState {

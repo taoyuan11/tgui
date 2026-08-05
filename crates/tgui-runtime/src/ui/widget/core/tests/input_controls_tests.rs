@@ -1,13 +1,97 @@
 use super::*;
-use crate::foundation::view_model::ValueCommand;
+use crate::foundation::binding::TextController;
+use crate::foundation::view_model::{Command, ValueCommand};
 use crate::theme::{ComponentThemes, Density, WidgetState};
 use crate::ui::layout::Value;
 use crate::ui::widget::{
-    Calendar, ColorPicker, DatePicker, NumberInput, PopoverStyle, TimePicker, Upload, UploadFile,
-    UploadFileId, UploadStatus,
+    Calendar, CalendarChangeTrigger, CalendarSelectionChange, ColorPicker, DatePicker,
+    FileDropEvent, NumberInput, NumberInputChange, NumberInputChangeTrigger, PopoverStyle,
+    ResolvedElement, TimePicker, Upload, UploadFile, UploadFileId, UploadSelection, UploadStatus,
 };
-use chrono::{NaiveDate, NaiveTime};
+use chrono::{Datelike, NaiveDate, NaiveTime};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+struct TemporaryUploadFile {
+    path: PathBuf,
+}
+
+impl TemporaryUploadFile {
+    fn new(name: &str, contents: &[u8]) -> Self {
+        static NEXT_ID: AtomicU64 = AtomicU64::new(0);
+
+        let directory = std::env::temp_dir().join(format!(
+            "tgui-upload-test-{}-{}",
+            std::process::id(),
+            NEXT_ID.fetch_add(1, Ordering::Relaxed)
+        ));
+        std::fs::create_dir_all(&directory).expect("create upload test directory");
+        let path = directory.join(name);
+        std::fs::write(&path, contents).expect("write upload test file");
+        Self { path }
+    }
+}
+
+impl Drop for TemporaryUploadFile {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
+        if let Some(directory) = self.path.parent() {
+            let _ = std::fs::remove_dir(directory);
+        }
+    }
+}
+
+fn resolved_children<VM>(element: &ResolvedElement<VM>) -> &[ResolvedElement<VM>] {
+    match &element.kind {
+        ResolvedWidgetKind::Container { children, .. }
+        | ResolvedWidgetKind::Virtual { children, .. } => children,
+        _ => &[],
+    }
+}
+
+fn collect_button_commands<VM>(
+    element: &ResolvedElement<VM>,
+    expected_label: &str,
+    commands: &mut Vec<Command<VM>>,
+) {
+    if matches!(
+        &element.kind,
+        ResolvedWidgetKind::Button { label, .. } if label.resolve() == expected_label
+    ) {
+        if let Some(command) = element.interactions.on_click.as_ref() {
+            commands.push(command.clone());
+        }
+    }
+    for child in resolved_children(element) {
+        collect_button_commands(child, expected_label, commands);
+    }
+}
+
+fn button_commands<VM>(element: &ResolvedElement<VM>, expected_label: &str) -> Vec<Command<VM>> {
+    let mut commands = Vec::new();
+    collect_button_commands(element, expected_label, &mut commands);
+    commands
+}
+
+fn first_slider_change<VM>(element: &ResolvedElement<VM>) -> Option<ValueCommand<VM, f32>> {
+    if let ResolvedWidgetKind::Slider {
+        on_change: Some(command),
+        ..
+    } = &element.kind
+    {
+        return Some(command.clone());
+    }
+    resolved_children(element)
+        .iter()
+        .find_map(first_slider_change)
+}
+
+fn first_file_drop<VM>(element: &ResolvedElement<VM>) -> Option<ValueCommand<VM, FileDropEvent>> {
+    if let Some(command) = element.interactions.on_file_drop.as_ref() {
+        return Some(command.clone());
+    }
+    resolved_children(element).iter().find_map(first_file_drop)
+}
 
 #[test]
 fn calendar_renders_month_grid_and_today_action() {
@@ -56,6 +140,41 @@ fn calendar_renders_month_grid_and_today_action() {
         !matches!(region.interaction, HitInteraction::Widget { .. })
             || (region.rect.x >= dp(12.0) && region.rect.right() <= dp(308.0))
     }));
+}
+
+#[test]
+fn calendar_renders_minimum_and_maximum_supported_months_without_panicking() {
+    let theme = Theme::default();
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+
+    for month in [NaiveDate::MIN, NaiveDate::MAX] {
+        let mut animations = AnimationEngine::default();
+        let tree: WidgetTree<()> = WidgetTree::new(Calendar::new(month, Some(month)).today(None));
+
+        let computed = tree.compute_scene(
+            &font_manager,
+            &theme,
+            &media,
+            &mut animations,
+            None,
+            None,
+            &HashMap::new(),
+            Rect::new(0.0, 0.0, 360.0, 360.0),
+            None,
+            None,
+            None,
+            None,
+            false,
+        );
+
+        assert!(computed
+            .rendered()
+            .primitives
+            .texts
+            .iter()
+            .any(|text| text.content.as_ref() == month.day().to_string()));
+    }
 }
 
 #[test]
@@ -1032,4 +1151,447 @@ fn upload_density_and_drop_state_are_resolved_in_the_real_scene() {
             .color;
         assert_eq!(hovered_background, theme.colors.primary_container);
     }
+}
+
+#[test]
+fn number_input_decimal_step_updates_text_and_emits_the_displayed_value() {
+    let theme = Theme::default();
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let mut animations = AnimationEngine::default();
+    let controller: TextController = "1.2".into();
+    let tree: WidgetTree<Vec<NumberInputChange>> = WidgetTree::new(
+        NumberInput::new(controller.clone(), Some(1.2))
+            .range(10.0, -10.0)
+            .step(0.001)
+            .on_change(ValueCommand::new(
+                |changes: &mut Vec<NumberInputChange>, change| changes.push(change),
+            )),
+    );
+    let layout = tree.build_scene_layout(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        UnitContext::default(),
+        &HashMap::new(),
+        &HashMap::new(),
+        Rect::new(0.0, 0.0, 360.0, 80.0),
+    );
+    let commands = button_commands(&layout.resolved_root, "Increase value");
+    assert_eq!(commands.len(), 1);
+
+    let mut changes = Vec::new();
+    commands[0].execute(&mut changes);
+
+    assert_eq!(controller.text(), "1.201");
+    assert_eq!(
+        changes,
+        vec![NumberInputChange {
+            value: Some(1.201),
+            text: "1.201".to_string(),
+            trigger: NumberInputChangeTrigger::StepUp,
+        }]
+    );
+}
+
+#[test]
+fn calendar_static_month_navigation_updates_the_existing_tree() {
+    let theme = Theme::default();
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let mut animations = AnimationEngine::default();
+    let tree: WidgetTree<Vec<CalendarSelectionChange>> = WidgetTree::new(
+        Calendar::new(NaiveDate::from_ymd_opt(2026, 6, 1).unwrap(), None)
+            .today(None)
+            .on_change(ValueCommand::new(
+                |changes: &mut Vec<CalendarSelectionChange>, change| changes.push(change),
+            )),
+    );
+    let layout = tree.build_scene_layout(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        UnitContext::default(),
+        &HashMap::new(),
+        &HashMap::new(),
+        Rect::new(0.0, 0.0, 360.0, 360.0),
+    );
+    let previous = button_commands(&layout.resolved_root, "Previous month");
+    let next = button_commands(&layout.resolved_root, "Next month");
+    assert_eq!(previous.len(), 1);
+    assert_eq!(next.len(), 1);
+
+    let mut changes = Vec::new();
+    next[0].execute(&mut changes);
+    let rendered = tree.render_output(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        None,
+        None,
+        &HashMap::new(),
+        Rect::new(0.0, 0.0, 360.0, 360.0),
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+
+    assert!(rendered
+        .primitives
+        .texts
+        .iter()
+        .any(|text| text.content.as_ref() == "July 2026"));
+    assert_eq!(changes.len(), 1);
+    assert_eq!(changes[0].trigger, CalendarChangeTrigger::NextMonth);
+    assert_eq!(
+        changes[0].display_month,
+        NaiveDate::from_ymd_opt(2026, 7, 1).unwrap()
+    );
+}
+
+#[test]
+fn static_date_and_time_pickers_update_without_callbacks_and_close() {
+    let theme = Theme::default();
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let viewport = Rect::new(0.0, 0.0, 420.0, 420.0);
+
+    let date_controller: TextController = "2026-06-06".into();
+    let date_tree: WidgetTree<()> = WidgetTree::new(
+        DatePicker::new(
+            date_controller.clone(),
+            Some(NaiveDate::from_ymd_opt(2026, 6, 6).unwrap()),
+            NaiveDate::from_ymd_opt(2026, 6, 1).unwrap(),
+        )
+        .open(true),
+    );
+    let mut animations = AnimationEngine::default();
+    let date_layout = date_tree.build_scene_layout(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        UnitContext::default(),
+        &HashMap::new(),
+        &HashMap::new(),
+        viewport,
+    );
+    let date_content = date_layout
+        .resolved_root
+        .popover
+        .as_ref()
+        .expect("date picker should own a popover")
+        .content
+        .as_ref()
+        .clone();
+    let date_content_tree = WidgetTree::new(date_content);
+    let date_content_layout = date_content_tree.build_scene_layout(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        UnitContext::default(),
+        &HashMap::new(),
+        &HashMap::new(),
+        viewport,
+    );
+    let date_commands = button_commands(&date_content_layout.resolved_root, "15");
+    assert_eq!(date_commands.len(), 1);
+    date_commands[0].execute(&mut ());
+    assert_eq!(date_controller.text(), "2026-06-15");
+    let closed_date = date_tree.render_output(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        None,
+        None,
+        &HashMap::new(),
+        viewport,
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+    assert!(closed_date.primitives.overlay_texts.is_empty());
+
+    let time_controller: TextController = "09:07".into();
+    let time_tree: WidgetTree<()> = WidgetTree::new(
+        TimePicker::new(
+            time_controller.clone(),
+            Some(NaiveTime::from_hms_opt(9, 7, 0).unwrap()),
+        )
+        .minute_step(15)
+        .open(true),
+    );
+    let time_layout = time_tree.build_scene_layout(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        UnitContext::default(),
+        &HashMap::new(),
+        &HashMap::new(),
+        viewport,
+    );
+    let time_content = time_layout
+        .resolved_root
+        .popover
+        .as_ref()
+        .expect("time picker should own a popover")
+        .content
+        .as_ref()
+        .clone();
+    let time_content_tree = WidgetTree::new(time_content);
+    let time_content_layout = time_content_tree.build_scene_layout(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        UnitContext::default(),
+        &HashMap::new(),
+        &HashMap::new(),
+        viewport,
+    );
+    let hour_commands = button_commands(&time_content_layout.resolved_root, "10");
+    assert_eq!(hour_commands.len(), 1);
+    hour_commands[0].execute(&mut ());
+    assert_eq!(time_controller.text(), "10:07");
+    let done = button_commands(&time_content_layout.resolved_root, "Done");
+    assert_eq!(done.len(), 1);
+    done[0].execute(&mut ());
+    let closed_time = time_tree.render_output(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        None,
+        None,
+        &HashMap::new(),
+        viewport,
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+    assert!(closed_time.primitives.overlay_texts.is_empty());
+}
+
+#[test]
+fn static_color_picker_slider_updates_without_an_external_callback() {
+    let theme = Theme::default();
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let viewport = Rect::new(0.0, 0.0, 420.0, 420.0);
+    let mut animations = AnimationEngine::default();
+    let tree: WidgetTree<()> =
+        WidgetTree::new(ColorPicker::new(Color::hexa(0x3366CCFF)).open(true));
+    let layout = tree.build_scene_layout(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        UnitContext::default(),
+        &HashMap::new(),
+        &HashMap::new(),
+        viewport,
+    );
+    let content = layout
+        .resolved_root
+        .popover
+        .as_ref()
+        .expect("color picker should own a popover")
+        .content
+        .as_ref()
+        .clone();
+    let content_tree = WidgetTree::new(content);
+    let content_layout = content_tree.build_scene_layout(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        UnitContext::default(),
+        &HashMap::new(),
+        &HashMap::new(),
+        viewport,
+    );
+    first_slider_change(&content_layout.resolved_root)
+        .expect("red channel slider should expose a change command")
+        .execute(&mut (), 128.0);
+
+    let rendered = tree.render_output(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        None,
+        None,
+        &HashMap::new(),
+        viewport,
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+    assert!(rendered
+        .primitives
+        .texts
+        .iter()
+        .chain(rendered.primitives.overlay_texts.iter())
+        .any(|text| text.content.as_ref() == "#8066CCFF"));
+}
+
+#[test]
+fn upload_static_and_signal_lists_update_and_directories_are_rejected() {
+    let theme = Theme::default();
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let viewport = Rect::new(0.0, 0.0, 520.0, 420.0);
+    let file = UploadFile::from_path(PathBuf::from("first.txt"));
+
+    let mut animations = AnimationEngine::default();
+    let static_tree: WidgetTree<()> = WidgetTree::new(Upload::new(vec![file.clone()]));
+    let static_layout = static_tree.build_scene_layout(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        UnitContext::default(),
+        &HashMap::new(),
+        &HashMap::new(),
+        viewport,
+    );
+    let remove = button_commands(&static_layout.resolved_root, "Remove file");
+    assert_eq!(remove.len(), 1);
+    remove[0].execute(&mut ());
+    let removed = static_tree.render_output(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        None,
+        None,
+        &HashMap::new(),
+        viewport,
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+    assert!(!removed
+        .primitives
+        .texts
+        .iter()
+        .any(|text| text.content.as_ref() == "first.txt"));
+
+    let context = test_context();
+    let files = context.state(vec![file]);
+    let signal_tree: WidgetTree<()> = WidgetTree::new(Upload::new(files.signal()));
+    files.set(vec![UploadFile::from_path(PathBuf::from("second.txt"))]);
+    let updated = signal_tree.render_output(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        None,
+        None,
+        &HashMap::new(),
+        viewport,
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+    assert!(updated
+        .primitives
+        .texts
+        .iter()
+        .any(|text| text.content.as_ref() == "second.txt"));
+
+    let drop_tree: WidgetTree<Vec<UploadSelection>> =
+        WidgetTree::new(Upload::new(Vec::new()).on_select(ValueCommand::new(
+            |selections: &mut Vec<UploadSelection>, selection| selections.push(selection),
+        )));
+    let drop_layout = drop_tree.build_scene_layout(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        UnitContext::default(),
+        &HashMap::new(),
+        &HashMap::new(),
+        viewport,
+    );
+    let drop = first_file_drop(&drop_layout.resolved_root)
+        .expect("upload drop zone should expose its file-drop command");
+    let mut selections = Vec::new();
+    drop.execute(
+        &mut selections,
+        FileDropEvent {
+            position: Point::new(10.0, 10.0),
+            paths: vec![PathBuf::from(".")],
+        },
+    );
+    assert_eq!(selections.len(), 1);
+    assert!(selections[0].files.is_empty());
+    assert_eq!(selections[0].rejected.len(), 1);
+    assert_eq!(
+        selections[0].rejected[0].reason,
+        "Only files can be uploaded"
+    );
+}
+
+#[test]
+fn upload_drop_preserves_the_dispatching_command_context() {
+    let theme = Theme::default();
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let mut animations = AnimationEngine::default();
+    let upload_file = TemporaryUploadFile::new("context.txt", b"context");
+    let tree: WidgetTree<Vec<UploadSelection>> = WidgetTree::new(
+        Upload::new(Vec::new()).on_select(ValueCommand::new_with_context(
+            |selections: &mut Vec<UploadSelection>, selection, context| {
+                selections.push(selection);
+                context.request_rebuild();
+            },
+        )),
+    );
+    let layout = tree.build_scene_layout(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        UnitContext::default(),
+        &HashMap::new(),
+        &HashMap::new(),
+        Rect::new(0.0, 0.0, 520.0, 420.0),
+    );
+    let drop = first_file_drop(&layout.resolved_root)
+        .expect("upload drop zone should expose its file-drop command");
+    let context = CommandContext::detached();
+    let revision_before = context.root_rebuild_revision();
+    let mut selections = Vec::new();
+
+    drop.execute_with_context(
+        &mut selections,
+        FileDropEvent {
+            position: Point::new(10.0, 10.0),
+            paths: vec![upload_file.path.clone()],
+        },
+        &context,
+    );
+
+    assert_eq!(selections.len(), 1);
+    assert_eq!(selections[0].files.len(), 1);
+    assert_eq!(context.root_rebuild_revision(), revision_before + 1);
 }

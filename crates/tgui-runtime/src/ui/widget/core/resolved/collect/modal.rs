@@ -28,6 +28,9 @@ const MODAL_OVERLAY_TAG: u64 = 0x4D4F44414C5F4944; // "MODAL_ID"
 impl<VM> ResolvedElement<VM> {
     pub(super) fn clear_closed_modal_interactions(&self, computed: &mut ComputedScene<VM>) {
         let Some(modal) = &self.modal else { return };
+        for scope in &mut computed.focus_scopes {
+            scope.active = scope.options.is_active_untracked();
+        }
         if modal.open.resolve() {
             return;
         }
@@ -36,7 +39,9 @@ impl<VM> ResolvedElement<VM> {
         computed.overlay_hit_regions.clear();
         computed.overlay_close_handlers.clear();
         computed.scroll_regions.clear();
-        computed.focus_scopes.clear();
+        computed
+            .focus_scopes
+            .retain(|scope| scope.options.hides_from_accessibility(scope.active));
         computed.ime_cursor_area = None;
         computed.overlay_layers = crate::ui::widget::common::fresh_overlay_layers();
     }

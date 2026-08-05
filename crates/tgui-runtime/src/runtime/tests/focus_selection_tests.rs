@@ -270,6 +270,351 @@ fn enter_space_and_escape_drive_default_focus_actions() {
     assert!(handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::Escape))));
     assert_eq!(handler.resolved_select_open_state(select_id), Some(false));
     assert_eq!(handler.focused_widget_id(), Some(select_id));
+
+    assert!(handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::Space))));
+    assert_eq!(handler.resolved_select_open_state(select_id), Some(true));
+}
+
+#[test]
+fn controlled_select_tracks_bound_open_state_after_runtime_interactions() {
+    let context = ViewModelContext::for_benchmarks();
+    let invalidation = context.invalidation().clone();
+    let open = context.state(false);
+    let open_for_command = open.clone();
+    let select: Element<TestVm> = Select::new(
+        vec![SelectOption::new("email".to_string(), "Email".to_string())],
+        None::<String>,
+    )
+    .open(open.signal())
+    .on_open_change(ValueCommand::new(move |_vm: &mut TestVm, next| {
+        open_for_command.set(next);
+    }))
+    .size(dp(160.0), dp(32.0))
+    .into();
+    let select_id = select.id;
+    let mut handler = test_handler(Some(WidgetTree::new(select)), invalidation);
+
+    assert!(handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::Tab))));
+    assert!(handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::Enter))));
+    assert!(open.get());
+    assert_eq!(handler.resolved_select_open_state(select_id), Some(true));
+
+    let _ = handler.computed_scene();
+    assert!(handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::Escape))));
+    assert!(!open.get());
+    assert_eq!(handler.resolved_select_open_state(select_id), Some(false));
+
+    open.set(true);
+    assert_eq!(handler.resolved_select_open_state(select_id), Some(true));
+}
+
+#[test]
+fn select_public_click_runs_for_pointer_enter_and_space() {
+    let invalidation = InvalidationSignal::new();
+    let clicks = Arc::new(AtomicUsize::new(0));
+    let clicks_for_command = Arc::clone(&clicks);
+    let select: Element<TestVm> = Select::new(
+        vec![SelectOption::new("one".to_string(), "One".to_string())],
+        None::<String>,
+    )
+    .on_click(Command::new(move |_vm: &mut TestVm| {
+        clicks_for_command.fetch_add(1, Ordering::SeqCst);
+    }))
+    .size(dp(160.0), dp(32.0))
+    .into();
+    let mut handler = test_handler(Some(WidgetTree::new(select)), invalidation);
+
+    handler.cursor_position = Some(Point::new(dp(10.0), dp(10.0)));
+    handler.handle_mouse_press(
+        handler.viewport_rect(),
+        Instant::now(),
+        CanvasMouseButton::Left,
+    );
+    assert_eq!(clicks.load(Ordering::SeqCst), 1);
+    assert!(handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::Enter))));
+    assert_eq!(clicks.load(Ordering::SeqCst), 2);
+    assert!(handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::Space))));
+    assert_eq!(clicks.load(Ordering::SeqCst), 3);
+}
+
+#[test]
+fn select_arrow_navigation_skips_disabled_options_and_enter_activates_focus() {
+    let invalidation = InvalidationSignal::new();
+    let selections = Arc::new(Mutex::new(Vec::new()));
+    let selections_for_command = Arc::clone(&selections);
+    let select: Element<TestVm> = Select::new(
+        vec![
+            SelectOption::new("one".to_string(), "One".to_string()),
+            SelectOption::new("disabled".to_string(), "Disabled".to_string()).disable(true),
+            SelectOption::new("three".to_string(), "Three".to_string()),
+        ],
+        None::<String>,
+    )
+    .on_change(ValueCommand::new(move |_vm: &mut TestVm, (key, _value)| {
+        selections_for_command.lock().unwrap().push(key);
+    }))
+    .size(dp(160.0), dp(32.0))
+    .into();
+    let select_id = select.id;
+    let mut handler = test_handler(Some(WidgetTree::new(select)), invalidation);
+
+    assert!(handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::Tab))));
+    assert_eq!(handler.focused_widget_id(), Some(select_id));
+    assert!(
+        handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::ArrowDown,)))
+    );
+    let first_option_id = handler
+        .focused_widget_id()
+        .expect("the first enabled option should receive focus");
+    assert_ne!(first_option_id, select_id);
+
+    handler.invalidate_computed_scene();
+    let _ = handler.computed_scene();
+    assert_eq!(
+        handler.focused_widget_id(),
+        Some(first_option_id),
+        "option focus identity must survive scene recollection"
+    );
+
+    assert!(
+        handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::ArrowDown,)))
+    );
+    assert_ne!(handler.focused_widget_id(), Some(first_option_id));
+    assert!(handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::Enter))));
+
+    assert_eq!(selections.lock().unwrap().as_slice(), &["three"]);
+    assert_eq!(handler.resolved_select_open_state(select_id), Some(false));
+    assert_eq!(handler.focused_widget_id(), Some(select_id));
+}
+
+#[test]
+fn long_select_keyboard_navigation_materializes_and_scrolls_to_the_focused_option() {
+    let invalidation = InvalidationSignal::new();
+    let selections = Arc::new(Mutex::new(Vec::new()));
+    let selections_for_command = Arc::clone(&selections);
+    let select: Element<TestVm> = Select::new(
+        (0..24)
+            .map(|index| SelectOption::new(index, format!("Option {index}")))
+            .collect::<Vec<_>>(),
+        None::<usize>,
+    )
+    .on_change(ValueCommand::new(move |_vm: &mut TestVm, (key, _value)| {
+        selections_for_command.lock().unwrap().push(key);
+    }))
+    .size(dp(160.0), dp(32.0))
+    .into();
+    let mut handler = test_handler_with_config(
+        TestVm,
+        Some(WidgetTree::new(select)),
+        invalidation,
+        test_config_with_size(220.0, 180.0),
+    );
+    handler.reduced_motion = true;
+
+    assert!(handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::Tab))));
+    for expected_index in 0..12 {
+        assert!(handler
+            .handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::ArrowDown))));
+        let focused_id = handler
+            .focused_widget_id()
+            .expect("a Select option should remain focused");
+        let materialized_options = handler
+            .computed_scene()
+            .overlay_hit_regions
+            .iter()
+            .filter_map(|region| match &region.interaction {
+                HitInteraction::SelectOption { option_index, .. } => Some((
+                    *option_index,
+                    region.focus.as_ref().map(|focus| focus.widget_id),
+                )),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        let materialized_index = materialized_options
+            .iter()
+            .find_map(|(index, id)| (*id == Some(focused_id)).then_some(*index));
+        assert_eq!(
+            materialized_index,
+            Some(expected_index),
+            "keyboard focus must stay attached to a materialized overlay option; focused={focused_id:?} options={materialized_options:?}"
+        );
+    }
+
+    assert!(handler
+        .scroll_states
+        .values()
+        .any(|offset| offset.y > Dp::ZERO));
+    assert!(handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::Enter))));
+    assert_eq!(selections.lock().unwrap().as_slice(), &[11]);
+}
+
+#[test]
+fn read_only_select_options_can_be_browsed_but_not_activated() {
+    let invalidation = InvalidationSignal::new();
+    let select: Element<TestVm> = Select::new(
+        vec![SelectOption::new("one".to_string(), "One".to_string())],
+        None::<String>,
+    )
+    .size(dp(160.0), dp(32.0))
+    .into();
+    let select_id = select.id;
+    let mut handler = test_handler(Some(WidgetTree::new(select)), invalidation);
+    handler.reduced_motion = true;
+
+    assert!(handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::Tab))));
+    assert!(handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::Enter))));
+    assert_eq!(handler.resolved_select_open_state(select_id), Some(true));
+    assert!(
+        handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::ArrowDown)))
+    );
+    assert!(!handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::Enter))));
+    assert_eq!(handler.resolved_select_open_state(select_id), Some(true));
+
+    let option_rect = handler
+        .computed_scene()
+        .overlay_hit_regions
+        .iter()
+        .find_map(|region| {
+            matches!(region.interaction, HitInteraction::SelectOption { .. }).then_some(region.rect)
+        })
+        .expect("the read-only Select option should remain browsable");
+    handler.cursor_position = Some(Point::new(
+        option_rect.x + option_rect.width * 0.5,
+        option_rect.y + option_rect.height * 0.5,
+    ));
+    handler.handle_mouse_press(
+        handler.viewport_rect(),
+        Instant::now(),
+        CanvasMouseButton::Left,
+    );
+    assert_eq!(handler.resolved_select_open_state(select_id), Some(true));
+}
+
+#[test]
+fn uncontrolled_select_open_callback_does_not_replace_escape_state_update() {
+    let invalidation = InvalidationSignal::new();
+    let open_changes = Arc::new(Mutex::new(Vec::new()));
+    let open_changes_for_command = Arc::clone(&open_changes);
+    let select: Element<TestVm> = Select::new(
+        vec![SelectOption::new("one".to_string(), "One".to_string())],
+        None::<String>,
+    )
+    .on_open_change(ValueCommand::new(move |_vm: &mut TestVm, open| {
+        open_changes_for_command.lock().unwrap().push(open);
+    }))
+    .size(dp(160.0), dp(32.0))
+    .into();
+    let select_id = select.id;
+    let mut handler = test_handler(Some(WidgetTree::new(select)), invalidation);
+
+    assert!(handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::Tab))));
+    assert!(handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::Enter))));
+    assert_eq!(handler.resolved_select_open_state(select_id), Some(true));
+    let _ = handler.computed_scene();
+
+    assert!(handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::Escape))));
+    assert_eq!(handler.resolved_select_open_state(select_id), Some(false));
+    assert_eq!(open_changes.lock().unwrap().as_slice(), &[true, false]);
+}
+
+#[test]
+fn uncontrolled_select_open_callback_does_not_replace_outside_click_state_update() {
+    let invalidation = InvalidationSignal::new();
+    let open_changes = Arc::new(Mutex::new(Vec::new()));
+    let open_changes_for_command = Arc::clone(&open_changes);
+    let select: Element<TestVm> = Select::new(
+        vec![SelectOption::new("one".to_string(), "One".to_string())],
+        None::<String>,
+    )
+    .on_open_change(ValueCommand::new(move |_vm: &mut TestVm, open| {
+        open_changes_for_command.lock().unwrap().push(open);
+    }))
+    .size(dp(160.0), dp(32.0))
+    .into();
+    let select_id = select.id;
+    let mut handler = test_handler(Some(WidgetTree::new(select)), invalidation);
+
+    handler.cursor_position = Some(Point::new(dp(10.0), dp(10.0)));
+    handler.handle_mouse_press(
+        handler.viewport_rect(),
+        Instant::now(),
+        CanvasMouseButton::Left,
+    );
+    assert_eq!(handler.resolved_select_open_state(select_id), Some(true));
+    let _ = handler.computed_scene();
+
+    let _ = handler.consume_overlay_close_handlers_outside_click(Point::new(dp(190.0), dp(110.0)));
+    assert_eq!(handler.resolved_select_open_state(select_id), Some(false));
+    assert_eq!(open_changes.lock().unwrap().as_slice(), &[true, false]);
+}
+
+#[test]
+fn accessibility_select_option_updates_uncontrolled_open_state_once() {
+    let invalidation = InvalidationSignal::new();
+    let open_changes = Arc::new(Mutex::new(Vec::new()));
+    let open_changes_for_command = Arc::clone(&open_changes);
+    let selections = Arc::new(AtomicUsize::new(0));
+    let selections_for_command = Arc::clone(&selections);
+    let select: Element<TestVm> = Select::new(
+        vec![SelectOption::new("one".to_string(), "One".to_string())],
+        None::<String>,
+    )
+    .on_change(ValueCommand::new(move |_vm: &mut TestVm, _selection| {
+        selections_for_command.fetch_add(1, Ordering::SeqCst);
+    }))
+    .on_open_change(ValueCommand::new(move |_vm: &mut TestVm, open| {
+        open_changes_for_command.lock().unwrap().push(open);
+    }))
+    .size(dp(160.0), dp(32.0))
+    .into();
+    let select_id = select.id;
+    let mut handler = test_handler(Some(WidgetTree::new(select)), invalidation);
+    handler.reduced_motion = true;
+
+    assert!(handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::Tab))));
+    assert!(handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::Enter))));
+    let interaction = handler
+        .computed_scene()
+        .overlay_hit_regions
+        .iter()
+        .find_map(|region| match &region.interaction {
+            interaction @ HitInteraction::SelectOption { id, .. } if *id == select_id => {
+                Some(interaction.clone())
+            }
+            _ => None,
+        })
+        .expect("open select should expose an accessibility option interaction");
+
+    assert!(handler.dispatch_accessibility_click_interaction(interaction));
+    assert_eq!(handler.resolved_select_open_state(select_id), Some(false));
+    assert_eq!(selections.load(Ordering::SeqCst), 1);
+    assert_eq!(open_changes.lock().unwrap().as_slice(), &[true, false]);
+}
+
+#[test]
+fn disabled_form_controls_are_skipped_by_tab_navigation() {
+    let invalidation = InvalidationSignal::new();
+    let enabled: Element<TestVm> = Button::new("Enabled").size(dp(80.0), dp(30.0)).into();
+    let enabled_id = enabled.id;
+    let tree = WidgetTree::new(
+        Flex::new(Axis::Vertical).child([
+            Checkbox::new(false).disable(true).into(),
+            crate::ui::widget::Radio::new(false).disable(true).into(),
+            Switch::new(false).disable(true).into(),
+            Slider::new(0.0, 0.0, 1.0).disable(true).into(),
+            Select::new(
+                vec![SelectOption::new("key".to_string(), "Value".to_string())],
+                None::<String>,
+            )
+            .disable(true)
+            .into(),
+            enabled,
+        ]),
+    );
+    let mut handler = test_handler(Some(tree), invalidation);
+
+    assert!(handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::Tab))));
+    assert_eq!(handler.focused_widget_id(), Some(enabled_id));
 }
 
 #[test]

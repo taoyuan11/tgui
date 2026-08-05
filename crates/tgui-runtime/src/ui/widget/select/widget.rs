@@ -6,7 +6,7 @@ use crate::ui::layout::{Align, Insets, LayoutStyle, Value};
 
 use super::super::common::{
     CursorStyle, InteractionHandlers, LifecycleEventHandlers, MediaEventHandlers, Point,
-    SelectOptionState, VisualStyle, WidgetId, WidgetKey, WidgetKind,
+    SelectLabelState, SelectOptionState, VisualStyle, WidgetId, WidgetKey, WidgetKind,
 };
 use super::super::container::{
     set_layout_inset, set_layout_length, set_layout_lengths, IntoLengthValue,
@@ -238,6 +238,12 @@ impl<VM, K, V> Select<VM, K, V> {
         self
     }
 
+    /// 设置辅助技术朗读的选择器名称。
+    pub fn label(mut self, label: impl Into<Value<String>>) -> Self {
+        self.visual.accessibility_label = Some(label.into());
+        self
+    }
+
     /// 设置禁用状态。
     pub fn disable(mut self, disable: impl Into<Value<bool>>) -> Self {
         self.disabled = disable.into();
@@ -368,6 +374,7 @@ where
     V: Clone + Into<Value<String>> + Send + Sync + 'static,
 {
     fn from(select: Select<VM, K, V>) -> Self {
+        let widget_id = WidgetId::next();
         let label_options = select
             .options
             .iter()
@@ -379,7 +386,6 @@ where
                 (option.key.clone(), label)
             })
             .collect::<Vec<_>>();
-        let selected_label = select_selected_label(&select.selected_key, label_options.clone());
         let options = select
             .options
             .into_iter()
@@ -398,16 +404,18 @@ where
                     })
                 });
                 SelectOptionState {
+                    widget_id: WidgetId::next(),
                     label,
                     selected,
                     disabled: option.disabled,
                     on_select,
                 }
             })
-            .collect();
+            .collect::<Vec<_>>();
+        let selected_label = SelectLabelState::from_options(&options);
 
         Element {
-            id: WidgetId::next(),
+            id: widget_id,
             key: select.key,
             layout: select.layout,
             focus: Default::default(),
@@ -456,37 +464,4 @@ where
             .map(move |current| current.as_ref() == Some(&option_key))
             .into(),
     }
-}
-
-fn select_selected_label<K>(
-    selected_key: &Value<Option<K>>,
-    options: Vec<(K, Value<String>)>,
-) -> Value<Option<String>>
-where
-    K: Clone + PartialEq + Send + Sync + 'static,
-{
-    match selected_key {
-        Value::Static(current) => Value::Static(
-            current
-                .as_ref()
-                .and_then(|key| selected_label_for_key(key, &options)),
-        ),
-        Value::Signal(signal) => signal
-            .map(move |current| {
-                current
-                    .as_ref()
-                    .and_then(|key| selected_label_for_key(key, &options))
-            })
-            .into(),
-    }
-}
-
-fn selected_label_for_key<K>(key: &K, options: &[(K, Value<String>)]) -> Option<String>
-where
-    K: PartialEq,
-{
-    options
-        .iter()
-        .find(|(option_key, _)| option_key == key)
-        .map(|(_, label)| label.resolve())
 }

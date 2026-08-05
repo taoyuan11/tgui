@@ -513,6 +513,25 @@ pub(crate) struct AccessibilityFragmentNode<VM> {
     pub(crate) hits: SmallVec<[HitRegion<VM>; 1]>,
     pub(crate) scroll_regions: SmallVec<[ScrollRegion; 1]>,
     pub(crate) children: SmallVec<[(usize, usize); 4]>,
+    pub(crate) synthetic_semantics: Option<AccessibilitySyntheticSemantics>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum AccessibilitySyntheticRole {
+    Menu,
+    MenuItem,
+    MenuItemCheckbox,
+    Tooltip,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct AccessibilitySyntheticSemantics {
+    pub(crate) role: AccessibilitySyntheticRole,
+    pub(crate) label: Option<String>,
+    pub(crate) disabled: bool,
+    pub(crate) checked: Option<bool>,
+    pub(crate) expanded: Option<bool>,
+    pub(crate) has_menu_popup: bool,
 }
 
 impl<VM> Clone for AccessibilityFragmentNode<VM> {
@@ -525,6 +544,7 @@ impl<VM> Clone for AccessibilityFragmentNode<VM> {
             hits: self.hits.clone(),
             scroll_regions: self.scroll_regions.clone(),
             children: self.children.clone(),
+            synthetic_semantics: self.synthetic_semantics.clone(),
         }
     }
 }

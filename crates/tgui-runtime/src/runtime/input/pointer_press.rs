@@ -236,7 +236,13 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     HitInteraction::Widget {
                         id, interactions, ..
                     } => {
-                        self.dispatch_widget_click(HoverTargetId::Widget(id), interactions, now);
+                        if button == CanvasMouseButton::Left {
+                            self.dispatch_widget_click(
+                                HoverTargetId::Widget(id),
+                                interactions,
+                                now,
+                            );
+                        }
                         return;
                     }
                     _ => {}
@@ -247,6 +253,15 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         }
 
         let pointer_position = self.cursor_position;
+        let trigger_widget_id = match hit.target_id() {
+            HitTargetId::Widget(widget_id) => Some(widget_id),
+            HitTargetId::SelectOption { .. } | HitTargetId::CanvasItem { .. } => None,
+        };
+        let popover_toggle = if button == CanvasMouseButton::Left {
+            trigger_widget_id.and_then(|widget_id| self.popover_trigger_ancestor(widget_id))
+        } else {
+            None
+        };
         let clicked_select = matches!(
             &hit,
             HitInteraction::SelectTrigger { .. } | HitInteraction::SelectOption { .. }
@@ -280,46 +295,16 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 }
             }
         }
-        let menu_toggle = match &hit {
-            HitInteraction::Widget { id, .. } | HitInteraction::TabTrigger { id, .. } => self
-                .cached_scene
-                .as_ref()
-                .and_then(|cached| cached.layout.as_ref())
-                .and_then(|layout| layout.resolved_widget(*id))
-                .and_then(|resolved| resolved.menu.as_ref().map(|_| *id)),
-            _ => None,
-        };
-        let context_menu_open = match &hit {
-            HitInteraction::Widget { id, .. }
-            | HitInteraction::TabTrigger { id, .. }
-            | HitInteraction::SelectableText { id, .. }
-            | HitInteraction::Switch { id, .. }
-            | HitInteraction::Checkbox { id, .. }
-            | HitInteraction::Radio { id, .. }
-            | HitInteraction::SelectTrigger { id, .. }
-            | HitInteraction::ListItem { id, .. }
-            | HitInteraction::TreeNode { id, .. }
-            | HitInteraction::TreeDisclosure { id, .. }
-            | HitInteraction::TreeCheckbox { id, .. }
-            | HitInteraction::DataGridCell { id, .. }
-            | HitInteraction::DataGridHeader { id, .. }
-            | HitInteraction::DataGridResizeHandle { id, .. }
-            | HitInteraction::SplitterHandle { id, .. }
-            | HitInteraction::Slider { id, .. }
-            | HitInteraction::TextInput { id, .. } => {
-                let has_context_menu = self
-                    .cached_scene
-                    .as_ref()
-                    .and_then(|cached| cached.layout.as_ref())
-                    .and_then(|layout| layout.resolved_widget(*id))
-                    .and_then(|resolved| resolved.context_menu.as_ref())
-                    .map(|menu| !menu.disabled.resolve())
-                    .unwrap_or(false);
-                (button == CanvasMouseButton::Right && has_context_menu)
-                    .then_some((*id, pointer_position.unwrap_or(Point::ZERO)))
-            }
-            _ => None,
-        };
+        let menu_toggle = (button == CanvasMouseButton::Left)
+            .then(|| trigger_widget_id.and_then(|id| self.menu_trigger_ancestor(id)))
+            .flatten();
+        let context_menu_open = (button == CanvasMouseButton::Right)
+            .then(|| {
+                trigger_widget_id
+                    .and_then(|id| self.context_menu_trigger_ancestor(id))
+                    .map(|id| (id, pointer_position.unwrap_or(Point::ZERO)))
+            })
+            .flatten();
 
         if let HitInteraction::DataGridCell {
             id,
@@ -347,23 +332,22 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             }
             self.close_all_open_selects_except(None);
             let disabled = state.disabled.resolve();
+            let focusable = !disabled;
             self.update_focus(
-                (!disabled).then_some(FocusedWidget {
+                focusable.then_some(FocusedWidget {
                     widget_id: id,
                     scope_path: hit_scope_path,
                     on_blur: interactions.on_blur.clone(),
                 }),
-                (!disabled)
-                    .then_some(interactions.on_focus.clone())
-                    .flatten(),
+                focusable.then_some(interactions.on_focus.clone()).flatten(),
                 false,
             );
-            if let Some((context_menu_id, position)) = context_menu_open {
-                let _ = self.open_context_menu_at(context_menu_id, position);
+            let handled = if let Some((context_menu_id, position)) = context_menu_open {
+                self.open_context_menu_at(context_menu_id, position)
             } else {
-                let _ = self.dispatch_data_grid_cell_click(&state, id, now, button);
-            }
-            self.pressed_widget = Some(id);
+                self.dispatch_data_grid_cell_click(&state, id, now, button)
+            };
+            self.pressed_widget = handled.then_some(id);
             return;
         }
 
@@ -405,9 +389,30 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         if let HitInteraction::DataGridResizeHandle {
             id,
             state,
-            interactions: _,
+            interactions,
         } = hit.clone()
         {
+            if button == CanvasMouseButton::Left {
+                let hit_scope_path = {
+                    let computed = self.computed_scene();
+                    computed
+                        .hit_regions
+                        .iter()
+                        .chain(computed.overlay_hit_regions.iter())
+                        .find(|region| region.interaction.target_id() == hit_target_id)
+                        .map(|region| region.scope_path.clone())
+                        .unwrap_or_default()
+                };
+                self.update_focus(
+                    Some(FocusedWidget {
+                        widget_id: id,
+                        scope_path: hit_scope_path,
+                        on_blur: interactions.on_blur.clone(),
+                    }),
+                    interactions.on_focus.clone(),
+                    false,
+                );
+            }
             if let Some((context_menu_id, position)) = context_menu_open {
                 let _ = self.open_context_menu_at(context_menu_id, position);
             } else {
@@ -733,10 +738,13 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 interactions.clone(),
                 Some(id),
                 interactions.on_focus.clone(),
-                on_change
-                    .clone()
-                    .map(|command| ClickHandler::Toggle(command, !current))
-                    .or_else(|| interactions.on_click.clone().map(ClickHandler::Command)),
+                (on_change.is_some() || interactions.on_click.is_some()).then(|| {
+                    ClickHandler::Toggle {
+                        on_change: on_change.clone(),
+                        next: Some(!current),
+                        on_click: interactions.on_click.clone(),
+                    }
+                }),
                 None,
                 None,
                 None,
@@ -751,10 +759,13 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 interactions.clone(),
                 Some(id),
                 interactions.on_focus.clone(),
-                on_change
-                    .clone()
-                    .map(|command| ClickHandler::Toggle(command, !current))
-                    .or_else(|| interactions.on_click.clone().map(ClickHandler::Command)),
+                (on_change.is_some() || interactions.on_click.is_some()).then(|| {
+                    ClickHandler::Toggle {
+                        on_change: on_change.clone(),
+                        next: Some(!current),
+                        on_click: interactions.on_click.clone(),
+                    }
+                }),
                 None,
                 None,
                 None,
@@ -769,10 +780,13 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 interactions.clone(),
                 Some(id),
                 interactions.on_focus.clone(),
-                on_change
-                    .clone()
-                    .map(|command| ClickHandler::Toggle(command, !current))
-                    .or_else(|| interactions.on_click.clone().map(ClickHandler::Command)),
+                (on_change.is_some() || interactions.on_click.is_some()).then(|| {
+                    ClickHandler::Toggle {
+                        on_change: on_change.clone(),
+                        next: (!current).then_some(true),
+                        on_click: interactions.on_click.clone(),
+                    }
+                }),
                 None,
                 None,
                 None,
@@ -814,13 +828,14 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 interactions,
                 on_open_change,
                 is_open,
+                can_toggle,
             } => (
                 id,
                 interactions.clone(),
                 Some(id),
                 interactions.on_focus.clone(),
                 interactions.on_click.clone().map(ClickHandler::Command),
-                Some((id, !is_open, on_open_change.clone())),
+                can_toggle.then(|| (id, !is_open, on_open_change.clone())),
                 None,
                 None,
             ),
@@ -872,21 +887,30 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 interactions,
                 on_select,
                 ref on_open_change,
+                ref menu_path,
                 ..
-            } => (
-                id,
-                interactions.clone(),
-                None,
-                None,
-                Some(ClickHandler::SelectOption {
-                    widget_id: id,
-                    command: on_select.clone(),
-                    on_open_change: on_open_change.clone(),
-                }),
-                Some((id, false, on_open_change.clone())),
-                None,
-                None,
-            ),
+            } => {
+                let is_menu_item = self.is_menu_layer_source(id);
+                let can_activate = on_select.is_some() || menu_path.is_some();
+                (
+                    id,
+                    interactions.clone(),
+                    None,
+                    None,
+                    (button == CanvasMouseButton::Left && can_activate).then(|| {
+                        ClickHandler::SelectOption {
+                            widget_id: id,
+                            command: on_select.clone(),
+                            on_open_change: on_open_change.clone(),
+                            menu_path: menu_path.clone(),
+                        }
+                    }),
+                    (button == CanvasMouseButton::Left && !is_menu_item && on_select.is_some())
+                        .then_some((id, false, on_open_change.clone())),
+                    None,
+                    None,
+                )
+            }
             HitInteraction::Occluder { .. } => unreachable!("occluder hit handled above"),
             HitInteraction::Disabled { .. } => unreachable!("disabled hit handled above"),
             HitInteraction::CanvasItem { .. } => unreachable!("canvas item handled above"),
@@ -950,19 +974,39 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             self.sync_ime_state();
         }
         if let Some((select_id, next_open, on_open_change)) = select_toggle {
-            self.close_all_open_selects_except(next_open.then_some(select_id));
-            let _ = self.set_select_open_state(select_id, next_open, on_open_change.as_ref());
+            if button == CanvasMouseButton::Left {
+                self.close_all_open_selects_except(next_open.then_some(select_id));
+                let _ = self.set_select_open_state(select_id, next_open, on_open_change.as_ref());
+            }
         }
         if let Some((context_menu_id, position)) = context_menu_open {
             self.close_all_open_selects_except(None);
             let _ = self.open_context_menu_at(context_menu_id, position);
         } else if button == CanvasMouseButton::Left {
+            if let Some(popover_id) = popover_toggle {
+                let _ = self.toggle_popover_from_trigger_descendant(popover_id);
+            }
             if let Some(menu_id) = menu_toggle {
                 self.close_all_open_selects_except(None);
                 let _ = self.toggle_menu_open_state(menu_id);
             }
         }
         self.pressed_widget = Some(widget_id);
+
+        if context_menu_open.is_some() {
+            self.pending_click = None;
+            return;
+        }
+
+        // Secondary mouse buttons may focus a target and/or open its context menu, but they
+        // must never run the primary activation path below. In particular, this keeps a right
+        // click from toggling selection controls, starting a slider drag, or dispatching a plain
+        // widget's `on_click` command.
+        if button != CanvasMouseButton::Left {
+            self.pending_click = None;
+            self.pressed_widget = None;
+            return;
+        }
 
         if let Some((
             slider_id,

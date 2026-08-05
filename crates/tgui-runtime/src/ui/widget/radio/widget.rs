@@ -5,7 +5,7 @@ use crate::ui::layout::{Align, Insets, LayoutStyle, Value};
 
 use super::super::common::{
     CursorStyle, InteractionHandlers, LifecycleEventHandlers, MediaEventHandlers, Point,
-    VisualStyle, WidgetId, WidgetKind,
+    RadioGroupInteraction, VisualStyle, WidgetId, WidgetKind,
 };
 use super::super::container::{
     set_layout_inset, set_layout_length, set_layout_lengths, IntoLengthValue,
@@ -341,6 +341,13 @@ impl<VM> Radio<VM> {
         if let WidgetKind::Radio { disabled, .. } = &mut self.element.kind {
             *disabled = disable.into();
         }
+        self
+    }
+
+    pub(super) fn group_item(mut self, interaction: RadioGroupInteraction, tab_stop: bool) -> Self {
+        self.element.interactions.radio_group = Some(interaction);
+        self.element.focus.focusable = Some(true);
+        self.element.focus.tab_index = Some(if tab_stop { 0 } else { -1 });
         self
     }
 

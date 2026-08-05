@@ -444,7 +444,7 @@ pub(super) fn lifecycle_widget_kind<VM>(kind: &ResolvedWidgetKind<VM>) -> Lifecy
             let mut disabled = disabled.clone();
             let mut validation = validation.clone();
             let mut style = style.clone();
-            freeze_value(&mut selected_label);
+            selected_label.freeze();
             freeze_value(&mut placeholder);
             for option in &mut options {
                 freeze_value(&mut option.label);
@@ -489,6 +489,7 @@ pub(super) fn lifecycle_widget_kind<VM>(kind: &ResolvedWidgetKind<VM>) -> Lifecy
         }
         ResolvedWidgetKind::Slider {
             value,
+            label,
             min,
             max,
             step,
@@ -503,15 +504,18 @@ pub(super) fn lifecycle_widget_kind<VM>(kind: &ResolvedWidgetKind<VM>) -> Lifecy
             ..
         } => {
             let mut value = value.clone();
+            let mut label = label.clone();
             let mut disabled = disabled.clone();
             let mut validation = validation.clone();
             let mut style = style.clone();
             freeze_value(&mut value);
+            freeze_option_value(&mut label);
             freeze_value(&mut disabled);
             freeze_value(&mut validation);
             freeze_slider_style(&mut style);
             LifecycleWidgetKind::Slider {
                 value,
+                label,
                 min: *min,
                 max: *max,
                 step: *step,

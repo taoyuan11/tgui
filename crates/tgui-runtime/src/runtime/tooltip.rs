@@ -3,7 +3,20 @@ use crate::runtime::state::TooltipDismissReason;
 use crate::ui::widget::{ActiveTooltipState, TooltipTrigger};
 
 impl<VM: 'static> BoundRuntimeHandler<VM> {
-    pub(super) fn widget_has_tooltip_in_computed(&mut self, widget_id: WidgetId) -> bool {
+    pub(super) fn tooltip_trigger_ancestor(&self, mut widget_id: WidgetId) -> Option<WidgetId> {
+        let layout = self.cached_scene.as_ref()?.layout.as_ref()?;
+        loop {
+            if layout
+                .resolved_widget(widget_id)
+                .is_some_and(|resolved| resolved.tooltip.is_some())
+            {
+                return Some(widget_id);
+            }
+            widget_id = layout.parent_of(widget_id)?;
+        }
+    }
+
+    pub(super) fn widget_has_tooltip_in_computed(&self, widget_id: WidgetId) -> bool {
         self.cached_scene
             .as_ref()
             .and_then(|cached| cached.layout.as_ref())
@@ -13,11 +26,17 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
     }
 
     pub(super) fn clear_tooltip_hover_suppression_if_needed(&mut self, widget_id: WidgetId) {
+        let widget_id = self
+            .tooltip_trigger_ancestor(widget_id)
+            .unwrap_or(widget_id);
         self.tooltip_state
             .clear_suppression_for_trigger(TooltipTrigger::Hover, widget_id);
     }
 
     pub(super) fn clear_tooltip_focus_suppression_if_needed(&mut self, widget_id: WidgetId) {
+        let widget_id = self
+            .tooltip_trigger_ancestor(widget_id)
+            .unwrap_or(widget_id);
         self.tooltip_state
             .clear_suppression_for_trigger(TooltipTrigger::Focus, widget_id);
     }
@@ -66,6 +85,17 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         if !should_hide {
             return false;
         }
+        if let Some(widget_id) = self
+            .tooltip_state
+            .long_press_candidate
+            .or_else(|| self.tooltip_state.active.map(|active| active.widget_id))
+        {
+            // Touch press can also focus/hover the trigger. Without suppressing those paths, the
+            // tooltip closed for LongPress would immediately reopen as a Focus/Hover tooltip.
+            self.tooltip_state.focus_suppressed = Some(widget_id);
+            self.tooltip_state.hover_suppressed = Some(widget_id);
+        }
+        self.tooltip_state.long_press_candidate = None;
         self.tooltip_state.clear_active();
         self.invalidate_computed_scene();
         true
@@ -85,7 +115,10 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             }
         }
 
-        if let Some(widget_id) = self.focused_widget_id() {
+        if let Some(widget_id) = self
+            .focused_widget_id()
+            .and_then(|widget_id| self.tooltip_trigger_ancestor(widget_id))
+        {
             if self.widget_has_tooltip_in_computed(widget_id)
                 && self.tooltip_state.focus_suppressed != Some(widget_id)
             {
@@ -103,7 +136,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             .iter()
             .rev()
             .filter_map(|hovered| match hovered.target_id {
-                HoverTargetId::Widget(widget_id) => Some(widget_id),
+                HoverTargetId::Widget(widget_id) => self.tooltip_trigger_ancestor(widget_id),
                 _ => None,
             })
             .collect();

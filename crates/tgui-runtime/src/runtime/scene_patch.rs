@@ -567,6 +567,24 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         let root_hit_region_count;
         let root_scroll_region_count;
         let theme = self.animated_theme(now);
+        {
+            let Some(cached) = self.cached_scene.as_ref() else {
+                return false;
+            };
+            let Some(layout) = cached.layout.as_ref() else {
+                return false;
+            };
+            if cached
+                .lifecycle_states
+                .keys()
+                .any(|widget_id| layout.path_for(*widget_id).is_none())
+            {
+                // Overlay descendants are detached from SceneLayout, so a subtree patch cannot
+                // identify which cached lifecycle states belong to the replaced overlay source.
+                // Recollecting the frame retires hidden Portal/Tooltip descendants atomically.
+                return false;
+            }
+        }
         let resolve_roots_started_at = text_profile_enabled().then_some(Instant::now());
         {
             let Some(cached) = self.cached_scene.as_mut() else {

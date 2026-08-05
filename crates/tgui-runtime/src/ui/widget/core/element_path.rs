@@ -4,6 +4,7 @@ use crate::ui::theme::StyleContext;
 use crate::ui::widget::common::ChildSource;
 use crate::ui::widget::r#virtual::{VirtualCacheState, VirtualViewportHint};
 use crate::ui::widget::StyleSheet;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::time::Instant;
 
 /// Resolves every child source in source order, then maps its children directly into the final
@@ -29,7 +30,10 @@ pub(super) fn map_resolved_child_elements_with_previous<'a, VM, Output>(
     let mut previous_by_key = HashMap::with_capacity(keyed_previous_count);
     for child in previous_children {
         if let Some(key) = child.key.as_ref() {
-            previous_by_key.insert(key, child);
+            previous_by_key
+                .entry(key)
+                .or_insert_with(VecDeque::new)
+                .push_back(child);
         }
     }
     let previous_by_id: HashMap<_, _> = previous_children
@@ -70,15 +74,17 @@ pub(super) fn map_resolved_child_elements_with_previous<'a, VM, Output>(
     let mut output = Vec::with_capacity(child_count);
     let mut owned_sources = owned_sources.into_iter();
     let mut resolved_index = 0usize;
+    let mut reused_previous_ids = HashSet::with_capacity(previous_children.len());
     for child_source in child_sources {
         match child_source {
             ChildSource::Static(children) => {
                 for child in children {
                     let previous_child = lookup_previous(
                         child,
-                        &previous_by_key,
+                        &mut previous_by_key,
                         &previous_by_id,
                         previous_children.get(resolved_index),
+                        &mut reused_previous_ids,
                     );
                     resolved_index += 1;
                     output.push(map_child(child, previous_child));
@@ -94,9 +100,10 @@ pub(super) fn map_resolved_child_elements_with_previous<'a, VM, Output>(
                 for child in children {
                     let previous_child = lookup_previous(
                         &child,
-                        &previous_by_key,
+                        &mut previous_by_key,
                         &previous_by_id,
                         previous_children.get(resolved_index),
+                        &mut reused_previous_ids,
                     );
                     resolved_index += 1;
                     output.push(map_child(&child, previous_child));
@@ -111,22 +118,32 @@ pub(super) fn map_resolved_child_elements_with_previous<'a, VM, Output>(
 
 fn lookup_previous<'a, VM>(
     child: &Element<VM>,
-    previous_by_key: &HashMap<&WidgetKey, &'a ResolvedElement<VM>>,
+    previous_by_key: &mut HashMap<&WidgetKey, VecDeque<&'a ResolvedElement<VM>>>,
     previous_by_id: &HashMap<WidgetId, &'a ResolvedElement<VM>>,
     previous_at_position: Option<&'a ResolvedElement<VM>>,
+    reused_previous_ids: &mut HashSet<WidgetId>,
 ) -> Option<&'a ResolvedElement<VM>> {
-    child
-        .key
-        .as_ref()
-        .and_then(|key| previous_by_key.get(key).copied())
-        .or_else(|| previous_by_id.get(&child.id).copied())
-        .or_else(|| {
-            child
-                .key
-                .is_none()
-                .then_some(previous_at_position)
-                .flatten()
-        })
+    let matching_id = previous_by_id
+        .get(&child.id)
+        .copied()
+        .filter(|previous| previous.key == child.key)
+        .filter(|previous| reused_previous_ids.insert(previous.id));
+    if matching_id.is_some() {
+        return matching_id;
+    }
+
+    if let Some(key) = child.key.as_ref() {
+        if let Some(candidates) = previous_by_key.get_mut(key) {
+            while let Some(previous) = candidates.pop_front() {
+                if reused_previous_ids.insert(previous.id) {
+                    return Some(previous);
+                }
+            }
+        }
+        return None;
+    }
+
+    previous_at_position.filter(|previous| reused_previous_ids.insert(previous.id))
 }
 
 pub(super) fn resolve_subtree_from_source_path<'a, VM: 'static>(

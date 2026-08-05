@@ -277,30 +277,31 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
     ) {
         match handler {
             ClickHandler::Command(command) => self.execute_command(command),
-            ClickHandler::Toggle(command, next) => self.execute_value_command(command, *next),
+            ClickHandler::Toggle {
+                on_change,
+                next,
+                on_click,
+            } => {
+                if let (Some(command), Some(next)) = (on_change, next) {
+                    self.execute_value_command(command, *next);
+                }
+                if let Some(command) = on_click {
+                    self.execute_command(command);
+                }
+            }
             ClickHandler::SelectOption {
                 widget_id,
                 command,
                 on_open_change,
+                menu_path,
             } => {
-                if let Some(command) = command {
-                    self.execute_command(command);
-                }
-                if self.close_context_menu(*widget_id) {
+                if let Some(path) = menu_path.as_deref() {
+                    let _ = self.activate_menu_accessibility_item(*widget_id, path);
                     return;
                 }
-                let is_menu = self
-                    .cached_scene
-                    .as_ref()
-                    .and_then(|cached| cached.layout.as_ref())
-                    .and_then(|layout| layout.resolved_widget(*widget_id))
-                    .and_then(|resolved| resolved.menu.as_ref())
-                    .is_some();
-                if is_menu {
-                    let _ = self.set_menu_open_state(*widget_id, false);
-                } else {
-                    let _ = self.set_select_open_state(*widget_id, false, on_open_change.as_ref());
-                }
+                let Some(command) = command else { return };
+                self.execute_command(command);
+                let _ = self.set_select_open_state(*widget_id, false, on_open_change.as_ref());
             }
             ClickHandler::Canvas(command, context, button) => {
                 if let Some(position) = position {

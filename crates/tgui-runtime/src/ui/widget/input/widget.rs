@@ -5,8 +5,8 @@ use crate::theme::{StyleContext, WidgetState};
 use crate::ui::layout::{Align, Insets, LayoutStyle, Value};
 
 use super::super::common::{
-    CursorStyle, InteractionHandlers, LifecycleEventHandlers, MediaEventHandlers, Point,
-    VisualStyle, WidgetId, WidgetKind,
+    CursorStyle, InteractionHandlers, LifecycleEventHandlers, MediaEventHandlers,
+    NumberInputInteraction, Point, VisualStyle, WidgetId, WidgetKind,
 };
 use super::super::container::{
     set_layout_inset, set_layout_length, set_layout_lengths, IntoLengthValue,
@@ -273,6 +273,12 @@ impl<VM> Input<VM> {
         self
     }
 
+    /// 设置辅助技术朗读的输入框名称。
+    pub fn label(mut self, label: impl Into<Value<String>>) -> Self {
+        self.element.visual.accessibility_label = Some(label.into());
+        self
+    }
+
     /// 设置内容变化时触发的无参命令。
     ///
     /// # 参数
@@ -384,6 +390,24 @@ impl<VM> Input<VM> {
         if let WidgetKind::TextEditor { runtime_layout, .. } = &mut self.element.kind {
             *runtime_layout = Some(std::sync::Arc::new(resolver));
         }
+        self
+    }
+
+    pub(crate) fn number_input_behavior(
+        mut self,
+        increment: Command<VM>,
+        decrement: Command<VM>,
+        min: Option<f64>,
+        max: Option<f64>,
+        step: f64,
+    ) -> Self {
+        self.element.interactions.number_input = Some(NumberInputInteraction {
+            increment,
+            decrement,
+            min,
+            max,
+            step,
+        });
         self
     }
 

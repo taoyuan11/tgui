@@ -295,18 +295,27 @@ fn prepare_cached_toast_card<VM: 'static>(
 ) -> Option<std::sync::Arc<PreparedToastCard<VM>>> {
     let toast_id = entry.id;
     let width_bits = card_width.get().to_bits();
-    if reuse_prepared_toast_cards() {
-        if let Ok(cache) = cache.lock() {
-            if let Some(cached) = cache.cards.get(&toast_id) {
-                if cached.width_bits == width_bits {
-                    return Some(Arc::clone(&cached.prepared));
-                }
+    let previous_resolved = if let Ok(cache) = cache.lock() {
+        if let Some(cached) = cache.cards.get(&toast_id) {
+            if reuse_prepared_toast_cards() && cached.width_bits == width_bits {
+                return Some(Arc::clone(&cached.prepared));
             }
+            Some(Arc::clone(&cached.prepared.resolved))
+        } else {
+            None
         }
-    }
+    } else {
+        None
+    };
 
     let prepared = Arc::new(prepare_toast_card_layout(
-        queue, entry, style, placement, card_width, context,
+        queue,
+        entry,
+        style,
+        placement,
+        card_width,
+        previous_resolved.as_deref(),
+        context,
     )?);
     if let Ok(mut cache) = cache.lock() {
         cache.cards.insert(
@@ -538,6 +547,7 @@ fn build_toast_scene<VM: 'static>(
                                 style.clone(),
                                 placement,
                                 stack_frame.width,
+                                Some(expanded_card.resolved.as_ref()),
                                 origin,
                                 card_opacity,
                                 context,
@@ -667,7 +677,7 @@ struct CachedPreparedToastCard<VM> {
 }
 
 struct PreparedToastCard<VM> {
-    resolved: ResolvedElement<VM>,
+    resolved: Arc<ResolvedElement<VM>>,
     taffy: TaffyTree<MeasureContext>,
     layout_root: LayoutNode,
     size: (Dp, Dp),
@@ -692,6 +702,7 @@ fn prepare_toast_card_layout<VM: 'static>(
     style: ToastStyle,
     placement: ToastPlacement,
     card_width: Dp,
+    previous: Option<&ResolvedElement<VM>>,
     context: &mut CollectContext<'_, '_>,
 ) -> Option<PreparedToastCard<VM>> {
     record_layout_pass();
@@ -707,7 +718,7 @@ fn prepare_toast_card_layout<VM: 'static>(
     let root = toast_card_root(queue, entry, style, placement, card_width);
     let mut resolved: Element<VM> = root.into();
     super::prepare_nested_scene_root(&mut resolved, context, context.viewport);
-    let resolved = resolved.resolve(context.theme);
+    let resolved = Arc::new(resolved.resolve_with_previous(context.theme, previous));
     let mut taffy = TaffyTree::new();
     let layout_root = resolved
         .build_layout_tree(
@@ -752,11 +763,14 @@ fn collect_toast_card_scene<VM: 'static>(
     style: ToastStyle,
     placement: ToastPlacement,
     card_width: Dp,
+    previous: Option<&ResolvedElement<VM>>,
     origin: Point,
     opacity: f32,
     context: &mut CollectContext<'_, '_>,
 ) -> Option<(ComputedScene<VM>, (Dp, Dp))> {
-    let prepared = prepare_toast_card_layout(queue, entry, style, placement, card_width, context)?;
+    let prepared = prepare_toast_card_layout(
+        queue, entry, style, placement, card_width, previous, context,
+    )?;
     let card_size = prepared.size;
     let scene = collect_prepared_toast_card_scene(&prepared, origin, opacity, context);
     Some((scene, card_size))
@@ -798,6 +812,7 @@ fn collect_prepared_toast_card_scene_uncached<VM: 'static>(
     let mut chunks = std::collections::HashMap::new();
     let mut chunk_parts = std::collections::HashMap::new();
     let mut visual_contexts = std::collections::HashMap::new();
+    let mut accessibility_geometry = Vec::new();
     let mut local_context = CollectContext {
         taffy: &prepared.taffy,
         font_manager: context.font_manager,
@@ -838,7 +853,7 @@ fn collect_prepared_toast_card_scene_uncached<VM: 'static>(
         gpu_scroll_enabled: false,
         gpu_scroll_container: None,
         transform_stack: context.transform_stack.clone(),
-        portal_accessibility_geometry: None,
+        portal_accessibility_geometry: Some(&mut accessibility_geometry),
         portal_accessibility_path: smallvec::SmallVec::new(),
     };
 
@@ -857,7 +872,18 @@ fn collect_prepared_toast_card_scene_uncached<VM: 'static>(
         &mut chunk_parts,
         &mut visual_contexts,
     );
-    chunks.get(&root_id).cloned().unwrap_or_default()
+    drop(local_context);
+    let mut computed = chunks.get(&root_id).cloned().unwrap_or_default();
+    if let Some(fragment) = super::portal::collect_accessibility_fragment(
+        Arc::clone(&prepared.resolved),
+        &prepared.layout_root,
+        &accessibility_geometry,
+        &computed.hit_regions,
+        &computed.scroll_regions,
+    ) {
+        computed.accessibility_fragments.push(fragment);
+    }
+    computed
 }
 
 fn prepare_toast_base_scene<VM: 'static>(
@@ -939,7 +965,6 @@ fn toast_base_scene_is_replayable<VM>(
     }
     if !computed.overlay_hit_regions.is_empty()
         || !computed.overlay_close_handlers.is_empty()
-        || !computed.accessibility_fragments.is_empty()
         || computed.portal_overlay_counts.shapes != 0
         || computed.portal_overlay_counts.textures != 0
         || computed.portal_overlay_counts.meshes != 0
@@ -1143,8 +1168,38 @@ fn replay_toast_base_scene<VM: 'static>(
             .copied()
             .map(|region| translate_toast_scroll_region(region, origin)),
     );
+    computed.accessibility_fragments.extend(
+        base.computed
+            .accessibility_fragments
+            .iter()
+            .cloned()
+            .map(|fragment| {
+                translate_toast_accessibility_fragment(fragment, base.outer_clip, origin)
+            }),
+    );
     computed.dependencies = base.computed.dependencies.clone();
     Some(computed)
+}
+
+fn translate_toast_accessibility_fragment<VM>(
+    mut fragment: crate::ui::widget::AccessibilityFragment<VM>,
+    outer_clip: Rect,
+    delta: Point,
+) -> crate::ui::widget::AccessibilityFragment<VM> {
+    fragment.clip_rect = translate_toast_clip(fragment.clip_rect, outer_clip, delta);
+    for node in &mut fragment.nodes {
+        node.bounds = translate_toast_rect(node.bounds, delta);
+        node.clip_rect = translate_toast_clip(node.clip_rect, outer_clip, delta);
+        for hit in &mut node.hits {
+            hit.rect = translate_toast_rect(hit.rect, delta);
+            hit.clip_rect = translate_toast_clip(hit.clip_rect, outer_clip, delta);
+            hit.interaction = hit.interaction.clone().translated(delta);
+        }
+        for region in &mut node.scroll_regions {
+            *region = translate_toast_scroll_region(*region, delta);
+        }
+    }
+    fragment
 }
 
 fn translate_toast_rect(mut rect: Rect, delta: Point) -> Rect {
@@ -1354,6 +1409,7 @@ fn extend_toast_card_scene<VM>(combined: &mut ComputedScene<VM>, card: &ToastCar
     visual_only.overlay_hit_regions.clear();
     visual_only.overlay_close_handlers.clear();
     visual_only.focus_scopes.clear();
+    visual_only.accessibility_fragments.clear();
     combined.extend(&visual_only);
 }
 
@@ -1532,19 +1588,19 @@ fn build_toast_card<VM: 'static>(
     let close_element: Element<VM> = if show_close {
         let dismiss_queue = queue.clone();
         let close_fg = foreground.with_alpha_factor(0.6);
+        let mut close_button: Element<VM> = Button::new("")
+            .size(close_size, close_size)
+            .style_full(move |_| close_style.clone())
+            .on_click(Command::new(move |_vm| {
+                dismiss_queue.dismiss(id);
+            }))
+            .into();
+        close_button.visual.accessibility_label =
+            Some(Value::Static("Dismiss notification".to_string()));
         Stack::new()
             .size(close_size, close_size)
             .center()
-            .style_full(move |context| {
-                let button_style = close_style.clone();
-                let mut container = ContainerStyle::default_for_theme(context.theme);
-                container.surface.background = Some(button_style.background.normal);
-                container.surface.border_color = Some(button_style.border.normal);
-                container.surface.border_width = Some(button_style.border_width);
-                container.surface.border_radius = Some(button_style.radius);
-                container.surface.shadow = button_style.surface.shadow;
-                container
-            })
+            .child(close_button)
             .child(
                 Icon::internal(SvgIconId::Close)
                     .size(close_icon_size)
@@ -1553,9 +1609,6 @@ fn build_toast_card<VM: 'static>(
                         icon_style.size = close_icon_size;
                     }),
             )
-            .on_click(Command::new(move |_vm| {
-                dismiss_queue.dismiss(id);
-            }))
             .into()
     } else {
         Stack::<VM>::new().width(Dp::ZERO).into()
@@ -1678,8 +1731,8 @@ fn ordered_entries<VM>(entries: Vec<ToastEntry<VM>>) -> Vec<ToastEntry<VM>> {
 }
 
 fn toast_width(style: &ToastStyle, viewport: Rect) -> Dp {
-    let _ = viewport;
-    style.max_width
+    let available = (viewport.width - style.margin * 2.0).max(Dp::ZERO);
+    style.max_width.min(available)
 }
 
 fn pct_or_fixed(width: Dp) -> Value<Length> {

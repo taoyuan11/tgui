@@ -4,7 +4,7 @@ use crate::theme::{StyleContext, WidgetState};
 use crate::ui::layout::{Axis, LayoutStyle, Value};
 
 use super::badge::Badge;
-use super::common::VisualStyle;
+use super::common::{AccessibilityRole, VisualStyle};
 use super::core::Element;
 use super::p3_support::{
     impl_p3_layout_api, merge_layout, resolve_component_style_with_sheet, with_visual_identity,
@@ -174,6 +174,7 @@ impl<VM: 'static> From<Avatar<VM>> for Element<VM> {
         if let Some(command) = avatar.on_click {
             root = root.on_click(command).focusable(true).tab_index(0);
             root.interactions.cursor_style = Some(Value::Static(CursorStyle::Pointer));
+            root.visual.accessibility_role = Some(AccessibilityRole::Button);
         }
         root.key = avatar.key;
         root = with_visual_identity(root, &avatar.visual);
@@ -333,7 +334,10 @@ impl<VM: 'static> From<AvatarGroup<VM>> for Element<VM> {
                 .style_full({
                     let style = group.style.clone();
                     move |context| {
-                        resolve_avatar_style(style.as_ref(), context, AvatarShape::Circle)
+                        let mut resolved =
+                            resolve_avatar_style(style.as_ref(), context, AvatarShape::Circle);
+                        resolved.background = resolved.group_overflow_background.clone();
+                        resolved
                     }
                 })
                 .classes(group.visual.classes.clone());

@@ -4,10 +4,10 @@ use std::sync::Arc;
 use chrono::{Datelike, Duration, NaiveDate, NaiveTime, Timelike};
 
 use crate::dialog::FileDialogOptions;
-use crate::foundation::binding::{TextChangeSet, TextController};
+use crate::foundation::binding::{InvalidationSignal, State, TextChangeSet, TextController};
 use crate::foundation::color::Color;
 use crate::foundation::form::ValidationVisualState;
-use crate::foundation::view_model::{Command, ValueCommand};
+use crate::foundation::view_model::{Command, CommandEffect, ValueCommand};
 use crate::theme::{Density, FontWeight, ResolvedThemeMode, StyleContext, Theme, WidgetState};
 use crate::ui::layout::{fr, pct, Align, Insets, Justify, Length, Value, Wrap};
 use crate::ui::theme::{StateValue, TextStyle};
@@ -15,13 +15,14 @@ use crate::ui::unit::{dp, sp, Dp};
 
 use super::common::ButtonVariantKind;
 use super::icon::SvgIconId;
+use super::popover::PopoverOpenHandle;
 use super::style::{
     ButtonStyle, ContainerStyle, InputStyle, PopoverStyle, SelectStyle, StyleResolver,
     TextWidgetStyle,
 };
 use super::{
-    Button, CursorStyle, Element, FileDropEvent, Flex, Grid, Icon, Input, Popover, ProgressBar,
-    Slider, Stack, Text,
+    Button, CursorStyle, Element, FileDropEvent, Flex, For, Grid, Icon, Input, Popover,
+    ProgressBar, Slider, Stack, Text, WidgetId,
 };
 
 const WEEKDAYS: [&str; 7] = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
@@ -85,6 +86,71 @@ struct PickerContentMetrics {
 }
 
 type InputControlWidthResolver = Arc<dyn Fn(&StyleContext<'_>) -> Dp + Send + Sync>;
+
+#[derive(Clone)]
+struct InputControlValue<T> {
+    value: Value<T>,
+    local: Option<State<T>>,
+}
+
+impl<T> InputControlValue<T>
+where
+    T: Clone + PartialEq + Send + Sync + 'static,
+{
+    fn new(value: Value<T>) -> Self {
+        match value {
+            Value::Static(value) => {
+                let local = State::new(value, InvalidationSignal::new());
+                Self {
+                    value: Value::Signal(local.signal()),
+                    local: Some(local),
+                }
+            }
+            Value::Signal(signal) => Self {
+                value: Value::Signal(signal),
+                local: None,
+            },
+        }
+    }
+
+    fn value(&self) -> Value<T> {
+        self.value.clone()
+    }
+
+    fn resolve(&self) -> T {
+        self.value.resolve()
+    }
+
+    fn is_locally_owned(&self) -> bool {
+        self.local.is_some()
+    }
+
+    fn set_local(&self, value: T) {
+        if let Some(local) = self.local.as_ref() {
+            local.set(value);
+        }
+    }
+
+    fn update_local(&self, update: impl FnOnce(&mut T)) {
+        if let Some(local) = self.local.as_ref() {
+            local.update(update);
+        }
+    }
+
+    fn is_local(&self) -> bool {
+        self.local.is_some()
+    }
+}
+
+fn singleton_items<T>(value: Value<T>) -> Value<Vec<T>>
+where
+    T: Clone + PartialEq + Send + Sync + 'static,
+{
+    match value {
+        Value::Static(value) => Value::Static(vec![value]),
+        Value::Signal(signal) => Value::Signal(signal.map(|value| vec![value])),
+    }
+}
 
 fn advanced_input_metrics(theme: &Theme) -> AdvancedInputMetrics {
     match theme.density {
@@ -381,7 +447,7 @@ impl UploadFile {
             .to_string();
         let size_bytes = std::fs::metadata(&path).ok().map(|metadata| metadata.len());
         Self {
-            id: UploadFileId::new(path.to_string_lossy().to_string()),
+            id: upload_file_id_for_path(&path),
             path,
             name,
             size_bytes,
@@ -392,7 +458,7 @@ impl UploadFile {
     pub fn progress(&self) -> f32 {
         match &self.status {
             UploadStatus::Queued => 0.0,
-            UploadStatus::Uploading { progress } => progress.clamp(0.0, 1.0),
+            UploadStatus::Uploading { progress } => normalized_upload_progress(*progress),
             UploadStatus::Complete => 1.0,
             UploadStatus::Error(_) => 0.0,
         }
@@ -484,26 +550,15 @@ impl<VM> Calendar<VM> {
 
 impl<VM: 'static> From<Calendar<VM>> for Element<VM> {
     fn from(calendar: Calendar<VM>) -> Self {
-        match calendar.display_month {
-            Value::Static(month) => calendar_element(
-                month,
-                calendar.selected.resolve(),
-                calendar.today,
-                calendar.disabled.resolve(),
-                calendar.on_change,
-                calendar.style,
-                calendar.framed,
-            ),
-            Value::Signal(month) => calendar_element(
-                month.get_untracked(),
-                calendar.selected.resolve_untracked(),
-                calendar.today,
-                calendar.disabled.resolve_untracked(),
-                calendar.on_change,
-                calendar.style,
-                calendar.framed,
-            ),
-        }
+        calendar_element(
+            InputControlValue::new(calendar.display_month),
+            InputControlValue::new(calendar.selected),
+            calendar.today,
+            calendar.disabled,
+            calendar.on_change,
+            calendar.style,
+            calendar.framed,
+        )
     }
 }
 
@@ -514,6 +569,7 @@ pub struct DatePicker<VM> {
     open: Value<bool>,
     disabled: Value<bool>,
     validation: Value<ValidationVisualState>,
+    label: Value<String>,
     placeholder: Value<String>,
     on_change: Option<ValueCommand<VM, DatePickerChange>>,
     on_month_change: Option<ValueCommand<VM, NaiveDate>>,
@@ -534,6 +590,7 @@ impl<VM> DatePicker<VM> {
             open: Value::Static(false),
             disabled: Value::Static(false),
             validation: Value::Static(ValidationVisualState::default()),
+            label: Value::Static("Date".to_string()),
             placeholder: Value::Static("Select date".to_string()),
             on_change: None,
             on_month_change: None,
@@ -554,6 +611,12 @@ impl<VM> DatePicker<VM> {
 
     pub fn validation(mut self, validation: impl Into<Value<ValidationVisualState>>) -> Self {
         self.validation = validation.into();
+        self
+    }
+
+    /// Sets the name announced for the editable date field.
+    pub fn label(mut self, label: impl Into<Value<String>>) -> Self {
+        self.label = label.into();
         self
     }
 
@@ -606,34 +669,43 @@ impl<VM: 'static> From<DatePicker<VM>> for Element<VM> {
             open,
             disabled,
             validation,
+            label,
             placeholder,
             on_change,
             on_month_change,
             on_open_change,
             style,
         } = picker;
+        let selected = InputControlValue::new(selected);
+        let display_month = InputControlValue::new(display_month);
+        let (controlled_open, open_handle) = picker_open_state(open);
+        let can_toggle = open_handle.is_some() || on_open_change.is_some();
         let trigger_style = style.clone();
 
         let parse_controller = controller.clone();
-        let typed_change = on_change.clone().map(|command| {
-            ValueCommand::new_with_context(move |vm, _: TextChangeSet, ctx| {
+        let typed_selected = selected.clone();
+        let typed_display_month = display_month.clone();
+        let typed_change_command = on_change.clone();
+        let typed_change = Some(ValueCommand::new_with_context(
+            move |vm, _: TextChangeSet, ctx| {
                 let text = parse_controller.text();
-                command.execute_with_context(
-                    vm,
-                    DatePickerChange {
-                        date: NaiveDate::parse_from_str(text.trim(), "%Y-%m-%d").ok(),
-                        text,
-                    },
-                    ctx,
-                );
-            })
-        });
+                let date = NaiveDate::parse_from_str(text.trim(), "%Y-%m-%d").ok();
+                typed_selected.set_local(date);
+                if let Some(date) = date {
+                    typed_display_month.set_local(month_start(date));
+                }
+                if let Some(command) = typed_change_command.as_ref() {
+                    command.execute_with_context(vm, DatePickerChange { date, text }, ctx);
+                }
+            },
+        ));
 
-        let trigger = picker_input_trigger(
+        let (trigger, return_focus_to) = picker_input_trigger(
             controller.clone(),
             placeholder,
             validation,
             disabled.clone(),
+            label,
             Arc::new(move |context| {
                 resolve_input_control_style_for_context(
                     trigger_style.as_ref(),
@@ -643,17 +715,21 @@ impl<VM: 'static> From<DatePicker<VM>> for Element<VM> {
                 .width
             }),
             ICON_CALENDAR,
-            open.clone(),
-            on_open_change.clone(),
+            "Open date picker",
+            can_toggle,
             typed_change,
         );
 
         let calendar_command = {
             let controller = controller.clone();
+            let selected = selected.clone();
+            let display_month = display_month.clone();
             let on_change = on_change.clone();
             let on_month_change = on_month_change.clone();
             let on_open_change = on_open_change.clone();
+            let open_handle = open_handle.clone();
             ValueCommand::new_with_context(move |vm, change: CalendarSelectionChange, ctx| {
+                display_month.set_local(change.display_month);
                 match change.trigger {
                     CalendarChangeTrigger::PreviousMonth | CalendarChangeTrigger::NextMonth => {
                         if let Some(command) = on_month_change.as_ref() {
@@ -661,6 +737,7 @@ impl<VM: 'static> From<DatePicker<VM>> for Element<VM> {
                         }
                     }
                     _ => {
+                        selected.set_local(Some(change.date));
                         let text = format_date(change.date);
                         controller.set_text(text.clone());
                         if let Some(command) = on_change.as_ref() {
@@ -673,6 +750,9 @@ impl<VM: 'static> From<DatePicker<VM>> for Element<VM> {
                                 ctx,
                             );
                         }
+                        if let Some(handle) = open_handle.as_ref() {
+                            handle.set(false);
+                        }
                         if let Some(command) = on_open_change.as_ref() {
                             command.execute_with_context(vm, false, ctx);
                         }
@@ -682,7 +762,7 @@ impl<VM: 'static> From<DatePicker<VM>> for Element<VM> {
         };
 
         let content_style = style.clone();
-        let content = Calendar::new(display_month, selected)
+        let content = Calendar::new(display_month.value(), selected.value())
             .style_full(move |context| {
                 resolve_input_control_style_for_context(
                     content_style.as_ref(),
@@ -694,15 +774,15 @@ impl<VM: 'static> From<DatePicker<VM>> for Element<VM> {
             .disable(disabled.clone())
             .on_change(calendar_command)
             .unframed();
-        let popover = Popover::new(trigger)
-            .content(picker_popover_content(content))
-            .open(open)
-            .disable(disabled);
-        if let Some(command) = on_open_change {
-            popover.on_open_change(command).into()
-        } else {
-            popover.into()
-        }
+        picker_popover(
+            trigger,
+            picker_popover_content(content),
+            controlled_open,
+            open_handle,
+            disabled,
+            on_open_change,
+            return_focus_to,
+        )
     }
 }
 
@@ -712,6 +792,7 @@ pub struct TimePicker<VM> {
     open: Value<bool>,
     disabled: Value<bool>,
     validation: Value<ValidationVisualState>,
+    label: Value<String>,
     placeholder: Value<String>,
     minute_step: u32,
     on_change: Option<ValueCommand<VM, TimePickerChange>>,
@@ -730,6 +811,7 @@ impl<VM> TimePicker<VM> {
             open: Value::Static(false),
             disabled: Value::Static(false),
             validation: Value::Static(ValidationVisualState::default()),
+            label: Value::Static("Time".to_string()),
             placeholder: Value::Static("Select time".to_string()),
             minute_step: 1,
             on_change: None,
@@ -755,6 +837,12 @@ impl<VM> TimePicker<VM> {
 
     pub fn validation(mut self, validation: impl Into<Value<ValidationVisualState>>) -> Self {
         self.validation = validation.into();
+        self
+    }
+
+    /// Sets the name announced for the editable time field.
+    pub fn label(mut self, label: impl Into<Value<String>>) -> Self {
+        self.label = label.into();
         self
     }
 
@@ -801,34 +889,38 @@ impl<VM: 'static> From<TimePicker<VM>> for Element<VM> {
             open,
             disabled,
             validation,
+            label,
             placeholder,
             minute_step,
             on_change,
             on_open_change,
             style,
         } = picker;
+        let selected = InputControlValue::new(selected);
+        let (controlled_open, open_handle) = picker_open_state(open);
+        let can_toggle = open_handle.is_some() || on_open_change.is_some();
         let trigger_style = style.clone();
 
         let parse_controller = controller.clone();
-        let typed_change = on_change.clone().map(|command| {
-            ValueCommand::new_with_context(move |vm, _: TextChangeSet, ctx| {
+        let typed_selected = selected.clone();
+        let typed_change_command = on_change.clone();
+        let typed_change = Some(ValueCommand::new_with_context(
+            move |vm, _: TextChangeSet, ctx| {
                 let text = parse_controller.text();
-                command.execute_with_context(
-                    vm,
-                    TimePickerChange {
-                        time: parse_time(&text),
-                        text,
-                    },
-                    ctx,
-                );
-            })
-        });
+                let time = parse_time(&text);
+                typed_selected.set_local(time);
+                if let Some(command) = typed_change_command.as_ref() {
+                    command.execute_with_context(vm, TimePickerChange { time, text }, ctx);
+                }
+            },
+        ));
 
-        let trigger = picker_input_trigger(
+        let (trigger, return_focus_to) = picker_input_trigger(
             controller.clone(),
             placeholder,
             validation,
             disabled.clone(),
+            label,
             Arc::new(move |context| {
                 resolve_input_control_style_for_context(
                     trigger_style.as_ref(),
@@ -838,29 +930,30 @@ impl<VM: 'static> From<TimePicker<VM>> for Element<VM> {
                 .width
             }),
             ICON_TIME,
-            open.clone(),
-            on_open_change.clone(),
+            "Open time picker",
+            can_toggle,
             typed_change,
         );
 
         let content = time_picker_content(
             controller,
-            selected.resolve(),
+            selected,
             minute_step,
-            disabled.resolve(),
+            disabled.clone(),
             on_change,
+            open_handle.clone(),
             on_open_change.clone(),
             style,
         );
-        let popover = Popover::new(trigger)
-            .content(picker_popover_content(content))
-            .open(open)
-            .disable(disabled);
-        if let Some(command) = on_open_change {
-            popover.on_open_change(command).into()
-        } else {
-            popover.into()
-        }
+        picker_popover(
+            trigger,
+            picker_popover_content(content),
+            controlled_open,
+            open_handle,
+            disabled,
+            on_open_change,
+            return_focus_to,
+        )
     }
 }
 
@@ -975,6 +1068,27 @@ impl<VM: 'static> From<NumberInput<VM>> for Element<VM> {
             on_change,
             style,
         } = input;
+        let (min, max) = normalize_number_bounds(min, max);
+        let decrement = number_step_command(
+            NumberInputChangeTrigger::StepDown,
+            -step,
+            controller.clone(),
+            value.clone(),
+            min,
+            max,
+            disabled.clone(),
+            on_change.clone(),
+        );
+        let increment = number_step_command(
+            NumberInputChangeTrigger::StepUp,
+            step,
+            controller.clone(),
+            value.clone(),
+            min,
+            max,
+            disabled.clone(),
+            on_change.clone(),
+        );
         let text_controller = controller.clone();
         let typed_change = on_change.clone().map(|command| {
             ValueCommand::new_with_context(move |vm, _: TextChangeSet, ctx| {
@@ -1005,32 +1119,23 @@ impl<VM: 'static> From<NumberInput<VM>> for Element<VM> {
             })
             .placeholder(placeholder)
             .validation(validation)
-            .disable(disabled.clone());
+            .disable(disabled.clone())
+            .number_input_behavior(increment.clone(), decrement.clone(), min, max, step);
         if let Some(command) = typed_change {
             field = field.on_change_set(command);
         }
         let minus = number_step_button(
             ICON_REMOVE,
             NumberInputChangeTrigger::StepDown,
-            -step,
-            controller.clone(),
-            value.clone(),
-            min,
-            max,
             disabled.clone(),
-            on_change.clone(),
+            decrement,
             style.clone(),
         );
         let plus = number_step_button(
             ICON_ADD,
             NumberInputChangeTrigger::StepUp,
-            step,
-            controller,
-            value,
-            min,
-            max,
             disabled.clone(),
-            on_change,
+            increment,
             style.clone(),
         );
 
@@ -1135,12 +1240,14 @@ impl<VM: 'static> From<ColorPicker<VM>> for Element<VM> {
             swatches,
             style,
         } = picker;
+        let color = InputControlValue::new(color);
+        let (controlled_open, open_handle) = picker_open_state(open);
+        let can_toggle = open_handle.is_some() || on_open_change.is_some();
         let trigger_style = style.clone();
-        let trigger = color_picker_trigger(
-            color.clone(),
+        let (trigger, return_focus_to) = color_picker_trigger(
+            color.value(),
             disabled.clone(),
-            open.clone(),
-            on_open_change.clone(),
+            can_toggle,
             Arc::new(move |context| {
                 resolve_input_control_style_for_context(
                     trigger_style.as_ref(),
@@ -1152,20 +1259,20 @@ impl<VM: 'static> From<ColorPicker<VM>> for Element<VM> {
         );
         let content = picker_popover_content(color_picker_content(
             color,
-            disabled.resolve(),
+            disabled.clone(),
             on_change,
             swatches,
             style,
         ));
-        let popover = Popover::new(trigger)
-            .content(content)
-            .open(open)
-            .disable(disabled);
-        if let Some(command) = on_open_change {
-            popover.on_open_change(command).into()
-        } else {
-            popover.into()
-        }
+        picker_popover(
+            trigger,
+            content,
+            controlled_open,
+            open_handle,
+            disabled,
+            on_open_change,
+            return_focus_to,
+        )
     }
 }
 
@@ -1275,6 +1382,8 @@ impl<VM: 'static> From<Upload<VM>> for Element<VM> {
             on_remove,
             style,
         } = upload;
+        let files = InputControlValue::new(files);
+        let can_select = files.is_local() || on_select.is_some();
         let disabled_for_click = disabled.clone();
         let dialog_command = {
             let accept_extensions = accept_extensions.clone();
@@ -1291,68 +1400,69 @@ impl<VM: 'static> From<Upload<VM>> for Element<VM> {
                 let callback = on_select.clone();
                 let accept = accept_extensions.clone();
                 let files_for_callback = files.clone();
-                let _ =
-                    ctx.dialogs().open_files_async(
-                        options,
-                        ValueCommand::new(
-                            move |vm: &mut VM,
-                                  result: Result<
-                                Option<Vec<PathBuf>>,
-                                crate::dialog::DialogError,
-                            >| {
+                let _ = ctx.dialogs().open_files_async(
+                    options,
+                    ValueCommand::new_with_context(
+                        move |vm: &mut VM,
+                              result: Result<Option<Vec<PathBuf>>, crate::dialog::DialogError>,
+                              ctx| {
+                            let selection = match result {
+                                Ok(Some(paths)) => Some(validate_upload_paths(
+                                    paths,
+                                    &accept,
+                                    max_files,
+                                    max_file_size,
+                                    files_for_callback.resolve().len(),
+                                )),
+                                Ok(None) => None,
+                                Err(error) => Some(UploadSelection {
+                                    files: Vec::new(),
+                                    rejected: vec![UploadRejection {
+                                        path: PathBuf::new(),
+                                        reason: error.to_string(),
+                                    }],
+                                }),
+                            };
+                            if let Some(selection) = selection {
+                                append_upload_selection(&files_for_callback, &selection);
                                 if let Some(command) = callback.as_ref() {
-                                    match result {
-                                        Ok(Some(paths)) => command.execute(
-                                            vm,
-                                            validate_upload_paths(
-                                                paths,
-                                                &accept,
-                                                max_files,
-                                                max_file_size,
-                                                files_for_callback.resolve().len(),
-                                            ),
-                                        ),
-                                        Ok(None) => {}
-                                        Err(error) => command.execute(
-                                            vm,
-                                            UploadSelection {
-                                                files: Vec::new(),
-                                                rejected: vec![UploadRejection {
-                                                    path: PathBuf::new(),
-                                                    reason: error.to_string(),
-                                                }],
-                                            },
-                                        ),
-                                    }
+                                    command.execute_with_context(vm, selection, ctx);
                                 }
-                            },
-                        ),
-                    );
+                            }
+                        },
+                    ),
+                );
             })
         };
 
-        let drop_command = on_select.clone().map(|command| {
+        let drop_command = {
             let accept = accept_extensions.clone();
             let disabled = disabled.clone();
             let files = files.clone();
-            ValueCommand::new(move |vm: &mut VM, event: FileDropEvent| {
+            ValueCommand::new_with_context(move |vm: &mut VM, event: FileDropEvent, ctx| {
                 if !disabled.resolve() {
-                    command.execute(
-                        vm,
-                        validate_upload_paths(
-                            event.paths,
-                            &accept,
-                            max_files,
-                            max_file_size,
-                            files.resolve().len(),
-                        ),
+                    let selection = validate_upload_paths(
+                        event.paths,
+                        &accept,
+                        max_files,
+                        max_file_size,
+                        files.resolve().len(),
                     );
+                    append_upload_selection(&files, &selection);
+                    if let Some(command) = on_select.as_ref() {
+                        command.execute_with_context(vm, selection, ctx);
+                    }
                 }
             })
-        });
+        };
 
         let drop_zone_style = style.clone();
         let disabled_for_surface = disabled.clone();
+        let drop_zone_cursor = if can_select {
+            disabled_cursor(disabled.clone())
+        } else {
+            Value::Static(CursorStyle::Default)
+        };
         let mut drop_zone = Flex::vertical()
             .center()
             .runtime_layout(move |layout, container, context, _, _| {
@@ -1371,27 +1481,28 @@ impl<VM: 'static> From<Upload<VM>> for Element<VM> {
                 state.disabled = disabled_for_surface.resolve();
                 upload_drop_zone_style(context, state)
             })
-            .cursor(CursorStyle::Pointer)
-            .on_click(dialog_command.clone())
+            .cursor(drop_zone_cursor)
             .child(upload_badge::<VM>())
             .child(Text::new(title).style_full(label_text_style))
-            .child(Text::new(hint).style_full(muted_text_style))
-            .child(
-                Button::new("Choose files")
-                    .secondary()
-                    .disable(disabled.clone())
-                    .on_click(dialog_command),
-            );
-        if let Some(command) = drop_command {
-            drop_zone = drop_zone.on_file_drop(command);
+            .child(Text::new(hint).style_full(muted_text_style));
+        let choose_disabled = if can_select {
+            disabled.clone()
+        } else {
+            Value::Static(true)
+        };
+        let mut choose_button = Button::new("Choose files")
+            .secondary()
+            .disable(choose_disabled)
+            .focusable(can_select);
+        if can_select {
+            drop_zone = drop_zone
+                .on_click(dialog_command.clone())
+                .on_file_drop(drop_command);
+            choose_button = choose_button.on_click(dialog_command);
         }
+        drop_zone = drop_zone.child(choose_button);
 
-        let list = build_upload_list(
-            files.resolve_untracked(),
-            on_remove,
-            disabled.clone(),
-            style.clone(),
-        );
+        let list = build_upload_list(files, on_remove, disabled.clone(), style.clone());
 
         Flex::vertical()
             .runtime_layout(move |layout, container, context, _, _| {
@@ -1415,13 +1526,13 @@ fn picker_input_trigger<VM: 'static>(
     placeholder: Value<String>,
     validation: Value<ValidationVisualState>,
     disabled: Value<bool>,
+    label: Value<String>,
     width: InputControlWidthResolver,
     icon: SvgIconId,
-    open: Value<bool>,
-    on_open_change: Option<ValueCommand<VM, bool>>,
+    toggle_label: &'static str,
+    can_toggle: bool,
     on_change_set: Option<ValueCommand<VM, TextChangeSet>>,
-) -> Element<VM> {
-    let toggle = open_toggle_command(open, disabled.clone(), on_open_change);
+) -> (Element<VM>, WidgetId) {
     let input_width = width.clone();
     let mut input = Input::new(controller)
         .runtime_layout(move |layout, context, _, _| {
@@ -1436,36 +1547,18 @@ fn picker_input_trigger<VM: 'static>(
                 layout.height = Some(Value::Static(Length::Px(metrics.control_height)));
             }
         })
+        .label(label)
         .placeholder(placeholder)
         .validation(validation)
         .disable(disabled.clone());
     if let Some(command) = on_change_set {
         input = input.on_change_set(command);
     }
-    if let Some(command) = toggle.clone() {
-        input = input.on_click(command);
-    }
+    let input: Element<VM> = input.into();
+    let return_focus_to = input.id;
+    let icon = picker_icon_button(icon, toggle_label, disabled, can_toggle);
 
-    let icon: Element<VM> = if let Some(command) = toggle {
-        secondary_icon_button(icon, disabled, command)
-    } else {
-        Stack::new()
-            .center()
-            .runtime_layout(move |layout, _, context, _, _| {
-                let size = advanced_input_metrics(context.theme).control_height;
-                layout.width = Some(Value::Static(Length::Px(size)));
-                layout.height = Some(Value::Static(Length::Px(size)));
-            })
-            .style_full(input_icon_surface_style)
-            .opacity(disabled_opacity(disabled))
-            .child(styled_icon(icon, dp(20.0), |context| {
-                let (_, _, _, muted, _, _, _) = mode_colors(context);
-                muted
-            }))
-            .into()
-    };
-
-    Flex::horizontal()
+    let trigger = Flex::horizontal()
         .align(Align::Center)
         .runtime_layout(move |layout, container, context, _, _| {
             let metrics = advanced_input_metrics(context.theme);
@@ -1475,27 +1568,33 @@ fn picker_input_trigger<VM: 'static>(
         })
         .child(input)
         .child(icon)
-        .into()
+        .into();
+    (trigger, return_focus_to)
 }
 
 fn color_picker_trigger<VM: 'static>(
     color: Value<Color>,
     disabled: Value<bool>,
-    open: Value<bool>,
-    on_open_change: Option<ValueCommand<VM, bool>>,
+    can_toggle: bool,
     width: InputControlWidthResolver,
-) -> Element<VM> {
-    let toggle = open_toggle_command(open, disabled.clone(), on_open_change);
+) -> (Element<VM>, WidgetId) {
     let mut button = Button::new(color_label(color.clone()))
         .width(pct(100.0))
         .height(pct(100.0))
         .style_full(color_trigger_accessible_button_style)
-        .disable(disabled.clone());
-    if let Some(command) = toggle.clone() {
-        button = button.on_click(command);
+        .disable(disabled.clone())
+        .focusable(can_toggle)
+        .cursor(disabled_cursor(disabled.clone()));
+    if can_toggle {
+        // Pointer presses toggle through the Popover trigger ancestor. The command also makes
+        // this real button activatable by Enter/Space and AccessKit's Click action; those paths
+        // use the same ancestor toggle before dispatching this no-op command.
+        button = button.on_click(Command::new(|_: &mut VM| {}).effect(CommandEffect::NoUiChange));
     }
+    let button: Element<VM> = button.into();
+    let return_focus_to = button.id;
 
-    let mut overlay = Flex::horizontal()
+    let overlay = Flex::horizontal()
         .width(pct(100.0))
         .height(pct(100.0))
         .align(Align::Center)
@@ -1506,11 +1605,7 @@ fn color_picker_trigger<VM: 'static>(
             container.gap = Value::Static(Length::Px(metrics.control_gap));
         })
         .style_full(input_control_shell_style)
-        .cursor(if disabled.resolve() {
-            CursorStyle::NotAllowed
-        } else {
-            CursorStyle::Pointer
-        })
+        .cursor(disabled_cursor(disabled.clone()))
         .opacity(disabled_opacity(disabled))
         .child(themed_icon(ICON_COLOR, dp(18.0)))
         .child(color_preview_box::<VM>(color.clone(), dp(24.0)))
@@ -1520,11 +1615,8 @@ fn color_picker_trigger<VM: 'static>(
                 .style_full(label_text_style),
         )
         .child(themed_icon(ICON_EXPAND, dp(20.0)));
-    if let Some(command) = toggle {
-        overlay = overlay.on_click(command);
-    }
 
-    Stack::new()
+    let trigger = Stack::new()
         .runtime_layout(move |layout, _, context, _, _| {
             let metrics = advanced_input_metrics(context.theme);
             layout.width = Some(Value::Static(Length::Px(width(context))));
@@ -1532,22 +1624,40 @@ fn color_picker_trigger<VM: 'static>(
         })
         .child(button)
         .child(overlay)
-        .into()
+        .into();
+    (trigger, return_focus_to)
 }
 
-fn open_toggle_command<VM: 'static>(
-    open: Value<bool>,
+fn picker_open_state(open: Value<bool>) -> (Option<Value<bool>>, Option<PopoverOpenHandle>) {
+    match open {
+        Value::Static(open) => (None, Some(PopoverOpenHandle::new(open))),
+        Value::Signal(open) => (Some(Value::Signal(open)), None),
+    }
+}
+
+fn picker_popover<VM: 'static>(
+    trigger: Element<VM>,
+    content: Element<VM>,
+    controlled_open: Option<Value<bool>>,
+    open_handle: Option<PopoverOpenHandle>,
     disabled: Value<bool>,
     on_open_change: Option<ValueCommand<VM, bool>>,
-) -> Option<Command<VM>> {
-    on_open_change.map(|command| {
-        Command::new_with_context(move |vm, ctx| {
-            if disabled.resolve() {
-                return;
-            }
-            command.execute_with_context(vm, !open.resolve(), ctx);
-        })
-    })
+    return_focus_to: WidgetId,
+) -> Element<VM> {
+    let mut popover = Popover::new(trigger)
+        .content(content)
+        .disable(disabled)
+        .return_focus_to(return_focus_to);
+    if let Some(open) = controlled_open {
+        popover = popover.open(open);
+    }
+    if let Some(handle) = open_handle {
+        popover = popover.open_handle(handle);
+    }
+    if let Some(command) = on_open_change {
+        popover = popover.on_open_change(command);
+    }
+    popover.into()
 }
 
 fn themed_icon<VM: 'static>(icon: SvgIconId, size: Dp) -> Icon<VM> {
@@ -1573,70 +1683,28 @@ fn styled_icon<VM: 'static>(
         })
 }
 
-fn ghost_icon_button<VM: 'static>(
+fn picker_icon_button<VM: 'static>(
     icon: SvgIconId,
-    size: Dp,
-    disabled: impl Into<Value<bool>>,
-    command: Command<VM>,
-) -> Element<VM> {
-    let disabled = disabled.into();
-    Stack::new()
-        .size(size, size)
-        .center()
-        .style_full(icon_surface_style)
-        .opacity(disabled_opacity(disabled.clone()))
-        .cursor(if disabled.resolve() {
-            CursorStyle::NotAllowed
-        } else {
-            CursorStyle::Pointer
-        })
-        .child(styled_icon(icon, dp(20.0), |context| {
-            let (_, _, _, muted, _, _, _) = mode_colors(context);
-            muted
-        }))
-        .on_click(guard_disabled_command(disabled, command))
-        .into()
-}
-
-fn upload_action_button<VM: 'static>(
-    icon: SvgIconId,
+    label: &'static str,
     disabled: Value<bool>,
-    command: Command<VM>,
+    can_toggle: bool,
 ) -> Element<VM> {
-    let disabled_for_style = disabled.clone();
-    let disabled_for_click = disabled.clone();
-    Stack::new()
-        .center()
-        .runtime_layout(move |layout, _, context, _, _| {
-            let size = advanced_input_metrics(context.theme).upload_action_size;
+    let mut button = Button::new(label)
+        .runtime_layout(move |layout, context, _, _| {
+            let size = advanced_input_metrics(context.theme).control_height;
             layout.width = Some(Value::Static(Length::Px(size)));
             layout.height = Some(Value::Static(Length::Px(size)));
         })
-        .style_full_with_style_sheet(move |context, _, _, mut state| {
-            state.disabled = disabled_for_style.resolve();
-            ghost_action_surface_style(context, state)
-        })
-        .opacity(disabled_opacity(disabled.clone()))
-        .cursor(if disabled.resolve() {
-            CursorStyle::NotAllowed
-        } else {
-            CursorStyle::Pointer
-        })
-        .focusable(true)
-        .child(styled_icon(icon, dp(18.0), |context| {
-            let (_, _, _, muted, _, _, _) = mode_colors(context);
-            muted
-        }))
-        .on_click(guard_disabled_command(disabled_for_click, command))
-        .into()
-}
-
-fn secondary_icon_button<VM: 'static>(
-    icon: SvgIconId,
-    disabled: impl Into<Value<bool>>,
-    command: Command<VM>,
-) -> Element<VM> {
-    let disabled = disabled.into();
+        .secondary()
+        .style_full(input_icon_button_style)
+        .disable(disabled.clone())
+        .focusable(can_toggle)
+        .cursor(disabled_cursor(disabled));
+    if can_toggle {
+        // Popover toggling is owned by the trigger ancestor. A no-op click command keeps this
+        // descendant in the normal Enter/Space activation index.
+        button = button.on_click(Command::new(|_: &mut VM| {}).effect(CommandEffect::NoUiChange));
+    }
     Stack::new()
         .center()
         .runtime_layout(move |layout, _, context, _, _| {
@@ -1644,27 +1712,83 @@ fn secondary_icon_button<VM: 'static>(
             layout.width = Some(Value::Static(Length::Px(size)));
             layout.height = Some(Value::Static(Length::Px(size)));
         })
-        .style_full(input_icon_surface_style)
-        .opacity(disabled_opacity(disabled.clone()))
-        .cursor(if disabled.resolve() {
-            CursorStyle::NotAllowed
-        } else {
-            CursorStyle::Pointer
-        })
+        .child(button)
         .child(styled_icon(icon, dp(20.0), |context| {
             let (_, _, _, muted, _, _, _) = mode_colors(context);
             muted
         }))
-        .on_click(guard_disabled_command(disabled, command))
         .into()
 }
 
-fn guard_disabled_command<VM: 'static>(disabled: Value<bool>, command: Command<VM>) -> Command<VM> {
-    Command::new_with_context(move |vm, ctx| {
-        if !disabled.resolve() {
-            command.execute_with_context(vm, ctx);
-        }
-    })
+fn ghost_icon_button<VM: 'static>(
+    button_id: WidgetId,
+    icon: SvgIconId,
+    label: impl Into<Value<String>>,
+    size: Dp,
+    disabled: impl Into<Value<bool>>,
+    interactive: bool,
+    command: Command<VM>,
+) -> Element<VM> {
+    let disabled = disabled.into();
+    let mut button = Button::new(label)
+        .size(size, size)
+        .ghost()
+        .style_full(icon_button_style)
+        .disable(disabled.clone())
+        .focusable(interactive)
+        .cursor(if interactive {
+            disabled_cursor(disabled.clone())
+        } else {
+            Value::Static(CursorStyle::Default)
+        });
+    if interactive {
+        button = button.on_click(command);
+    }
+    let mut button: Element<VM> = button.into();
+    button.id = button_id;
+    Stack::new()
+        .size(size, size)
+        .center()
+        .child(button)
+        .child(styled_icon(icon, dp(20.0), |context| {
+            let (_, _, _, muted, _, _, _) = mode_colors(context);
+            muted
+        }))
+        .into()
+}
+
+fn upload_action_button<VM: 'static>(
+    icon: SvgIconId,
+    accessible_label: impl Into<Value<String>>,
+    disabled: Value<bool>,
+    command: Command<VM>,
+) -> Element<VM> {
+    let button = Button::new("Remove file")
+        .runtime_layout(move |layout, context, _, _| {
+            let size = advanced_input_metrics(context.theme).upload_action_size;
+            layout.width = Some(Value::Static(Length::Px(size)));
+            layout.height = Some(Value::Static(Length::Px(size)));
+        })
+        .ghost()
+        .style_full(upload_action_button_style)
+        .disable(disabled.clone())
+        .cursor(disabled_cursor(disabled.clone()))
+        .on_click(command);
+    let mut button: Element<VM> = button.into();
+    button.visual.accessibility_label = Some(accessible_label.into());
+    Stack::new()
+        .center()
+        .runtime_layout(move |layout, _, context, _, _| {
+            let size = advanced_input_metrics(context.theme).upload_action_size;
+            layout.width = Some(Value::Static(Length::Px(size)));
+            layout.height = Some(Value::Static(Length::Px(size)));
+        })
+        .child(button)
+        .child(styled_icon(icon, dp(18.0), |context| {
+            let (_, _, _, muted, _, _, _) = mode_colors(context);
+            muted
+        }))
+        .into()
 }
 
 fn color_preview_box<VM: 'static>(color: Value<Color>, size: Dp) -> Element<VM> {
@@ -1730,16 +1854,75 @@ fn disabled_opacity(disabled: Value<bool>) -> Value<f32> {
     }
 }
 
+fn disabled_cursor(disabled: Value<bool>) -> Value<CursorStyle> {
+    match disabled {
+        Value::Static(disabled) => Value::Static(if disabled {
+            CursorStyle::NotAllowed
+        } else {
+            CursorStyle::Pointer
+        }),
+        Value::Signal(disabled) => Value::Signal(disabled.map(|disabled| {
+            if disabled {
+                CursorStyle::NotAllowed
+            } else {
+                CursorStyle::Pointer
+            }
+        })),
+    }
+}
+
 fn calendar_element<VM: 'static>(
-    display_month: NaiveDate,
-    selected: Option<NaiveDate>,
+    display_month: InputControlValue<NaiveDate>,
+    selected: InputControlValue<Option<NaiveDate>>,
     today: Option<NaiveDate>,
-    disabled: bool,
+    disabled: Value<bool>,
     on_change: Option<ValueCommand<VM, CalendarSelectionChange>>,
     style: Option<StyleResolver<CalendarStyle>>,
     framed: bool,
 ) -> Element<VM> {
-    let month = month_start(display_month);
+    let can_change_month = display_month.is_locally_owned() || on_change.is_some();
+    let can_select = (display_month.is_locally_owned() || on_change.is_some())
+        && (selected.is_locally_owned() || on_change.is_some());
+    let calendar_owner_id = WidgetId::next();
+    let calendar_nav_ids = WidgetId::reserve(2);
+    let calendar_day_ids = WidgetId::reserve(42);
+    let initial_month = month_start(display_month.resolve());
+    let initial_days = calendar_days(initial_month);
+    let initial_focus_date = selected
+        .resolve()
+        .filter(|date| initial_days.contains(&Some(*date)))
+        .or_else(|| today.filter(|date| initial_days.contains(&Some(*date))))
+        .unwrap_or(initial_month);
+    let focus_date = InputControlValue::new(Value::Static(initial_focus_date));
+    let focus_move = {
+        let display_month = display_month.clone();
+        let focus_date = focus_date.clone();
+        let on_change = on_change.clone();
+        ValueCommand::new_with_context(move |vm, target: NaiveDate, ctx| {
+            let current_month = month_start(display_month.resolve());
+            let next_month = month_start(target);
+            focus_date.set_local(target);
+            if next_month == current_month {
+                return;
+            }
+            display_month.set_local(next_month);
+            if let Some(command) = on_change.as_ref() {
+                command.execute_with_context(
+                    vm,
+                    CalendarSelectionChange {
+                        date: target,
+                        display_month: next_month,
+                        trigger: if next_month < current_month {
+                            CalendarChangeTrigger::PreviousMonth
+                        } else {
+                            CalendarChangeTrigger::NextMonth
+                        },
+                    },
+                    ctx,
+                );
+            }
+        })
+    };
     let root_style = style.clone();
     let mut root = Flex::vertical().runtime_layout(move |layout, container, context, _, _| {
         let resolved = resolve_input_control_style_for_context(
@@ -1758,38 +1941,52 @@ fn calendar_element<VM: 'static>(
         root = root.style_full(panel_style);
     }
 
-    root = root.child(
-        Flex::horizontal()
-            .runtime_layout(move |layout, _, context, _, _| {
-                layout.height = Some(Value::Static(Length::Px(
-                    picker_content_metrics(context.theme).header_height,
-                )));
-            })
-            .align(Align::Center)
-            .justify(Justify::SpaceBetween)
-            .child(calendar_nav_button(
-                ICON_PREVIOUS,
-                add_months(month, -1),
-                CalendarChangeTrigger::PreviousMonth,
-                disabled,
-                on_change.clone(),
-            ))
-            .child(
-                Text::new(format!(
-                    "{} {}",
-                    MONTHS[month.month0() as usize],
-                    month.year()
+    let header_display_month = display_month.clone();
+    let header_disabled = disabled.clone();
+    let header_change = on_change.clone();
+    root = root.child(For::new(
+        singleton_items(display_month.value()),
+        |_| "calendar-header",
+        move |_index, display_month| {
+            let month = month_start(*display_month);
+            Flex::horizontal()
+                .runtime_layout(move |layout, _, context, _, _| {
+                    layout.height = Some(Value::Static(Length::Px(
+                        picker_content_metrics(context.theme).header_height,
+                    )));
+                })
+                .align(Align::Center)
+                .justify(Justify::SpaceBetween)
+                .child(calendar_nav_button(
+                    calendar_nav_ids,
+                    ICON_PREVIOUS,
+                    add_months(month, -1),
+                    CalendarChangeTrigger::PreviousMonth,
+                    header_display_month.clone(),
+                    header_disabled.clone(),
+                    header_change.clone(),
+                    can_change_month,
                 ))
-                .style_full(label_text_style),
-            )
-            .child(calendar_nav_button(
-                ICON_NEXT,
-                add_months(month, 1),
-                CalendarChangeTrigger::NextMonth,
-                disabled,
-                on_change.clone(),
-            )),
-    );
+                .child(
+                    Text::new(format!(
+                        "{} {}",
+                        MONTHS[month.month0() as usize],
+                        month.year()
+                    ))
+                    .style_full(label_text_style),
+                )
+                .child(calendar_nav_button(
+                    calendar_nav_ids.offset(1),
+                    ICON_NEXT,
+                    add_months(month, 1),
+                    CalendarChangeTrigger::NextMonth,
+                    header_display_month.clone(),
+                    header_disabled.clone(),
+                    header_change.clone(),
+                    can_change_month,
+                ))
+        },
+    ));
 
     let weekday_style = style.clone();
     let mut weekday_row = Grid::columns([
@@ -1830,100 +2027,198 @@ fn calendar_element<VM: 'static>(
     }
     root = root.child(weekday_row);
 
-    let days_style = style.clone();
-    let mut days = Grid::columns([
-        fr(1.0),
-        fr(1.0),
-        fr(1.0),
-        fr(1.0),
-        fr(1.0),
-        fr(1.0),
-        fr(1.0),
-    ])
-    .runtime_layout(move |_, container, context, _, _| {
-        let resolved = resolve_input_control_style_for_context(
-            days_style.as_ref(),
-            context,
-            CalendarStyle::default_for_theme,
-        );
-        container.gap = Value::Static(Length::Px(resolved.gap));
-    });
-    for date in calendar_days(month) {
-        let same_month = date.month() == month.month();
-        let is_selected = selected == Some(date);
-        let is_today = today == Some(date);
-        let button_style = style.clone();
-        let button = Button::new(date.day().to_string())
-            .runtime_layout(move |layout, context, _, _| {
+    let days_display_month = display_month.clone();
+    let days_selected = selected.clone();
+    let days_focus_date = focus_date.clone();
+    let days_focus_move = focus_move.clone();
+    let days_disabled = disabled.clone();
+    let days_change = on_change.clone();
+    root = root.child(For::new(
+        singleton_items(display_month.value()),
+        |_| "calendar-days",
+        move |_index, display_month| {
+            let month = month_start(*display_month);
+            let selected = days_selected.resolve();
+            let visible_days = calendar_days(month);
+            let requested_focus = days_focus_date.resolve();
+            let roving_date = if visible_days.contains(&Some(requested_focus)) {
+                requested_focus
+            } else {
+                selected
+                    .filter(|date| visible_days.contains(&Some(*date)))
+                    .or_else(|| today.filter(|date| visible_days.contains(&Some(*date))))
+                    .unwrap_or(month)
+            };
+            let days_style = style.clone();
+            let mut days = Grid::columns([
+                fr(1.0),
+                fr(1.0),
+                fr(1.0),
+                fr(1.0),
+                fr(1.0),
+                fr(1.0),
+                fr(1.0),
+            ])
+            .runtime_layout(move |_, container, context, _, _| {
                 let resolved = resolve_input_control_style_for_context(
-                    button_style.as_ref(),
+                    days_style.as_ref(),
                     context,
                     CalendarStyle::default_for_theme,
                 );
-                layout.width = Some(Value::Static(Length::Px(resolved.day_size)));
-                layout.height = Some(Value::Static(Length::Px(resolved.day_size)));
-            })
-            .style_full(move |context| {
-                calendar_day_button_style(context, is_selected, is_today, same_month)
-            })
-            .disable(disabled);
-        let command = on_change.clone();
-        days = days.child(button.on_click(Command::new_with_context(move |vm, ctx| {
-            if let Some(command) = command.as_ref() {
-                command.execute_with_context(
-                    vm,
-                    CalendarSelectionChange {
-                        date,
-                        display_month: month_start(date),
-                        trigger: CalendarChangeTrigger::Day,
-                    },
-                    ctx,
-                );
-            }
-        })));
-    }
-    root = root.child(days);
-    if let Some(today) = today {
-        root = root.child(
-            Button::new("Today")
-                .secondary()
-                .runtime_layout(move |layout, context, _, _| {
-                    layout.height = Some(Value::Static(Length::Px(
-                        picker_content_metrics(context.theme).button_height,
-                    )));
-                })
-                .style_full(today_button_style)
-                .disable(disabled)
-                .on_click(Command::new_with_context(move |vm, ctx| {
-                    if let Some(command) = on_change.as_ref() {
-                        command.execute_with_context(
-                            vm,
-                            CalendarSelectionChange {
-                                date: today,
-                                display_month: month_start(today),
-                                trigger: CalendarChangeTrigger::Today,
-                            },
-                            ctx,
-                        );
+                container.gap = Value::Static(Length::Px(resolved.gap));
+            });
+            for (day_index, date) in visible_days.into_iter().enumerate() {
+                let same_month = date.is_some_and(|date| date.month() == month.month());
+                let is_selected = date.is_some() && selected == date;
+                let is_today = date.is_some() && today == date;
+                let button_style = style.clone();
+                let unavailable = date.is_none();
+                let button_disabled = if unavailable {
+                    Value::Static(true)
+                } else {
+                    days_disabled.clone()
+                };
+                let mut button =
+                    Button::new(date.map(|date| date.day().to_string()).unwrap_or_default())
+                        .runtime_layout(move |layout, context, _, _| {
+                            let resolved = resolve_input_control_style_for_context(
+                                button_style.as_ref(),
+                                context,
+                                CalendarStyle::default_for_theme,
+                            );
+                            layout.width = Some(Value::Static(Length::Px(resolved.day_size)));
+                            layout.height = Some(Value::Static(Length::Px(resolved.day_size)));
+                        })
+                        .style_full(move |context| {
+                            calendar_day_button_style(context, is_selected, is_today, same_month)
+                        })
+                        .disable(button_disabled.clone())
+                        .cursor(disabled_cursor(button_disabled));
+                if can_select {
+                    if let Some(date) = date {
+                        button = button
+                            .tab_index(if date == roving_date { 0 } else { -1 })
+                            .calendar_day_behavior(
+                                calendar_owner_id,
+                                date,
+                                days_focus_move.clone(),
+                            );
+                    } else {
+                        button = button.tab_index(-1);
                     }
-                })),
-        );
+                }
+                let display_month = days_display_month.clone();
+                let selected = days_selected.clone();
+                let focus_date = days_focus_date.clone();
+                let command = days_change.clone();
+                if can_select {
+                    button = button.on_click(Command::new_with_context(move |vm, ctx| {
+                        let Some(date) = date else {
+                            return;
+                        };
+                        let next_month = month_start(date);
+                        display_month.set_local(next_month);
+                        selected.set_local(Some(date));
+                        focus_date.set_local(date);
+                        if let Some(command) = command.as_ref() {
+                            command.execute_with_context(
+                                vm,
+                                CalendarSelectionChange {
+                                    date,
+                                    display_month: next_month,
+                                    trigger: CalendarChangeTrigger::Day,
+                                },
+                                ctx,
+                            );
+                        }
+                    }));
+                }
+                let mut button: Element<VM> = button.into();
+                if !can_select {
+                    button.interactions = Default::default();
+                    button.focus.focusable = Some(false);
+                    button.focus.tab_index = Some(-1);
+                }
+                button.id = calendar_day_ids.offset(day_index);
+                if let Some(date) = date {
+                    button.visual.accessibility_label = Some(Value::Static(format_date(date)));
+                    button.visual.accessibility_selected = Some(Value::Static(is_selected));
+                }
+                days = days.child(button);
+            }
+            days
+        },
+    ));
+    if let Some(today) = today {
+        let today_display_month = display_month;
+        let today_selected = selected;
+        let today_focus_date = focus_date;
+        let mut today_button = Button::new("Today")
+            .secondary()
+            .runtime_layout(move |layout, context, _, _| {
+                layout.height = Some(Value::Static(Length::Px(
+                    picker_content_metrics(context.theme).button_height,
+                )));
+            })
+            .style_full(today_button_style)
+            .disable(disabled.clone());
+        if can_select {
+            today_button =
+                today_button
+                    .cursor(disabled_cursor(disabled))
+                    .on_click(Command::new_with_context(move |vm, ctx| {
+                        let display_month = month_start(today);
+                        today_display_month.set_local(display_month);
+                        today_selected.set_local(Some(today));
+                        today_focus_date.set_local(today);
+                        if let Some(command) = on_change.as_ref() {
+                            command.execute_with_context(
+                                vm,
+                                CalendarSelectionChange {
+                                    date: today,
+                                    display_month,
+                                    trigger: CalendarChangeTrigger::Today,
+                                },
+                                ctx,
+                            );
+                        }
+                    }));
+        }
+        let mut today_button: Element<VM> = today_button.into();
+        if !can_select {
+            today_button.interactions = Default::default();
+            today_button.focus.focusable = Some(false);
+            today_button.focus.tab_index = Some(-1);
+        }
+        root = root.child(today_button);
     }
     root.into()
 }
 
 fn calendar_nav_button<VM: 'static>(
+    button_id: WidgetId,
     icon: SvgIconId,
     display_month: NaiveDate,
     trigger: CalendarChangeTrigger,
-    disabled: bool,
+    month_state: InputControlValue<NaiveDate>,
+    disabled: Value<bool>,
     on_change: Option<ValueCommand<VM, CalendarSelectionChange>>,
+    interactive: bool,
 ) -> Element<VM> {
+    let label = match trigger {
+        CalendarChangeTrigger::PreviousMonth => "Previous month",
+        CalendarChangeTrigger::NextMonth => "Next month",
+        CalendarChangeTrigger::Day | CalendarChangeTrigger::Today => "Change month",
+    };
     ghost_icon_button(
+        button_id,
         icon,
+        label,
         dp(32.0),
-        Value::Static(disabled),
+        disabled,
+        interactive,
         Command::new_with_context(move |vm, ctx| {
+            month_state.set_local(display_month);
             if let Some(command) = on_change.as_ref() {
                 command.execute_with_context(
                     vm,
@@ -1941,47 +2236,16 @@ fn calendar_nav_button<VM: 'static>(
 
 fn time_picker_content<VM: 'static>(
     controller: TextController,
-    selected: Option<NaiveTime>,
+    selected: InputControlValue<Option<NaiveTime>>,
     minute_step: u32,
-    disabled: bool,
+    disabled: Value<bool>,
     on_change: Option<ValueCommand<VM, TimePickerChange>>,
+    open_handle: Option<PopoverOpenHandle>,
     on_open_change: Option<ValueCommand<VM, bool>>,
     style: Option<StyleResolver<TimePickerStyle>>,
 ) -> Element<VM> {
-    let current = selected
-        .or_else(|| parse_time(&controller.text()))
-        .unwrap_or(NaiveTime::MIN);
-    let minute_values = minute_values_for_step(minute_step);
-    let hour_values = (0..24).collect::<Vec<_>>();
-    let hour_index = value_index(&hour_values, current.hour());
-    let minute_index = value_index(&minute_values, current.minute());
-    let hour = hour_values[hour_index];
-    let minute = minute_values[minute_index];
-    let hour_column = time_wheel_column(
-        "Hour",
-        TimePickerUnit::Hour,
-        &hour_values,
-        hour_index,
-        hour,
-        minute,
-        controller.clone(),
-        disabled,
-        on_change.clone(),
-        style.clone(),
-    );
-    let minute_column = time_wheel_column(
-        "Minute",
-        TimePickerUnit::Minute,
-        &minute_values,
-        minute_index,
-        hour,
-        minute,
-        controller,
-        disabled,
-        on_change,
-        style.clone(),
-    );
-
+    let hour_ids = TimeWheelColumnIds::new(24);
+    let minute_ids = TimeWheelColumnIds::new(60);
     let done_style = style.clone();
     let mut done_button = Button::new("Done")
         .primary()
@@ -1996,15 +2260,39 @@ fn time_picker_content<VM: 'static>(
                 picker_content_metrics(context.theme).button_height,
             )));
         })
-        .disable(disabled || on_open_change.is_none());
-    if let Some(command) = on_open_change {
+        .disable(if open_handle.is_none() && on_open_change.is_none() {
+            Value::Static(true)
+        } else {
+            disabled.clone()
+        })
+        .cursor(disabled_cursor(
+            if open_handle.is_none() && on_open_change.is_none() {
+                Value::Static(true)
+            } else {
+                disabled.clone()
+            },
+        ));
+    if open_handle.is_some() || on_open_change.is_some() {
+        let disabled_for_done = disabled.clone();
         done_button = done_button.on_click(Command::new_with_context(move |vm, ctx| {
-            command.execute_with_context(vm, false, ctx);
+            if disabled_for_done.resolve() {
+                return;
+            }
+            if let Some(handle) = open_handle.as_ref() {
+                handle.set(false);
+            }
+            if let Some(command) = on_open_change.as_ref() {
+                command.execute_with_context(vm, false, ctx);
+            }
         }));
     }
 
     let root_style = style.clone();
     let row_style = style;
+    let wheel_controller = controller;
+    let wheel_selected = selected.clone();
+    let wheel_disabled = disabled;
+    let wheel_change = on_change;
     Flex::vertical()
         .runtime_layout(move |layout, container, context, _, _| {
             let resolved = resolve_input_control_style_for_context(
@@ -2027,26 +2315,96 @@ fn time_picker_content<VM: 'static>(
                 .child(themed_icon(ICON_TIME, dp(18.0)))
                 .child(Text::new("Select time").style_full(label_text_style)),
         )
-        .child(
-            Flex::horizontal()
-                .align(Align::Center)
-                .justify(Justify::Center)
-                .runtime_layout(move |layout, container, context, _, _| {
-                    let resolved = resolve_input_control_style_for_context(
-                        row_style.as_ref(),
-                        context,
-                        TimePickerStyle::default_for_theme,
-                    );
-                    layout.width = Some(Value::Static(Length::Px(resolved.width)));
-                    container.gap = Value::Static(Length::Px(
-                        picker_content_metrics(context.theme).section_gap,
-                    ));
-                })
-                .child(hour_column)
-                .child(Text::new(":").style_full(time_wheel_separator_style))
-                .child(minute_column),
-        )
+        .child(For::new(
+            singleton_items(selected.value()),
+            |_| "time-wheel",
+            move |_index, selected| {
+                time_wheel_row(
+                    wheel_controller.clone(),
+                    *selected,
+                    wheel_selected.clone(),
+                    minute_step,
+                    wheel_disabled.clone(),
+                    wheel_change.clone(),
+                    row_style.clone(),
+                    hour_ids,
+                    minute_ids,
+                )
+            },
+        ))
         .child(done_button)
+        .into()
+}
+
+fn time_wheel_row<VM: 'static>(
+    controller: TextController,
+    selected: Option<NaiveTime>,
+    selected_state: InputControlValue<Option<NaiveTime>>,
+    minute_step: u32,
+    disabled: Value<bool>,
+    on_change: Option<ValueCommand<VM, TimePickerChange>>,
+    style: Option<StyleResolver<TimePickerStyle>>,
+    hour_ids: TimeWheelColumnIds,
+    minute_ids: TimeWheelColumnIds,
+) -> Element<VM> {
+    let current = selected
+        .or_else(|| parse_time(&controller.text()))
+        .unwrap_or(NaiveTime::MIN);
+    let mut minute_values = minute_values_for_step(minute_step);
+    if let Err(index) = minute_values.binary_search(&current.minute()) {
+        minute_values.insert(index, current.minute());
+    }
+    let hour_values = (0..24).collect::<Vec<_>>();
+    let hour_index = value_index(&hour_values, current.hour());
+    let minute_index = value_index(&minute_values, current.minute());
+    let hour = hour_values[hour_index];
+    let minute = minute_values[minute_index];
+    let hour_column = time_wheel_column(
+        "Hour",
+        TimePickerUnit::Hour,
+        &hour_values,
+        hour_index,
+        hour,
+        minute,
+        controller.clone(),
+        selected_state.clone(),
+        disabled.clone(),
+        on_change.clone(),
+        style.clone(),
+        hour_ids,
+    );
+    let minute_column = time_wheel_column(
+        "Minute",
+        TimePickerUnit::Minute,
+        &minute_values,
+        minute_index,
+        hour,
+        minute,
+        controller,
+        selected_state,
+        disabled,
+        on_change,
+        style.clone(),
+        minute_ids,
+    );
+    let row_style = style;
+    Flex::horizontal()
+        .align(Align::Center)
+        .justify(Justify::Center)
+        .runtime_layout(move |layout, container, context, _, _| {
+            let resolved = resolve_input_control_style_for_context(
+                row_style.as_ref(),
+                context,
+                TimePickerStyle::default_for_theme,
+            );
+            layout.width = Some(Value::Static(Length::Px(resolved.width)));
+            container.gap = Value::Static(Length::Px(
+                picker_content_metrics(context.theme).section_gap,
+            ));
+        })
+        .child(hour_column)
+        .child(Text::new(":").style_full(time_wheel_separator_style))
+        .child(minute_column)
         .into()
 }
 
@@ -2054,6 +2412,27 @@ fn time_picker_content<VM: 'static>(
 enum TimePickerUnit {
     Hour,
     Minute,
+}
+
+#[derive(Clone, Copy)]
+struct TimeWheelColumnIds {
+    previous: WidgetId,
+    next: WidgetId,
+    values: WidgetId,
+}
+
+impl TimeWheelColumnIds {
+    fn new(value_count: usize) -> Self {
+        Self {
+            previous: WidgetId::next(),
+            next: WidgetId::next(),
+            values: WidgetId::reserve(value_count),
+        }
+    }
+
+    fn value(self, value: u32) -> WidgetId {
+        self.values.offset(value as usize)
+    }
 }
 
 fn time_wheel_column<VM: 'static>(
@@ -2064,17 +2443,24 @@ fn time_wheel_column<VM: 'static>(
     current_hour: u32,
     current_minute: u32,
     controller: TextController,
-    disabled: bool,
+    selected_state: InputControlValue<Option<NaiveTime>>,
+    disabled: Value<bool>,
     on_change: Option<ValueCommand<VM, TimePickerChange>>,
     style: Option<StyleResolver<TimePickerStyle>>,
+    ids: TimeWheelColumnIds,
 ) -> Element<VM> {
     let previous_index = previous_index(selected_index, values.len());
     let next_index = next_index(selected_index, values.len());
     let previous = values[previous_index];
-    let selected = values[selected_index];
+    let selected_value = values[selected_index];
     let next = values[next_index];
+    let navigation_disabled = if values.len() <= 1 {
+        Value::Static(true)
+    } else {
+        disabled.clone()
+    };
     let column_style = style.clone();
-    Flex::vertical()
+    let mut column = Flex::vertical()
         .runtime_layout(move |layout, container, context, _, _| {
             let resolved = resolve_input_control_style_for_context(
                 column_style.as_ref(),
@@ -2090,75 +2476,97 @@ fn time_wheel_column<VM: 'static>(
         .align(Align::Center)
         .child(Text::new(label).style_full(muted_text_style))
         .child(ghost_icon_button(
+            ids.previous,
             ICON_UP,
+            format!("Previous {label}"),
             dp(32.0),
-            disabled,
+            navigation_disabled.clone(),
+            true,
             time_wheel_select_command(
                 unit,
                 previous,
                 current_hour,
                 current_minute,
                 controller.clone(),
-                disabled,
+                selected_state.clone(),
+                navigation_disabled.clone(),
                 on_change.clone(),
             ),
-        ))
-        .child(time_wheel_value_button(
+        ));
+    if previous_index != selected_index {
+        column = column.child(time_wheel_value_button(
+            ids.value(previous),
+            unit,
             previous,
             false,
             style.clone(),
-            disabled,
+            disabled.clone(),
             time_wheel_select_command(
                 unit,
                 previous,
                 current_hour,
                 current_minute,
                 controller.clone(),
-                disabled,
+                selected_state.clone(),
+                disabled.clone(),
                 on_change.clone(),
             ),
-        ))
-        .child(time_wheel_value_button(
-            selected,
-            true,
-            style.clone(),
-            disabled,
-            time_wheel_select_command(
-                unit,
-                selected,
-                current_hour,
-                current_minute,
-                controller.clone(),
-                disabled,
-                on_change.clone(),
-            ),
-        ))
-        .child(time_wheel_value_button(
+        ));
+    }
+    column = column.child(time_wheel_value_button(
+        ids.value(selected_value),
+        unit,
+        selected_value,
+        true,
+        style.clone(),
+        disabled.clone(),
+        time_wheel_select_command(
+            unit,
+            selected_value,
+            current_hour,
+            current_minute,
+            controller.clone(),
+            selected_state.clone(),
+            disabled.clone(),
+            on_change.clone(),
+        ),
+    ));
+    if next_index != selected_index && next_index != previous_index {
+        column = column.child(time_wheel_value_button(
+            ids.value(next),
+            unit,
             next,
             false,
             style,
-            disabled,
+            disabled.clone(),
             time_wheel_select_command(
                 unit,
                 next,
                 current_hour,
                 current_minute,
                 controller.clone(),
-                disabled,
+                selected_state.clone(),
+                disabled.clone(),
                 on_change.clone(),
             ),
-        ))
+        ));
+    }
+    column
         .child(ghost_icon_button(
+            ids.next,
             ICON_DOWN,
+            format!("Next {label}"),
             dp(32.0),
-            disabled,
+            navigation_disabled.clone(),
+            true,
             time_wheel_select_command(
                 unit,
                 next,
                 current_hour,
                 current_minute,
                 controller,
-                disabled,
+                selected_state,
+                navigation_disabled,
                 on_change,
             ),
         ))
@@ -2166,12 +2574,14 @@ fn time_wheel_column<VM: 'static>(
 }
 
 fn time_wheel_value_button<VM: 'static>(
+    button_id: WidgetId,
+    unit: TimePickerUnit,
     value: u32,
     selected: bool,
     style: Option<StyleResolver<TimePickerStyle>>,
-    disabled: bool,
+    disabled: Value<bool>,
     command: Command<VM>,
-) -> Button<VM> {
+) -> Element<VM> {
     let button = Button::new(format!("{value:02}"))
         .runtime_layout(move |layout, context, _, _| {
             let resolved = resolve_input_control_style_for_context(
@@ -2189,9 +2599,10 @@ fn time_wheel_value_button<VM: 'static>(
                 metrics.time_option_height
             })));
         })
-        .disable(disabled)
+        .disable(disabled.clone())
+        .cursor(disabled_cursor(disabled))
         .on_click(command);
-    if selected {
+    let button = if selected {
         button
             .primary()
             .style_full(time_wheel_selected_button_style)
@@ -2199,7 +2610,16 @@ fn time_wheel_value_button<VM: 'static>(
         button
             .secondary()
             .style_full(time_wheel_option_button_style)
-    }
+    };
+    let unit_label = match unit {
+        TimePickerUnit::Hour => "Hour",
+        TimePickerUnit::Minute => "Minute",
+    };
+    let mut button: Element<VM> = button.into();
+    button.id = button_id;
+    button.visual.accessibility_label = Some(Value::Static(format!("{unit_label} {value:02}")));
+    button.visual.accessibility_selected = Some(Value::Static(selected));
+    button
 }
 
 fn time_wheel_select_command<VM: 'static>(
@@ -2208,11 +2628,12 @@ fn time_wheel_select_command<VM: 'static>(
     current_hour: u32,
     current_minute: u32,
     controller: TextController,
-    disabled: bool,
+    selected_state: InputControlValue<Option<NaiveTime>>,
+    disabled: Value<bool>,
     on_change: Option<ValueCommand<VM, TimePickerChange>>,
 ) -> Command<VM> {
     Command::new_with_context(move |vm, ctx| {
-        if disabled {
+        if disabled.resolve() {
             return;
         }
         let (hour, minute) = match unit {
@@ -2222,6 +2643,7 @@ fn time_wheel_select_command<VM: 'static>(
         let time = NaiveTime::from_hms_opt(hour, minute, 0).unwrap_or(NaiveTime::MIN);
         let text = format_time(time);
         controller.set_text(text.clone());
+        selected_state.set_local(Some(time));
         if let Some(command) = on_change.as_ref() {
             command.execute_with_context(
                 vm,
@@ -2279,17 +2701,31 @@ fn next_index(index: usize, len: usize) -> usize {
 fn number_step_button<VM: 'static>(
     icon: SvgIconId,
     trigger: NumberInputChangeTrigger,
-    delta: f64,
-    controller: TextController,
-    value: Value<Option<f64>>,
-    min: Option<f64>,
-    max: Option<f64>,
     disabled: Value<bool>,
-    on_change: Option<ValueCommand<VM, NumberInputChange>>,
+    command: Command<VM>,
     style: Option<StyleResolver<NumberInputStyle>>,
 ) -> Element<VM> {
-    let disabled_for_style = disabled.clone();
-    let disabled_for_click = disabled.clone();
+    let button_style = style.clone();
+    let button = Button::new(match trigger {
+        NumberInputChangeTrigger::StepDown => "Decrease value",
+        NumberInputChangeTrigger::StepUp => "Increase value",
+        NumberInputChangeTrigger::Text => "Change value",
+    })
+    .runtime_layout(move |layout, context, _, _| {
+        let resolved = resolve_input_control_style_for_context(
+            button_style.as_ref(),
+            context,
+            NumberInputStyle::default_for_theme,
+        );
+        let metrics = advanced_input_metrics(context.theme);
+        layout.width = Some(Value::Static(Length::Px(resolved.button_width)));
+        layout.height = Some(Value::Static(Length::Px(metrics.control_height)));
+    })
+    .secondary()
+    .style_full(number_step_button_style)
+    .disable(disabled.clone())
+    .cursor(disabled_cursor(disabled.clone()))
+    .on_click(command);
     Stack::new()
         .center()
         .runtime_layout(move |layout, _, context, _, _| {
@@ -2302,49 +2738,57 @@ fn number_step_button<VM: 'static>(
             layout.width = Some(Value::Static(Length::Px(resolved.button_width)));
             layout.height = Some(Value::Static(Length::Px(metrics.control_height)));
         })
-        .style_full_with_style_sheet(move |context, _, _, mut state| {
-            state.disabled = disabled_for_style.resolve();
-            number_stepper_surface_style(context, state)
-        })
-        .opacity(disabled_opacity(disabled.clone()))
-        .cursor(if disabled.resolve() {
-            CursorStyle::NotAllowed
-        } else {
-            CursorStyle::Pointer
-        })
-        .focusable(true)
+        .child(button)
         .child(styled_icon(icon, dp(18.0), |context| {
             let (_, _, _, muted, _, _, _) = mode_colors(context);
             muted
         }))
-        .on_click(guard_disabled_command(
-            disabled_for_click,
-            Command::new_with_context(move |vm, ctx| {
-                let current = parse_number(&controller.text(), min, max)
-                    .or_else(|| value.resolve())
-                    .unwrap_or(0.0);
-                let next = clamp_number(current + delta, min, max);
-                let text = format_number(next);
-                controller.set_text(text.clone());
-                if let Some(command) = on_change.as_ref() {
-                    command.execute_with_context(
-                        vm,
-                        NumberInputChange {
-                            value: Some(next),
-                            text,
-                            trigger,
-                        },
-                        ctx,
-                    );
-                }
-            }),
-        ))
         .into()
 }
 
+fn number_step_command<VM: 'static>(
+    trigger: NumberInputChangeTrigger,
+    delta: f64,
+    controller: TextController,
+    value: Value<Option<f64>>,
+    min: Option<f64>,
+    max: Option<f64>,
+    disabled: Value<bool>,
+    on_change: Option<ValueCommand<VM, NumberInputChange>>,
+) -> Command<VM> {
+    Command::new_with_context(move |vm, ctx| {
+        if disabled.resolve() {
+            return;
+        }
+        let current_text = controller.text();
+        let current = parse_number(&current_text, min, max)
+            .or_else(|| value.resolve().filter(|value| value.is_finite()))
+            .unwrap_or(0.0);
+        let next = clamp_number(current + delta, min, max);
+        let precision = stepped_number_precision(&current_text, delta, next, min, max);
+        let text = format_number(next, precision);
+        if next == current && text == current_text {
+            return;
+        }
+        let emitted_value = parse_number(&text, min, max).unwrap_or(next);
+        controller.set_text(text.clone());
+        if let Some(command) = on_change.as_ref() {
+            command.execute_with_context(
+                vm,
+                NumberInputChange {
+                    value: Some(emitted_value),
+                    text,
+                    trigger,
+                },
+                ctx,
+            );
+        }
+    })
+}
+
 fn color_picker_content<VM: 'static>(
-    color: Value<Color>,
-    disabled: bool,
+    color: InputControlValue<Color>,
+    disabled: Value<bool>,
     on_change: Option<ValueCommand<VM, ColorPickerChange>>,
     swatches: Vec<Color>,
     style: Option<StyleResolver<ColorPickerStyle>>,
@@ -2369,12 +2813,12 @@ fn color_picker_content<VM: 'static>(
                     picker_content_metrics(context.theme).section_gap,
                 ));
             })
-            .child(picker_color_preview_box::<VM>(color.clone()))
+            .child(picker_color_preview_box::<VM>(color.value()))
             .child(
                 Flex::vertical()
                     .gap(dp(2.0))
                     .child(Text::new("Current color").style_full(muted_text_style))
-                    .child(Text::new(color_label(color.clone())).style_full(label_text_style)),
+                    .child(Text::new(color_label(color.value())).style_full(label_text_style)),
             ),
     );
 
@@ -2386,11 +2830,12 @@ fn color_picker_content<VM: 'static>(
                     Value::Static(Length::Px(picker_content_metrics(context.theme).inline_gap));
             });
     for swatch in swatches {
+        let color = color.clone();
         let command = on_change.clone();
         let swatch_style = style.clone();
         swatch_row = swatch_row.child(
-            Flex::<VM>::vertical()
-                .runtime_layout(move |layout, _, context, _, _| {
+            Button::new(format_color(swatch))
+                .runtime_layout(move |layout, context, _, _| {
                     let resolved = resolve_input_control_style_for_context(
                         swatch_style.as_ref(),
                         context,
@@ -2399,24 +2844,20 @@ fn color_picker_content<VM: 'static>(
                     layout.width = Some(Value::Static(Length::Px(resolved.swatch_size)));
                     layout.height = Some(Value::Static(Length::Px(resolved.swatch_size)));
                 })
-                .style_full(move |context| color_swatch_style(context, swatch))
-                .cursor(if disabled {
-                    CursorStyle::NotAllowed
-                } else {
-                    CursorStyle::Pointer
-                })
+                .style_full(move |context| color_swatch_button_style(context, swatch))
+                .disable(disabled.clone())
+                .cursor(disabled_cursor(disabled.clone()))
                 .on_click(Command::new_with_context(move |vm, ctx| {
-                    if !disabled {
-                        if let Some(command) = command.as_ref() {
-                            command.execute_with_context(
-                                vm,
-                                ColorPickerChange {
-                                    color: swatch,
-                                    trigger: ColorPickerChangeTrigger::Swatch,
-                                },
-                                ctx,
-                            );
-                        }
+                    color.set_local(swatch);
+                    if let Some(command) = command.as_ref() {
+                        command.execute_with_context(
+                            vm,
+                            ColorPickerChange {
+                                color: swatch,
+                                trigger: ColorPickerChangeTrigger::Swatch,
+                            },
+                            ctx,
+                        );
                     }
                 })),
         );
@@ -2426,21 +2867,21 @@ fn color_picker_content<VM: 'static>(
         "R",
         color.clone(),
         ColorPickerChangeTrigger::Red,
-        disabled,
+        disabled.clone(),
         on_change.clone(),
     ));
     root = root.child(color_slider(
         "G",
         color.clone(),
         ColorPickerChangeTrigger::Green,
-        disabled,
+        disabled.clone(),
         on_change.clone(),
     ));
     root = root.child(color_slider(
         "B",
         color.clone(),
         ColorPickerChangeTrigger::Blue,
-        disabled,
+        disabled.clone(),
         on_change.clone(),
     ));
     root = root.child(color_slider(
@@ -2455,12 +2896,12 @@ fn color_picker_content<VM: 'static>(
 
 fn color_slider<VM: 'static>(
     label: &'static str,
-    color: Value<Color>,
+    color: InputControlValue<Color>,
     trigger: ColorPickerChangeTrigger,
-    disabled: bool,
+    disabled: Value<bool>,
     on_change: Option<ValueCommand<VM, ColorPickerChange>>,
 ) -> Element<VM> {
-    let value = color_channel_value(color.clone(), trigger);
+    let value = color_channel_value(color.value(), trigger);
     let color_for_change = color.clone();
     Flex::horizontal()
         .align(Align::Center)
@@ -2475,20 +2916,22 @@ fn color_slider<VM: 'static>(
         )
         .child(
             Slider::new(value, 0.0, 255.0)
+                .label(color_channel_accessible_label(trigger))
                 .step(1.0)
                 .grow(1.0)
                 .disable(disabled)
                 .on_change(ValueCommand::new_with_context(move |vm, next: f32, ctx| {
+                    let mut current = color_for_change.resolve();
+                    let channel = next.round().clamp(0.0, 255.0) as u8;
+                    match trigger {
+                        ColorPickerChangeTrigger::Red => current.r = channel,
+                        ColorPickerChangeTrigger::Green => current.g = channel,
+                        ColorPickerChangeTrigger::Blue => current.b = channel,
+                        ColorPickerChangeTrigger::Alpha => current.a = channel,
+                        ColorPickerChangeTrigger::Swatch => {}
+                    }
+                    color_for_change.set_local(current);
                     if let Some(command) = on_change.as_ref() {
-                        let mut current = color_for_change.resolve();
-                        let channel = next.round().clamp(0.0, 255.0) as u8;
-                        match trigger {
-                            ColorPickerChangeTrigger::Red => current.r = channel,
-                            ColorPickerChangeTrigger::Green => current.g = channel,
-                            ColorPickerChangeTrigger::Blue => current.b = channel,
-                            ColorPickerChangeTrigger::Alpha => current.a = channel,
-                            ColorPickerChangeTrigger::Swatch => {}
-                        }
                         command.execute_with_context(
                             vm,
                             ColorPickerChange {
@@ -2501,7 +2944,7 @@ fn color_slider<VM: 'static>(
                 })),
         )
         .child(
-            Text::new(color_channel_label(color, trigger))
+            Text::new(color_channel_label(color.value(), trigger))
                 .width(dp(32.0))
                 .style_full(muted_text_style),
         )
@@ -2517,13 +2960,13 @@ fn picker_popover_content<VM: 'static>(content: impl Into<Element<VM>>) -> Eleme
 }
 
 fn build_upload_list<VM: 'static>(
-    files: Vec<UploadFile>,
+    files: InputControlValue<Vec<UploadFile>>,
     on_remove: Option<ValueCommand<VM, UploadRemove>>,
     disabled: Value<bool>,
     style: Option<StyleResolver<UploadStyle>>,
 ) -> Element<VM> {
     let list_style = style.clone();
-    let mut list = Flex::vertical().runtime_layout(move |layout, container, context, _, _| {
+    let list = Flex::vertical().runtime_layout(move |layout, container, context, _, _| {
         let resolved = resolve_input_control_style_for_context(
             list_style.as_ref(),
             context,
@@ -2533,27 +2976,37 @@ fn build_upload_list<VM: 'static>(
         layout.width = Some(Value::Static(Length::Px(resolved.width)));
         container.gap = Value::Static(Length::Px(metrics.upload_row_gap));
     });
-    for file in files {
-        list = list.child(upload_row(
-            file,
-            on_remove.clone(),
-            disabled.clone(),
-            style.clone(),
-        ));
-    }
-    list.into()
+    let files_for_rows = files.clone();
+    list.child(For::new(
+        files.value(),
+        |file| file.id.as_str().to_string(),
+        move |_index, file| {
+            upload_row(
+                file.clone(),
+                files_for_rows.clone(),
+                on_remove.clone(),
+                disabled.clone(),
+                style.clone(),
+            )
+        },
+    ))
+    .into()
 }
 
 fn upload_row<VM: 'static>(
     file: UploadFile,
+    files: InputControlValue<Vec<UploadFile>>,
     on_remove: Option<ValueCommand<VM, UploadRemove>>,
     disabled: Value<bool>,
     style: Option<StyleResolver<UploadStyle>>,
 ) -> Element<VM> {
     let id = file.id.clone();
-    let remove = on_remove.map(|command| {
+    let remove = (files.is_local() || on_remove.is_some()).then(|| {
         Command::new_with_context(move |vm, ctx| {
-            command.execute_with_context(vm, UploadRemove { id: id.clone() }, ctx);
+            files.update_local(|files| files.retain(|file| file.id != id));
+            if let Some(command) = on_remove.as_ref() {
+                command.execute_with_context(vm, UploadRemove { id: id.clone() }, ctx);
+            }
         })
     });
     let status = upload_status_text(&file.status);
@@ -2569,7 +3022,12 @@ fn upload_row<VM: 'static>(
                 .child(Text::new(status).style_full(muted_text_style)),
         );
     if let Some(command) = remove {
-        footer = footer.child(upload_action_button(ICON_DELETE, disabled, command));
+        footer = footer.child(upload_action_button(
+            ICON_DELETE,
+            format!("Remove {}", file.name),
+            disabled,
+            command,
+        ));
     }
     let row_style = style.clone();
     Flex::vertical()
@@ -2599,7 +3057,11 @@ fn upload_row<VM: 'static>(
                         ),
                 ),
         )
-        .child(ProgressBar::<VM>::new(file.progress()).height(dp(8.0)))
+        .child(
+            ProgressBar::<VM>::new(file.progress())
+                .label(format!("Upload progress for {}", file.name))
+                .height(dp(8.0)),
+        )
         .child(footer)
         .into()
 }
@@ -2614,6 +3076,23 @@ fn validate_upload_paths(
     let mut files = Vec::new();
     let mut rejected = Vec::new();
     for path in paths {
+        let metadata = match std::fs::metadata(&path) {
+            Ok(metadata) => metadata,
+            Err(error) => {
+                rejected.push(UploadRejection {
+                    path,
+                    reason: format!("Unable to read file metadata: {error}"),
+                });
+                continue;
+            }
+        };
+        if !metadata.is_file() {
+            rejected.push(UploadRejection {
+                path,
+                reason: "Only files can be uploaded".to_string(),
+            });
+            continue;
+        }
         if max_files
             .map(|max| existing_count.saturating_add(files.len()) >= max)
             .unwrap_or(false)
@@ -2631,8 +3110,8 @@ fn validate_upload_paths(
             });
             continue;
         }
-        let size = std::fs::metadata(&path).ok().map(|metadata| metadata.len());
-        if let (Some(size), Some(max_size)) = (size, max_file_size) {
+        let size = metadata.len();
+        if let Some(max_size) = max_file_size {
             if size > max_size {
                 rejected.push(UploadRejection {
                     path,
@@ -2642,10 +3121,28 @@ fn validate_upload_paths(
             }
         }
         let mut file = UploadFile::from_path(path);
-        file.size_bytes = size;
+        file.size_bytes = Some(size);
         files.push(file);
     }
     UploadSelection { files, rejected }
+}
+
+fn append_upload_selection(
+    files: &InputControlValue<Vec<UploadFile>>,
+    selection: &UploadSelection,
+) {
+    if selection.files.is_empty() {
+        return;
+    }
+    files.update_local(|current| {
+        for selected in &selection.files {
+            if let Some(existing) = current.iter_mut().find(|file| file.id == selected.id) {
+                *existing = selected.clone();
+            } else {
+                current.push(selected.clone());
+            }
+        }
+    });
 }
 
 fn month_start(date: NaiveDate) -> NaiveDate {
@@ -2659,11 +3156,25 @@ fn add_months(date: NaiveDate, months: i32) -> NaiveDate {
     NaiveDate::from_ymd_opt(year, month, 1).unwrap_or(date)
 }
 
-fn calendar_days(month: NaiveDate) -> Vec<NaiveDate> {
-    let start = month - Duration::days(month.weekday().num_days_from_monday() as i64);
+fn calendar_days(month: NaiveDate) -> Vec<Option<NaiveDate>> {
+    let month = month_start(month);
+    let leading_days = i64::from(month.weekday().num_days_from_monday());
     (0..42)
-        .map(|offset| start + Duration::days(offset))
+        .map(|offset| month.checked_add_signed(Duration::days(i64::from(offset) - leading_days)))
         .collect()
+}
+
+fn upload_file_id_for_path(path: &std::path::Path) -> UploadFileId {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+
+    let bytes = path.as_os_str().as_encoded_bytes();
+    let mut id = String::with_capacity("path:".len() + bytes.len() * 2);
+    id.push_str("path:");
+    for byte in bytes {
+        id.push(HEX[(byte >> 4) as usize] as char);
+        id.push(HEX[(byte & 0x0f) as usize] as char);
+    }
+    UploadFileId::new(id)
 }
 
 fn format_date(date: NaiveDate) -> String {
@@ -2686,7 +3197,17 @@ fn parse_number(text: &str, min: Option<f64>, max: Option<f64>) -> Option<f64> {
         .map(|value| clamp_number(value, min, max))
 }
 
+fn normalize_number_bounds(min: Option<f64>, max: Option<f64>) -> (Option<f64>, Option<f64>) {
+    let min = min.filter(|value| value.is_finite());
+    let max = max.filter(|value| value.is_finite());
+    match (min, max) {
+        (Some(min), Some(max)) if min > max => (Some(max), Some(min)),
+        bounds => bounds,
+    }
+}
+
 fn clamp_number(mut value: f64, min: Option<f64>, max: Option<f64>) -> f64 {
+    let (min, max) = normalize_number_bounds(min, max);
     if let Some(min) = min {
         value = value.max(min);
     }
@@ -2696,11 +3217,69 @@ fn clamp_number(mut value: f64, min: Option<f64>, max: Option<f64>) -> f64 {
     value
 }
 
-fn format_number(value: f64) -> String {
-    if value.fract().abs() < f64::EPSILON {
+pub(crate) fn normalize_number_input_accessibility_value(
+    value: f64,
+    current_text: &str,
+    min: Option<f64>,
+    max: Option<f64>,
+    step: f64,
+) -> Option<String> {
+    if !value.is_finite() {
+        return None;
+    }
+    let (min, max) = normalize_number_bounds(min, max);
+    let value = clamp_number(value, min, max);
+    let precision = decimal_places(current_text)
+        .max(decimal_places(&step.abs().to_string()))
+        .max(decimal_places(&value.to_string()))
+        .min(15);
+    Some(format_number(value, precision))
+}
+
+fn stepped_number_precision(
+    current_text: &str,
+    step: f64,
+    next: f64,
+    min: Option<f64>,
+    max: Option<f64>,
+) -> usize {
+    let mut precision = decimal_places(current_text).max(decimal_places(&step.abs().to_string()));
+    if min == Some(next) {
+        precision = precision.max(decimal_places(&next.to_string()));
+    }
+    if max == Some(next) {
+        precision = precision.max(decimal_places(&next.to_string()));
+    }
+    precision.min(15)
+}
+
+fn decimal_places(text: &str) -> usize {
+    let text = text.trim();
+    if text.is_empty() {
+        return 0;
+    }
+    let unsigned = text
+        .strip_prefix('+')
+        .or_else(|| text.strip_prefix('-'))
+        .unwrap_or(text);
+    let (mantissa, exponent) = unsigned
+        .split_once('e')
+        .or_else(|| unsigned.split_once('E'))
+        .map(|(mantissa, exponent)| (mantissa, exponent.parse::<i32>().unwrap_or_default()))
+        .unwrap_or((unsigned, 0));
+    let fraction_digits = mantissa
+        .split_once('.')
+        .map(|(_, fraction)| fraction.len())
+        .unwrap_or(0) as i32;
+    fraction_digits.saturating_sub(exponent).max(0) as usize
+}
+
+fn format_number(value: f64, precision: usize) -> String {
+    let value = if value == 0.0 { 0.0 } else { value };
+    if precision == 0 {
         format!("{value:.0}")
     } else {
-        format!("{value:.2}")
+        format!("{value:.precision$}")
             .trim_end_matches('0')
             .trim_end_matches('.')
             .to_string()
@@ -2742,6 +3321,16 @@ fn color_channel_label(color: Value<Color>, channel: ColorPickerChangeTrigger) -
     match color {
         Value::Static(color) => Value::Static(read(color)),
         Value::Signal(color) => Value::Signal(color.map(read)),
+    }
+}
+
+fn color_channel_accessible_label(channel: ColorPickerChangeTrigger) -> &'static str {
+    match channel {
+        ColorPickerChangeTrigger::Red => "Red channel",
+        ColorPickerChangeTrigger::Green => "Green channel",
+        ColorPickerChangeTrigger::Blue => "Blue channel",
+        ColorPickerChangeTrigger::Alpha => "Alpha channel",
+        ColorPickerChangeTrigger::Swatch => "Color",
     }
 }
 
@@ -2804,10 +3393,21 @@ fn upload_status_text(status: &UploadStatus) -> String {
     match status {
         UploadStatus::Queued => "Queued".to_string(),
         UploadStatus::Uploading { progress } => {
-            format!("Uploading {:.0}%", progress.clamp(0.0, 1.0) * 100.0)
+            format!(
+                "Uploading {:.0}%",
+                normalized_upload_progress(*progress) * 100.0
+            )
         }
         UploadStatus::Complete => "Complete".to_string(),
         UploadStatus::Error(message) => format!("Error: {message}"),
+    }
+}
+
+fn normalized_upload_progress(progress: f32) -> f32 {
+    if progress.is_finite() {
+        progress.clamp(0.0, 1.0)
+    } else {
+        0.0
     }
 }
 
@@ -2914,51 +3514,6 @@ fn upload_drop_zone_style(context: &StyleContext<'_>, state: WidgetState) -> Con
     style
 }
 
-fn icon_surface_style(context: &StyleContext<'_>) -> ContainerStyle {
-    let button = icon_button_style(context);
-    let mut style = ContainerStyle::default_for_theme(context.theme);
-    style.surface.background = Some(button.background.normal);
-    style.surface.border_color = Some(button.border.normal);
-    style.surface.border_width = Some(button.border_width);
-    style.surface.border_radius = Some(button.radius);
-    style.surface.shadow = button.surface.shadow;
-    style
-}
-
-fn input_icon_surface_style(context: &StyleContext<'_>) -> ContainerStyle {
-    let button = input_icon_button_style(context);
-    let mut style = ContainerStyle::default_for_theme(context.theme);
-    style.surface.background = Some(button.background.normal);
-    style.surface.border_color = Some(button.border.normal);
-    style.surface.border_width = Some(button.border_width);
-    style.surface.border_radius = Some(button.radius);
-    style.surface.shadow = button.surface.shadow;
-    style
-}
-
-fn number_stepper_surface_style(context: &StyleContext<'_>, state: WidgetState) -> ContainerStyle {
-    let button = component_button_style(context, ButtonVariantKind::Secondary);
-    let input = component_input_style(context);
-    let mut style = ContainerStyle::default_for_theme(context.theme);
-    style.surface.background = Some(button.background.resolve(state));
-    style.surface.border_color = Some(button.border.resolve(state));
-    style.surface.border_width = Some(button.border_width);
-    style.surface.border_radius = Some(input.radius);
-    style.surface.shadow = None;
-    style
-}
-
-fn ghost_action_surface_style(context: &StyleContext<'_>, state: WidgetState) -> ContainerStyle {
-    let button = component_button_style(context, ButtonVariantKind::Ghost);
-    let mut style = ContainerStyle::default_for_theme(context.theme);
-    style.surface.background = Some(button.background.resolve(state));
-    style.surface.border_color = Some(button.border.resolve(state));
-    style.surface.border_width = Some(button.border_width);
-    style.surface.border_radius = Some(Value::Static(context.theme.radius.lg));
-    style.surface.shadow = None;
-    style
-}
-
 fn color_trigger_accessible_button_style(context: &StyleContext<'_>) -> ButtonStyle {
     let mut style = component_button_style(context, ButtonVariantKind::Secondary);
     style.foreground = value_color(
@@ -2985,6 +3540,7 @@ fn picker_popover_content_style(context: &StyleContext<'_>) -> ContainerStyle {
 
 fn icon_button_style(context: &StyleContext<'_>) -> ButtonStyle {
     let mut style = component_button_style(context, ButtonVariantKind::Ghost);
+    style.foreground = transparent_button_foreground();
     style.radius = Value::Static(dp(8.0));
     style.padding_x = dp(0.0);
     style.padding_y = dp(0.0);
@@ -2994,11 +3550,41 @@ fn icon_button_style(context: &StyleContext<'_>) -> ButtonStyle {
 
 fn input_icon_button_style(context: &StyleContext<'_>) -> ButtonStyle {
     let mut style = component_button_style(context, ButtonVariantKind::Secondary);
+    style.foreground = transparent_button_foreground();
     style.radius = component_input_style(context).radius;
     style.padding_x = dp(0.0);
     style.padding_y = dp(0.0);
     style.min_height = advanced_input_metrics(context.theme).control_height;
     style
+}
+
+fn upload_action_button_style(context: &StyleContext<'_>) -> ButtonStyle {
+    let mut style = component_button_style(context, ButtonVariantKind::Ghost);
+    style.foreground = transparent_button_foreground();
+    style.radius = Value::Static(context.theme.radius.lg);
+    style.padding_x = dp(0.0);
+    style.padding_y = dp(0.0);
+    style.min_height = advanced_input_metrics(context.theme).upload_action_size;
+    style
+}
+
+fn number_step_button_style(context: &StyleContext<'_>) -> ButtonStyle {
+    let mut style = component_button_style(context, ButtonVariantKind::Secondary);
+    style.foreground = transparent_button_foreground();
+    style.radius = component_input_style(context).radius;
+    style.padding_x = dp(0.0);
+    style.padding_y = dp(0.0);
+    style.min_height = advanced_input_metrics(context.theme).control_height;
+    style
+}
+
+fn transparent_button_foreground() -> StateValue<Value<Color>> {
+    value_color(
+        Color::TRANSPARENT,
+        Color::TRANSPARENT,
+        Color::TRANSPARENT,
+        Color::TRANSPARENT,
+    )
 }
 
 fn time_option_button_style(context: &StyleContext<'_>) -> ButtonStyle {
@@ -3154,10 +3740,6 @@ fn panel_style(context: &StyleContext<'_>) -> ContainerStyle {
     style
 }
 
-fn color_preview_style(context: &StyleContext<'_>, color: Color) -> ContainerStyle {
-    color_preview_value_style(context, Value::Static(color))
-}
-
 fn color_preview_value_style(context: &StyleContext<'_>, color: Value<Color>) -> ContainerStyle {
     let (_, _, _, _, _, _, outline) = mode_colors(context);
     let mut style = ContainerStyle::default_for_theme(context.theme);
@@ -3169,9 +3751,22 @@ fn color_preview_value_style(context: &StyleContext<'_>, color: Value<Color>) ->
     style
 }
 
-fn color_swatch_style(context: &StyleContext<'_>, color: Color) -> ContainerStyle {
-    let mut style = color_preview_style(context, color);
-    style.surface.border_radius = Some(Value::Static(dp(7.0)));
+fn color_swatch_button_style(context: &StyleContext<'_>, color: Color) -> ButtonStyle {
+    let mut style = component_button_style(context, ButtonVariantKind::Ghost);
+    style.background = value_color(color, color.lighten(0.08), color.darken(0.08), color);
+    let border = component_input_style(context).border.normal.resolve();
+    style.border = value_color(border, border, border, border.with_alpha_factor(0.5));
+    style.foreground = value_color(
+        Color::TRANSPARENT,
+        Color::TRANSPARENT,
+        Color::TRANSPARENT,
+        Color::TRANSPARENT,
+    );
+    style.border_width = Value::Static(dp(1.0));
+    style.radius = Value::Static(dp(7.0));
+    style.padding_x = dp(0.0);
+    style.padding_y = dp(0.0);
+    style.min_height = dp(0.0);
     style
 }
 
@@ -3219,6 +3814,36 @@ fn muted_text_style(context: &StyleContext<'_>) -> TextWidgetStyle {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    struct TemporaryUploadFile {
+        path: PathBuf,
+    }
+
+    impl TemporaryUploadFile {
+        fn new(name: &str, contents: &[u8]) -> Self {
+            static NEXT_ID: AtomicU64 = AtomicU64::new(0);
+
+            let directory = std::env::temp_dir().join(format!(
+                "tgui-upload-validation-test-{}-{}",
+                std::process::id(),
+                NEXT_ID.fetch_add(1, Ordering::Relaxed)
+            ));
+            std::fs::create_dir_all(&directory).expect("create upload validation directory");
+            let path = directory.join(name);
+            std::fs::write(&path, contents).expect("write upload validation file");
+            Self { path }
+        }
+    }
+
+    impl Drop for TemporaryUploadFile {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_file(&self.path);
+            if let Some(directory) = self.path.parent() {
+                let _ = std::fs::remove_dir(directory);
+            }
+        }
+    }
 
     fn relative_luminance(color: Color) -> f32 {
         fn linear(channel: u8) -> f32 {
@@ -3245,26 +3870,30 @@ mod tests {
     fn calendar_month_has_six_weeks() {
         let days = calendar_days(NaiveDate::from_ymd_opt(2026, 6, 1).unwrap());
         assert_eq!(days.len(), 42);
-        assert_eq!(days[0], NaiveDate::from_ymd_opt(2026, 6, 1).unwrap());
+        assert_eq!(days[0], Some(NaiveDate::from_ymd_opt(2026, 6, 1).unwrap()));
+    }
+
+    #[test]
+    fn calendar_month_grid_is_defined_at_date_bounds() {
+        assert_eq!(calendar_days(NaiveDate::MIN).len(), 42);
+        assert_eq!(calendar_days(NaiveDate::MAX).len(), 42);
     }
 
     #[test]
     fn upload_validation_rejects_extensions() {
-        let selection = validate_upload_paths(
-            vec![PathBuf::from("a.exe")],
-            &["png".to_string()],
-            None,
-            None,
-            0,
-        );
+        let file = TemporaryUploadFile::new("a.exe", b"application");
+        let selection =
+            validate_upload_paths(vec![file.path.clone()], &["png".to_string()], None, None, 0);
         assert!(selection.files.is_empty());
         assert_eq!(selection.rejected.len(), 1);
     }
 
     #[test]
     fn upload_validation_counts_existing_files() {
+        let first = TemporaryUploadFile::new("a.png", b"a");
+        let second = TemporaryUploadFile::new("b.png", b"b");
         let selection = validate_upload_paths(
-            vec![PathBuf::from("a.png"), PathBuf::from("b.png")],
+            vec![first.path.clone(), second.path.clone()],
             &["png".to_string()],
             Some(2),
             None,
@@ -3275,8 +3904,61 @@ mod tests {
     }
 
     #[test]
+    fn upload_validation_rejects_metadata_failures() {
+        let missing = std::env::temp_dir().join(format!(
+            "tgui-upload-missing-{}-{}",
+            std::process::id(),
+            AtomicU64::new(0).fetch_add(1, Ordering::Relaxed)
+        ));
+        let selection = validate_upload_paths(vec![missing], &[], None, None, 0);
+
+        assert!(selection.files.is_empty());
+        assert_eq!(selection.rejected.len(), 1);
+        assert!(selection.rejected[0]
+            .reason
+            .starts_with("Unable to read file metadata:"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn upload_file_ids_distinguish_non_utf8_paths() {
+        use std::os::unix::ffi::OsStringExt;
+
+        let first = UploadFile::from_path(PathBuf::from(std::ffi::OsString::from_vec(vec![
+            b'f', b'i', b'l', b'e', b'-', 0x80,
+        ])));
+        let second = UploadFile::from_path(PathBuf::from(std::ffi::OsString::from_vec(vec![
+            b'f', b'i', b'l', b'e', b'-', 0x81,
+        ])));
+
+        assert_ne!(first.id, second.id);
+    }
+
+    #[test]
+    fn upload_non_finite_progress_falls_back_to_zero() {
+        for progress in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+            let file = UploadFile {
+                id: UploadFileId::new("non-finite"),
+                path: PathBuf::from("non-finite.bin"),
+                name: "non-finite.bin".to_string(),
+                size_bytes: None,
+                status: UploadStatus::Uploading { progress },
+            };
+            assert_eq!(file.progress(), 0.0);
+            assert_eq!(upload_status_text(&file.status), "Uploading 0%");
+        }
+    }
+
+    #[test]
     fn number_clamp_respects_bounds() {
         assert_eq!(parse_number("42", Some(10.0), Some(20.0)), Some(20.0));
+    }
+
+    #[test]
+    fn number_parser_rejects_non_finite_values() {
+        assert_eq!(parse_number("NaN", None, None), None);
+        assert_eq!(parse_number("inf", None, None), None);
+        assert_eq!(parse_number("-inf", Some(-10.0), Some(10.0)), None);
     }
 
     #[test]

@@ -152,6 +152,84 @@ fn clicking_checkbox_dispatches_toggled_value() {
 }
 
 #[test]
+fn toggle_controls_dispatch_change_and_click_from_the_same_pointer_activation() {
+    let invalidation = InvalidationSignal::new();
+    let changes = Arc::new(Mutex::new(Vec::new()));
+    let clicks = Arc::new(AtomicUsize::new(0));
+    let changes_ref = Arc::clone(&changes);
+    let clicks_ref = Arc::clone(&clicks);
+    let tree = WidgetTree::new(
+        Checkbox::new(false)
+            .on_change(ValueCommand::new(move |_vm: &mut TestVm, value| {
+                changes_ref.lock().unwrap().push(value);
+            }))
+            .on_click(Command::new(move |_vm: &mut TestVm| {
+                clicks_ref.fetch_add(1, Ordering::SeqCst);
+            }))
+            .size(dp(120.0), dp(30.0)),
+    );
+    let mut handler = test_handler(Some(tree), invalidation);
+    let viewport = handler.viewport_rect();
+    let frame = handler
+        .computed_scene()
+        .hit_regions
+        .iter()
+        .find_map(|region| match &region.interaction {
+            HitInteraction::Checkbox { .. } => Some(region.rect),
+            _ => None,
+        })
+        .expect("checkbox hit region should exist");
+
+    handler.cursor_position = Some(Point::new(
+        frame.x + frame.width * 0.5,
+        frame.y + frame.height * 0.5,
+    ));
+    handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Left);
+
+    assert_eq!(*changes.lock().unwrap(), vec![true]);
+    assert_eq!(clicks.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn selected_radio_click_is_idempotent_but_still_dispatches_on_click() {
+    let invalidation = InvalidationSignal::new();
+    let changes = Arc::new(Mutex::new(Vec::new()));
+    let clicks = Arc::new(AtomicUsize::new(0));
+    let changes_ref = Arc::clone(&changes);
+    let clicks_ref = Arc::clone(&clicks);
+    let tree = WidgetTree::new(
+        crate::ui::widget::Radio::new(true)
+            .on_change(ValueCommand::new(move |_vm: &mut TestVm, value| {
+                changes_ref.lock().unwrap().push(value);
+            }))
+            .on_click(Command::new(move |_vm: &mut TestVm| {
+                clicks_ref.fetch_add(1, Ordering::SeqCst);
+            }))
+            .size(dp(120.0), dp(30.0)),
+    );
+    let mut handler = test_handler(Some(tree), invalidation);
+    let viewport = handler.viewport_rect();
+    let frame = handler
+        .computed_scene()
+        .hit_regions
+        .iter()
+        .find_map(|region| match &region.interaction {
+            HitInteraction::Radio { .. } => Some(region.rect),
+            _ => None,
+        })
+        .expect("radio hit region should exist");
+
+    handler.cursor_position = Some(Point::new(
+        frame.x + frame.width * 0.5,
+        frame.y + frame.height * 0.5,
+    ));
+    handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Left);
+
+    assert!(changes.lock().unwrap().is_empty());
+    assert_eq!(clicks.load(Ordering::SeqCst), 1);
+}
+
+#[test]
 fn focused_input_receives_inserted_text_via_on_change() {
     let invalidation = InvalidationSignal::new();
     let controller = TextController::from("hi");

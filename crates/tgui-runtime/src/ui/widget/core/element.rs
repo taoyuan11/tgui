@@ -200,6 +200,7 @@ impl<VM> Element<VM> {
                 options: options
                     .into_iter()
                     .map(|option| SelectOptionState {
+                        widget_id: option.widget_id,
                         label: option.label,
                         selected: option.selected,
                         disabled: option.disabled,
@@ -224,6 +225,7 @@ impl<VM> Element<VM> {
                 owner_id,
                 option_index,
                 option: SelectOptionState {
+                    widget_id: option.widget_id,
                     label: option.label,
                     selected: option.selected,
                     disabled: option.disabled,
@@ -236,6 +238,7 @@ impl<VM> Element<VM> {
             },
             WidgetKind::Slider {
                 value,
+                label,
                 min,
                 max,
                 step,
@@ -252,6 +255,7 @@ impl<VM> Element<VM> {
                 runtime_layout,
             } => WidgetKind::Slider {
                 value,
+                label,
                 min,
                 max,
                 step,

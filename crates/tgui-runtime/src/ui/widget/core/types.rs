@@ -3,6 +3,7 @@ mod lifecycle;
 pub(crate) use self::lifecycle::{LifecycleSelectOption, LifecycleSnapshot, LifecycleWidgetKind};
 use super::*;
 use crate::foundation::form::ValidationVisualState;
+use crate::ui::widget::common::SelectLabelState;
 use crate::ui::widget::r#virtual::{
     ItemLayout, VirtualArrangement, VirtualResolvedItemMeta, VirtualRuntimeState, VirtualWindowPlan,
 };
@@ -288,7 +289,7 @@ pub(crate) enum ResolvedWidgetKind<VM> {
         runtime_style: ResolvedRuntimeStyle<WidgetSwitchStyle>,
     },
     Select {
-        selected_label: Value<Option<String>>,
+        selected_label: SelectLabelState,
         placeholder: Value<String>,
         options: Vec<SelectOptionState<VM>>,
         open: Option<Value<bool>>,
@@ -307,6 +308,7 @@ pub(crate) enum ResolvedWidgetKind<VM> {
     },
     Slider {
         value: Value<f32>,
+        label: Option<Value<String>>,
         min: f32,
         max: f32,
         step: f32,
@@ -690,6 +692,7 @@ impl<VM> Clone for ResolvedWidgetKind<VM> {
             },
             Self::Slider {
                 value,
+                label,
                 min,
                 max,
                 step,
@@ -706,6 +709,7 @@ impl<VM> Clone for ResolvedWidgetKind<VM> {
                 runtime_style,
             } => Self::Slider {
                 value: value.clone(),
+                label: label.clone(),
                 min: *min,
                 max: *max,
                 step: *step,

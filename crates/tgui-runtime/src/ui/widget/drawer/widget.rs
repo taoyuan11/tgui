@@ -376,6 +376,8 @@ impl<VM: 'static> From<Drawer<VM>> for Element<VM> {
                 FocusScopeOptions::new()
                     .trap(true)
                     .auto_focus_first(auto_focus_first)
+                    .suppress_interactions_when_inactive()
+                    .hide_from_accessibility_when_inactive()
                     .active(open.clone()),
             )
             .child(backdrop_element)
@@ -487,6 +489,8 @@ fn build_push_drawer_host<VM: 'static>(content: Element<VM>, drawer: Drawer<VM>)
             FocusScopeOptions::new()
                 .trap(true)
                 .auto_focus_first(auto_focus_first)
+                .suppress_interactions_when_inactive()
+                .hide_from_accessibility_when_inactive()
                 .active(open.clone()),
         )
         .style_full_with_style_sheet(move |context, style_sheet, visual, state| {

@@ -1,6 +1,7 @@
 use std::sync::Arc;
 use std::time::Instant;
 
+mod calendar;
 mod combobox;
 mod editing;
 mod focus;
@@ -16,6 +17,7 @@ mod overlay_close;
 mod platform_keys;
 mod pointer_click;
 mod pointer_press;
+mod radio_group;
 mod scrolling;
 mod select_state;
 mod session;
@@ -63,6 +65,27 @@ pub(super) use self::text_input::{
 };
 use crate::platform::backend::event_loop::ActiveEventLoop;
 use crate::rendering::renderer::RenderStatus;
+
+pub(super) fn normalize_text_input_value(text: &str, multiline: bool) -> String {
+    let mut normalized = String::with_capacity(text.len());
+    let mut chars = text.chars().peekable();
+    while let Some(character) = chars.next() {
+        match character {
+            '\r' => {
+                if chars.peek() == Some(&'\n') {
+                    chars.next();
+                }
+                if multiline {
+                    normalized.push('\n');
+                }
+            }
+            '\n' | '\u{0085}' | '\u{2028}' | '\u{2029}' if multiline => normalized.push('\n'),
+            '\n' | '\u{0085}' | '\u{2028}' | '\u{2029}' => {}
+            character => normalized.push(character),
+        }
+    }
+    normalized
+}
 
 impl<VM: 'static> BoundRuntimeHandler<VM> {
     fn flush_text_input_session(&mut self, widget_id: WidgetId) -> TextInputFlushOutcome {
@@ -247,6 +270,18 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             return false;
         }
 
+        let requests_context_menu =
+            matches!(event.physical_key, PhysicalKey::Code(KeyCode::ContextMenu))
+                || (matches!(event.physical_key, PhysicalKey::Code(KeyCode::F10))
+                    && self.modifiers == crate::platform::keyboard::ModifiersState::SHIFT);
+        if requests_context_menu
+            && self
+                .focused_widget_id()
+                .is_some_and(|widget_id| self.open_context_menu_semantically(widget_id))
+        {
+            return true;
+        }
+
         // When the platform IME is composing text, key presses such as pinyin
         // letters, candidate navigation, Enter, and Backspace should stay owned
         // by the IME. If we also treat them as direct text-edit commands, CJK
@@ -318,19 +353,28 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 self.advance_focus(self.modifiers.shift_key())
             }
             PhysicalKey::Code(KeyCode::Enter) | PhysicalKey::Code(KeyCode::NumpadEnter) => {
-                if self.activate_first_open_popover_option_from_input() {
+                if self.activate_focused_select_option() {
                     true
-                } else if self.focused_text_input_id().is_none() {
+                } else if self.activate_first_open_popover_option_from_input() {
+                    true
+                } else if let Some(id) = self.focused_text_input_id() {
+                    if is_primary_shortcut_modifier(self.modifiers) || self.modifiers.alt_key() {
+                        false
+                    } else {
+                        self.sync_text_input_buffer(id)
+                            .is_some_and(|region| region.multiline)
+                            && self.insert_text_at_focused_input("\n")
+                    }
+                } else {
                     self.activate_focused_data_grid_cell(true, false)
                         || self.activate_focused_tree_node(true, false)
                         || self.activate_focused_list_item(true, false)
                         || self.activate_focused_widget(true, false)
-                } else {
-                    false
                 }
             }
             PhysicalKey::Code(KeyCode::Space) if self.focused_text_input_id().is_none() => {
-                self.activate_focused_data_grid_cell(false, true)
+                self.activate_focused_select_option()
+                    || self.activate_focused_data_grid_cell(false, true)
                     || self.activate_focused_tree_node(false, true)
                     || self.activate_focused_list_item(false, true)
                     || self.activate_focused_widget(false, true)
@@ -338,7 +382,15 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             PhysicalKey::Code(KeyCode::Backspace) => self.delete_backward_at_focused_input(),
             PhysicalKey::Code(KeyCode::Delete) => self.delete_forward_at_focused_input(),
             PhysicalKey::Code(KeyCode::ArrowLeft) => {
-                if self.focused_tab_is_horizontal() == Some(true) && self.move_focused_tab(-1) {
+                if self.move_focused_calendar_day_by_days(-1) {
+                    true
+                } else if self.move_focused_radio_group(crate::ui::layout::Axis::Horizontal, -1) {
+                    true
+                } else if self.focused_tab_is_horizontal() == Some(true)
+                    && self.move_focused_tab(-1)
+                {
+                    true
+                } else if self.adjust_focused_data_grid_resize(-1) {
                     true
                 } else if self.move_focused_data_grid_cell(0, -1, self.modifiers.shift_key()) {
                     true
@@ -346,7 +398,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     true
                 } else if self.adjust_focused_splitter(crate::ui::layout::Axis::Horizontal, -1) {
                     true
-                } else if self.adjust_focused_slider(-1, None) {
+                } else if self.adjust_focused_slider(-1, None, Some(true)) {
                     true
                 } else {
                     let extend = self.modifiers.shift_key();
@@ -367,7 +419,14 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 }
             }
             PhysicalKey::Code(KeyCode::ArrowRight) => {
-                if self.focused_tab_is_horizontal() == Some(true) && self.move_focused_tab(1) {
+                if self.move_focused_calendar_day_by_days(1) {
+                    true
+                } else if self.move_focused_radio_group(crate::ui::layout::Axis::Horizontal, 1) {
+                    true
+                } else if self.focused_tab_is_horizontal() == Some(true) && self.move_focused_tab(1)
+                {
+                    true
+                } else if self.adjust_focused_data_grid_resize(1) {
                     true
                 } else if self.move_focused_data_grid_cell(0, 1, self.modifiers.shift_key()) {
                     true
@@ -375,7 +434,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     true
                 } else if self.adjust_focused_splitter(crate::ui::layout::Axis::Horizontal, 1) {
                     true
-                } else if self.adjust_focused_slider(1, None) {
+                } else if self.adjust_focused_slider(1, None, Some(true)) {
                     true
                 } else {
                     let extend = self.modifiers.shift_key();
@@ -396,7 +455,11 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 }
             }
             PhysicalKey::Code(KeyCode::ArrowUp) => {
-                self.focus_open_popover_option_from_input(-1)
+                self.adjust_focused_number_input(1)
+                    || self.move_focused_select_option(-1)
+                    || self.focus_open_popover_option_from_input(-1)
+                    || self.move_focused_calendar_day_by_days(-7)
+                    || self.move_focused_radio_group(crate::ui::layout::Axis::Vertical, -1)
                     || (self.focused_tab_is_horizontal() == Some(false)
                         && self.move_focused_tab(-1))
                     || self.move_focused_data_grid_cell(-1, 0, self.modifiers.shift_key())
@@ -405,11 +468,15 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     || self.move_focused_list_item(-1, self.modifiers.shift_key())
                     || self.enter_focused_list_root(true, self.modifiers.shift_key())
                     || self.adjust_focused_splitter(crate::ui::layout::Axis::Vertical, -1)
-                    || self.adjust_focused_slider(1, None)
+                    || self.adjust_focused_slider(1, None, Some(false))
                     || self.move_focused_input_cursor_vertically(-1, self.modifiers.shift_key())
             }
             PhysicalKey::Code(KeyCode::ArrowDown) => {
-                self.focus_open_popover_option_from_input(1)
+                self.adjust_focused_number_input(-1)
+                    || self.move_focused_select_option(1)
+                    || self.focus_open_popover_option_from_input(1)
+                    || self.move_focused_calendar_day_by_days(7)
+                    || self.move_focused_radio_group(crate::ui::layout::Axis::Vertical, 1)
                     || (self.focused_tab_is_horizontal() == Some(false) && self.move_focused_tab(1))
                     || self.move_focused_data_grid_cell(1, 0, self.modifiers.shift_key())
                     || self.move_focused_tree_node(1, self.modifiers.shift_key())
@@ -417,28 +484,30 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     || self.move_focused_list_item(1, self.modifiers.shift_key())
                     || self.enter_focused_list_root(false, self.modifiers.shift_key())
                     || self.adjust_focused_splitter(crate::ui::layout::Axis::Vertical, 1)
-                    || self.adjust_focused_slider(-1, None)
+                    || self.adjust_focused_slider(-1, None, Some(false))
                     || self.move_focused_input_cursor_vertically(1, self.modifiers.shift_key())
             }
             PhysicalKey::Code(KeyCode::Home) => {
-                self.move_focused_tab_to_edge(false)
+                self.move_focused_calendar_day_to_week_edge(false)
+                    || self.move_focused_tab_to_edge(false)
                     || self.move_focused_data_grid_cell_to_edge(false, self.modifiers.shift_key())
                     || self.move_focused_tree_node_to_edge(false, self.modifiers.shift_key())
                     || self.enter_focused_tree_root(false, self.modifiers.shift_key())
                     || self.move_focused_list_item_to_edge(false, self.modifiers.shift_key())
                     || self.enter_focused_list_root(false, self.modifiers.shift_key())
-                    || self.adjust_focused_slider(0, Some(false))
+                    || self.adjust_focused_slider(0, Some(false), None)
                     || self.move_focused_input_cursor(|_, _, _| 0, self.modifiers.shift_key())
                     || self.scroll_focused_region_to_edge(false)
             }
             PhysicalKey::Code(KeyCode::End) => {
-                self.move_focused_tab_to_edge(true)
+                self.move_focused_calendar_day_to_week_edge(true)
+                    || self.move_focused_tab_to_edge(true)
                     || self.move_focused_data_grid_cell_to_edge(true, self.modifiers.shift_key())
                     || self.move_focused_tree_node_to_edge(true, self.modifiers.shift_key())
                     || self.enter_focused_tree_root(true, self.modifiers.shift_key())
                     || self.move_focused_list_item_to_edge(true, self.modifiers.shift_key())
                     || self.enter_focused_list_root(true, self.modifiers.shift_key())
-                    || self.adjust_focused_slider(0, Some(true))
+                    || self.adjust_focused_slider(0, Some(true), None)
                     || self.move_focused_input_cursor(
                         |text: &str, _is_ascii: bool, _state: &TextEditState| text.len(),
                         self.modifiers.shift_key(),
@@ -446,7 +515,9 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     || self.scroll_focused_region_to_edge(true)
             }
             PhysicalKey::Code(KeyCode::PageUp) => {
-                self.page_focused_data_grid_cell(-1, self.modifiers.shift_key())
+                self.move_focused_calendar_day_by_months(-1)
+                    || self.page_focused_slider(1)
+                    || self.page_focused_data_grid_cell(-1, self.modifiers.shift_key())
                     || self.page_focused_tree_node(-1, self.modifiers.shift_key())
                     || self.enter_focused_tree_root(false, self.modifiers.shift_key())
                     || self.page_focused_list_item(-1, self.modifiers.shift_key())
@@ -454,7 +525,9 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     || self.scroll_focused_region_by_pages(-1)
             }
             PhysicalKey::Code(KeyCode::PageDown) => {
-                self.page_focused_data_grid_cell(1, self.modifiers.shift_key())
+                self.move_focused_calendar_day_by_months(1)
+                    || self.page_focused_slider(-1)
+                    || self.page_focused_data_grid_cell(1, self.modifiers.shift_key())
                     || self.page_focused_tree_node(1, self.modifiers.shift_key())
                     || self.enter_focused_tree_root(false, self.modifiers.shift_key())
                     || self.page_focused_list_item(1, self.modifiers.shift_key())
@@ -478,15 +551,9 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 && self.focused_text_input_id().is_some() =>
             {
                 match &event.logical_key {
-                    Key::Named(NamedKey::Enter) => {
-                        let Some(id) = self.focused_text_input_id() else {
-                            return false;
-                        };
-                        let Some(region) = self.sync_text_input_buffer(id) else {
-                            return false;
-                        };
-                        region.multiline && self.insert_text_at_focused_input("\n")
-                    }
+                    // Physical Enter/NumpadEnter are handled above. Keep this fallback for
+                    // platforms that report Enter without a mappable physical key.
+                    Key::Named(NamedKey::Enter) => self.insert_text_at_focused_input("\n"),
                     _ => event
                         .text
                         .as_ref()

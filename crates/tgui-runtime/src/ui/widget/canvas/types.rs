@@ -1,5 +1,13 @@
 use super::*;
 
+pub(crate) fn normalized_unit_interval(value: f32) -> f32 {
+    if value.is_finite() {
+        value.clamp(0.0, 1.0)
+    } else {
+        0.0
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct CanvasItemId(u64);
 
@@ -120,7 +128,7 @@ pub struct CanvasGradientStop {
 impl CanvasGradientStop {
     pub fn new(offset: f32, color: Color) -> Self {
         Self {
-            offset: offset.clamp(0.0, 1.0),
+            offset: normalized_unit_interval(offset),
             color,
         }
     }
@@ -282,7 +290,7 @@ impl CanvasColorFilter {
     }
 
     pub fn tint(color: Color, amount: f32) -> Self {
-        let amount = amount.clamp(0.0, 1.0);
+        let amount = normalized_unit_interval(amount);
         let rgba = color.to_linear_rgba_f32();
         let base = 1.0 - amount;
         Self::linear(

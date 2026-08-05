@@ -28,12 +28,13 @@ use crate::ui::layout::{Axis, Insets, Overflow};
 use crate::ui::theme::{Theme, ThemeMode, ThemeSet};
 use crate::ui::unit::{dp, sp, Dp, UnitContext};
 use crate::ui::widget::{
-    Button, Canvas, CanvasMouseButton, CanvasParagraphStyle, CanvasPointerEvent, CanvasRecorder,
-    CanvasShadow, CanvasStroke, CanvasTextStyle, CanvasTextVerticalAlign, CanvasTextWrap, Carousel,
-    Checkbox, ContainerStyle, CursorStyle, DataGrid, DataGridColumn, DataGridColumnPin,
-    DataGridRow, Flex, FocusScopeOptions, HitInteraction, HitRegion, Input, Point, ProgressBar,
-    Rect, ScrollView, Select, SelectOption, Slider, Spinner, Switch, Text, TextEditState, Textarea,
-    Tooltip, VirtualCacheState, WidgetKey, WidgetTree,
+    Button, Canvas, CanvasDragEvent, CanvasMouseButton, CanvasParagraphStyle, CanvasPointerEvent,
+    CanvasRecorder, CanvasShadow, CanvasStroke, CanvasTextStyle, CanvasTextVerticalAlign,
+    CanvasTextWrap, Carousel, Checkbox, Combobox, ComboboxOption, ContainerStyle, CursorStyle,
+    DataGrid, DataGridColumn, DataGridColumnPin, DataGridRow, Flex, FocusScopeOptions,
+    HitInteraction, HitRegion, Input, Point, ProgressBar, Rect, ScrollView, Select, SelectOption,
+    Slider, Spinner, Switch, Text, TextEditState, Textarea, Tooltip, VirtualCacheState, WidgetKey,
+    WidgetTree,
 };
 use crate::ui::widget::{Element, Stack, WidgetId};
 #[cfg(feature = "audio")]
@@ -264,6 +265,63 @@ fn media_dispatch_tracks_handlers_added_and_removed_by_dynamic_revision() {
     assert!(handler.media_event_states.is_empty());
 }
 
+#[test]
+fn media_event_walk_tracks_open_portal_and_active_rich_tooltip_content() {
+    let invalidation = InvalidationSignal::new();
+    let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+    let portal_open = context.state(false);
+    let source = crate::media::MediaSource::bytes(
+        br#"<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"/>"#,
+    );
+
+    let portal_image: Element<TestVm> = crate::ui::widget::Image::new(source.clone())
+        .on_loading(Command::new(|_vm: &mut TestVm| {}));
+    let portal_image_id = portal_image.id;
+    let portal: Element<TestVm> = crate::ui::widget::Portal::new(portal_image)
+        .open(portal_open.signal())
+        .anchor(Rect::new(dp(24.0), dp(18.0), dp(1.0), dp(1.0)))
+        .into();
+
+    let tooltip_image: Element<TestVm> =
+        crate::ui::widget::Image::new(source).on_loading(Command::new(|_vm: &mut TestVm| {}));
+    let tooltip_image_id = tooltip_image.id;
+    let trigger: Element<TestVm> = Button::new("Inspect")
+        .tooltip(Tooltip::content(tooltip_image).delay(Duration::ZERO))
+        .into();
+    let trigger_id = trigger.id;
+    let tree = WidgetTree::new_legacy(Stack::new().child([trigger, portal]));
+    let handler = test_handler(Some(tree), invalidation);
+
+    let state_ids = |active_tooltip| {
+        handler
+            .widget_tree
+            .as_ref()
+            .expect("widget tree should exist")
+            .media_event_states_with_active_tooltip(
+                &handler.media_manager,
+                &handler.theme,
+                active_tooltip,
+            )
+            .into_iter()
+            .map(|state| state.widget_id)
+            .collect::<std::collections::HashSet<_>>()
+    };
+
+    assert!(state_ids(None).is_empty());
+
+    portal_open.set(true);
+    let portal_states = state_ids(None);
+    assert!(portal_states.contains(&portal_image_id));
+    assert!(!portal_states.contains(&tooltip_image_id));
+
+    portal_open.set(false);
+    let tooltip_states = state_ids(Some(trigger_id));
+    assert!(!tooltip_states.contains(&portal_image_id));
+    assert!(tooltip_states.contains(&tooltip_image_id));
+
+    assert!(state_ids(None).is_empty());
+}
+
 fn pressed_key_event(physical_key: PhysicalKey) -> KeyEvent {
     KeyEvent {
         physical_key,
@@ -437,9 +495,79 @@ fn carousel_auto_play_advances_after_interval() {
     assert!(!handler.drive_carousel_auto_play(now + Duration::from_millis(5)));
     assert!(handler.drive_carousel_auto_play(now + Duration::from_millis(10)));
 
+    {
+        let view_model = handler.view_model.lock().unwrap();
+        assert_eq!(view_model.selected, 1);
+        assert_eq!(view_model.changes, vec![1]);
+    }
+
+    // A static initial index is uncontrolled. The wrapper updates the internal selection before
+    // forwarding the callback, so the next tick wraps from 1 back to 0 instead of repeatedly
+    // emitting 1.
+    assert!(handler.drive_carousel_auto_play(now + Duration::from_millis(20)));
     let view_model = handler.view_model.lock().unwrap();
-    assert_eq!(view_model.selected, 1);
-    assert_eq!(view_model.changes, vec![1]);
+    assert_eq!(view_model.selected, 0);
+    assert_eq!(view_model.changes, vec![1, 0]);
+}
+
+#[test]
+fn uncontrolled_carousel_auto_play_advances_without_an_on_change_callback() {
+    let invalidation = InvalidationSignal::new();
+    let items: Vec<Element<CarouselRuntimeVm>> =
+        vec![Text::new("first").into(), Text::new("second").into()];
+    let tree = WidgetTree::new(Carousel::new(items, 0usize).auto_play(Duration::from_millis(10)));
+    let mut handler = test_handler_with_vm(CarouselRuntimeVm::default(), Some(tree), invalidation);
+    let now = Instant::now();
+
+    assert!(!handler.drive_carousel_auto_play(now));
+    assert!(handler.drive_carousel_auto_play(now + Duration::from_millis(10)));
+    assert_eq!(
+        handler.computed_scene().carousel_auto_play[0]
+            .selected
+            .resolve_untracked(),
+        1
+    );
+    assert!(handler.drive_carousel_auto_play(now + Duration::from_millis(20)));
+    assert_eq!(
+        handler.computed_scene().carousel_auto_play[0]
+            .selected
+            .resolve_untracked(),
+        0
+    );
+}
+
+#[test]
+fn carousel_auto_play_disabled_signal_pauses_and_restarts_a_full_interval() {
+    let invalidation = InvalidationSignal::new();
+    let disabled = State::new(false, invalidation.clone());
+    let items: Vec<Element<CarouselRuntimeVm>> =
+        vec![Text::new("first").into(), Text::new("second").into()];
+    let tree = WidgetTree::new(
+        Carousel::new(items, 0usize)
+            .disabled(disabled.signal())
+            .auto_play(Duration::from_millis(10)),
+    );
+    let mut handler = test_handler_with_vm(CarouselRuntimeVm::default(), Some(tree), invalidation);
+    let now = Instant::now();
+
+    assert!(!handler.drive_carousel_auto_play(now));
+    disabled.set(true);
+    assert!(!handler.drive_carousel_auto_play(now + Duration::from_millis(10)));
+    assert_eq!(handler.next_carousel_wakeup_deadline, None);
+
+    disabled.set(false);
+    assert!(!handler.drive_carousel_auto_play(now + Duration::from_millis(100)));
+    assert_eq!(
+        handler.next_carousel_wakeup_deadline,
+        Some(now + Duration::from_millis(110))
+    );
+    assert!(handler.drive_carousel_auto_play(now + Duration::from_millis(110)));
+    assert_eq!(
+        handler.computed_scene().carousel_auto_play[0]
+            .selected
+            .resolve_untracked(),
+        1
+    );
 }
 
 #[test]
@@ -486,16 +614,57 @@ fn carousel_auto_play_reads_live_selection_and_pauses_while_hovered() {
         frame.bottom() + dp(20.0),
     ));
     assert!(!handler.drive_carousel_auto_play(now + Duration::from_millis(19)));
-    assert!(handler.drive_carousel_auto_play(now + Duration::from_millis(20)));
+    assert!(!handler.drive_carousel_auto_play(now + Duration::from_millis(20)));
+    assert!(handler.drive_carousel_auto_play(now + Duration::from_millis(29)));
     assert_eq!(handler.view_model.lock().unwrap().changes.as_slice(), [2]);
 
     // The command updated the same State. A second tick must resolve that live
     // value and wrap from 2 to 0 even if no widget tree is rebuilt.
-    assert!(handler.drive_carousel_auto_play(now + Duration::from_millis(30)));
+    assert!(handler.drive_carousel_auto_play(now + Duration::from_millis(39)));
     assert_eq!(
         handler.view_model.lock().unwrap().changes.as_slice(),
         [2, 0]
     );
+}
+
+#[test]
+fn carousel_auto_play_pauses_while_focus_is_inside_and_restarts_a_full_interval() {
+    let invalidation = InvalidationSignal::new();
+    let first: Element<CarouselRuntimeVm> = Button::new("first").into();
+    let first_id = first.id;
+    let outside: Element<CarouselRuntimeVm> = Button::new("outside").into();
+    let outside_id = outside.id;
+    let tree = WidgetTree::new(
+        Flex::new(Axis::Vertical).child([
+            Carousel::new(vec![first, Button::new("second").into()], 0usize)
+                .auto_play(Duration::from_millis(10))
+                .into(),
+            outside,
+        ]),
+    );
+    let mut handler = test_handler_with_vm(CarouselRuntimeVm::default(), Some(tree), invalidation);
+    let now = Instant::now();
+
+    handler.focused_widget = Some(FocusedWidget {
+        widget_id: first_id,
+        scope_path: Vec::new(),
+        on_blur: None,
+    });
+    assert!(!handler.drive_carousel_auto_play(now));
+    assert!(!handler.drive_carousel_auto_play(now + Duration::from_millis(100)));
+    assert_eq!(handler.next_carousel_wakeup_deadline, None);
+
+    handler.focused_widget = Some(FocusedWidget {
+        widget_id: outside_id,
+        scope_path: Vec::new(),
+        on_blur: None,
+    });
+    assert!(!handler.drive_carousel_auto_play(now + Duration::from_millis(100)));
+    assert_eq!(
+        handler.next_carousel_wakeup_deadline,
+        Some(now + Duration::from_millis(110))
+    );
+    assert!(handler.drive_carousel_auto_play(now + Duration::from_millis(110)));
 }
 
 #[test]
@@ -626,6 +795,7 @@ struct CanvasEventVm {
     wheel_events: usize,
     drag_events: usize,
     drag_end_events: usize,
+    drag_sequence: Vec<(&'static str, CanvasMouseButton)>,
 }
 
 impl crate::foundation::view_model::ViewModel for LifecycleVm {
@@ -683,7 +853,10 @@ impl crate::foundation::view_model::ViewModel for CanvasEventVm {
 mod accessibility_tests;
 mod audio_video_tests;
 mod cache_lifecycle_tests;
+mod calendar_tests;
 mod canvas_tests;
+mod clickable_surface_tests;
+mod date_time_upload_tests;
 mod drawer_tests;
 mod file_drop_tests;
 mod focus_navigation_cache_tests;
@@ -693,8 +866,10 @@ mod idle_redraw_tests;
 mod list_tests;
 mod menu_tests;
 mod modal_tests;
+mod pointer_button_tests;
 mod popover_tests;
 mod portal_tests;
+mod radio_group_tests;
 mod scroll_tests;
 mod slider_tests;
 mod splitter_tests;

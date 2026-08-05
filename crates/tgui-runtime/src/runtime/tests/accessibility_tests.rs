@@ -1,12 +1,20 @@
 use super::*;
+use crate::foundation::binding::{Toast, ToastQueue};
 use crate::ui::widget::{
-    ColorPicker, DataGridCellAction, DataGridSelectionChange, DataGridSelectionMode,
-    DataGridSelectionTrigger, DatePicker, List, ListItem, ListItemAction, ListSelectionChange,
-    ListSelectionMode, ListSelectionTrigger, NumberInput, OverlayFlipPolicy, OverlayLayer, Portal,
-    Show, TimePicker, Tree, TreeNode, TreeNodeAction, TreeSelectionChange, TreeSelectionMode,
-    TreeSelectionTrigger, Upload, UploadFile, UploadFileId, UploadStatus,
+    Collapse, ColorPicker, ComputedScene, ContextMenu, DataGridCellAction, DataGridSelectionChange,
+    DataGridSelectionMode, DataGridSelectionTrigger, DatePicker, Drawer, DrawerHost, DrawerMode,
+    Image, List, ListItem, ListItemAction, ListSelectionChange, ListSelectionMode,
+    ListSelectionTrigger, Menu, MenuBar, MenuItem, Modal, NumberInput, NumberInputChangeTrigger,
+    OverlayFlipPolicy, OverlayLayer, Pagination, Pane, Portal, ProgressBar, Radio, Rating,
+    ResolvedWidgetKind, RichText, ScrollRegion, Show, Spinner, Splitter, SplitterAxis, TabItem,
+    Tabs, TimePicker, ToastHost, Tree, TreeExpandChange, TreeNode, TreeNodeAction,
+    TreeSelectionChange, TreeSelectionMode, TreeSelectionTrigger, Upload, UploadFile, UploadFileId,
+    UploadStatus,
 };
-use accesskit::{Action, ActionData, ActionRequest, Node, Role, Toggled, TreeId};
+use accesskit::{
+    Action, ActionData, ActionRequest, AriaCurrent, AutoComplete, HasPopup, Node, Orientation,
+    Role, SortDirection, Toggled, TreeId,
+};
 use chrono::{NaiveDate, NaiveTime};
 
 fn accessibility_update(handler: &mut BoundRuntimeHandler<TestVm>) -> accesskit::TreeUpdate {
@@ -25,6 +33,90 @@ fn node_for(update: &accesskit::TreeUpdate, widget_id: WidgetId) -> &Node {
 fn has_node(update: &accesskit::TreeUpdate, widget_id: WidgetId) -> bool {
     let node_id = crate::accessibility::node_id_from_widget(widget_id);
     update.nodes.iter().any(|(id, _)| *id == node_id)
+}
+
+fn overlay_scope_scene_fingerprint<VM>(
+    scene: &ComputedScene<VM>,
+) -> (
+    Vec<(WidgetId, Vec<WidgetId>, bool, bool, bool, bool)>,
+    Vec<(
+        Rect,
+        Option<Rect>,
+        Vec<WidgetId>,
+        Option<(WidgetId, Option<i32>, Vec<WidgetId>)>,
+        std::mem::Discriminant<HitInteraction<VM>>,
+    )>,
+    Vec<(
+        Rect,
+        Option<Rect>,
+        Vec<WidgetId>,
+        Option<(WidgetId, Option<i32>, Vec<WidgetId>)>,
+        std::mem::Discriminant<HitInteraction<VM>>,
+    )>,
+    Vec<(
+        crate::ui::widget::OverlayId,
+        Rect,
+        OverlayLayer,
+        bool,
+        Option<WidgetId>,
+        bool,
+        bool,
+    )>,
+    Vec<ScrollRegion>,
+) {
+    let scopes = scene
+        .focus_scopes
+        .iter()
+        .map(|scope| {
+            (
+                scope.scope_id,
+                scope.path.clone(),
+                scope.active,
+                scope.options.is_trap(),
+                scope.options.is_auto_focus_first(),
+                scope.options.hides_from_accessibility(false),
+            )
+        })
+        .collect();
+    let hits = |regions: &[HitRegion<VM>]| {
+        regions
+            .iter()
+            .map(|region| {
+                (
+                    region.rect,
+                    region.clip_rect,
+                    region.scope_path.clone(),
+                    region
+                        .focus
+                        .as_ref()
+                        .map(|focus| (focus.widget_id, focus.tab_index, focus.scope_path.clone())),
+                    std::mem::discriminant(&region.interaction),
+                )
+            })
+            .collect::<Vec<_>>()
+    };
+    let close_handlers = scene
+        .overlay_close_handlers
+        .iter()
+        .map(|handler| {
+            (
+                handler.overlay_id,
+                handler.rect,
+                handler.layer,
+                handler.on_close.is_some(),
+                handler.return_focus_to,
+                handler.close_on_outside_click,
+                handler.close_on_escape,
+            )
+        })
+        .collect();
+    (
+        scopes,
+        hits(&scene.hit_regions),
+        hits(&scene.overlay_hit_regions),
+        close_handlers,
+        scene.scroll_regions.to_vec(),
+    )
 }
 
 fn has_reachable_node(update: &accesskit::TreeUpdate, target: accesskit::NodeId) -> bool {
@@ -59,6 +151,14 @@ fn node_for_id(update: &accesskit::TreeUpdate, target: accesskit::NodeId) -> &No
 
 fn has_node_id(update: &accesskit::TreeUpdate, target: accesskit::NodeId) -> bool {
     update.nodes.iter().any(|(id, _)| *id == target)
+}
+
+fn node_id_for_label(update: &accesskit::TreeUpdate, label: &str) -> accesskit::NodeId {
+    update
+        .nodes
+        .iter()
+        .find_map(|(id, node)| (node.label() == Some(label)).then_some(*id))
+        .unwrap_or_else(|| panic!("accessible node labeled {label:?} should exist"))
 }
 
 fn assert_node_bounds_match_hit(node: &Node, hit: &HitRegion<TestVm>) {
@@ -98,19 +198,30 @@ fn action_request_for_node(
 #[test]
 fn accessibility_tree_maps_basic_roles_labels_values_and_bounds() {
     let invalidation = InvalidationSignal::new();
-    let button: Element<TestVm> = Button::new("Save").size(dp(80.0), dp(30.0)).into();
+    let button: Element<TestVm> = Button::new("Save")
+        .size(dp(80.0), dp(30.0))
+        .on_click(Command::new(|_: &mut TestVm| {}))
+        .into();
     let button_id = button.id;
     let checkbox: Element<TestVm> = Checkbox::new(true)
         .label("Remember")
         .size(dp(120.0), dp(30.0))
+        .on_change(ValueCommand::new(|_: &mut TestVm, _: bool| {}))
         .into();
     let checkbox_id = checkbox.id;
+    let radio: Element<TestVm> = Radio::new(true)
+        .label("Choice")
+        .size(dp(120.0), dp(30.0))
+        .on_change(ValueCommand::new(|_: &mut TestVm, _: bool| {}))
+        .into();
+    let radio_id = radio.id;
     let slider: Element<TestVm> = Slider::new(4.0, 0.0, 10.0)
         .step(2.0)
         .size(dp(160.0), dp(30.0))
+        .on_change(ValueCommand::new(|_: &mut TestVm, _: f32| {}))
         .into();
     let slider_id = slider.id;
-    let tree = WidgetTree::new(Flex::new(Axis::Vertical).child([button, checkbox, slider]));
+    let tree = WidgetTree::new(Flex::new(Axis::Vertical).child([button, checkbox, radio, slider]));
     let mut handler = test_handler(Some(tree), invalidation);
 
     let update = accessibility_update(&mut handler);
@@ -126,12 +237,842 @@ fn accessibility_tree_maps_basic_roles_labels_values_and_bounds() {
     assert_eq!(checkbox_node.label(), Some("Remember"));
     assert_eq!(checkbox_node.toggled(), Some(Toggled::True));
 
+    let radio_node = node_for(&update, radio_id);
+    assert_eq!(radio_node.role(), Role::RadioButton);
+    assert_eq!(radio_node.label(), Some("Choice"));
+    assert_eq!(radio_node.toggled(), Some(Toggled::True));
+
     let slider_node = node_for(&update, slider_id);
     assert_eq!(slider_node.role(), Role::Slider);
     assert_eq!(slider_node.numeric_value(), Some(4.0));
     assert_eq!(slider_node.min_numeric_value(), Some(0.0));
     assert_eq!(slider_node.max_numeric_value(), Some(10.0));
     assert!(slider_node.supports_action(Action::SetValue));
+}
+
+#[test]
+fn accessibility_read_only_controls_do_not_advertise_mutating_actions() {
+    let invalidation = InvalidationSignal::new();
+    let button: Element<TestVm> = Button::new("Preview").into();
+    let button_id = button.id;
+    let checkbox: Element<TestVm> = Checkbox::new(true).label("Checked preview").into();
+    let checkbox_id = checkbox.id;
+    let radio: Element<TestVm> = Radio::new(true).label("Radio preview").into();
+    let radio_id = radio.id;
+    let switch: Element<TestVm> = Switch::new(true).label("Switch preview").into();
+    let switch_id = switch.id;
+    let slider: Element<TestVm> = Slider::new(4.0, 0.0, 10.0).into();
+    let slider_id = slider.id;
+    let tree =
+        WidgetTree::new(Flex::new(Axis::Vertical).child([button, checkbox, radio, switch, slider]));
+    let mut handler = test_handler(Some(tree), invalidation);
+    let update = accessibility_update(&mut handler);
+
+    assert!(!node_for(&update, button_id).supports_action(Action::Click));
+    assert!(!node_for(&update, checkbox_id).supports_action(Action::Click));
+    assert!(!node_for(&update, radio_id).supports_action(Action::Click));
+    assert!(!node_for(&update, switch_id).supports_action(Action::Click));
+    let slider = node_for(&update, slider_id);
+    assert!(!slider.supports_action(Action::Increment));
+    assert!(!slider.supports_action(Action::Decrement));
+    assert!(!slider.supports_action(Action::SetValue));
+}
+
+#[test]
+fn accessibility_modal_hides_closed_descendants_and_exposes_open_dialog() {
+    let invalidation = InvalidationSignal::new();
+    let open = State::new(false, invalidation.clone());
+    let content: Element<TestVm> = Button::new("Modal content")
+        .size(dp(140.0), dp(30.0))
+        .into();
+    let content_id = content.id;
+    let tree = WidgetTree::new(Modal::new(open.signal()).title("Settings").content(content));
+    let mut handler = test_handler(Some(tree), invalidation);
+    handler.reduced_motion = true;
+
+    let closed = accessibility_update(&mut handler);
+    assert!(!has_node(&closed, content_id));
+    assert!(closed
+        .nodes
+        .iter()
+        .all(|(_, node)| node.role() != Role::Dialog));
+
+    open.set(true);
+    handler.request_redraw_if_dirty(Instant::now());
+    let opened = accessibility_update(&mut handler);
+    assert!(has_node(&opened, content_id));
+    let dialog = opened
+        .nodes
+        .iter()
+        .find_map(|(_, node)| (node.role() == Role::Dialog && node.is_modal()).then_some(node))
+        .expect("open modal should publish a dialog node");
+    assert_eq!(dialog.label(), Some("Settings"));
+
+    let retained_open = overlay_scope_scene_fingerprint(handler.computed_scene());
+    handler.invalidate_scene_with_reason("modal_accessibility_equivalence_full_recollect");
+    let full_open = overlay_scope_scene_fingerprint(handler.computed_scene());
+    let full_open_accessibility = accessibility_update(&mut handler);
+    assert_eq!(retained_open, full_open);
+    assert_eq!(opened, full_open_accessibility);
+
+    open.set(false);
+    handler.request_redraw_if_dirty(Instant::now());
+    let closed_again = accessibility_update(&mut handler);
+    assert!(!has_node(&closed_again, content_id));
+    assert!(closed_again
+        .nodes
+        .iter()
+        .all(|(_, node)| node.role() != Role::Dialog));
+    let retained_closed = overlay_scope_scene_fingerprint(handler.computed_scene());
+    handler.invalidate_scene_with_reason("modal_closed_equivalence_full_recollect");
+    let full_closed = overlay_scope_scene_fingerprint(handler.computed_scene());
+    let full_closed_accessibility = accessibility_update(&mut handler);
+    assert_eq!(retained_closed, full_closed);
+    assert_eq!(closed_again, full_closed_accessibility);
+}
+
+#[test]
+fn accessibility_drawer_hides_closed_overlay_and_push_descendants() {
+    for mode in [DrawerMode::Overlay, DrawerMode::Push] {
+        let invalidation = InvalidationSignal::new();
+        let open = State::new(false, invalidation.clone());
+        let content: Element<TestVm> = Button::new("Drawer content")
+            .size(dp(140.0), dp(30.0))
+            .into();
+        let content_id = content.id;
+        let drawer = Drawer::new(open.signal()).mode(mode).content(content);
+        let root: Element<TestVm> = match mode {
+            DrawerMode::Overlay => drawer.into(),
+            DrawerMode::Push => DrawerHost::new(Text::new("Main content"), drawer)
+                .size(dp(480.0), dp(320.0))
+                .into(),
+        };
+        let mut handler = test_handler(Some(WidgetTree::new(root)), invalidation);
+        handler.reduced_motion = true;
+
+        let closed = accessibility_update(&mut handler);
+        assert!(!has_node(&closed, content_id), "closed {mode:?} drawer");
+        assert!(closed
+            .nodes
+            .iter()
+            .all(|(_, node)| node.role() != Role::Dialog));
+
+        open.set(true);
+        handler.request_redraw_if_dirty(Instant::now());
+        let opened = accessibility_update(&mut handler);
+        assert!(has_node(&opened, content_id), "open {mode:?} drawer");
+        assert!(opened
+            .nodes
+            .iter()
+            .any(|(_, node)| node.role() == Role::Dialog && node.is_modal()));
+
+        let retained_open = overlay_scope_scene_fingerprint(handler.computed_scene());
+        handler.invalidate_scene_with_reason("drawer_accessibility_equivalence_full_recollect");
+        let full_open = overlay_scope_scene_fingerprint(handler.computed_scene());
+        let full_open_accessibility = accessibility_update(&mut handler);
+        assert_eq!(retained_open, full_open, "open {mode:?} drawer scene");
+        assert_eq!(opened, full_open_accessibility, "open {mode:?} drawer a11y");
+
+        open.set(false);
+        handler.request_redraw_if_dirty(Instant::now());
+        let closed_again = accessibility_update(&mut handler);
+        assert!(
+            !has_node(&closed_again, content_id),
+            "reclosed {mode:?} drawer"
+        );
+        assert!(closed_again
+            .nodes
+            .iter()
+            .all(|(_, node)| node.role() != Role::Dialog));
+        let retained_closed = overlay_scope_scene_fingerprint(handler.computed_scene());
+        handler.invalidate_scene_with_reason("drawer_closed_equivalence_full_recollect");
+        let full_closed = overlay_scope_scene_fingerprint(handler.computed_scene());
+        let full_closed_accessibility = accessibility_update(&mut handler);
+        assert_eq!(retained_closed, full_closed, "closed {mode:?} drawer scene");
+        assert_eq!(
+            closed_again, full_closed_accessibility,
+            "closed {mode:?} drawer a11y"
+        );
+    }
+}
+
+#[test]
+fn accessibility_toast_close_button_is_reachable_and_clickable() {
+    let context = ViewModelContext::for_benchmarks();
+    let invalidation = context.invalidation().clone();
+    let queue = ToastQueue::<TestVm>::new(&context);
+    queue.push_at(
+        Toast::new("Background job completed").persistent(true),
+        Instant::now() - Duration::from_secs(1),
+    );
+    let tree = WidgetTree::new(
+        Stack::new()
+            .size(dp(640.0), dp(480.0))
+            .child(ToastHost::new(queue.clone())),
+    );
+    let mut handler = test_handler(Some(tree), invalidation);
+
+    let update = accessibility_update(&mut handler);
+    let (close_node_id, close_node) = update
+        .nodes
+        .iter()
+        .find(|(_, node)| node.label() == Some("Dismiss notification"))
+        .expect("Toast close button should be published by its overlay accessibility fragment");
+    assert_eq!(close_node.role(), Role::Button);
+    assert!(close_node.supports_action(Action::Focus));
+    assert!(close_node.supports_action(Action::Click));
+    assert!(has_reachable_node(&update, *close_node_id));
+
+    handler
+        .accessibility_action_sender
+        .send(action_request_for_node(*close_node_id, Action::Click, None))
+        .unwrap();
+    assert!(handler.drain_accessibility_actions());
+    assert!(queue
+        .snapshot()
+        .first()
+        .and_then(|entry| entry.deadline)
+        .is_some_and(|deadline| deadline <= Instant::now()));
+}
+
+#[test]
+fn accessibility_collapse_hides_inactive_content_and_tracks_header_state() {
+    let invalidation = InvalidationSignal::new();
+    let expanded = State::new(false, invalidation.clone());
+    let disabled = State::new(false, invalidation.clone());
+    let expanded_for_command = expanded.clone();
+    let content: Element<TestVm> = Button::new("Collapse content")
+        .size(dp(160.0), dp(30.0))
+        .into();
+    let content_id = content.id;
+    let tree = WidgetTree::new(
+        Collapse::new("Details", content)
+            .expanded(expanded.signal())
+            .disabled(disabled.signal())
+            .on_change(ValueCommand::new(move |_vm: &mut TestVm, value| {
+                expanded_for_command.set(value);
+            }))
+            .size(dp(220.0), dp(100.0)),
+    );
+    let mut handler = test_handler(Some(tree), invalidation);
+
+    let collapsed = accessibility_update(&mut handler);
+    let (header_id, header) = collapsed
+        .nodes
+        .iter()
+        .find(|(_, node)| node.role() == Role::Button && node.label() == Some("Details"))
+        .expect("Collapse header should be exposed as a named button");
+    assert_eq!(header.is_expanded(), Some(false));
+    assert!(!header.is_disabled());
+    assert!(header.supports_action(Action::Click));
+    assert!(!has_node(&collapsed, content_id));
+
+    handler
+        .accessibility_action_sender
+        .send(action_request_for_node(*header_id, Action::Click, None))
+        .unwrap();
+    assert!(handler.drain_accessibility_actions());
+    assert!(expanded.get());
+    handler.request_redraw_if_dirty(Instant::now());
+
+    let opened = accessibility_update(&mut handler);
+    assert_eq!(node_for_id(&opened, *header_id).is_expanded(), Some(true));
+    assert!(has_node(&opened, content_id));
+
+    disabled.set(true);
+    handler.request_redraw_if_dirty(Instant::now());
+    let disabled_update = accessibility_update(&mut handler);
+    let disabled_header = node_for_id(&disabled_update, *header_id);
+    assert!(disabled_header.is_disabled());
+    assert!(!disabled_header.supports_action(Action::Click));
+    assert!(has_node(&disabled_update, content_id));
+}
+
+#[test]
+fn accessibility_carousel_exposes_only_active_slide_and_describes_indicators() {
+    let invalidation = InvalidationSignal::new();
+    let selected = State::new(0usize, invalidation.clone());
+    let disabled = State::new(false, invalidation.clone());
+    let selected_for_command = selected.clone();
+    let first: Element<TestVm> = Button::new("First slide").size(dp(140.0), dp(30.0)).into();
+    let first_id = first.id;
+    let second: Element<TestVm> = Button::new("Second slide").size(dp(140.0), dp(30.0)).into();
+    let second_id = second.id;
+    let tree = WidgetTree::new(
+        Carousel::new(vec![first, second], selected.signal())
+            .disabled(disabled.signal())
+            .on_change(ValueCommand::new(move |_vm: &mut TestVm, index| {
+                selected_for_command.set(index);
+            }))
+            .size(dp(260.0), dp(160.0)),
+    );
+    let mut handler = test_handler(Some(tree), invalidation);
+
+    let initial = accessibility_update(&mut handler);
+    assert!(has_node(&initial, first_id));
+    assert!(!has_node(&initial, second_id));
+    let (second_indicator_id, second_indicator) = initial
+        .nodes
+        .iter()
+        .find(|(_, node)| node.label() == Some("Go to slide 2 of 2"))
+        .expect("second Carousel indicator should be named");
+    assert_eq!(second_indicator.role(), Role::Button);
+    assert_eq!(second_indicator.is_selected(), Some(false));
+    assert_eq!(second_indicator.aria_current(), None);
+    assert_eq!(second_indicator.position_in_set(), Some(2));
+    assert_eq!(second_indicator.size_of_set(), Some(2));
+    assert!(second_indicator.supports_action(Action::Click));
+
+    handler
+        .accessibility_action_sender
+        .send(action_request_for_node(
+            *second_indicator_id,
+            Action::Click,
+            None,
+        ))
+        .unwrap();
+    assert!(handler.drain_accessibility_actions());
+    assert_eq!(selected.get(), 1);
+    handler.request_redraw_if_dirty(Instant::now());
+
+    let changed = accessibility_update(&mut handler);
+    assert!(!has_node(&changed, first_id));
+    assert!(has_node(&changed, second_id));
+    let selected_indicator = node_for_id(&changed, *second_indicator_id);
+    assert_eq!(selected_indicator.is_selected(), Some(true));
+    assert_eq!(selected_indicator.aria_current(), Some(AriaCurrent::True));
+
+    disabled.set(true);
+    handler.request_redraw_if_dirty(Instant::now());
+    let disabled_update = accessibility_update(&mut handler);
+    let disabled_indicator = node_for_id(&disabled_update, *second_indicator_id);
+    assert!(disabled_indicator.is_disabled());
+    assert!(!disabled_indicator.supports_action(Action::Click));
+}
+
+#[test]
+fn accessibility_tabs_hide_unselected_panels() {
+    let invalidation = InvalidationSignal::new();
+    let selected = State::new("one".to_string(), invalidation.clone());
+    let first: Element<TestVm> = Button::new("First panel action")
+        .size(dp(140.0), dp(30.0))
+        .into();
+    let first_id = first.id;
+    let second: Element<TestVm> = Button::new("Second panel action")
+        .size(dp(140.0), dp(30.0))
+        .into();
+    let second_id = second.id;
+    let tree = WidgetTree::new(
+        Tabs::new(
+            vec![
+                TabItem::new("one", "One", first),
+                TabItem::new("two", "Two", second),
+            ],
+            selected.signal(),
+        )
+        .size(dp(260.0), dp(150.0)),
+    );
+    let mut handler = test_handler(Some(tree), invalidation);
+
+    let first_update = accessibility_update(&mut handler);
+    assert!(has_node(&first_update, first_id));
+    assert!(!has_node(&first_update, second_id));
+
+    selected.set("two".to_string());
+    handler.request_redraw_if_dirty(Instant::now());
+    let second_update = accessibility_update(&mut handler);
+    let scopes = handler
+        .cached_scene
+        .as_ref()
+        .map(|cached| {
+            cached
+                .computed
+                .focus_scopes
+                .iter()
+                .map(|scope| (scope.scope_id, scope.active))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    assert!(
+        !has_node(&second_update, first_id),
+        "inactive first panel remained accessible; focus scopes: {scopes:?}"
+    );
+    assert!(has_node(&second_update, second_id));
+}
+
+#[test]
+fn accessibility_pagination_data_grid_and_splitter_publish_structural_state() {
+    let invalidation = InvalidationSignal::new();
+    let pagination: Element<TestVm> = Pagination::new(2usize, 5usize)
+        .size(dp(260.0), dp(40.0))
+        .into();
+    let mut pagination_handler =
+        test_handler(Some(WidgetTree::new(pagination)), invalidation.clone());
+    let pagination_update = accessibility_update(&mut pagination_handler);
+    let current_pages = pagination_update
+        .nodes
+        .iter()
+        .filter(|(_, node)| node.aria_current() == Some(AriaCurrent::Page))
+        .collect::<Vec<_>>();
+    assert_eq!(current_pages.len(), 1);
+    assert_eq!(current_pages[0].1.label(), Some("2"));
+
+    let columns = vec![DataGridColumn::new(
+        "name",
+        "Name".to_string(),
+        |context: crate::ui::widget::DataGridCellContext<&'static str>| {
+            Text::new(context.row).into()
+        },
+    )
+    .width(dp(100.0))
+    .min_width(dp(60.0))
+    .max_width(dp(140.0))
+    .sortable(true)
+    .resizable(true)];
+    let grid = WidgetTree::new(
+        DataGrid::new(vec![DataGridRow::keyed("row", "Alpha")], columns)
+            .sort(vec![crate::ui::widget::DataGridSort {
+                column_key: WidgetKey::from("name"),
+                direction: crate::ui::widget::DataGridSortDirection::Descending,
+            }])
+            .on_sort_change(ValueCommand::new(|_vm: &mut TestVm, _change| {}))
+            .on_column_width_change(ValueCommand::new(|_vm: &mut TestVm, _change| {}))
+            .size(dp(180.0), dp(100.0)),
+    );
+    let mut grid_handler = test_handler(Some(grid), invalidation.clone());
+    let (header_id, resize_id) = {
+        let computed = grid_handler.computed_scene();
+        let header = computed
+            .hit_regions
+            .iter()
+            .find_map(|region| match &region.interaction {
+                HitInteraction::DataGridHeader { id, .. } => Some(*id),
+                _ => None,
+            })
+            .expect("sortable DataGrid header should be materialized");
+        let resize = computed
+            .hit_regions
+            .iter()
+            .find_map(|region| match &region.interaction {
+                HitInteraction::DataGridResizeHandle { id, .. } => Some(*id),
+                _ => None,
+            })
+            .expect("resizable DataGrid handle should be materialized");
+        (header, resize)
+    };
+    let grid_update = accessibility_update(&mut grid_handler);
+    assert_eq!(
+        node_for(&grid_update, header_id).sort_direction(),
+        Some(SortDirection::Descending)
+    );
+    let resize = node_for(&grid_update, resize_id);
+    assert_eq!(resize.orientation(), Some(Orientation::Horizontal));
+    assert_eq!(resize.numeric_value(), Some(100.0));
+    assert_eq!(resize.min_numeric_value(), Some(60.0));
+    assert_eq!(resize.max_numeric_value(), Some(140.0));
+
+    let splitter = WidgetTree::new(
+        Splitter::new(
+            vec![
+                Pane::new(Text::new("Left")).min(0.2).max(0.9),
+                Pane::new(Text::new("Right")).min(0.4).max(0.6),
+            ],
+            vec![0.5, 0.5],
+        )
+        .axis(SplitterAxis::Horizontal)
+        .size(dp(240.0), dp(100.0)),
+    );
+    let mut splitter_handler = test_handler(Some(splitter), invalidation);
+    let handle_id = splitter_handler
+        .computed_scene()
+        .hit_regions
+        .iter()
+        .find_map(|region| match &region.interaction {
+            HitInteraction::SplitterHandle { id, .. } => Some(*id),
+            _ => None,
+        })
+        .expect("Splitter handle should be materialized");
+    let splitter_update = accessibility_update(&mut splitter_handler);
+    let handle = node_for(&splitter_update, handle_id);
+    assert_eq!(handle.orientation(), Some(Orientation::Horizontal));
+    assert_eq!(handle.numeric_value(), Some(0.5));
+    assert!((handle.min_numeric_value().unwrap() - 0.4).abs() <= 1e-6);
+    assert!((handle.max_numeric_value().unwrap() - 0.6).abs() <= 1e-6);
+}
+
+#[test]
+fn accessibility_tree_tracks_uncontrolled_select_and_option_semantics() {
+    let invalidation = InvalidationSignal::new();
+    let selections = Arc::new(Mutex::new(Vec::<String>::new()));
+    let selections_for_command = Arc::clone(&selections);
+    let select: Element<TestVm> = Select::new(
+        vec![
+            SelectOption::new("one".to_string(), "One".to_string()),
+            SelectOption::new("disabled".to_string(), "Disabled".to_string()).disable(true),
+            SelectOption::new("two".to_string(), "Two".to_string()),
+        ],
+        Some("one".to_string()),
+    )
+    .on_change(ValueCommand::new(move |_vm: &mut TestVm, (key, _label)| {
+        selections_for_command.lock().unwrap().push(key);
+    }))
+    .size(dp(180.0), dp(32.0))
+    .into();
+    let select_id = select.id;
+    let mut handler = test_handler(Some(WidgetTree::new(select)), invalidation);
+    handler.reduced_motion = true;
+
+    let closed = accessibility_update(&mut handler);
+    assert_eq!(node_for(&closed, select_id).is_expanded(), Some(false));
+
+    assert!(handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::Tab))));
+    assert!(handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::Enter))));
+    let opened = accessibility_update(&mut handler);
+    assert_eq!(node_for(&opened, select_id).is_expanded(), Some(true));
+
+    let options = opened
+        .nodes
+        .iter()
+        .filter(|(_, node)| node.role() == Role::ListBoxOption)
+        .collect::<Vec<_>>();
+    assert_eq!(options.len(), 3);
+    let selected = options
+        .iter()
+        .find(|(_, node)| node.label() == Some("One"))
+        .expect("selected option should be exposed");
+    assert_eq!(selected.1.is_selected(), Some(true));
+    let disabled = options
+        .iter()
+        .find(|(_, node)| node.label() == Some("Disabled"))
+        .expect("disabled option should be exposed");
+    assert!(disabled.1.is_disabled());
+    let two = options
+        .iter()
+        .find(|(_, node)| node.label() == Some("Two"))
+        .expect("enabled option should be exposed");
+    assert!(two.1.supports_action(Action::Click));
+    let two_node_id = two.0;
+
+    handler
+        .accessibility_action_sender
+        .send(action_request_for_node(two_node_id, Action::Click, None))
+        .unwrap();
+    assert!(handler.drain_accessibility_actions());
+    assert_eq!(selections.lock().unwrap().as_slice(), ["two"]);
+    assert_eq!(handler.resolved_select_open_state(select_id), Some(false));
+}
+
+#[test]
+fn accessibility_tree_labels_and_disables_switch_select_and_combobox() {
+    let invalidation = InvalidationSignal::new();
+    let checkbox: Element<TestVm> = Checkbox::new(true)
+        .label("Remember me")
+        .disable(true)
+        .size(dp(140.0), dp(28.0))
+        .into();
+    let checkbox_id = checkbox.id;
+    let radio: Element<TestVm> = Radio::new(true)
+        .label("Primary")
+        .disable(true)
+        .size(dp(140.0), dp(28.0))
+        .into();
+    let radio_id = radio.id;
+    let switch: Element<TestVm> = Switch::new(true)
+        .label("Airplane mode")
+        .disable(true)
+        .size(dp(48.0), dp(28.0))
+        .into();
+    let switch_id = switch.id;
+    let select: Element<TestVm> = Select::new(
+        vec![SelectOption::new("cn".to_string(), "China".to_string())],
+        Some("cn".to_string()),
+    )
+    .label("Country")
+    .disable(true)
+    .size(dp(180.0), dp(32.0))
+    .into();
+    let select_id = select.id;
+    let slider: Element<TestVm> = Slider::new(4.0, 0.0, 10.0)
+        .disable(true)
+        .size(dp(180.0), dp(28.0))
+        .into();
+    let slider_id = slider.id;
+    let combobox: Element<TestVm> = Combobox::new(
+        TextController::new_legacy("Shanghai"),
+        vec![ComboboxOption::new("sh", "Shanghai")],
+    )
+    .label("City")
+    .disable(true)
+    .size(dp(180.0), dp(32.0))
+    .into();
+    let combobox_id = combobox.id;
+    let tree = WidgetTree::new(
+        Flex::new(Axis::Vertical).child([checkbox, radio, switch, select, slider, combobox]),
+    );
+    let mut handler = test_handler(Some(tree), invalidation);
+
+    let update = accessibility_update(&mut handler);
+
+    let checkbox = node_for(&update, checkbox_id);
+    assert_eq!(checkbox.role(), Role::CheckBox);
+    assert_eq!(checkbox.toggled(), Some(Toggled::True));
+    assert!(checkbox.is_disabled());
+    assert!(!checkbox.supports_action(Action::Click));
+
+    let radio = node_for(&update, radio_id);
+    assert_eq!(radio.role(), Role::RadioButton);
+    assert_eq!(radio.toggled(), Some(Toggled::True));
+    assert!(radio.is_disabled());
+    assert!(!radio.supports_action(Action::Click));
+
+    let switch = node_for(&update, switch_id);
+    assert_eq!(switch.role(), Role::Switch);
+    assert_eq!(switch.label(), Some("Airplane mode"));
+    assert_eq!(switch.toggled(), Some(Toggled::True));
+    assert!(switch.is_disabled());
+    assert!(!switch.supports_action(Action::Click));
+
+    let select = node_for(&update, select_id);
+    assert_eq!(select.role(), Role::ComboBox);
+    assert_eq!(select.label(), Some("Country"));
+    assert_eq!(select.value(), Some("China"));
+    assert_eq!(select.has_popup(), Some(HasPopup::Listbox));
+    assert_eq!(select.is_expanded(), Some(false));
+    assert!(select.is_disabled());
+    assert!(!select.supports_action(Action::Click));
+
+    let slider = node_for(&update, slider_id);
+    assert_eq!(slider.role(), Role::Slider);
+    assert_eq!(slider.numeric_value(), Some(4.0));
+    assert!(slider.is_disabled());
+    assert!(!slider.supports_action(Action::Increment));
+    assert!(!slider.supports_action(Action::Decrement));
+    assert!(!slider.supports_action(Action::SetValue));
+
+    let combobox = node_for(&update, combobox_id);
+    assert_eq!(combobox.role(), Role::ComboBox);
+    assert_eq!(combobox.label(), Some("City"));
+    assert_eq!(combobox.value(), Some("Shanghai"));
+    assert_eq!(combobox.auto_complete(), Some(AutoComplete::List));
+    assert_eq!(combobox.has_popup(), Some(HasPopup::Listbox));
+    assert_eq!(combobox.is_expanded(), Some(false));
+    assert!(combobox.is_disabled());
+    assert!(!combobox.supports_action(Action::Click));
+    assert!(!combobox.supports_action(Action::SetValue));
+}
+
+#[test]
+fn accessibility_select_fixed_open_only_clicks_when_public_handler_exists() {
+    let invalidation = InvalidationSignal::new();
+    let inert: Element<TestVm> = Select::new(
+        vec![SelectOption::new("one".to_string(), "One".to_string())],
+        None::<String>,
+    )
+    .open(false)
+    .into();
+    let inert_id = inert.id;
+    let mut inert_handler = test_handler(Some(WidgetTree::new(inert)), invalidation.clone());
+    let inert_update = accessibility_update(&mut inert_handler);
+    assert!(!node_for(&inert_update, inert_id).supports_action(Action::Click));
+    let inert_hit = inert_handler
+        .computed_scene()
+        .hit_regions
+        .iter()
+        .find(|hit| matches!(hit.interaction, HitInteraction::SelectTrigger { .. }))
+        .expect("fixed Select trigger hit");
+    assert_eq!(inert_hit.interaction.keyboard_activation(), None);
+
+    let clicks = Arc::new(AtomicUsize::new(0));
+    let clicks_for_command = Arc::clone(&clicks);
+    let clickable: Element<TestVm> = Select::new(
+        vec![SelectOption::new("one".to_string(), "One".to_string())],
+        None::<String>,
+    )
+    .open(false)
+    .on_click(Command::new(move |_vm: &mut TestVm| {
+        clicks_for_command.fetch_add(1, Ordering::SeqCst);
+    }))
+    .into();
+    let clickable_id = clickable.id;
+    let mut clickable_handler = test_handler(Some(WidgetTree::new(clickable)), invalidation);
+    let clickable_update = accessibility_update(&mut clickable_handler);
+    assert!(node_for(&clickable_update, clickable_id).supports_action(Action::Click));
+    clickable_handler
+        .accessibility_action_sender
+        .send(action_request(clickable_id, Action::Click, None))
+        .unwrap();
+    assert!(clickable_handler.drain_accessibility_actions());
+    assert_eq!(clicks.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        clickable_handler.resolved_select_open_state(clickable_id),
+        Some(false)
+    );
+}
+
+#[test]
+fn accessibility_read_only_select_options_do_not_publish_click() {
+    let invalidation = InvalidationSignal::new();
+    let select: Element<TestVm> = Select::new(
+        vec![SelectOption::new("one".to_string(), "One".to_string())],
+        None::<String>,
+    )
+    .open(true)
+    .size(dp(180.0), dp(32.0))
+    .into();
+    let mut handler = test_handler(Some(WidgetTree::new(select)), invalidation);
+    handler.reduced_motion = true;
+
+    let update = accessibility_update(&mut handler);
+    let option = update
+        .nodes
+        .iter()
+        .find_map(|(_, node)| (node.role() == Role::ListBoxOption).then_some(node))
+        .expect("an open Select should expose its option");
+    assert!(!option.supports_action(Action::Click));
+}
+
+#[test]
+fn accessibility_combobox_fixed_open_and_read_only_tabs_do_not_publish_click() {
+    let invalidation = InvalidationSignal::new();
+    let combobox: Element<TestVm> = Combobox::new(
+        TextController::new_legacy(""),
+        vec![ComboboxOption::new("one", "One")],
+    )
+    .open(false)
+    .into();
+    let combobox_id = combobox.id;
+    let mut combobox_handler = test_handler(Some(WidgetTree::new(combobox)), invalidation.clone());
+    let combobox_update = accessibility_update(&mut combobox_handler);
+    let combobox_node = node_for(&combobox_update, combobox_id);
+    assert_eq!(combobox_node.role(), Role::ComboBox);
+    assert!(combobox_node.supports_action(Action::SetValue));
+    assert!(!combobox_node.supports_action(Action::Click));
+
+    let tabs = Tabs::new(
+        vec![
+            TabItem::new("one", "One", Text::new("First panel")),
+            TabItem::new("two", "Two", Text::new("Second panel")),
+        ],
+        "one".to_string(),
+    );
+    let mut tabs_handler = test_handler(Some(WidgetTree::new(tabs)), invalidation);
+    let tabs_update = accessibility_update(&mut tabs_handler);
+    let tab_nodes = tabs_update
+        .nodes
+        .iter()
+        .filter_map(|(_, node)| (node.role() == Role::Tab).then_some(node))
+        .collect::<Vec<_>>();
+    assert_eq!(tab_nodes.len(), 2);
+    assert!(tab_nodes
+        .iter()
+        .all(|node| !node.supports_action(Action::Click)));
+}
+
+#[test]
+fn accessibility_combobox_exposes_popup_and_option_semantics() {
+    let invalidation = InvalidationSignal::new();
+    let combobox: Element<TestVm> = Combobox::new(
+        TextController::new_legacy(""),
+        vec![
+            ComboboxOption::new("apple", "Apple"),
+            ComboboxOption::new("banana", "Banana"),
+            ComboboxOption::new("unavailable", "Unavailable").disabled(true),
+        ],
+    )
+    .selected_key(Some("banana".to_string()))
+    .label("Fruit")
+    .size(dp(180.0), dp(32.0))
+    .into();
+    let combobox_id = combobox.id;
+    let mut handler = test_handler(Some(WidgetTree::new(combobox)), invalidation);
+    handler.reduced_motion = true;
+
+    let closed = accessibility_update(&mut handler);
+    let trigger = node_for(&closed, combobox_id);
+    assert_eq!(trigger.role(), Role::ComboBox);
+    assert_eq!(trigger.label(), Some("Fruit"));
+    assert_eq!(trigger.auto_complete(), Some(AutoComplete::List));
+    assert_eq!(trigger.has_popup(), Some(HasPopup::Listbox));
+    assert_eq!(trigger.is_expanded(), Some(false));
+    assert!(trigger.supports_action(Action::Click));
+    assert!(trigger.supports_action(Action::SetValue));
+
+    handler
+        .accessibility_action_sender
+        .send(action_request(combobox_id, Action::Click, None))
+        .unwrap();
+    assert!(handler.drain_accessibility_actions());
+
+    let _ = accessibility_update(&mut handler);
+    let opened = accessibility_update(&mut handler);
+    assert_eq!(node_for(&opened, combobox_id).is_expanded(), Some(true));
+    assert!(opened
+        .nodes
+        .iter()
+        .any(|(_, node)| node.role() == Role::ListBox));
+    let options = opened
+        .nodes
+        .iter()
+        .filter(|(_, node)| node.role() == Role::ListBoxOption)
+        .map(|(_, node)| node)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        options
+            .iter()
+            .map(|node| node.label().unwrap_or_default())
+            .collect::<Vec<_>>(),
+        ["Apple", "Banana", "Unavailable"]
+    );
+    let banana = options
+        .iter()
+        .find(|node| node.label() == Some("Banana"))
+        .expect("selected combobox option");
+    assert_eq!(banana.is_selected(), Some(true));
+    let unavailable = options
+        .iter()
+        .find(|node| node.label() == Some("Unavailable"))
+        .expect("disabled combobox option");
+    assert!(unavailable.is_disabled());
+    assert!(!unavailable.supports_action(Action::Click));
+}
+
+#[test]
+fn accessibility_stale_click_cannot_open_newly_disabled_combobox() {
+    let invalidation = InvalidationSignal::new();
+    let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+    let disabled = context.state(false);
+    let open_requests = Arc::new(Mutex::new(Vec::new()));
+    let requests_for_command = Arc::clone(&open_requests);
+    let combobox: Element<TestVm> = Combobox::new(
+        TextController::new_legacy(""),
+        vec![ComboboxOption::new("one", "One")],
+    )
+    .label("Choice")
+    .disable(disabled.signal())
+    .on_open_change(ValueCommand::new(move |_vm, open| {
+        requests_for_command.lock().unwrap().push(open);
+    }))
+    .size(dp(180.0), dp(32.0))
+    .into();
+    let combobox_id = combobox.id;
+    let mut handler = test_handler(Some(WidgetTree::new(combobox)), invalidation);
+
+    let enabled = accessibility_update(&mut handler);
+    assert!(node_for(&enabled, combobox_id).supports_action(Action::Click));
+
+    disabled.set(true);
+    handler
+        .accessibility_action_sender
+        .send(action_request(combobox_id, Action::Click, None))
+        .unwrap();
+    assert!(!handler.drain_accessibility_actions());
+    assert!(open_requests.lock().unwrap().is_empty());
+
+    let disabled = accessibility_update(&mut handler);
+    let node = node_for(&disabled, combobox_id);
+    assert!(node.is_disabled());
+    assert_eq!(node.is_expanded(), Some(false));
+    assert!(!node.supports_action(Action::Click));
 }
 
 #[test]
@@ -170,14 +1111,26 @@ fn accessibility_tree_maps_input_controls_to_base_interactive_roles() {
         .filter(|(_, node)| node.role() == Role::TextInput)
         .count();
     assert!(
-        text_input_count >= 3,
-        "DatePicker, TimePicker and NumberInput should expose editable text inputs"
+        text_input_count >= 2,
+        "DatePicker and TimePicker should expose editable text inputs"
     );
-    let color_button = update
+    let number_input = update
         .nodes
         .iter()
-        .find_map(|(_, node)| {
-            (node.role() == Role::Button && node.label() == Some("#3366CCFF")).then_some(node)
+        .find_map(|(_, node)| (node.role() == Role::SpinButton).then_some(node))
+        .expect("NumberInput should expose a spin button");
+    assert_eq!(number_input.value(), Some("24"));
+    assert_eq!(number_input.numeric_value(), Some(24.0));
+    assert_eq!(number_input.numeric_value_step(), Some(1.0));
+    assert!(number_input.supports_action(Action::Increment));
+    assert!(number_input.supports_action(Action::Decrement));
+    assert!(number_input.supports_action(Action::SetValue));
+    let (color_button_id, color_button) = update
+        .nodes
+        .iter()
+        .find_map(|(id, node)| {
+            (node.role() == Role::Button && node.label() == Some("#3366CCFF"))
+                .then_some((*id, node))
         })
         .expect("ColorPicker trigger should be a labeled button");
     assert!(color_button.supports_action(Action::Click));
@@ -192,6 +1145,410 @@ fn accessibility_tree_maps_input_controls_to_base_interactive_roles() {
     assert!(update.nodes.iter().any(|(_, node)| {
         node.role() == Role::ProgressIndicator && node.numeric_value() == Some(0.5)
     }));
+
+    handler
+        .accessibility_action_sender
+        .send(action_request_for_node(
+            color_button_id,
+            Action::Click,
+            None,
+        ))
+        .unwrap();
+    assert!(handler.drain_accessibility_actions());
+    assert!(handler
+        .computed_scene()
+        .overlay_close_handlers
+        .iter()
+        .any(|handler| handler.layer == crate::runtime::overlay::OverlayLayer::Popover));
+}
+
+#[test]
+fn progress_spinner_and_image_publish_normalized_named_semantics() {
+    let invalidation = InvalidationSignal::new();
+    let spinner_label = State::new(String::from("Loading results"), invalidation.clone());
+    let non_finite: Element<TestVm> = ProgressBar::new(f32::NAN).label("Unknown progress").into();
+    let non_finite_id = non_finite.id;
+    let overflow: Element<TestVm> = ProgressBar::new(1.5).label("Completed progress").into();
+    let overflow_id = overflow.id;
+    let spinner: Element<TestVm> = Spinner::new().label(spinner_label.signal()).into();
+    let spinner_id = spinner.id;
+    let image: Element<TestVm> = Image::from_bytes(Vec::<u8>::new())
+        .fit(crate::media::ContentFit::Cover)
+        .alt("Architecture diagram")
+        .size(dp(32.0), dp(32.0))
+        .into();
+    let image_id = image.id;
+    let decorative: Element<TestVm> = Image::from_bytes(Vec::<u8>::new())
+        .alt("")
+        .size(dp(32.0), dp(32.0))
+        .into();
+    let decorative_id = decorative.id;
+    let tree = WidgetTree::new(
+        Flex::new(Axis::Vertical).child([non_finite, overflow, spinner, image, decorative]),
+    );
+    let mut handler = test_handler(Some(tree), invalidation);
+
+    let update = accessibility_update(&mut handler);
+    let non_finite = node_for(&update, non_finite_id);
+    assert_eq!(non_finite.role(), Role::ProgressIndicator);
+    assert_eq!(non_finite.numeric_value(), Some(0.0));
+    assert_eq!(non_finite.label(), Some("Unknown progress"));
+    assert_eq!(node_for(&update, overflow_id).numeric_value(), Some(1.0));
+    assert_eq!(
+        node_for(&update, spinner_id).label(),
+        Some("Loading results")
+    );
+    assert_eq!(
+        node_for(&update, image_id).label(),
+        Some("Architecture diagram")
+    );
+    assert_eq!(node_for(&update, decorative_id).label(), None);
+
+    spinner_label.set(String::from("Almost done"));
+    let updated = accessibility_update(&mut handler);
+    assert_eq!(node_for(&updated, spinner_id).label(), Some("Almost done"));
+
+    let image_fit = handler
+        .cached_scene
+        .as_ref()
+        .and_then(|cached| cached.layout.as_ref())
+        .and_then(|layout| layout.resolved_widget(image_id))
+        .and_then(|resolved| match &resolved.kind {
+            ResolvedWidgetKind::Image { image, .. } => Some(image.fit),
+            _ => None,
+        });
+    assert_eq!(image_fit, Some(crate::media::ContentFit::Cover));
+}
+
+#[test]
+fn color_picker_exposes_named_rgba_channel_sliders() {
+    let invalidation = InvalidationSignal::new();
+    let tree = WidgetTree::new(ColorPicker::new(Color::hexa(0x3366CCFF)).open(true));
+    let mut handler = test_handler_with_config(
+        TestVm,
+        Some(tree),
+        invalidation,
+        test_config_with_size(500.0, 500.0),
+    );
+
+    let update = accessibility_update(&mut handler);
+    let channels = update
+        .nodes
+        .iter()
+        .filter_map(|(id, node)| {
+            (node.role() == Role::Slider).then_some((*id, node.label().unwrap_or_default()))
+        })
+        .collect::<Vec<_>>();
+    let mut labels = channels.iter().map(|(_, label)| *label).collect::<Vec<_>>();
+    labels.sort_unstable();
+
+    assert_eq!(
+        labels,
+        vec![
+            "Alpha channel",
+            "Blue channel",
+            "Green channel",
+            "Red channel"
+        ]
+    );
+
+    let red_channel = channels
+        .iter()
+        .find_map(|(id, label)| (*label == "Red channel").then_some(*id))
+        .expect("red channel accessibility node");
+    handler
+        .accessibility_action_sender
+        .send(action_request_for_node(
+            red_channel,
+            Action::SetValue,
+            Some(ActionData::NumericValue(128.0)),
+        ))
+        .unwrap();
+    assert!(handler.drain_accessibility_actions());
+    assert!(handler
+        .computed_scene()
+        .scene
+        .overlay_texts
+        .iter()
+        .any(|text| text.content.as_ref() == "#8066CCFF"));
+}
+
+#[test]
+fn rating_exposes_a_named_slider_semantic() {
+    let invalidation = InvalidationSignal::new();
+    let tree =
+        WidgetTree::new(Rating::new(3.0).on_change(ValueCommand::new(|_: &mut TestVm, _| {})));
+    let mut handler = test_handler_with_config(
+        TestVm,
+        Some(tree),
+        invalidation,
+        test_config_with_size(300.0, 120.0),
+    );
+
+    let update = accessibility_update(&mut handler);
+    let rating = update
+        .nodes
+        .iter()
+        .find_map(|(_, node)| {
+            (node.role() == Role::Slider && node.label() == Some("Rating")).then_some(node)
+        })
+        .expect("interactive Rating should expose its named slider");
+
+    assert_eq!(rating.numeric_value(), Some(3.0));
+    assert_eq!(rating.min_numeric_value(), Some(0.0));
+    assert_eq!(rating.max_numeric_value(), Some(5.0));
+    assert!(rating.supports_action(Action::SetValue));
+}
+
+#[test]
+fn rich_text_image_alt_reaches_accesskit_image_label() {
+    let invalidation = InvalidationSignal::new();
+    let tree = WidgetTree::new(RichText::markdown(
+        "![Architecture diagram](https://example.com/diagram.png)",
+    ));
+    let mut handler = test_handler_with_config(
+        TestVm,
+        Some(tree),
+        invalidation,
+        test_config_with_size(320.0, 220.0),
+    );
+
+    let update = accessibility_update(&mut handler);
+    let image = update
+        .nodes
+        .iter()
+        .find_map(|(_, node)| (node.role() == Role::Image).then_some(node))
+        .expect("rich-text image should be accessible");
+    assert_eq!(image.label(), Some("Architecture diagram"));
+}
+
+#[test]
+fn number_input_accessibility_increment_and_decrement_use_its_step_commands() {
+    let invalidation = InvalidationSignal::new();
+    let controller = TextController::new_legacy("4");
+    let changes = Arc::new(Mutex::new(Vec::new()));
+    let changes_for_command = Arc::clone(&changes);
+    let tree = WidgetTree::new(
+        NumberInput::new(controller.clone(), Some(4.0))
+            .range(0.0, 10.0)
+            .step(2.0)
+            .on_change(ValueCommand::new(move |_: &mut TestVm, change| {
+                changes_for_command.lock().unwrap().push(change);
+            })),
+    );
+    let mut handler = test_handler(Some(tree), invalidation);
+    let update = accessibility_update(&mut handler);
+    let number_node = update
+        .nodes
+        .iter()
+        .find_map(|(id, node)| (node.role() == Role::SpinButton).then_some(*id))
+        .expect("NumberInput spin button node");
+
+    handler
+        .accessibility_action_sender
+        .send(action_request_for_node(
+            number_node,
+            Action::Increment,
+            None,
+        ))
+        .unwrap();
+    assert!(handler.drain_accessibility_actions());
+    assert_eq!(controller.text(), "6");
+
+    handler
+        .accessibility_action_sender
+        .send(action_request_for_node(
+            number_node,
+            Action::Decrement,
+            None,
+        ))
+        .unwrap();
+    assert!(handler.drain_accessibility_actions());
+    assert_eq!(controller.text(), "4");
+    assert_eq!(changes.lock().unwrap().len(), 2);
+}
+
+#[test]
+fn number_input_accessibility_set_value_clamps_formats_and_rejects_invalid_data() {
+    let invalidation = InvalidationSignal::new();
+    let controller = TextController::new_legacy("11");
+    let changes = Arc::new(Mutex::new(Vec::new()));
+    let changes_for_command = Arc::clone(&changes);
+    let tree = WidgetTree::new(
+        NumberInput::new(controller.clone(), Some(11.0))
+            .range(0.0, 10.0)
+            .step(0.25)
+            .on_change(ValueCommand::new(move |_: &mut TestVm, change| {
+                changes_for_command.lock().unwrap().push(change);
+            })),
+    );
+    let mut handler = test_handler(Some(tree), invalidation);
+    let update = accessibility_update(&mut handler);
+    let number_node = update
+        .nodes
+        .iter()
+        .find_map(|(id, node)| (node.role() == Role::SpinButton).then_some(*id))
+        .expect("NumberInput spin button node");
+
+    handler
+        .accessibility_action_sender
+        .send(action_request_for_node(
+            number_node,
+            Action::Increment,
+            None,
+        ))
+        .unwrap();
+    assert!(handler.drain_accessibility_actions());
+    assert_eq!(controller.text(), "10");
+
+    handler
+        .accessibility_action_sender
+        .send(action_request_for_node(
+            number_node,
+            Action::SetValue,
+            Some(ActionData::NumericValue(7.125)),
+        ))
+        .unwrap();
+    assert!(handler.drain_accessibility_actions());
+    assert_eq!(controller.text(), "7.125");
+
+    handler
+        .accessibility_action_sender
+        .send(action_request_for_node(
+            number_node,
+            Action::SetValue,
+            Some(ActionData::NumericValue(99.0)),
+        ))
+        .unwrap();
+    assert!(handler.drain_accessibility_actions());
+    assert_eq!(controller.text(), "10");
+
+    handler
+        .accessibility_action_sender
+        .send(action_request_for_node(
+            number_node,
+            Action::SetValue,
+            Some(ActionData::Value("not-a-number".into())),
+        ))
+        .unwrap();
+    assert!(!handler.drain_accessibility_actions());
+    assert_eq!(controller.text(), "10");
+
+    let changes = changes.lock().unwrap();
+    assert_eq!(changes.len(), 3);
+    assert_eq!(changes[0].value, Some(10.0));
+    assert_eq!(changes[0].trigger, NumberInputChangeTrigger::StepUp);
+    assert_eq!(changes[1].value, Some(7.125));
+    assert_eq!(changes[1].trigger, NumberInputChangeTrigger::Text);
+    assert_eq!(changes[2].value, Some(10.0));
+    assert_eq!(changes[2].trigger, NumberInputChangeTrigger::Text);
+}
+
+#[test]
+fn number_input_arrow_keys_step_the_focused_field_without_repeating_at_bounds() {
+    let invalidation = InvalidationSignal::new();
+    let controller = TextController::new_legacy("10");
+    let changes = Arc::new(Mutex::new(Vec::new()));
+    let changes_for_command = Arc::clone(&changes);
+    let tree = WidgetTree::new(
+        NumberInput::new(controller.clone(), Some(10.0))
+            .range(0.0, 10.0)
+            .step(2.0)
+            .on_change(ValueCommand::new(move |_: &mut TestVm, change| {
+                changes_for_command.lock().unwrap().push(change);
+            })),
+    );
+    let mut handler = test_handler(Some(tree), invalidation);
+
+    assert!(handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::Tab))));
+    assert!(handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::Tab))));
+    assert!(handler.focused_text_input_id().is_some());
+
+    assert!(handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::ArrowUp,))));
+    assert_eq!(controller.text(), "10");
+    assert!(changes.lock().unwrap().is_empty());
+
+    assert!(
+        handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::ArrowDown,)))
+    );
+    assert_eq!(controller.text(), "8");
+    assert_eq!(changes.lock().unwrap().len(), 1);
+}
+
+#[test]
+fn time_picker_done_closes_internal_popover_and_restores_input_focus() {
+    let invalidation = InvalidationSignal::new();
+    let controller = TextController::new_legacy("09:30");
+    let tree = WidgetTree::new(
+        TimePicker::new(controller, Some(NaiveTime::from_hms_opt(9, 30, 0).unwrap())).open(true),
+    );
+    let mut handler = test_handler_with_config(
+        TestVm,
+        Some(tree),
+        invalidation,
+        test_config_with_size(500.0, 500.0),
+    );
+    handler.reduced_motion = true;
+
+    assert!(handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::Tab))));
+    let input_id = handler
+        .focused_text_input_id()
+        .expect("TimePicker input should focus first");
+    let computed = handler.computed_scene();
+    let done_frame = computed
+        .scene
+        .overlay_texts
+        .iter()
+        .find(|text| text.content.as_ref() == "Done")
+        .map(|text| text.frame)
+        .expect("TimePicker should render its Done label");
+    let done_center = Point::new(
+        done_frame.x + done_frame.width * 0.5,
+        done_frame.y + done_frame.height * 0.5,
+    );
+    let (done_focus, done_interaction) = computed
+        .overlay_hit_regions
+        .iter()
+        .filter_map(|region| {
+            region.focus.as_ref()?;
+            matches!(
+                &region.interaction,
+                HitInteraction::Widget { interactions, .. }
+                    if interactions.on_click.is_some()
+            )
+            .then_some(region)
+        })
+        .find(|region| {
+            region
+                .hit_delta_if_contains(done_center, &computed.transform_records)
+                .is_some()
+        })
+        .map(|region| {
+            (
+                region.focus.as_ref().unwrap().clone(),
+                region.interaction.clone(),
+            )
+        })
+        .expect("TimePicker Done button should own the Done label");
+    handler.update_focus(
+        Some(FocusedWidget {
+            widget_id: done_focus.widget_id,
+            scope_path: done_focus.scope_path.clone(),
+            on_blur: done_focus.on_blur.clone(),
+        }),
+        done_focus.on_focus.clone(),
+        true,
+    );
+    assert_ne!(handler.focused_widget_id(), Some(input_id));
+
+    assert!(handler.dispatch_accessibility_click_interaction(done_interaction));
+    let _ = handler.computed_scene();
+    assert_eq!(handler.focused_widget_id(), Some(input_id));
+    assert!(!handler
+        .computed_scene()
+        .overlay_close_handlers
+        .iter()
+        .any(|handle| handle.layer == crate::runtime::overlay::OverlayLayer::Popover));
 }
 
 #[test]
@@ -204,6 +1561,7 @@ fn accessibility_tree_maps_data_grid_roles_and_selection() {
     let grid: Element<TestVm> =
         DataGrid::<&'static str, TestVm>::new(vec![DataGridRow::keyed("a", "Alpha")], columns)
             .selected_keys(vec![WidgetKey::from("a")])
+            .selection_mode(DataGridSelectionMode::None)
             .size(dp(220.0), dp(120.0))
             .into();
     let grid_id = grid.id;
@@ -237,7 +1595,92 @@ fn accessibility_tree_maps_data_grid_roles_and_selection() {
     let cell_node = node_for(&update, cell_id);
     assert_eq!(cell_node.role(), Role::GridCell);
     assert_eq!(cell_node.is_selected(), Some(true));
-    assert!(cell_node.supports_action(Action::Click));
+    assert!(!cell_node.supports_action(Action::Click));
+    assert!(cell_node.supports_action(Action::Focus));
+}
+
+#[test]
+fn accessibility_data_grid_click_falls_back_to_real_action_or_edit_capability() {
+    let action_count = Arc::new(AtomicUsize::new(0));
+    let action_count_for_command = Arc::clone(&action_count);
+    let action_columns = vec![DataGridColumn::new(
+        "action",
+        "Action".to_string(),
+        |context: crate::ui::widget::DataGridCellContext<&'static str>| {
+            Text::new(context.row).into()
+        },
+    )];
+    let action_tree = WidgetTree::new(
+        DataGrid::new(
+            vec![DataGridRow::keyed("action-row", "Run")],
+            action_columns,
+        )
+        .selection_mode(DataGridSelectionMode::None)
+        .on_cell_action(ValueCommand::new(move |_vm, _action| {
+            action_count_for_command.fetch_add(1, Ordering::SeqCst);
+        }))
+        .size(dp(180.0), dp(96.0)),
+    );
+    let mut action_handler = test_handler(Some(action_tree), InvalidationSignal::new());
+    let action_id = action_handler
+        .computed_scene()
+        .hit_regions
+        .iter()
+        .find_map(|region| match region.interaction {
+            HitInteraction::DataGridCell { id, .. } => Some(id),
+            _ => None,
+        })
+        .expect("action-only DataGrid cell");
+    let update = accessibility_update(&mut action_handler);
+    let node = node_for(&update, action_id);
+    assert!(node.supports_action(Action::Click));
+    assert!(node.supports_action(Action::Focus));
+    action_handler
+        .accessibility_action_sender
+        .send(action_request(action_id, Action::Click, None))
+        .unwrap();
+    assert!(action_handler.drain_accessibility_actions());
+    assert_eq!(action_count.load(Ordering::SeqCst), 1);
+
+    let edit_count = Arc::new(AtomicUsize::new(0));
+    let edit_count_for_command = Arc::clone(&edit_count);
+    let edit_columns = vec![DataGridColumn::new(
+        "edit",
+        "Edit".to_string(),
+        |context: crate::ui::widget::DataGridCellContext<&'static str>| {
+            Text::new(context.row).into()
+        },
+    )
+    .text_value(|row| row.to_string())
+    .editable(true)];
+    let edit_tree = WidgetTree::new(
+        DataGrid::new(vec![DataGridRow::keyed("edit-row", "Edit")], edit_columns)
+            .selection_mode(DataGridSelectionMode::None)
+            .on_cell_edit_commit(ValueCommand::new(move |_vm, _commit| {
+                edit_count_for_command.fetch_add(1, Ordering::SeqCst);
+            }))
+            .size(dp(180.0), dp(96.0)),
+    );
+    let mut edit_handler = test_handler(Some(edit_tree), InvalidationSignal::new());
+    let edit_id = edit_handler
+        .computed_scene()
+        .hit_regions
+        .iter()
+        .find_map(|region| match region.interaction {
+            HitInteraction::DataGridCell { id, .. } => Some(id),
+            _ => None,
+        })
+        .expect("edit-only DataGrid cell");
+    let update = accessibility_update(&mut edit_handler);
+    let node = node_for(&update, edit_id);
+    assert!(node.supports_action(Action::Click));
+    assert!(node.supports_action(Action::Focus));
+    edit_handler
+        .accessibility_action_sender
+        .send(action_request(edit_id, Action::Click, None))
+        .unwrap();
+    assert!(edit_handler.drain_accessibility_actions());
+    assert_eq!(edit_count.load(Ordering::SeqCst), 1);
 }
 
 #[test]
@@ -255,6 +1698,7 @@ fn accessibility_tree_maps_tree_roles_state_and_set_metadata() {
     .selection_mode(TreeSelectionMode::Multiple)
     .checkable(true)
     .checked_keys(vec![WidgetKey::from("child-a")])
+    .on_expand_change(ValueCommand::new(|_: &mut TestVm, _: TreeExpandChange| {}))
     .size(dp(260.0), dp(180.0))
     .into();
     let tree_id = tree_element.id;
@@ -293,6 +1737,8 @@ fn accessibility_tree_maps_tree_roles_state_and_set_metadata() {
     assert_eq!(root_node.position_in_set(), Some(1));
     assert_eq!(root_node.size_of_set(), Some(1));
     assert!(root_node.supports_action(Action::Click));
+    assert!(root_node.supports_action(Action::Collapse));
+    assert!(!root_node.supports_action(Action::Expand));
 
     let child_node = node_for(&update, child_row_id);
     assert_eq!(child_node.role(), Role::TreeItem);
@@ -306,6 +1752,62 @@ fn accessibility_tree_maps_tree_roles_state_and_set_metadata() {
     assert_eq!(disabled_node.role(), Role::TreeItem);
     assert!(disabled_node.is_disabled());
     assert_eq!(disabled_node.toggled(), Some(Toggled::False));
+    assert!(!disabled_node.supports_action(Action::Click));
+}
+
+#[test]
+fn accessibility_tree_expand_and_collapse_actions_dispatch_controlled_changes() {
+    let invalidation = InvalidationSignal::new();
+    let expanded = State::new(Vec::<WidgetKey>::new(), invalidation.clone());
+    let expanded_for_command = expanded.clone();
+    let tree = WidgetTree::new(
+        Tree::<&'static str, TestVm>::new(
+            vec![TreeNode::keyed("root", "Root").child(TreeNode::keyed("child", "Child"))],
+            |ctx| Text::new(ctx.item).into(),
+        )
+        .expanded_keys(expanded.signal())
+        .on_expand_change(ValueCommand::new(
+            move |_: &mut TestVm, change: TreeExpandChange| {
+                expanded_for_command.set(change.expanded_keys);
+            },
+        ))
+        .size(dp(260.0), dp(120.0)),
+    );
+    let mut handler = test_handler(Some(tree), invalidation);
+    let root_id = handler
+        .computed_scene()
+        .hit_regions
+        .iter()
+        .find_map(|region| match &region.interaction {
+            HitInteraction::TreeNode { id, state, .. } if state.key == WidgetKey::from("root") => {
+                Some(*id)
+            }
+            _ => None,
+        })
+        .expect("root Tree row should be materialized");
+
+    let collapsed = accessibility_update(&mut handler);
+    let collapsed_node = node_for(&collapsed, root_id);
+    assert!(collapsed_node.supports_action(Action::Expand));
+    assert!(!collapsed_node.supports_action(Action::Collapse));
+    handler
+        .accessibility_action_sender
+        .send(action_request(root_id, Action::Expand, None))
+        .unwrap();
+    assert!(handler.drain_accessibility_actions());
+    assert_eq!(expanded.get(), vec![WidgetKey::from("root")]);
+
+    handler.request_redraw_if_dirty(Instant::now());
+    let expanded_update = accessibility_update(&mut handler);
+    let expanded_node = node_for(&expanded_update, root_id);
+    assert!(!expanded_node.supports_action(Action::Expand));
+    assert!(expanded_node.supports_action(Action::Collapse));
+    handler
+        .accessibility_action_sender
+        .send(action_request(root_id, Action::Collapse, None))
+        .unwrap();
+    assert!(handler.drain_accessibility_actions());
+    assert!(expanded.get().is_empty());
 }
 
 #[test]
@@ -385,6 +1887,37 @@ fn accessibility_focus_and_click_actions_use_runtime_focus_and_commands() {
 }
 
 #[test]
+fn accessibility_radio_activation_is_idempotent_and_keeps_click_callback() {
+    let invalidation = InvalidationSignal::new();
+    let changes = Arc::new(Mutex::new(Vec::new()));
+    let clicks = Arc::new(AtomicUsize::new(0));
+    let changes_ref = Arc::clone(&changes);
+    let clicks_ref = Arc::clone(&clicks);
+    let radio: Element<TestVm> = crate::ui::widget::Radio::new(true)
+        .on_change(ValueCommand::new(move |_vm: &mut TestVm, value| {
+            changes_ref.lock().unwrap().push(value);
+        }))
+        .on_click(Command::new(move |_vm: &mut TestVm| {
+            clicks_ref.fetch_add(1, Ordering::SeqCst);
+        }))
+        .size(dp(120.0), dp(30.0))
+        .into();
+    let radio_id = radio.id;
+    let tree = WidgetTree::new(radio);
+    let mut handler = test_handler(Some(tree), invalidation);
+    let _ = accessibility_update(&mut handler);
+
+    handler
+        .accessibility_action_sender
+        .send(action_request(radio_id, Action::Click, None))
+        .unwrap();
+    assert!(handler.drain_accessibility_actions());
+
+    assert!(changes.lock().unwrap().is_empty());
+    assert_eq!(clicks.load(Ordering::SeqCst), 1);
+}
+
+#[test]
 fn accessibility_slider_and_text_set_value_use_existing_change_paths() {
     let invalidation = InvalidationSignal::new();
     let slider_value = Arc::new(Mutex::new(0.0));
@@ -435,6 +1968,119 @@ fn accessibility_slider_and_text_set_value_use_existing_change_paths() {
     assert!(handler.drain_accessibility_actions());
     assert_eq!(controller.text(), "new");
     assert_eq!(text_changes.lock().unwrap().as_slice(), ["changed"]);
+}
+
+#[test]
+fn accessibility_slider_uses_completion_callbacks_fallback_step_and_boundary_idempotence() {
+    let invalidation = InvalidationSignal::new();
+    let changes = Arc::new(Mutex::new(Vec::new()));
+    let change_ends = Arc::new(Mutex::new(Vec::new()));
+    let changes_ref = Arc::clone(&changes);
+    let change_ends_ref = Arc::clone(&change_ends);
+    let slider: Element<TestVm> = Slider::new(50.0, 0.0, 100.0)
+        .step(0.0)
+        .size(dp(120.0), dp(30.0))
+        .on_change(ValueCommand::new(move |_vm: &mut TestVm, value| {
+            changes_ref.lock().unwrap().push(value);
+        }))
+        .on_change_end(ValueCommand::new(move |_vm: &mut TestVm, value| {
+            change_ends_ref.lock().unwrap().push(value);
+        }))
+        .into();
+    let slider_id = slider.id;
+    let mut handler = test_handler(Some(WidgetTree::new(slider)), invalidation);
+    let update = accessibility_update(&mut handler);
+    assert_eq!(node_for(&update, slider_id).numeric_value_step(), Some(1.0));
+
+    handler
+        .accessibility_action_sender
+        .send(action_request(slider_id, Action::Increment, None))
+        .unwrap();
+    assert!(handler.drain_accessibility_actions());
+    assert_eq!(*changes.lock().unwrap(), vec![51.0]);
+    assert_eq!(*change_ends.lock().unwrap(), vec![51.0]);
+
+    changes.lock().unwrap().clear();
+    change_ends.lock().unwrap().clear();
+    handler
+        .accessibility_action_sender
+        .send(action_request(
+            slider_id,
+            Action::SetValue,
+            Some(ActionData::NumericValue(50.0)),
+        ))
+        .unwrap();
+    assert!(handler.drain_accessibility_actions());
+    assert!(changes.lock().unwrap().is_empty());
+    assert!(change_ends.lock().unwrap().is_empty());
+}
+
+#[test]
+fn accessibility_slider_with_only_completion_callback_remains_adjustable() {
+    let invalidation = InvalidationSignal::new();
+    let completions = Arc::new(Mutex::new(Vec::new()));
+    let completions_ref = Arc::clone(&completions);
+    let slider: Element<TestVm> = Slider::new(4.0, 0.0, 10.0)
+        .step(2.0)
+        .size(dp(120.0), dp(30.0))
+        .on_change_end(ValueCommand::new(move |_vm: &mut TestVm, value| {
+            completions_ref.lock().unwrap().push(value);
+        }))
+        .into();
+    let slider_id = slider.id;
+    let mut handler = test_handler(Some(WidgetTree::new(slider)), invalidation);
+    let update = accessibility_update(&mut handler);
+    let node = node_for(&update, slider_id);
+    assert!(node.supports_action(Action::Increment));
+    assert!(node.supports_action(Action::Decrement));
+    assert!(node.supports_action(Action::SetValue));
+
+    handler
+        .accessibility_action_sender
+        .send(action_request(slider_id, Action::Increment, None))
+        .unwrap();
+    assert!(handler.drain_accessibility_actions());
+    assert_eq!(*completions.lock().unwrap(), vec![6.0]);
+}
+
+#[test]
+fn accessibility_set_value_normalizes_input_and_textarea_line_breaks() {
+    let invalidation = InvalidationSignal::new();
+    let input_controller = TextController::new_legacy("");
+    let textarea_controller = TextController::new_legacy("");
+    let input: Element<TestVm> = Input::new(input_controller.clone())
+        .size(dp(160.0), dp(30.0))
+        .into();
+    let input_id = input.id;
+    let textarea: Element<TestVm> = Textarea::new(textarea_controller.clone())
+        .size(dp(160.0), dp(60.0))
+        .into();
+    let textarea_id = textarea.id;
+    let tree = WidgetTree::new(Flex::new(Axis::Vertical).child([input, textarea]));
+    let mut handler = test_handler(Some(tree), invalidation);
+    let _ = accessibility_update(&mut handler);
+    let value = "a\r\nb\nc\rd\u{0085}e\u{2028}f\u{2029}g";
+
+    handler
+        .accessibility_action_sender
+        .send(action_request(
+            input_id,
+            Action::SetValue,
+            Some(ActionData::Value(value.into())),
+        ))
+        .unwrap();
+    handler
+        .accessibility_action_sender
+        .send(action_request(
+            textarea_id,
+            Action::SetValue,
+            Some(ActionData::Value(value.into())),
+        ))
+        .unwrap();
+    assert!(handler.drain_accessibility_actions());
+
+    assert_eq!(input_controller.text(), "abcdefg");
+    assert_eq!(textarea_controller.text(), "a\nb\nc\nd\ne\nf\ng");
 }
 
 #[test]
@@ -567,9 +2213,9 @@ fn accessibility_tree_click_ignores_stale_disclosure_cursor() {
         .unwrap();
     assert!(handler.drain_accessibility_actions());
 
-    assert_eq!(selections.load(Ordering::SeqCst), 1);
+    assert_eq!(selections.load(Ordering::SeqCst), 0);
     assert_eq!(expands.load(Ordering::SeqCst), 0);
-    assert_eq!(checks.load(Ordering::SeqCst), 0);
+    assert_eq!(checks.load(Ordering::SeqCst), 1);
     assert!(handler.pending_click.is_none());
 }
 
@@ -862,6 +2508,8 @@ fn accessibility_click_rejects_disabled_virtual_list_and_data_grid_targets() {
                     .flatten()
             })
             .unwrap_or_else(|| panic!("disabled {kind:?} target should be materialized"));
+        let disabled_node = node_for(&update, disabled_id);
+        assert!(!disabled_node.supports_action(Action::Click));
 
         handler
             .accessibility_action_sender
@@ -1021,6 +2669,280 @@ fn accessibility_click_allows_target_inside_portal_focus_trap() {
 }
 
 #[test]
+fn accessibility_menu_exposes_items_disabled_and_checked_state_and_click_closes() {
+    let invalidation = InvalidationSignal::new();
+    let selections = Arc::new(AtomicUsize::new(0));
+    let selections_for_command = Arc::clone(&selections);
+    let menu: Element<TestVm> = Menu::new(Button::new("File").size(dp(80.0), dp(28.0)))
+        .items(vec![
+            MenuItem::new("New"),
+            MenuItem::separator(),
+            MenuItem::new("Unavailable").disable(true),
+            MenuItem::submenu("Empty submenu", Vec::new()),
+            MenuItem::checkable("Show toolbar")
+                .checked(true)
+                .on_select(Command::new(move |_| {
+                    selections_for_command.fetch_add(1, Ordering::SeqCst);
+                })),
+        ])
+        .into();
+    let menu_id = menu.id;
+    let mut handler = test_handler(Some(WidgetTree::new(menu)), invalidation);
+
+    let closed = accessibility_update(&mut handler);
+    let closed_trigger = node_for(&closed, menu_id);
+    assert_eq!(closed_trigger.has_popup(), Some(HasPopup::Menu));
+    assert_eq!(closed_trigger.is_expanded(), Some(false));
+    assert!(closed_trigger.supports_action(Action::Click));
+    assert!(closed
+        .nodes
+        .iter()
+        .all(|(_, node)| node.role() != Role::Menu));
+
+    assert!(handler.set_menu_open_state(menu_id, true));
+    let opened = accessibility_update(&mut handler);
+    let opened_trigger = node_for(&opened, menu_id);
+    assert_eq!(opened_trigger.has_popup(), Some(HasPopup::Menu));
+    assert_eq!(opened_trigger.is_expanded(), Some(true));
+    assert!(opened
+        .nodes
+        .iter()
+        .any(|(_, node)| node.role() == Role::Menu));
+    assert_eq!(
+        opened
+            .nodes
+            .iter()
+            .filter(|(_, node)| { matches!(node.role(), Role::MenuItem | Role::MenuItemCheckBox) })
+            .count(),
+        4,
+        "separator rows must not become accessible menu items"
+    );
+
+    let empty_submenu = node_for_id(&opened, node_id_for_label(&opened, "Empty submenu"));
+    assert_eq!(empty_submenu.has_popup(), None);
+    assert_eq!(empty_submenu.is_expanded(), None);
+    assert!(!empty_submenu.supports_action(Action::Expand));
+    assert!(!empty_submenu.supports_action(Action::Collapse));
+
+    let unavailable = node_for_id(&opened, node_id_for_label(&opened, "Unavailable"));
+    assert_eq!(unavailable.role(), Role::MenuItem);
+    assert!(unavailable.is_disabled());
+    assert!(!unavailable.supports_action(Action::Focus));
+    assert!(!unavailable.supports_action(Action::Click));
+
+    let check_id = node_id_for_label(&opened, "Show toolbar");
+    let check = node_for_id(&opened, check_id);
+    assert_eq!(check.role(), Role::MenuItemCheckBox);
+    assert_eq!(check.toggled(), Some(Toggled::True));
+    assert!(check.supports_action(Action::Focus));
+    assert!(check.supports_action(Action::Click));
+
+    handler
+        .accessibility_action_sender
+        .send(action_request_for_node(check_id, Action::Focus, None))
+        .unwrap();
+    assert!(handler.drain_accessibility_actions());
+    assert_eq!(handler.accessibility_focused_node, Some(check_id));
+    handler
+        .accessibility_action_sender
+        .send(action_request_for_node(check_id, Action::Click, None))
+        .unwrap();
+    assert!(handler.drain_accessibility_actions());
+    assert_eq!(selections.load(Ordering::SeqCst), 1);
+    let closed_again = accessibility_update(&mut handler);
+    assert!(closed_again
+        .nodes
+        .iter()
+        .all(|(_, node)| node.role() != Role::Menu));
+}
+
+#[test]
+fn accessibility_menu_submenu_expands_and_nested_click_routes_through_unique_fragments() {
+    let invalidation = InvalidationSignal::new();
+    let selections = Arc::new(AtomicUsize::new(0));
+    let selections_for_command = Arc::clone(&selections);
+    let menu: Element<TestVm> = Menu::new(Button::new("File").size(dp(80.0), dp(28.0)))
+        .items(vec![MenuItem::submenu(
+            "Recent",
+            vec![MenuItem::new("a.txt").on_select(Command::new(move |_| {
+                selections_for_command.fetch_add(1, Ordering::SeqCst);
+            }))],
+        )])
+        .into();
+    let menu_id = menu.id;
+    let mut handler = test_handler(Some(WidgetTree::new(menu)), invalidation);
+    let _ = accessibility_update(&mut handler);
+    assert!(handler.set_menu_open_state(menu_id, true));
+
+    let root_open = accessibility_update(&mut handler);
+    let recent_id = node_id_for_label(&root_open, "Recent");
+    let recent = node_for_id(&root_open, recent_id);
+    assert_eq!(recent.role(), Role::MenuItem);
+    assert_eq!(recent.has_popup(), Some(HasPopup::Menu));
+    assert_eq!(recent.is_expanded(), Some(false));
+    assert!(recent.supports_action(Action::Expand));
+    assert!(recent.supports_action(Action::Click));
+
+    handler
+        .accessibility_action_sender
+        .send(action_request_for_node(recent_id, Action::Expand, None))
+        .unwrap();
+    assert!(handler.drain_accessibility_actions());
+    let expanded = accessibility_update(&mut handler);
+    let recent = node_for_id(&expanded, node_id_for_label(&expanded, "Recent"));
+    assert_eq!(recent.is_expanded(), Some(true));
+    assert!(recent.supports_action(Action::Collapse));
+    assert_eq!(
+        expanded
+            .nodes
+            .iter()
+            .filter(|(_, node)| node.role() == Role::Menu)
+            .count(),
+        2,
+        "root and nested menu fragments must both be reachable"
+    );
+
+    let expanded_recent_id = node_id_for_label(&expanded, "Recent");
+    handler
+        .accessibility_action_sender
+        .send(action_request_for_node(
+            expanded_recent_id,
+            Action::Collapse,
+            None,
+        ))
+        .unwrap();
+    assert!(handler.drain_accessibility_actions());
+    let collapsed = accessibility_update(&mut handler);
+    let collapsed_recent_id = node_id_for_label(&collapsed, "Recent");
+    assert_eq!(
+        node_for_id(&collapsed, collapsed_recent_id).is_expanded(),
+        Some(false)
+    );
+    assert!(collapsed
+        .nodes
+        .iter()
+        .all(|(_, node)| node.label() != Some("a.txt")));
+
+    handler
+        .accessibility_action_sender
+        .send(action_request_for_node(
+            collapsed_recent_id,
+            Action::Click,
+            None,
+        ))
+        .unwrap();
+    assert!(handler.drain_accessibility_actions());
+    let expanded = accessibility_update(&mut handler);
+
+    let child_id = node_id_for_label(&expanded, "a.txt");
+    let child = node_for_id(&expanded, child_id);
+    assert_eq!(child.role(), Role::MenuItem);
+    assert!(child.supports_action(Action::Click));
+    handler
+        .accessibility_action_sender
+        .send(action_request_for_node(child_id, Action::Click, None))
+        .unwrap();
+    assert!(handler.drain_accessibility_actions());
+    assert_eq!(selections.load(Ordering::SeqCst), 1);
+    let closed = accessibility_update(&mut handler);
+    assert!(closed
+        .nodes
+        .iter()
+        .all(|(_, node)| node.role() != Role::Menu));
+}
+
+#[test]
+fn accessibility_context_menu_and_menubar_publish_menu_item_roles() {
+    let invalidation = InvalidationSignal::new();
+    let context_menu: Element<TestVm> =
+        ContextMenu::new(Button::new("Photo").size(dp(90.0), dp(30.0)))
+            .items(vec![MenuItem::new("Copy")])
+            .into();
+    let context_menu_id = context_menu.id;
+    let mut context_handler =
+        test_handler(Some(WidgetTree::new(context_menu)), invalidation.clone());
+    let _ = accessibility_update(&mut context_handler);
+    assert!(context_handler.open_context_menu_at(context_menu_id, Point::new(dp(24.0), dp(14.0))));
+    let context_open = accessibility_update(&mut context_handler);
+    let copy_id = node_id_for_label(&context_open, "Copy");
+    assert_eq!(node_for_id(&context_open, copy_id).role(), Role::MenuItem);
+    context_handler
+        .accessibility_action_sender
+        .send(action_request_for_node(copy_id, Action::Click, None))
+        .unwrap();
+    assert!(context_handler.drain_accessibility_actions());
+    let context_closed = accessibility_update(&mut context_handler);
+    assert!(context_closed
+        .nodes
+        .iter()
+        .all(|(_, node)| node.role() != Role::Menu));
+
+    let menubar = MenuBar::<TestVm>::uncontrolled().entry("File", vec![MenuItem::new("New")]);
+    let mut menubar_handler = test_handler(Some(WidgetTree::new(menubar)), invalidation);
+    let viewport = menubar_handler.viewport_rect();
+    menubar_handler.cursor_position = Some(Point::new(dp(24.0), dp(14.0)));
+    let _ = menubar_handler.handle_hover(viewport);
+    menubar_handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Left);
+    let menubar_open = accessibility_update(&mut menubar_handler);
+    let new_id = node_id_for_label(&menubar_open, "New");
+    assert_eq!(node_for_id(&menubar_open, new_id).role(), Role::MenuItem);
+    assert!(menubar_open
+        .nodes
+        .iter()
+        .any(|(_, node)| node.role() == Role::Menu));
+}
+
+#[test]
+fn accessibility_show_context_menu_action_opens_enabled_owner_and_is_absent_when_disabled() {
+    let invalidation = InvalidationSignal::new();
+    let context_menu: Element<TestVm> =
+        ContextMenu::new(Button::new("Photo").size(dp(90.0), dp(30.0)))
+            .items(vec![MenuItem::new("Copy")])
+            .into();
+    let context_menu_id = context_menu.id;
+    let mut handler = test_handler(Some(WidgetTree::new(context_menu)), invalidation.clone());
+
+    let update = accessibility_update(&mut handler);
+    let trigger = node_for(&update, context_menu_id);
+    assert_eq!(trigger.has_popup(), Some(HasPopup::Menu));
+    assert!(trigger.supports_action(Action::ShowContextMenu));
+    handler
+        .accessibility_action_sender
+        .send(action_request(
+            context_menu_id,
+            Action::ShowContextMenu,
+            None,
+        ))
+        .unwrap();
+    assert!(handler.drain_accessibility_actions());
+    assert!(handler
+        .context_menu_anchor_states
+        .contains_key(&context_menu_id));
+    assert!(accessibility_update(&mut handler)
+        .nodes
+        .iter()
+        .any(|(_, node)| node.role() == Role::Menu));
+
+    let disabled: Element<TestVm> =
+        ContextMenu::new(Button::new("Disabled photo").size(dp(90.0), dp(30.0)))
+            .items(vec![MenuItem::new("Copy")])
+            .disable(true)
+            .into();
+    let disabled_id = disabled.id;
+    let mut disabled_handler = test_handler(Some(WidgetTree::new(disabled)), invalidation);
+    let disabled_update = accessibility_update(&mut disabled_handler);
+    assert!(!node_for(&disabled_update, disabled_id).supports_action(Action::ShowContextMenu));
+    disabled_handler
+        .accessibility_action_sender
+        .send(action_request(disabled_id, Action::ShowContextMenu, None))
+        .unwrap();
+    assert!(!disabled_handler.drain_accessibility_actions());
+    assert!(!disabled_handler
+        .context_menu_anchor_states
+        .contains_key(&disabled_id));
+}
+
+#[test]
 fn accessibility_tree_exposes_same_window_portal_controls_and_removes_them_when_closed() {
     let context = ViewModelContext::for_benchmarks();
     let invalidation = context.invalidation().clone();
@@ -1154,14 +3076,8 @@ fn accessibility_tree_exposes_same_window_portal_controls_and_removes_them_when_
     assert!(handler.drain_accessibility_actions());
     assert_eq!(controller.text(), "Updated Portal value");
 
-    #[cfg(feature = "bench-support")]
-    crate::runtime::action_stats::reset();
     open.set(false);
     handler.request_redraw_if_dirty(Instant::now());
-    #[cfg(feature = "bench-support")]
-    let close_actions = crate::runtime::action_stats::snapshot();
-    #[cfg(feature = "bench-support")]
-    eprintln!("portal close invalidation actions: {close_actions:?}");
     let closed = accessibility_update(&mut handler);
     let closed_scene = &handler
         .cached_scene
@@ -1201,6 +3117,44 @@ fn accessibility_tree_exposes_same_window_portal_controls_and_removes_them_when_
         })
         .expect("reopened Portal button should be present");
     assert_ne!(reopened_button_id, portal_button_node_id);
+}
+
+#[test]
+fn accessibility_tree_exposes_rich_tooltip_root_and_nested_controls() {
+    let invalidation = InvalidationSignal::new();
+    let tree = WidgetTree::new(
+        Button::<TestVm>::new("Inspect")
+            .size(dp(120.0), dp(40.0))
+            .tooltip(
+                Tooltip::content(
+                    Button::new("Tooltip action").on_click(Command::new(|_vm: &mut TestVm| {})),
+                )
+                .delay(Duration::ZERO),
+            ),
+    );
+    let mut handler = test_handler(Some(tree), invalidation);
+    handler.reduced_motion = true;
+    handler.cursor_position = Some(Point::new(dp(40.0), dp(20.0)));
+    let viewport = handler.viewport_rect();
+    assert!(handler.handle_hover(viewport));
+
+    let update = accessibility_update(&mut handler);
+    let tooltip_root_id = update
+        .nodes
+        .iter()
+        .find_map(|(id, node)| (node.role() == Role::Tooltip).then_some(*id))
+        .expect("rich Tooltip should publish a Tooltip root");
+    let nested_button_id = update
+        .nodes
+        .iter()
+        .find_map(|(id, node)| {
+            (node.role() == Role::Button && node.label() == Some("Tooltip action")).then_some(*id)
+        })
+        .expect("rich Tooltip should publish nested controls");
+
+    assert!(has_reachable_node(&update, tooltip_root_id));
+    assert!(has_reachable_node(&update, nested_button_id));
+    assert!(node_for_id(&update, nested_button_id).supports_action(Action::Click));
 }
 
 #[test]
@@ -1965,9 +3919,9 @@ fn accessibility_tree_click_ignores_stale_checkbox_cursor() {
     assert!(handler.drain_accessibility_actions());
 
     assert_eq!(handler.focused_widget_id(), Some(row_id));
-    assert_eq!(selections.load(Ordering::SeqCst), 1);
+    assert_eq!(selections.load(Ordering::SeqCst), 0);
     assert_eq!(expands.load(Ordering::SeqCst), 0);
-    assert_eq!(checks.load(Ordering::SeqCst), 0);
+    assert_eq!(checks.load(Ordering::SeqCst), 1);
     assert!(handler.pending_click.is_none());
 }
 
@@ -2330,4 +4284,72 @@ fn accessibility_primary_modifier() -> ModifiersState {
     {
         ModifiersState::CONTROL
     }
+}
+
+#[test]
+fn clickable_avatar_and_card_publish_button_semantics_only_when_interactive() {
+    let invalidation = InvalidationSignal::new();
+    let activations = Arc::new(AtomicUsize::new(0));
+
+    let avatar_activations = Arc::clone(&activations);
+    let avatar: Element<TestVm> = crate::ui::widget::Avatar::initials("TG")
+        .on_click(Command::new(move |_: &mut TestVm| {
+            avatar_activations.fetch_add(1, Ordering::SeqCst);
+        }))
+        .size(dp(64.0), dp(64.0))
+        .into();
+    let avatar_id = avatar.id;
+
+    let card_activations = Arc::clone(&activations);
+    let card: Element<TestVm> = crate::ui::widget::Card::new()
+        .body(Text::new("Open details"))
+        .on_click(Command::new(move |_: &mut TestVm| {
+            card_activations.fetch_add(1, Ordering::SeqCst);
+        }))
+        .size(dp(180.0), dp(64.0))
+        .into();
+    let card_id = card.id;
+
+    let static_avatar: Element<TestVm> = crate::ui::widget::Avatar::initials("ST")
+        .size(dp(64.0), dp(64.0))
+        .into();
+    let static_avatar_id = static_avatar.id;
+    let static_card: Element<TestVm> = crate::ui::widget::Card::new()
+        .body(Text::new("Preview only"))
+        .size(dp(180.0), dp(64.0))
+        .into();
+    let static_card_id = static_card.id;
+
+    let tree = WidgetTree::new(Flex::new(Axis::Vertical).child([
+        avatar,
+        card,
+        static_avatar,
+        static_card,
+    ]));
+    let mut handler = test_handler_with_config(
+        TestVm,
+        Some(tree),
+        invalidation,
+        test_config_with_size(320.0, 320.0),
+    );
+    let update = accessibility_update(&mut handler);
+
+    for id in [avatar_id, card_id] {
+        let node = node_for(&update, id);
+        assert_eq!(node.role(), Role::Button);
+        assert!(node.supports_action(Action::Focus));
+        assert!(node.supports_action(Action::Click));
+    }
+    for id in [static_avatar_id, static_card_id] {
+        assert!(!node_for(&update, id).supports_action(Action::Click));
+    }
+    assert_ne!(node_for(&update, static_avatar_id).role(), Role::Button);
+    assert_ne!(node_for(&update, static_card_id).role(), Role::Button);
+
+    handler
+        .accessibility_action_sender
+        .send(action_request(card_id, Action::Click, None))
+        .unwrap();
+    assert!(handler.drain_accessibility_actions());
+    assert_eq!(activations.load(Ordering::SeqCst), 1);
 }

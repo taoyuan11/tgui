@@ -3,18 +3,18 @@ use super::*;
 use crate::ui::layout::Value;
 use crate::ui::theme::Density;
 use crate::ui::widget::{
-    Button, Carousel, CarouselStyle, ComputedScene, ResolvedWidgetKind, WidgetId,
+    Button, Carousel, CarouselStyle, ComputedScene, ResolvedElement, ResolvedWidgetKind, WidgetId,
 };
 
-fn carousel_scene_at(
-    tree: &WidgetTree<()>,
+fn carousel_scene_at<VM: 'static>(
+    tree: &WidgetTree<VM>,
     theme: &Theme,
     font_manager: &FontManager,
     media: &MediaManager,
     animations: &mut AnimationEngine,
     reduced_motion: bool,
     now: Instant,
-) -> ComputedScene<()> {
+) -> ComputedScene<VM> {
     tree.compute_scene_with_units_and_widget_state_at(
         font_manager,
         theme,
@@ -37,7 +37,7 @@ fn carousel_scene_at(
     )
 }
 
-fn text_alpha(scene: &ComputedScene<()>, content: &str) -> u8 {
+fn text_alpha<VM>(scene: &ComputedScene<VM>, content: &str) -> u8 {
     scene
         .scene
         .texts
@@ -48,10 +48,46 @@ fn text_alpha(scene: &ComputedScene<()>, content: &str) -> u8 {
         .a
 }
 
-fn scene_has_widget_hit(scene: &ComputedScene<()>, id: WidgetId) -> bool {
+fn scene_has_widget_hit<VM>(scene: &ComputedScene<VM>, id: WidgetId) -> bool {
     scene.hit_regions.iter().any(|hit| match hit.interaction {
         HitInteraction::Widget { id: candidate, .. } => candidate == id,
         _ => false,
+    })
+}
+
+fn resolved_children<VM>(element: &ResolvedElement<VM>) -> &[ResolvedElement<VM>] {
+    match &element.kind {
+        ResolvedWidgetKind::Container { children, .. }
+        | ResolvedWidgetKind::Virtual { children, .. } => children.as_slice(),
+        _ => &[],
+    }
+}
+
+fn resolved_button<'a, VM>(
+    element: &'a ResolvedElement<VM>,
+    expected_label: &str,
+) -> Option<&'a ResolvedElement<VM>> {
+    match &element.kind {
+        ResolvedWidgetKind::Button { label, .. } if label.resolve() == expected_label => {
+            Some(element)
+        }
+        _ => resolved_children(element)
+            .iter()
+            .find_map(|child| resolved_button(child, expected_label)),
+    }
+}
+
+fn button_disabled<VM>(element: &ResolvedElement<VM>) -> bool {
+    match &element.kind {
+        ResolvedWidgetKind::Button { disabled, .. } => disabled.resolve(),
+        _ => panic!("expected button"),
+    }
+}
+
+fn keyboard_activation<VM>(scene: &ComputedScene<VM>, id: WidgetId) -> Option<(bool, bool)> {
+    scene.hit_regions.iter().find_map(|region| {
+        let (candidate, enter, space) = region.interaction.keyboard_activation()?;
+        (candidate == id).then_some((enter, space))
     })
 }
 
@@ -341,4 +377,250 @@ fn carousel_reduced_and_zero_motion_land_on_selection_without_animation_slots() 
         );
         assert!(!animations.has_active_animations());
     }
+}
+
+#[derive(Default)]
+struct UncontrolledCarouselVm {
+    changes: Vec<usize>,
+}
+
+#[test]
+fn static_carousel_selection_is_uncontrolled_and_navigation_reads_latest_index() {
+    let tree: WidgetTree<UncontrolledCarouselVm> = WidgetTree::new(
+        Carousel::new(
+            vec![
+                Text::new("first panel").into(),
+                Text::new("second panel").into(),
+                Text::new("third panel").into(),
+            ],
+            0usize,
+        )
+        .on_change(ValueCommand::new(
+            |vm: &mut UncontrolledCarouselVm, selected| vm.changes.push(selected),
+        ))
+        .size(dp(340.0), dp(180.0)),
+    );
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let theme = Theme::default();
+    let mut layout_animations = AnimationEngine::default();
+    let layout = tree.build_scene_layout(
+        &font_manager,
+        &theme,
+        &media,
+        &mut layout_animations,
+        UnitContext::default(),
+        &HashMap::new(),
+        &HashMap::new(),
+        Rect::new(0.0, 0.0, 360.0, 220.0),
+    );
+    let next = resolved_button(&layout.resolved_root, "Next")
+        .and_then(|button| button.interactions.on_click.clone())
+        .expect("uncontrolled carousel Next button should be active");
+    let previous = resolved_button(&layout.resolved_root, "Prev")
+        .and_then(|button| button.interactions.on_click.clone())
+        .expect("uncontrolled carousel Prev button should be active");
+    let mut vm = UncontrolledCarouselVm::default();
+
+    next.execute(&mut vm);
+    let mut animations = AnimationEngine::default();
+    let selected_one = carousel_scene_at(
+        &tree,
+        &theme,
+        &font_manager,
+        &media,
+        &mut animations,
+        true,
+        Instant::now(),
+    );
+    assert_eq!(text_alpha(&selected_one, "first panel"), 0);
+    assert_eq!(text_alpha(&selected_one, "second panel"), 255);
+
+    // Reusing the original command must read the internal selection live rather than a
+    // construction-time snapshot.
+    next.execute(&mut vm);
+    let mut animations = AnimationEngine::default();
+    let selected_two = carousel_scene_at(
+        &tree,
+        &theme,
+        &font_manager,
+        &media,
+        &mut animations,
+        true,
+        Instant::now(),
+    );
+    assert_eq!(text_alpha(&selected_two, "second panel"), 0);
+    assert_eq!(text_alpha(&selected_two, "third panel"), 255);
+
+    previous.execute(&mut vm);
+    let mut animations = AnimationEngine::default();
+    let back_to_one = carousel_scene_at(
+        &tree,
+        &theme,
+        &font_manager,
+        &media,
+        &mut animations,
+        true,
+        Instant::now(),
+    );
+    assert_eq!(text_alpha(&back_to_one, "second panel"), 255);
+    assert_eq!(vm.changes, vec![1, 2, 1]);
+}
+
+#[test]
+fn carousel_with_no_callback_still_navigates_when_given_a_static_initial_index() {
+    let tree: WidgetTree<()> = WidgetTree::new(
+        Carousel::new(
+            vec![Text::new("first").into(), Text::new("second").into()],
+            0usize,
+        )
+        .size(dp(340.0), dp(180.0)),
+    );
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let theme = Theme::default();
+    let mut layout_animations = AnimationEngine::default();
+    let layout = tree.build_scene_layout(
+        &font_manager,
+        &theme,
+        &media,
+        &mut layout_animations,
+        UnitContext::default(),
+        &HashMap::new(),
+        &HashMap::new(),
+        Rect::new(0.0, 0.0, 360.0, 220.0),
+    );
+    let next = resolved_button(&layout.resolved_root, "Next")
+        .and_then(|button| button.interactions.on_click.clone())
+        .expect("default carousel navigation should own internal state");
+    next.execute(&mut ());
+
+    let mut animations = AnimationEngine::default();
+    let scene = carousel_scene_at(
+        &tree,
+        &theme,
+        &font_manager,
+        &media,
+        &mut animations,
+        true,
+        Instant::now(),
+    );
+    assert_eq!(text_alpha(&scene, "first"), 0);
+    assert_eq!(text_alpha(&scene, "second"), 255);
+}
+
+#[test]
+fn empty_and_single_item_carousels_disable_navigation_and_keep_indicator_count_exact() {
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let theme = Theme::default();
+
+    for (items, expected_indicators) in [
+        (Vec::<Element<()>>::new(), 0usize),
+        (vec![Text::new("only").into()], 1usize),
+    ] {
+        let tree: WidgetTree<()> = WidgetTree::new(Carousel::new(items, usize::MAX));
+        let mut animations = AnimationEngine::default();
+        let layout = tree.build_scene_layout(
+            &font_manager,
+            &theme,
+            &media,
+            &mut animations,
+            UnitContext::default(),
+            &HashMap::new(),
+            &HashMap::new(),
+            Rect::new(0.0, 0.0, 360.0, 220.0),
+        );
+        let previous = resolved_button(&layout.resolved_root, "Prev").expect("Prev button");
+        let next = resolved_button(&layout.resolved_root, "Next").expect("Next button");
+        assert!(button_disabled(previous));
+        assert!(button_disabled(next));
+        let root_children = resolved_children(&layout.resolved_root);
+        assert_eq!(root_children.len(), 2);
+        assert_eq!(
+            resolved_children(&root_children[1]).len(),
+            expected_indicators,
+            "indicator count should match the real item count"
+        );
+    }
+}
+
+#[test]
+fn carousel_navigation_supports_enter_and_space_and_tracks_disabled_signal() {
+    let context = test_context();
+    let disabled = context.state(false);
+    let tree: WidgetTree<()> = WidgetTree::new(
+        Carousel::new(
+            vec![Text::new("first").into(), Text::new("second").into()],
+            0usize,
+        )
+        .disabled(disabled.signal())
+        .auto_play(Duration::from_millis(50))
+        .size(dp(340.0), dp(180.0)),
+    );
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let theme = Theme::default();
+    let mut layout_animations = AnimationEngine::default();
+    let layout = tree.build_scene_layout(
+        &font_manager,
+        &theme,
+        &media,
+        &mut layout_animations,
+        UnitContext::default(),
+        &HashMap::new(),
+        &HashMap::new(),
+        Rect::new(0.0, 0.0, 360.0, 220.0),
+    );
+    let next_id = resolved_button(&layout.resolved_root, "Next")
+        .expect("Next button")
+        .id;
+    let mut animations = AnimationEngine::default();
+    let start = Instant::now();
+    let enabled_scene = carousel_scene_at(
+        &tree,
+        &theme,
+        &font_manager,
+        &media,
+        &mut animations,
+        false,
+        start,
+    );
+    assert_eq!(
+        keyboard_activation(&enabled_scene, next_id),
+        Some((true, true))
+    );
+    assert!(scene_has_widget_hit(&enabled_scene, next_id));
+    assert_eq!(enabled_scene.carousel_auto_play.len(), 1);
+    assert!(!enabled_scene.carousel_auto_play[0].disabled.resolve());
+
+    disabled.set(true);
+    let disabled_scene = carousel_scene_at(
+        &tree,
+        &theme,
+        &font_manager,
+        &media,
+        &mut animations,
+        false,
+        start + Duration::from_millis(1),
+    );
+    assert_eq!(keyboard_activation(&disabled_scene, next_id), None);
+    assert!(!scene_has_widget_hit(&disabled_scene, next_id));
+    assert!(disabled_scene.carousel_auto_play[0].disabled.resolve());
+
+    disabled.set(false);
+    let reenabled_scene = carousel_scene_at(
+        &tree,
+        &theme,
+        &font_manager,
+        &media,
+        &mut animations,
+        false,
+        start + Duration::from_millis(2),
+    );
+    assert_eq!(
+        keyboard_activation(&reenabled_scene, next_id),
+        Some((true, true))
+    );
+    assert!(!reenabled_scene.carousel_auto_play[0].disabled.resolve());
 }

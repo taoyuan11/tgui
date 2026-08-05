@@ -1,3 +1,4 @@
+use crate::foundation::binding::{InvalidationSignal, State};
 use crate::foundation::view_model::{Command, ValueCommand};
 use crate::theme::{StyleContext, WidgetState};
 use crate::ui::layout::{pct, Axis, LayoutStyle, Value};
@@ -39,12 +40,16 @@ impl<VM> Pane<VM> {
     }
 
     pub fn min(mut self, min: f32) -> Self {
-        self.min = min.clamp(0.0, 1.0);
+        if min.is_finite() {
+            self.min = min.clamp(0.0, 1.0);
+        }
         self
     }
 
     pub fn max(mut self, max: f32) -> Self {
-        self.max = max.clamp(0.0, 1.0);
+        if max.is_finite() {
+            self.max = max.clamp(0.0, 1.0);
+        }
         self
     }
 }
@@ -84,7 +89,11 @@ impl<VM> ResizablePanels<VM> {
     }
 
     pub fn step(mut self, step: f32) -> Self {
-        self.step = step.abs().max(0.001);
+        self.step = if step.is_finite() {
+            step.abs().clamp(0.001, 1.0)
+        } else {
+            0.05
+        };
         self
     }
 
@@ -117,20 +126,36 @@ impl<VM> ResizablePanels<VM> {
 
 impl<VM: 'static> From<ResizablePanels<VM>> for Element<VM> {
     fn from(splitter: ResizablePanels<VM>) -> Self {
-        let constraints = splitter
-            .panes
-            .iter()
-            .map(|pane| (pane.min, pane.max))
-            .collect::<Vec<_>>();
+        let constraints = normalize_constraints(
+            splitter
+                .panes
+                .iter()
+                .map(|pane| (pane.min, pane.max))
+                .collect::<Vec<_>>(),
+        );
         let pane_count = splitter.panes.len();
-        let sizes = splitter_sizes_value(splitter.sizes.clone(), pane_count);
+        let (sizes, local_sizes) = splitter_sizes_value(splitter.sizes.clone(), pane_count);
+        let on_resize = match local_sizes {
+            Some(local_sizes) => {
+                let external = splitter.on_resize.clone();
+                Some(ValueCommand::new_with_context(
+                    move |view_model, resize: SplitterResize, context| {
+                        local_sizes.set(normalize_sizes(resize.sizes.clone(), pane_count));
+                        if let Some(command) = external.as_ref() {
+                            command.execute_with_context(view_model, resize, context);
+                        }
+                    },
+                ))
+            }
+            None => splitter.on_resize.clone(),
+        };
         let mut children = Vec::new();
         for (index, pane) in splitter.panes.into_iter().enumerate() {
             let mut content = pane.content;
             content.layout.grow = splitter_pane_grow(&sizes, pane_count, index);
             children.push(content);
             if index + 1 < pane_count {
-                let on_resize = splitter.on_resize.clone();
+                let handle_on_resize = on_resize.clone();
                 let reset_sizes = splitter_reset_sizes(pane_count);
                 let style = splitter.style.clone();
                 let axis = splitter.axis;
@@ -166,7 +191,7 @@ impl<VM: 'static> From<ResizablePanels<VM>> for Element<VM> {
                             CursorStyle::NsResize
                         })
                         .on_click(Command::new_with_context({
-                            let on_resize = on_resize.clone();
+                            let on_resize = handle_on_resize.clone();
                             let click_sizes = sizes.clone();
                             let constraints = constraints.clone();
                             let step = splitter.step;
@@ -190,7 +215,7 @@ impl<VM: 'static> From<ResizablePanels<VM>> for Element<VM> {
                             }
                         }))
                         .on_double_click(Command::new_with_context(move |vm, context| {
-                            if let Some(command) = on_resize.as_ref() {
+                            if let Some(command) = handle_on_resize.as_ref() {
                                 command.execute_with_context(
                                     vm,
                                     SplitterResize {
@@ -251,17 +276,22 @@ impl<VM: 'static> From<ResizablePanels<VM>> for Element<VM> {
                         .into(),
                     &handle_identity,
                 );
-                handle.splitter_handle = Some(SplitterHandleState {
-                    axis: match axis {
-                        SplitterAxis::Horizontal => Axis::Horizontal,
-                        SplitterAxis::Vertical => Axis::Vertical,
-                    },
-                    index,
-                    sizes: sizes.clone(),
-                    constraints: constraints.clone(),
-                    step: splitter.step,
-                    on_resize: splitter.on_resize.clone(),
-                });
+                if on_resize.is_some() {
+                    handle.splitter_handle = Some(SplitterHandleState {
+                        axis: match axis {
+                            SplitterAxis::Horizontal => Axis::Horizontal,
+                            SplitterAxis::Vertical => Axis::Vertical,
+                        },
+                        index,
+                        sizes: sizes.clone(),
+                        constraints: constraints.clone(),
+                        step: splitter.step,
+                        on_resize: on_resize.clone(),
+                    });
+                } else {
+                    handle.interactions = Default::default();
+                    handle.focus = Default::default();
+                }
                 children.push(handle);
             }
         }
@@ -301,21 +331,52 @@ fn normalize_sizes(mut sizes: Vec<f32>, count: usize) -> Vec<f32> {
     {
         sizes = vec![1.0 / count as f32; count];
     }
-    let total: f32 = sizes.iter().sum();
-    if total <= f32::EPSILON {
+    let total = sizes.iter().map(|value| f64::from(*value)).sum::<f64>();
+    if !total.is_finite() || total <= f64::from(f32::EPSILON) {
         vec![1.0 / count as f32; count]
     } else {
-        sizes.into_iter().map(|value| value / total).collect()
+        sizes
+            .into_iter()
+            .map(|value| (f64::from(value) / total) as f32)
+            .collect()
     }
 }
 
-fn splitter_sizes_value(sizes: Value<Vec<f32>>, count: usize) -> Value<Vec<f32>> {
+fn normalize_constraints(mut constraints: Vec<(f32, f32)>) -> Vec<(f32, f32)> {
+    for (min, max) in &mut constraints {
+        *min = if min.is_finite() {
+            min.clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        *max = if max.is_finite() {
+            max.clamp(0.0, 1.0)
+        } else {
+            1.0
+        };
+        if *min > *max {
+            std::mem::swap(min, max);
+        }
+    }
+    constraints
+}
+
+fn splitter_sizes_value(
+    sizes: Value<Vec<f32>>,
+    count: usize,
+) -> (Value<Vec<f32>>, Option<State<Vec<f32>>>) {
     match sizes {
-        Value::Static(sizes) => Value::Static(normalize_sizes(sizes, count)),
-        Value::Signal(signal) => Value::Signal(
-            signal
-                .project(move |sizes| normalize_sizes(sizes.clone(), count))
-                .without_transition(),
+        Value::Static(sizes) => {
+            let local = State::new(normalize_sizes(sizes, count), InvalidationSignal::new());
+            (Value::Signal(local.signal()), Some(local))
+        }
+        Value::Signal(signal) => (
+            Value::Signal(
+                signal
+                    .project(move |sizes| normalize_sizes(sizes.clone(), count))
+                    .without_transition(),
+            ),
+            None,
         ),
     }
 }
@@ -436,6 +497,20 @@ mod tests {
         assert_sizes_close(
             splitter_adjusted_sizes(&sizes, &constraints, 0, -0.8),
             &[0.2, 0.8],
+        );
+    }
+
+    #[test]
+    fn splitter_normalizes_non_finite_sizes_without_overflow() {
+        assert_sizes_close(normalize_sizes(vec![f32::MAX, f32::MAX], 2), &[0.5, 0.5]);
+        assert_sizes_close(normalize_sizes(vec![f32::NAN, 1.0], 2), &[0.5, 0.5]);
+    }
+
+    #[test]
+    fn splitter_normalizes_non_finite_and_reversed_constraints() {
+        assert_eq!(
+            normalize_constraints(vec![(f32::NAN, f32::INFINITY), (0.8, 0.2)]),
+            vec![(0.0, 1.0), (0.2, 0.8)]
         );
     }
 }

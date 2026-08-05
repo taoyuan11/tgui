@@ -64,7 +64,11 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             if removed_ids.contains(&focused.widget_id) {
                 self.focus_visible = false;
                 self.active_key_repeat = None;
-                self.restore_focus_after_target_removal(&focused, removed_ids);
+                if !self.restore_list_focus_after_target_removal(&focused, removed_ids)
+                    && !self.restore_tree_focus_after_target_removal(&focused, removed_ids)
+                {
+                    self.restore_focus_after_target_removal(&focused, removed_ids);
+                }
             } else {
                 self.focused_widget = Some(focused);
             }
@@ -132,6 +136,12 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             .retain(|widget_id, _| !removed_ids.contains(widget_id));
         self.select_open_states
             .retain(|widget_id, _| !removed_ids.contains(widget_id));
+        self.menu_open_states
+            .retain(|widget_id, _| !removed_ids.contains(widget_id));
+        self.context_menu_anchor_states
+            .retain(|widget_id, _| !removed_ids.contains(widget_id));
+        self.menu_keyboard_cursor
+            .retain(|widget_id, _| !removed_ids.contains(widget_id));
         self.media_event_states
             .retain(|widget_id, _| !removed_ids.contains(widget_id));
     }
@@ -141,7 +151,76 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         previous: &FocusedWidget<VM>,
         removed_ids: &HashSet<WidgetId>,
     ) {
-        let candidates = self.focusable_widgets_in_tab_order();
+        let restore_target = self.focused_overlay_return_target.take().or_else(|| {
+            self.cached_scene.as_ref().and_then(|cached| {
+                cached
+                    .computed
+                    .overlay_close_handlers
+                    .iter()
+                    .rev()
+                    .find_map(|handle| {
+                        handle
+                            .return_focus_to
+                            .filter(|widget_id| !removed_ids.contains(widget_id))
+                    })
+            })
+        });
+        if let Some(widget_id) = restore_target {
+            let target = self.cached_scene.as_ref().and_then(|cached| {
+                cached
+                    .computed
+                    .hit_regions
+                    .iter()
+                    .chain(cached.computed.overlay_hit_regions.iter())
+                    .find_map(|region| {
+                        let focus = region.focus.as_ref()?;
+                        (focus.widget_id == widget_id && !removed_ids.contains(&widget_id)).then(
+                            || FocusedWidget {
+                                widget_id,
+                                scope_path: focus.scope_path.clone(),
+                                on_blur: focus.on_blur.clone(),
+                            },
+                        )
+                    })
+            });
+            if let Some(target) = target {
+                self.update_focus(Some(target), None, true);
+                return;
+            }
+        }
+
+        let mut candidates = self
+            .cached_scene
+            .as_ref()
+            .map(|cached| {
+                let mut seen = HashSet::new();
+                cached
+                    .computed
+                    .hit_regions
+                    .iter()
+                    .chain(cached.computed.overlay_hit_regions.iter())
+                    .filter_map(|region| {
+                        let focus = region.focus.as_ref()?;
+                        (focus.tab_index.unwrap_or(0) >= 0
+                            && !removed_ids.contains(&focus.widget_id)
+                            && seen.insert(focus.widget_id))
+                        .then(|| focus.clone())
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        candidates.sort_by(|left, right| {
+            let left_bucket = left.tab_index.unwrap_or(0);
+            let right_bucket = right.tab_index.unwrap_or(0);
+            match (left_bucket > 0, right_bucket > 0) {
+                (true, true) => left_bucket
+                    .cmp(&right_bucket)
+                    .then_with(|| left.order.cmp(&right.order)),
+                (true, false) => std::cmp::Ordering::Less,
+                (false, true) => std::cmp::Ordering::Greater,
+                (false, false) => left.order.cmp(&right.order),
+            }
+        });
         if let Some(next) = candidates
             .iter()
             .find(|candidate| {
@@ -156,22 +235,6 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         {
             self.update_focus(Some(next), None, true);
             return;
-        }
-
-        let restore_target = self
-            .computed_scene()
-            .overlay_close_handlers
-            .iter()
-            .rev()
-            .find_map(|handle| {
-                handle
-                    .return_focus_to
-                    .filter(|widget_id| !removed_ids.contains(widget_id))
-            });
-        if let Some(widget_id) = restore_target {
-            if self.restore_overlay_focus_if_needed(widget_id) {
-                return;
-            }
         }
 
         self.update_focus(None, None, false);

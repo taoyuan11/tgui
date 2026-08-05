@@ -21,6 +21,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     || self.focused_data_grid_cell_is_some()
                     || self.focused_tree_node_is_some()
                     || self.focused_list_item_is_some()
+                    || self.focused_calendar_day().is_some()
             }
             _ if !is_primary_shortcut_modifier(self.modifiers)
                 && !self.modifiers.alt_key()

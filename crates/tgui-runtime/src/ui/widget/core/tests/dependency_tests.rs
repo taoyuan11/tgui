@@ -1,5 +1,6 @@
 use super::*;
 use crate::ui::widget::r#virtual::{VirtualCacheState, VirtualViewportHint};
+use crate::ui::widget::ResolvedSceneLayout;
 use std::sync::{Arc, Mutex};
 
 #[test]
@@ -387,6 +388,66 @@ fn strict_keyed_for_children_reuse_widget_ids_across_reorder_patch() {
 }
 
 #[test]
+fn duplicate_keyed_for_children_keep_distinct_stable_widget_ids() {
+    use crate::ui::widget::For;
+
+    let ctx = test_context();
+    let items = ctx.state(vec!["first".to_string(), "second".to_string()]);
+    let container: Element<()> = Stack::<()>::new()
+        .child(For::new(
+            items.signal(),
+            |_item| "duplicate",
+            |_index, item| Text::new(item.clone()),
+        ))
+        .into();
+    let container_id = container.id;
+    let tree = WidgetTree::try_new_strict(container).expect("strict keyed For tree");
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let theme = Theme::default();
+    let viewport = Rect::new(0.0, 0.0, 200.0, 120.0);
+    let mut animations = AnimationEngine::default();
+    let mut layout = tree.build_scene_layout(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        UnitContext::default(),
+        &HashMap::new(),
+        &HashMap::new(),
+        viewport,
+    );
+    let ids = |layout: &ResolvedSceneLayout<()>| match &layout.resolved_root.kind {
+        ResolvedWidgetKind::Container { children, .. } => {
+            children.iter().map(|child| child.id).collect::<Vec<_>>()
+        }
+        _ => panic!("stack root should resolve to a container"),
+    };
+    let initial_ids = ids(&layout);
+    assert_ne!(initial_ids[0], initial_ids[1]);
+
+    items.set(vec![
+        "first updated".to_string(),
+        "second updated".to_string(),
+    ]);
+    layout
+        .patch_layout_roots(
+            &[container_id],
+            &font_manager,
+            &theme,
+            &media,
+            &mut animations,
+            viewport,
+            Instant::now(),
+        )
+        .expect("duplicate-key patch should stay valid");
+    let updated_ids = ids(&layout);
+
+    assert_eq!(updated_ids, initial_ids);
+    assert_ne!(updated_ids[0], updated_ids[1]);
+}
+
+#[test]
 fn mixed_child_sources_preserve_spans_and_previous_identity_matching() {
     use crate::ui::widget::common::ChildSource;
     use crate::ui::widget::{For, Show, ViewSwitch, WidgetKey};
@@ -740,6 +801,60 @@ fn textarea_non_focused_render_reuses_stable_layout_snapshot() {
             .height
             .max(overridden_region.content_viewport.height.get())
     );
+}
+
+#[test]
+fn input_and_textarea_from_value_follow_signal_in_the_existing_tree() {
+    let ctx = test_context();
+    let input_value = ctx.state(String::from("input before"));
+    let textarea_value = ctx.state(String::from("textarea before"));
+    let input: Element<()> = Input::from_value(input_value.signal())
+        .height(dp(36.0))
+        .into();
+    let textarea: Element<()> = Textarea::from_value(textarea_value.signal())
+        .height(dp(72.0))
+        .into();
+    let tree: WidgetTree<()> = WidgetTree::new(Flex::vertical().child([input, textarea]));
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let theme = Theme::default();
+    let media = test_media();
+    let mut animations = AnimationEngine::default();
+    let viewport = Rect::new(0.0, 0.0, 260.0, 120.0);
+    let collect_text = |tree: &WidgetTree<()>, animations: &mut AnimationEngine| {
+        tree.compute_scene(
+            &font_manager,
+            &theme,
+            &media,
+            animations,
+            None,
+            None,
+            &HashMap::new(),
+            viewport,
+            None,
+            None,
+            None,
+            None,
+            false,
+        )
+        .rendered()
+        .primitives
+        .texts
+        .iter()
+        .map(|text| text.content.to_string())
+        .collect::<Vec<_>>()
+    };
+
+    let before = collect_text(&tree, &mut animations);
+    assert!(before.iter().any(|text| text == "input before"));
+    assert!(before.iter().any(|text| text == "textarea before"));
+
+    input_value.set(String::from("input after"));
+    textarea_value.set(String::from("textarea after"));
+    let after = collect_text(&tree, &mut animations);
+    assert!(after.iter().any(|text| text == "input after"));
+    assert!(after.iter().any(|text| text == "textarea after"));
+    assert!(!after.iter().any(|text| text == "input before"));
+    assert!(!after.iter().any(|text| text == "textarea before"));
 }
 
 #[test]

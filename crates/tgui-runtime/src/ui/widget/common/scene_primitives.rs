@@ -2576,10 +2576,10 @@ impl BrushPrimitiveData {
                     1.0,
                     stops.len() as f32,
                     [
-                        gradient.start.x.get(),
-                        gradient.start.y.get(),
-                        gradient.end.x.get(),
-                        gradient.end.y.get(),
+                        finite_brush_value(gradient.start.x.get()),
+                        finite_brush_value(gradient.start.y.get()),
+                        finite_brush_value(gradient.end.x.get()),
+                        finite_brush_value(gradient.end.y.get()),
                     ],
                     [0.0; 4],
                     stops,
@@ -2592,9 +2592,9 @@ impl BrushPrimitiveData {
                     stops.len() as f32,
                     [0.0; 4],
                     [
-                        gradient.center.x.get(),
-                        gradient.center.y.get(),
-                        gradient.radius.get().max(0.0001),
+                        finite_brush_value(gradient.center.x.get()),
+                        finite_brush_value(gradient.center.y.get()),
+                        finite_brush_value(gradient.radius.get()).max(0.0001),
                         0.0,
                     ],
                     stops,
@@ -2654,12 +2654,20 @@ fn normalized_background_stops(
             .map(|stop| {
                 let color = stop.color.with_alpha_factor(opacity);
                 BackgroundGradientStopData {
-                    offset: stop.offset,
+                    offset: finite_brush_value(stop.offset).clamp(0.0, 1.0),
                     color: color.to_linear_rgba_f32(),
                 }
             })
             .collect(),
     )
+}
+
+fn finite_brush_value(value: f32) -> f32 {
+    if value.is_finite() {
+        value
+    } else {
+        0.0
+    }
 }
 
 fn solid_stop_colors(color: Color) -> [[f32; 4]; 7] {
@@ -2673,6 +2681,7 @@ fn solid_stop_colors(color: Color) -> [[f32; 4]; 7] {
 #[cfg(test)]
 mod culling_tests {
     use super::*;
+    use crate::ui::widget::{BackgroundLinearGradient, BackgroundRadialGradient};
 
     fn shape(rect: Rect, clip_rect: Option<Rect>) -> RenderPrimitive {
         RenderPrimitive {
@@ -2731,6 +2740,48 @@ mod culling_tests {
             clip_rect: None,
             clip_mask: None,
         }
+    }
+
+    fn brush_data_is_finite(data: &BrushPrimitiveData) -> bool {
+        data.brush_meta
+            .iter()
+            .chain(data.gradient_data0.iter())
+            .chain(data.gradient_data1.iter())
+            .chain(data.stop_offsets0.iter())
+            .chain(data.stop_offsets1.iter())
+            .chain(data.stop_colors.iter().flatten())
+            .all(|value| value.is_finite())
+    }
+
+    #[test]
+    fn background_brush_gpu_data_sanitizes_non_finite_public_fields() {
+        let linear = BackgroundBrush::LinearGradient(BackgroundLinearGradient {
+            start: Point::new(f32::NAN, f32::INFINITY),
+            end: Point::new(f32::NEG_INFINITY, 8.0),
+            stops: vec![BackgroundGradientStop {
+                offset: f32::NAN,
+                color: Color::WHITE,
+            }],
+        });
+        let linear_data = BrushPrimitiveData::from_background_brush(&linear, f32::NAN)
+            .expect("linear brush data");
+        assert!(brush_data_is_finite(&linear_data));
+        assert_eq!(linear_data.gradient_data0, [0.0, 0.0, 0.0, 8.0]);
+        assert_eq!(linear_data.stop_offsets0[0], 0.0);
+
+        let radial = BackgroundBrush::RadialGradient(BackgroundRadialGradient {
+            center: Point::new(f32::INFINITY, f32::NAN),
+            radius: Dp::new(f32::INFINITY),
+            stops: vec![BackgroundGradientStop {
+                offset: f32::INFINITY,
+                color: Color::BLACK,
+            }],
+        });
+        let radial_data =
+            BrushPrimitiveData::from_background_brush(&radial, 1.0).expect("radial brush data");
+        assert!(brush_data_is_finite(&radial_data));
+        assert_eq!(radial_data.gradient_data1, [0.0, 0.0, 0.0001, 0.0]);
+        assert_eq!(radial_data.stop_offsets0[0], 0.0);
     }
 
     #[test]

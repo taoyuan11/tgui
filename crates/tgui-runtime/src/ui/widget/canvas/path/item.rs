@@ -77,7 +77,7 @@ impl CanvasPath {
     }
 
     pub fn opacity(mut self, opacity: f32) -> Self {
-        self.style.opacity = opacity.clamp(0.0, 1.0);
+        self.style.opacity = normalized_unit_interval(opacity);
         self
     }
 

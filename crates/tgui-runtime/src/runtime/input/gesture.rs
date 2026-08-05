@@ -37,7 +37,28 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         let Some(cursor_position) = self.cursor_position else {
             return false;
         };
-        let Some((widget_id, target_id, recognizer)) = self.gesture_hit_target(viewport) else {
+        let explicit_target =
+            self.gesture_hit_target(viewport)
+                .map(|(widget_id, target_id, mut recognizer)| {
+                    // A composite ContextMenu owns the ancestor recognizer, but an interactive child
+                    // may already own a deeper swipe/double-tap recognizer. Keep the deeper gesture
+                    // identity and add only the missing long-press channel; context-menu dispatch
+                    // resolves the descriptor owner through the layout ancestry.
+                    if recognizer.on_long_press.is_none()
+                        && self.context_menu_trigger_ancestor(widget_id).is_some()
+                    {
+                        recognizer = recognizer.on_long_press(ValueCommand::new(
+                            |_: &mut VM, _: crate::ui::widget::LongPressEvent| {},
+                        ));
+                    }
+                    (widget_id, target_id, recognizer)
+                });
+        let target = explicit_target.or_else(|| {
+            matches!(button, ButtonSource::Touch { .. })
+                .then(|| self.tooltip_long_press_hit_target(viewport))
+                .flatten()
+        });
+        let Some((widget_id, target_id, recognizer)) = target else {
             return false;
         };
         let gesture_finger = Self::gesture_finger_id_from_button(button);
@@ -486,104 +507,118 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         crate::ui::widget::GestureRecognizer<VM>,
     )> {
         let hit_path = self.hit_path(viewport);
-        let interaction = hit_path.last()?;
-        let (widget_id, target_id, recognizer) = match interaction {
-            HitInteraction::Widget {
-                id, interactions, ..
-            }
-            | HitInteraction::SelectableText {
-                id, interactions, ..
-            }
-            | HitInteraction::Switch {
-                id, interactions, ..
-            }
-            | HitInteraction::Checkbox {
-                id, interactions, ..
-            }
-            | HitInteraction::Radio {
-                id, interactions, ..
-            }
-            | HitInteraction::SelectTrigger {
-                id, interactions, ..
-            }
-            | HitInteraction::TabTrigger {
-                id, interactions, ..
-            }
-            | HitInteraction::ListItem {
-                id, interactions, ..
-            }
-            | HitInteraction::TreeNode {
-                id, interactions, ..
-            }
-            | HitInteraction::TreeDisclosure {
-                id, interactions, ..
-            }
-            | HitInteraction::TreeCheckbox {
-                id, interactions, ..
-            }
-            | HitInteraction::DataGridCell {
-                id, interactions, ..
-            }
-            | HitInteraction::DataGridHeader {
-                id, interactions, ..
-            }
-            | HitInteraction::DataGridResizeHandle {
-                id, interactions, ..
-            }
-            | HitInteraction::SplitterHandle {
-                id, interactions, ..
-            }
-            | HitInteraction::Slider {
-                id, interactions, ..
-            }
-            | HitInteraction::TextInput {
-                id, interactions, ..
-            } => (
-                *id,
-                HoverTargetId::Widget(*id),
-                interactions.gesture.clone(),
-            ),
-            HitInteraction::SelectOption {
-                id,
-                option_index,
-                interactions,
-                ..
-            } => (
-                *id,
-                HoverTargetId::SelectOption {
-                    widget_id: *id,
-                    option_index: *option_index,
-                },
-                interactions.gesture.clone(),
-            ),
-            HitInteraction::Occluder { .. }
-            | HitInteraction::Disabled { .. }
-            | HitInteraction::CanvasItem { .. } => return None,
-        };
+        hit_path.iter().rev().find_map(|interaction| {
+            let (widget_id, target_id, recognizer) = match interaction {
+                HitInteraction::Widget {
+                    id, interactions, ..
+                }
+                | HitInteraction::SelectableText {
+                    id, interactions, ..
+                }
+                | HitInteraction::Switch {
+                    id, interactions, ..
+                }
+                | HitInteraction::Checkbox {
+                    id, interactions, ..
+                }
+                | HitInteraction::Radio {
+                    id, interactions, ..
+                }
+                | HitInteraction::SelectTrigger {
+                    id, interactions, ..
+                }
+                | HitInteraction::TabTrigger {
+                    id, interactions, ..
+                }
+                | HitInteraction::ListItem {
+                    id, interactions, ..
+                }
+                | HitInteraction::TreeNode {
+                    id, interactions, ..
+                }
+                | HitInteraction::TreeDisclosure {
+                    id, interactions, ..
+                }
+                | HitInteraction::TreeCheckbox {
+                    id, interactions, ..
+                }
+                | HitInteraction::DataGridCell {
+                    id, interactions, ..
+                }
+                | HitInteraction::DataGridHeader {
+                    id, interactions, ..
+                }
+                | HitInteraction::DataGridResizeHandle {
+                    id, interactions, ..
+                }
+                | HitInteraction::SplitterHandle {
+                    id, interactions, ..
+                }
+                | HitInteraction::Slider {
+                    id, interactions, ..
+                }
+                | HitInteraction::TextInput {
+                    id, interactions, ..
+                } => (
+                    *id,
+                    HoverTargetId::Widget(*id),
+                    interactions.gesture.clone(),
+                ),
+                HitInteraction::SelectOption {
+                    id,
+                    option_index,
+                    interactions,
+                    ..
+                } => (
+                    *id,
+                    HoverTargetId::SelectOption {
+                        widget_id: *id,
+                        option_index: *option_index,
+                    },
+                    interactions.gesture.clone(),
+                ),
+                HitInteraction::Occluder { .. }
+                | HitInteraction::Disabled { .. }
+                | HitInteraction::CanvasItem { .. } => return None,
+            };
+            recognizer
+                .filter(|gesture| gesture.has_any())
+                .map(|recognizer| (widget_id, target_id, recognizer))
+        })
+    }
 
-        recognizer
-            .filter(|gesture| gesture.has_any())
-            .map(|recognizer| (widget_id, target_id, recognizer))
+    fn tooltip_long_press_hit_target(
+        &mut self,
+        viewport: Rect,
+    ) -> Option<(
+        WidgetId,
+        HoverTargetId,
+        crate::ui::widget::GestureRecognizer<VM>,
+    )> {
+        let interaction = self.hit_path(viewport).last()?.clone();
+        let hit_widget_id = match interaction.target_id() {
+            crate::ui::widget::HitTargetId::Widget(widget_id) => widget_id,
+            crate::ui::widget::HitTargetId::SelectOption { widget_id, .. }
+            | crate::ui::widget::HitTargetId::CanvasItem { widget_id, .. } => widget_id,
+        };
+        let tooltip_id = self.tooltip_trigger_ancestor(hit_widget_id)?;
+        let recognizer = crate::ui::widget::GestureRecognizer::new().on_long_press(
+            ValueCommand::new(|_: &mut VM, _: crate::ui::widget::LongPressEvent| {}),
+        );
+        Some((tooltip_id, HoverTargetId::Widget(tooltip_id), recognizer))
     }
 
     fn open_context_menu_from_long_press_event(
         &mut self,
         event: &crate::ui::widget::LongPressEvent,
     ) -> bool {
-        let Some(has_context_menu) = self
-            .cached_scene
-            .as_ref()
-            .and_then(|cached| cached.layout.as_ref())
-            .and_then(|layout| layout.resolved_widget(event.widget_id))
-            .and_then(|resolved| resolved.context_menu.as_ref())
-            .map(|menu| !menu.disabled.resolve())
-        else {
+        let Some(widget_id) = self.context_menu_trigger_ancestor(event.widget_id) else {
             return false;
         };
-        if !has_context_menu {
-            return false;
-        }
-        self.open_context_menu_at(event.widget_id, event.position)
+        self.open_context_menu_with_event(crate::ui::widget::LongPressEvent {
+            widget_id,
+            ..*event
+        })
     }
 
     fn detect_gesture_edge(

@@ -131,6 +131,13 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
     }
 
     pub(in crate::runtime) fn handle_canvas_mouse_release(&mut self, button: CanvasMouseButton) {
+        if self
+            .active_canvas_drag
+            .as_ref()
+            .is_some_and(|drag| drag.button != button)
+        {
+            return;
+        }
         if let Some(position) = self.cursor_position {
             if let Some(drag) = self.active_canvas_drag.as_ref() {
                 let context = drag.context.clone();

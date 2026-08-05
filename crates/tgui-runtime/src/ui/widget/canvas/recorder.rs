@@ -155,7 +155,7 @@ impl CanvasRecorder {
     }
 
     pub fn set_opacity(&mut self, opacity: f32) -> &mut Self {
-        self.current_state_mut().opacity = opacity.clamp(0.0, 1.0);
+        self.current_state_mut().opacity = normalized_unit_interval(opacity);
         self
     }
 

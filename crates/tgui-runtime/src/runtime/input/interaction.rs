@@ -624,6 +624,9 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         let Some(drag) = self.active_canvas_drag.take() else {
             return false;
         };
+        if !drag.started {
+            return false;
+        }
         let Some(cursor_position) = self.cursor_position else {
             return false;
         };

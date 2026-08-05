@@ -92,6 +92,28 @@ impl DependencyGraph {
         self.dependencies.get(&dependency)
     }
 
+    /// Returns every owner that reads the same dependency as a particular property owner.
+    ///
+    /// Pointer-drag fast paths use this to keep related retained widgets in sync without needing
+    /// access to the private dependency identity stored by the source `Signal`.
+    pub(crate) fn owners_sharing_widget_property(
+        &self,
+        widget_id: u64,
+        phase: DependencyPhase,
+        property: PropertySlot,
+    ) -> HashSet<DependencyOwner> {
+        let target = DependencyOwner {
+            widget_id,
+            phase,
+            property: Some(property),
+        };
+        self.dependencies
+            .values()
+            .filter(|owners| owners.contains(&target))
+            .flat_map(|owners| owners.iter().copied())
+            .collect()
+    }
+
     pub(crate) fn has_global_dependency(&self) -> bool {
         !self.global_owners.is_empty()
     }

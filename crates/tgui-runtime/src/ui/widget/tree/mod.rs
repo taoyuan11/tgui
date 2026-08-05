@@ -22,7 +22,7 @@ use super::style::palette::palette_from_theme;
 use super::style::{ContainerStyle, StyleResolver, StyleSheet, WidgetSurfaceStyle};
 use super::{
     ContextMenuDescriptor, Flex, GestureRecognizer, LongPressEvent, MenuItem, MenuItemState, Stack,
-    Text,
+    Text, ViewSwitch,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -423,6 +423,16 @@ where
     fn key(&self, index: usize) -> Option<WidgetKey> {
         self.snapshot().rows.get(index).map(|row| row.key.clone())
     }
+
+    fn revision(&self) -> u64 {
+        // Loading/empty switching lives outside the virtual source. Expansion is
+        // therefore the only revision that can invalidate measured row indices,
+        // and no lossy composite revision is needed.
+        match &self.expanded_keys {
+            Value::Static(_) => 0,
+            Value::Signal(signal) => signal.sync_token().1,
+        }
+    }
 }
 
 #[cfg(feature = "bench-support")]
@@ -535,8 +545,8 @@ where
             context_menu: Vec::new(),
             draggable: false,
             layout: LayoutStyle::default(),
-            focusable: None,
-            tab_index: None,
+            focusable: Some(true),
+            tab_index: Some(0),
             focus_scope: None,
             visual: VisualStyle::default(),
             interactions,
@@ -868,16 +878,40 @@ where
     VM: 'static,
 {
     fn into_element(self) -> Element<VM> {
-        if self.loading.resolve() {
-            return self
-                .loading_view
-                .unwrap_or_else(|| Stack::new().child(Text::new("Loading...")).into());
+        let loading_is_reactive = matches!(&self.loading, Value::Signal(_));
+        let has_nodes = !self.nodes.is_empty();
+        if !loading_is_reactive {
+            if self.loading.resolve() {
+                return self
+                    .loading_view
+                    .clone()
+                    .unwrap_or_else(|| Stack::new().child(Text::new("Loading...")).into());
+            }
+            if !has_nodes {
+                return self
+                    .empty_view
+                    .clone()
+                    .unwrap_or_else(|| Stack::new().child(Text::new("No items")).into());
+            }
         }
-        if self.nodes.is_empty() {
-            return self
-                .empty_view
-                .unwrap_or_else(|| Stack::new().child(Text::new("No items")).into());
-        }
+        let reactive_slot_index = match &self.loading {
+            Value::Signal(signal) => Some(signal.map(move |loading| {
+                if loading {
+                    0
+                } else if has_nodes {
+                    2
+                } else {
+                    1
+                }
+            })),
+            Value::Static(_) => None,
+        };
+        let loading_view = self
+            .loading_view
+            .unwrap_or_else(|| Stack::new().child(Text::new("Loading...")).into());
+        let empty_view = self
+            .empty_view
+            .unwrap_or_else(|| Stack::new().child(Text::new("No items")).into());
 
         let tree_id = WidgetId::next();
         let style_resolver = self.style.clone();
@@ -891,12 +925,7 @@ where
             checked: checked_keys.clone(),
         });
         let source = TreeRowSource::new(self.nodes.into(), expanded_keys);
-        let row_count = source.len();
-        if row_count == 0 {
-            return self
-                .empty_view
-                .unwrap_or_else(|| Stack::new().child(Text::new("No items")).into());
-        }
+        let row_count = source.snapshot().rows.len();
         let source_for_render = source.clone();
         let render = self.render.clone();
         let (selected_keys, selected_key_membership) = match self.selected_keys {
@@ -1025,7 +1054,17 @@ where
             selection: root_selection,
             checkable: root_checkable,
         });
-        tree
+        match reactive_slot_index {
+            Some(index) => Stack::new()
+                .child(
+                    ViewSwitch::new(index)
+                        .case(loading_view)
+                        .case(empty_view)
+                        .case(tree),
+                )
+                .into(),
+            None => tree,
+        }
     }
 }
 
@@ -1094,7 +1133,7 @@ where
     let mut element: Element<VM> = row_container.into();
     element.key = Some(row.key.clone());
     element.focus.focusable = Some(!disabled_now);
-    element.focus.tab_index = Some(if visible_index == 0 { 0 } else { -1 });
+    element.focus.tab_index = Some(-1);
     element.interactions.cursor_style = Some(Value::Static(if disabled_now {
         CursorStyle::Default
     } else if draggable {
@@ -1155,15 +1194,17 @@ where
         draggable,
     });
     if !context_menu.is_empty() {
-        let on_show = ValueCommand::new(|_: &mut VM, _: LongPressEvent| {});
+        let noop = || ValueCommand::new(|_: &mut VM, _: LongPressEvent| {});
         element.interactions.gesture = Some(match element.interactions.gesture.take() {
-            Some(existing) => existing.on_long_press(on_show),
-            None => GestureRecognizer::new().on_long_press(on_show),
+            Some(existing) if existing.on_long_press.is_some() => existing,
+            Some(existing) => existing.on_long_press(noop()),
+            None => GestureRecognizer::new().on_long_press(noop()),
         });
         element.context_menu = Some(Box::new(ContextMenuDescriptor {
             items: context_menu.as_ref().to_vec(),
+            on_show: None,
             on_open_change: None,
-            disabled: Value::Static(false),
+            disabled: row.disabled.clone(),
             style: None,
         }));
     }
@@ -1398,11 +1439,27 @@ mod row_source_tests {
     }
 
     #[test]
+    fn retained_row_source_revision_changes_for_each_expansion_invalidation() {
+        let expanded = Arc::new(Mutex::new(Vec::new()));
+        let (source, invalidation) = source_with_expansion(Arc::clone(&expanded));
+        let initial_revision = source.revision();
+
+        expanded.lock().unwrap().push("root".into());
+        invalidation.mark_dirty();
+        let expanded_revision = source.revision();
+        assert_ne!(expanded_revision, initial_revision);
+
+        expanded.lock().unwrap().clear();
+        invalidation.mark_dirty();
+        assert_ne!(source.revision(), expanded_revision);
+    }
+
+    #[test]
     fn retained_row_snapshot_keeps_disabled_check_targets_live() {
         let invalidation = InvalidationSignal::new();
         let child_disabled = Arc::new(Mutex::new(false));
         let child_disabled_for_signal = Arc::clone(&child_disabled);
-        let source =
+        let source: TreeRowSource<&'static str> =
             TreeRowSource::new(
                 vec![TreeNode::keyed("root", "Root").child(
                     TreeNode::keyed("child", "Child").disable(Signal::new(

@@ -360,6 +360,11 @@ pub struct BoundRuntimeHandler<VM> {
     /// `cached_scene` 硬清空，导致本帧无法推断，浮层会误关闭。点击不移动光标，故这里缓存上一次结果，
     /// 在 cache 缺失的重建帧里复用，重建后新 cache 会恢复正常解析。光标离开窗口时清空。
     hover_popover_anchor: Option<WidgetId>,
+    /// Focus target associated with the currently focused closable overlay item.
+    /// Kept outside the scene cache so a conservative rebuild can still restore
+    /// focus after the overlay content disappears.
+    focused_overlay_return_target: Option<WidgetId>,
+    pending_calendar_focus: Option<(WidgetId, chrono::NaiveDate)>,
     /// 未受控 Menu 的内部开闭状态。受控 Menu 仍以 descriptor.open 为准。
     menu_open_states: HashMap<WidgetId, bool>,
     /// 未受控 MenuBar 的内部 active entry。key 为 MenuBarGroupId 的 raw 值。
@@ -551,6 +556,8 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 long_press_release_deadline: None,
             },
             hover_popover_anchor: None,
+            focused_overlay_return_target: None,
+            pending_calendar_focus: None,
             menu_open_states: HashMap::new(),
             menubar_active_states: HashMap::new(),
             context_menu_anchor_states: HashMap::new(),

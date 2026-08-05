@@ -14,7 +14,7 @@ pub(crate) fn progress_bar_track_rect(
     theme: &Theme,
     units: UnitContext,
 ) -> Rect {
-    let track_height = units.resolve_dp(style.height).max(1.0);
+    let track_height = finite_non_negative(units.resolve_dp(style.height), 1.0).max(1.0);
     if !show_label {
         return Rect::new(
             frame.x,
@@ -26,9 +26,10 @@ pub(crate) fn progress_bar_track_rect(
 
     let label_probe = text_with_typography("100%", &style.text_style);
     let (_, label_height, _) = resolved_text_metrics(&label_probe, theme, units);
+    let gap = finite_non_negative(units.resolve_dp(style.gap), 0.0);
     Rect::new(
         frame.x,
-        frame.y + Dp::new((label_height + units.resolve_dp(style.gap)).max(0.0)),
+        frame.y + Dp::new((label_height + gap).max(0.0)),
         frame.width,
         track_height,
     )
@@ -65,11 +66,10 @@ pub(crate) fn push_progress_bar_primitives(
     now: std::time::Instant,
     scene: &mut ScenePrimitives,
 ) -> Rect {
+    let show_label = show_label && (label.is_some() || !indeterminate);
     let track_rect = progress_bar_track_rect(frame, style, show_label, theme, units);
-    let radius = units
-        .resolve_dp(style.radius.resolve())
-        .min(track_rect.height.get() * 0.5)
-        .max(0.0);
+    let radius = finite_non_negative(units.resolve_dp(style.radius.resolve()), 0.0)
+        .min(track_rect.height.get() * 0.5);
     let track_color = style.track_color.resolve().with_alpha_factor(opacity);
     let fill_color = style.fill_color.resolve().with_alpha_factor(opacity);
 
@@ -84,7 +84,11 @@ pub(crate) fn push_progress_bar_primitives(
 
     if track_rect.width > Dp::ZERO {
         if indeterminate {
-            let segment_ratio = style.indeterminate_segment_ratio.clamp(0.1, 1.0);
+            let segment_ratio = if style.indeterminate_segment_ratio.is_finite() {
+                style.indeterminate_segment_ratio.clamp(0.1, 1.0)
+            } else {
+                0.34
+            };
             let segment_width = Dp::new(track_rect.width.get() * segment_ratio)
                 .max(dp(8.0))
                 .min(track_rect.width);
@@ -123,8 +127,8 @@ pub(crate) fn push_progress_bar_primitives(
                 });
             }
         } else {
-            let fill_width =
-                Dp::new(track_rect.width.get() * value.clamp(0.0, 1.0)).min(track_rect.width);
+            let fill_width = Dp::new(track_rect.width.get() * normalized_progress_value(value))
+                .min(track_rect.width);
             scene.push_shape(RenderPrimitive {
                 rect: Rect::new(track_rect.x, track_rect.y, fill_width, track_rect.height),
                 color: fill_color,
@@ -137,9 +141,9 @@ pub(crate) fn push_progress_bar_primitives(
     }
 
     if show_label {
-        let label_text = label
-            .cloned()
-            .unwrap_or_else(|| Value::Static(format!("{:.0}%", value.clamp(0.0, 1.0) * 100.0)));
+        let label_text = label.cloned().unwrap_or_else(|| {
+            Value::Static(format!("{:.0}%", normalized_progress_value(value) * 100.0))
+        });
         let label_widget = text_with_typography(label_text, &style.text_style);
         push_text_primitives(
             &label_widget,
@@ -164,4 +168,12 @@ pub(crate) fn push_progress_bar_primitives(
     }
 
     track_rect
+}
+
+fn finite_non_negative(value: f32, fallback: f32) -> f32 {
+    if value.is_finite() {
+        value.max(0.0)
+    } else {
+        fallback
+    }
 }

@@ -172,6 +172,18 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         self.text_input_regions.get(&widget_id).cloned()
     }
 
+    pub(super) fn text_input_region_data_from_cached_scene(
+        &self,
+        widget_id: WidgetId,
+    ) -> Option<TextInputRegionData<VM>> {
+        let computed = &self.cached_scene.as_ref()?.computed;
+        computed
+            .hit_regions
+            .iter()
+            .chain(computed.overlay_hit_regions.iter())
+            .find_map(|region| text_input_region_data_from_hit(region, widget_id))
+    }
+
     pub(super) fn cached_text_input_flush_data(
         &self,
         widget_id: WidgetId,
@@ -191,32 +203,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             .hit_regions
             .iter()
             .chain(computed.overlay_hit_regions.iter())
-            .find_map(|region| match &region.interaction {
-                HitInteraction::TextInput {
-                    id,
-                    controller,
-                    frame,
-                    padding,
-                    text_style,
-                    multiline,
-                    auto_wrap,
-                    show_scrollbar,
-                    on_change,
-                    on_change_set,
-                    ..
-                } if *id == widget_id => Some(TextInputRegionData {
-                    controller: controller.clone(),
-                    frame: *frame,
-                    padding: *padding,
-                    text_style: text_style.clone(),
-                    multiline: *multiline,
-                    auto_wrap: *auto_wrap,
-                    show_scrollbar: *show_scrollbar,
-                    on_change: on_change.clone(),
-                    on_change_set: on_change_set.clone(),
-                }),
-                _ => None,
-            });
+            .find_map(|region| text_input_region_data_from_hit(region, widget_id));
         if let Some(region) = region.clone() {
             self.text_input_regions.insert(widget_id, region);
         }
@@ -409,5 +396,37 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         }
         self.text_edit_states.insert(widget_id, state);
         Some(region)
+    }
+}
+
+fn text_input_region_data_from_hit<VM>(
+    region: &crate::ui::widget::HitRegion<VM>,
+    widget_id: WidgetId,
+) -> Option<TextInputRegionData<VM>> {
+    match &region.interaction {
+        HitInteraction::TextInput {
+            id,
+            controller,
+            frame,
+            padding,
+            text_style,
+            multiline,
+            auto_wrap,
+            show_scrollbar,
+            on_change,
+            on_change_set,
+            ..
+        } if *id == widget_id => Some(TextInputRegionData {
+            controller: controller.clone(),
+            frame: *frame,
+            padding: *padding,
+            text_style: text_style.clone(),
+            multiline: *multiline,
+            auto_wrap: *auto_wrap,
+            show_scrollbar: *show_scrollbar,
+            on_change: on_change.clone(),
+            on_change_set: on_change_set.clone(),
+        }),
+        _ => None,
     }
 }

@@ -41,6 +41,20 @@ fn tab_center(handler: &mut BoundRuntimeHandler<TestVm>, key: &str) -> Point {
     Point::new(rect.x + rect.width * 0.5, rect.y + rect.height * 0.5)
 }
 
+fn tab_id(handler: &mut BoundRuntimeHandler<TestVm>, key: &str) -> WidgetId {
+    handler
+        .computed_scene()
+        .hit_regions
+        .iter()
+        .find_map(|region| match &region.interaction {
+            HitInteraction::TabTrigger {
+                id, key: candidate, ..
+            } if candidate == key => Some(*id),
+            _ => None,
+        })
+        .expect("tab trigger should exist")
+}
+
 #[test]
 fn clicking_tab_trigger_dispatches_on_change() {
     let invalidation = InvalidationSignal::new();
@@ -70,6 +84,94 @@ fn arrow_keys_skip_disabled_tabs_and_enter_activates_focused_tab() {
     assert!(handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::Enter))));
 
     assert_eq!(log.lock().unwrap().as_slice(), ["three"]);
+}
+
+#[test]
+fn scroll_tabs_keyboard_navigation_keeps_each_focused_trigger_visible() {
+    let invalidation = InvalidationSignal::new();
+    let tree = WidgetTree::new(
+        Tabs::new(
+            (0..8)
+                .map(|index| {
+                    TabItem::new(
+                        format!("tab-{index}"),
+                        format!("Tab {index}"),
+                        Text::new(format!("Panel {index}")),
+                    )
+                })
+                .collect(),
+            "tab-0".to_string(),
+        )
+        .size(dp(180.0), dp(120.0))
+        .style(|style, _| style.tab_min_width = dp(88.0)),
+    );
+    let mut handler = test_handler_with_config(
+        TestVm,
+        Some(tree),
+        invalidation,
+        test_config_with_size(220.0, 160.0),
+    );
+
+    assert!(handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::Tab))));
+    for expected_index in 1..7 {
+        assert!(handler
+            .handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::ArrowRight))));
+        let focused_id = handler
+            .focused_widget_id()
+            .expect("a tab trigger should remain focused");
+        let (key, rect, clip) = handler
+            .computed_scene()
+            .hit_regions
+            .iter()
+            .find_map(|region| match &region.interaction {
+                HitInteraction::TabTrigger { id, key, .. } if *id == focused_id => {
+                    Some((key.clone(), region.rect, region.clip_rect))
+                }
+                _ => None,
+            })
+            .expect("the focused tab trigger should remain materialized");
+        assert_eq!(key, format!("tab-{expected_index}"));
+        let clip = clip.expect("scrolling tab triggers should carry the strip clip");
+        assert!(
+            rect.x + dp(0.01) >= clip.x && rect.right() <= clip.right() + dp(0.01),
+            "the focused trigger must be fully visible: rect={rect:?} clip={clip:?}"
+        );
+    }
+
+    assert!(handler
+        .scroll_states
+        .values()
+        .any(|offset| offset.x > Dp::ZERO));
+}
+
+#[test]
+fn tab_navigation_enters_at_selected_enabled_tab_or_first_enabled_fallback() {
+    let build = |selected: &str| {
+        WidgetTree::new(Tabs::new(
+            vec![
+                TabItem::new("one", "One", Text::new("Panel one")),
+                TabItem::new("two", "Two", Text::new("Panel two")).disabled(true),
+                TabItem::new("three", "Three", Text::new("Panel three")),
+            ],
+            selected.to_string(),
+        ))
+    };
+
+    let invalidation = InvalidationSignal::new();
+    let mut selected_handler = test_handler(Some(build("three")), invalidation);
+    let selected_id = tab_id(&mut selected_handler, "three");
+    assert!(
+        selected_handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::Tab)))
+    );
+    assert_eq!(selected_handler.focused_widget_id(), Some(selected_id));
+
+    let invalidation = InvalidationSignal::new();
+    let mut fallback_handler = test_handler(Some(build("two")), invalidation);
+    let fallback_id = tab_id(&mut fallback_handler, "one");
+    assert!(
+        fallback_handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::Tab)))
+    );
+    assert_eq!(fallback_handler.focused_widget_id(), Some(fallback_id));
 }
 
 #[test]
@@ -160,11 +262,8 @@ fn changing_selected_state_moves_active_tab_indicator() {
     selected.set("three".to_string());
     let animation_start = Instant::now();
     handler.request_redraw_if_dirty(animation_start);
-    // A strict retained plan may conservatively reject the combined trigger +
-    // panel update because inactive panels own focus-scope sentinels. Rendering
-    // the requested frame performs the safe subtree/full fallback and starts
-    // the live border transition.
-    handler.invalidate_computed_scene();
+    // The selected signal updates the retained trigger structure and panel scene in
+    // one invalidation batch. Both branches must be patched before this frame is read.
     let _ = handler.computed_scene();
 
     #[cfg(feature = "bench-support")]
@@ -174,10 +273,10 @@ fn changing_selected_state_moves_active_tab_indicator() {
             snapshot.iter().any(|(action, count)| {
                 matches!(
                     *action,
-                    "reactive_property_slot_write" | "strict_reactive_scene_rejected"
+                    "reactive_structure_slot_update" | "reactive_property_slot_write"
                 ) && *count >= 1
             }),
-            "tabs selected change should use a property slot or its strict safe fallback: {snapshot:?}"
+            "tabs selected change should update every retained consumer: {snapshot:?}"
         );
     }
 

@@ -12,6 +12,9 @@ pub struct FocusScopeOptions {
     /// visual subtree to stop receiving *all* input as soon as logical selection
     /// changes, while its opacity/offset are still animating.
     pub(crate) suppress_interactions_when_inactive: bool,
+    /// View-stack panels that are visually retained for exit animation must not
+    /// remain exposed to assistive technology after they become inactive.
+    pub(crate) hide_from_accessibility_when_inactive: bool,
 }
 
 impl FocusScopeOptions {
@@ -21,6 +24,7 @@ impl FocusScopeOptions {
             auto_focus_first: false,
             active: Value::Static(true),
             suppress_interactions_when_inactive: false,
+            hide_from_accessibility_when_inactive: false,
         }
     }
 
@@ -44,6 +48,11 @@ impl FocusScopeOptions {
         self
     }
 
+    pub(crate) fn hide_from_accessibility_when_inactive(mut self) -> Self {
+        self.hide_from_accessibility_when_inactive = true;
+        self
+    }
+
     pub fn is_trap(&self) -> bool {
         self.trap
     }
@@ -62,6 +71,10 @@ impl FocusScopeOptions {
 
     pub(crate) fn suppresses_interactions(&self, active: bool) -> bool {
         self.suppress_interactions_when_inactive && !active
+    }
+
+    pub(crate) fn hides_from_accessibility(&self, active: bool) -> bool {
+        self.hide_from_accessibility_when_inactive && !active
     }
 }
 
@@ -165,7 +178,7 @@ pub(crate) enum MeasureContext {
     },
     Select {
         id: WidgetId,
-        selected_label: Value<Option<String>>,
+        selected_label: SelectLabelState,
         placeholder: Value<String>,
         style: crate::ui::widget::SelectStyle,
     },
@@ -306,10 +319,12 @@ pub(crate) enum HitInteraction<VM> {
         interactions: InteractionHandlers<VM>,
         on_open_change: Option<ValueCommand<VM, bool>>,
         is_open: bool,
+        can_toggle: bool,
     },
     TabTrigger {
         id: WidgetId,
         group_id: WidgetId,
+        scroll_container_id: Option<WidgetId>,
         index: usize,
         placement: TabPlacement,
         key: String,
@@ -395,6 +410,8 @@ pub(crate) enum HitInteraction<VM> {
         interactions: InteractionHandlers<VM>,
         on_select: Option<Command<VM>>,
         on_open_change: Option<ValueCommand<VM, bool>>,
+        /// Full item path for menu overlays. Select dropdown options leave this unset.
+        menu_path: Option<smallvec::SmallVec<[usize; 4]>>,
     },
     CanvasItem {
         id: WidgetId,
@@ -479,15 +496,18 @@ impl<VM> Clone for HitInteraction<VM> {
                 interactions,
                 on_open_change,
                 is_open,
+                can_toggle,
             } => Self::SelectTrigger {
                 id: *id,
                 interactions: interactions.clone(),
                 on_open_change: on_open_change.clone(),
                 is_open: *is_open,
+                can_toggle: *can_toggle,
             },
             Self::TabTrigger {
                 id,
                 group_id,
+                scroll_container_id,
                 index,
                 placement,
                 key,
@@ -499,6 +519,7 @@ impl<VM> Clone for HitInteraction<VM> {
             } => Self::TabTrigger {
                 id: *id,
                 group_id: *group_id,
+                scroll_container_id: *scroll_container_id,
                 index: *index,
                 placement: *placement,
                 key: key.clone(),
@@ -639,6 +660,7 @@ impl<VM> Clone for HitInteraction<VM> {
                 interactions,
                 on_select,
                 on_open_change,
+                menu_path,
             } => Self::SelectOption {
                 id: *id,
                 state_id: *state_id,
@@ -646,6 +668,7 @@ impl<VM> Clone for HitInteraction<VM> {
                 interactions: interactions.clone(),
                 on_select: on_select.clone(),
                 on_open_change: on_open_change.clone(),
+                menu_path: menu_path.clone(),
             },
             Self::CanvasItem {
                 id,
@@ -687,15 +710,36 @@ impl<VM> HitInteraction<VM> {
                 default_activation.handles_enter(),
                 default_activation.handles_space(),
             ),
-            Self::Checkbox { id, on_change, .. }
-            | Self::Radio { id, on_change, .. }
-            | Self::Switch { id, on_change, .. }
-                if on_change.is_some() =>
-            {
-                (*id, false, true)
+            Self::Checkbox {
+                id,
+                interactions,
+                on_change,
+                ..
             }
-            Self::SelectTrigger { id, .. } => (*id, true, false),
+            | Self::Radio {
+                id,
+                interactions,
+                on_change,
+                ..
+            }
+            | Self::Switch {
+                id,
+                interactions,
+                on_change,
+                ..
+            } if on_change.is_some() || interactions.on_click.is_some() => (*id, false, true),
+            Self::SelectTrigger {
+                id,
+                interactions,
+                can_toggle,
+                ..
+            } if *can_toggle || interactions.on_click.is_some() => (*id, true, true),
             Self::TabTrigger { id, on_change, .. } if on_change.is_some() => (*id, true, true),
+            Self::DataGridHeader { id, state, .. }
+                if state.sortable && state.on_sort_change.is_some() =>
+            {
+                (*id, true, true)
+            }
             _ => return None,
         };
         (enter || space).then_some((id, enter, space))

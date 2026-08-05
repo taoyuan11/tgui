@@ -28,7 +28,9 @@ use super::style::{
     ContainerStyle, IconStyle, ProgressBarStyle, SelectStyle, SliderStyle, StyleResolver,
     StyleSheet, TextWidgetStyle, VideoStyle, VideoSurfaceStyle,
 };
-use super::{Flex, IntoTextContent, ProgressBar, Select, SelectOption, Slider, Stack, Text};
+use super::{
+    Flex, For, IntoTextContent, ProgressBar, Select, SelectOption, Show, Slider, Stack, Text,
+};
 
 const PLAYBACK_RATE_OPTIONS: &[(i32, &str)] = &[
     (25, "Speed: 0.25x"),
@@ -623,159 +625,182 @@ impl<VM> Video<VM> {
 
 impl<VM: 'static> From<Video<VM>> for Element<VM> {
     fn from(video: Video<VM>) -> Self {
-        let controller = video.controller.clone();
-        let show_controls = video.show_controls.resolve();
-        let show_status = video.show_status.resolve();
-        let show_volume = video.show_volume.resolve();
-        let show_looping = video.show_looping.resolve();
-        let show_playback_rate = video.show_playback_rate.resolve();
-        let show_audio_tracks = video.show_audio_tracks.resolve();
-        let show_subtitle_tracks = video.show_subtitle_tracks.resolve();
-        let show_subtitles = video.show_subtitles.resolve();
-        let fit = video.fit;
-
-        let surface_style = video.style.clone();
-        let mut surface: Element<VM> = VideoSurface::new(controller.clone())
-            .size(pct(100.0), pct(100.0))
-            .position_absolute()
-            .inset(dp(0.0))
-            .style(move |style, context| {
-                style.fit = fit;
-                style.surface.background = Some(Color::hexa(0x000000FF).into());
-                let resolved = resolve_video_style(surface_style.as_ref(), context);
-                style.surface.border_radius = Some(Value::Static(resolved.radius));
-            })
-            .into();
-        surface.media_events = video.media_events.clone();
-
-        let root_style = video.style.clone();
-        let root_layout_style = video.style.clone();
-        let mut root = Stack::new()
-            .aspect_ratio(16.0 / 9.0)
-            .runtime_layout(move |layout, _container, context, style_sheet, visual| {
-                let resolved = resolve_video_style_with_sheet(
-                    root_layout_style.as_ref(),
-                    context,
-                    style_sheet,
-                    visual,
-                    WidgetState::default(),
-                );
-                if layout.width.is_none() {
-                    layout.width = Some(Value::Static(crate::ui::layout::Length::Px(
-                        resolved.default_surface_width,
-                    )));
-                }
-                if layout.height.is_none() {
-                    layout.height = Some(Value::Static(crate::ui::layout::Length::Px(
-                        resolved.default_surface_height,
-                    )));
-                }
-                if layout.padding.is_none() {
-                    layout.padding = Some(Value::Static(resolved.padding));
-                }
-            })
-            .overflow(Overflow::Hidden)
-            .style_full_with_style_sheet(move |context, style_sheet, visual, state| {
-                let resolved = resolve_video_style_with_sheet(
-                    root_style.as_ref(),
-                    context,
-                    style_sheet,
-                    visual,
-                    state,
-                );
-                let mut container = ContainerStyle::default_for_theme(context.theme);
-                container.surface = resolved.surface.clone();
-                container.surface.background = Some(resolved.background);
-                container.surface.border_color = Some(resolved.border);
-                container.surface.border_width = Some(Value::Static(resolved.border_width));
-                container.surface.border_radius = Some(Value::Static(resolved.radius));
-                container
-            })
-            .child(surface);
-
-        if let Some(subtitles) = maybe_subtitle_overlay(
-            &controller,
-            show_subtitles,
-            show_controls,
-            video.style.clone(),
-            video.visual.clone(),
-        ) {
-            root = root.child(subtitles);
-        }
-
-        if show_controls {
-            root = root.child(video_controls(
-                controller.clone(),
-                show_volume,
-                show_looping,
-                show_playback_rate,
-                show_audio_tracks,
-                show_subtitle_tracks,
-                video.style.clone(),
-                video.visual.clone(),
-            ));
-        }
-
-        if show_status {
-            root = root.child(status_overlay(
-                controller.clone(),
-                video.style.clone(),
-                video.visual.clone(),
-            ));
-        }
-
-        let mut root: Element<VM> = root.into();
-        root.key = video.key;
-        root = with_visual_identity(root, &video.visual);
-        root.layout = merge_layout(root.layout, video.layout);
-        if root.layout.height != LayoutStyle::default().height {
-            root.layout.aspect_ratio = None;
-        }
-        root
+        with_video_construction_stack(|| video_into_element(video))
     }
 }
 
 #[inline(never)]
-fn maybe_subtitle_overlay<VM: 'static>(
-    controller: &VideoController,
-    show_subtitles: bool,
-    controls_visible: bool,
-    style: Option<StyleResolver<VideoStyle>>,
-    visual: VisualStyle,
-) -> Option<Element<VM>> {
-    if !show_subtitles {
-        return None;
-    }
+fn video_into_element<VM: 'static>(video: Video<VM>) -> Element<VM> {
+    let controller = video.controller.clone();
+    let fit = video.fit;
 
-    let subtitle = controller
-        .current_subtitle()
-        .get()
-        .filter(|cue| !cue.text.trim().is_empty())?;
-    let placement = controller
-        .current_subtitle_placement()
-        .get()
-        .unwrap_or_default();
-    let subtitle_style = controller
-        .current_subtitle_style()
-        .get()
-        .unwrap_or_default();
-    Some(subtitle_overlay(
-        subtitle.text,
-        placement,
-        subtitle_style,
-        controls_visible,
-        style,
-        visual,
-    ))
+    let surface_style = video.style.clone();
+    let mut surface: Element<VM> = VideoSurface::new(controller.clone())
+        .size(pct(100.0), pct(100.0))
+        .position_absolute()
+        .inset(dp(0.0))
+        .style(move |style, context| {
+            style.fit = fit;
+            style.surface.background = Some(Color::hexa(0x000000FF).into());
+            let resolved = resolve_video_style(surface_style.as_ref(), context);
+            style.surface.border_radius = Some(Value::Static(resolved.radius));
+        })
+        .into();
+    surface.media_events = video.media_events.clone();
+
+    let root_style = video.style.clone();
+    let root_layout_style = video.style.clone();
+    let mut root = Stack::new()
+        .aspect_ratio(16.0 / 9.0)
+        .runtime_layout(move |layout, _container, context, style_sheet, visual| {
+            let resolved = resolve_video_style_with_sheet(
+                root_layout_style.as_ref(),
+                context,
+                style_sheet,
+                visual,
+                WidgetState::default(),
+            );
+            if layout.width.is_none() {
+                layout.width = Some(Value::Static(crate::ui::layout::Length::Px(
+                    resolved.default_surface_width,
+                )));
+            }
+            if layout.height.is_none() {
+                layout.height = Some(Value::Static(crate::ui::layout::Length::Px(
+                    resolved.default_surface_height,
+                )));
+            }
+            if layout.padding.is_none() {
+                layout.padding = Some(Value::Static(resolved.padding));
+            }
+        })
+        .overflow(Overflow::Hidden)
+        .style_full_with_style_sheet(move |context, style_sheet, visual, state| {
+            let resolved = resolve_video_style_with_sheet(
+                root_style.as_ref(),
+                context,
+                style_sheet,
+                visual,
+                state,
+            );
+            let mut container = ContainerStyle::default_for_theme(context.theme);
+            container.surface = resolved.surface.clone();
+            container.surface.background = Some(resolved.background);
+            container.surface.border_color = Some(resolved.border);
+            container.surface.border_width = Some(Value::Static(resolved.border_width));
+            container.surface.border_radius = Some(Value::Static(resolved.radius));
+            container
+        })
+        .child(surface);
+
+    root = root.child(dynamic_subtitle_overlay(
+        controller.clone(),
+        video.show_subtitles.clone(),
+        video.show_controls.clone(),
+        video.style.clone(),
+        video.visual.clone(),
+    ));
+    root = root.child(Show::new(
+        video.show_controls.clone(),
+        video_controls(
+            controller.clone(),
+            video.show_volume,
+            video.show_looping,
+            video.show_playback_rate,
+            video.show_audio_tracks,
+            video.show_subtitle_tracks,
+            video.style.clone(),
+            video.visual.clone(),
+        ),
+    ));
+    root = root.child(Show::new(
+        video.show_status,
+        status_overlay(
+            controller.clone(),
+            video.style.clone(),
+            video.visual.clone(),
+        ),
+    ));
+
+    let mut root: Element<VM> = root.into();
+    root.key = video.key;
+    root = with_visual_identity(root, &video.visual);
+    root.layout = merge_layout(root.layout, video.layout);
+    if root.layout.height != LayoutStyle::default().height {
+        root.layout.aspect_ratio = None;
+    }
+    root
 }
 
+fn with_video_construction_stack<R>(f: impl FnOnce() -> R) -> R {
+    #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
+    {
+        const VIDEO_STACK_RED_ZONE: usize = 2 * 1024 * 1024;
+        const VIDEO_STACK_SIZE: usize = 4 * 1024 * 1024;
+        return stacker::maybe_grow(VIDEO_STACK_RED_ZONE, VIDEO_STACK_SIZE, f);
+    }
+
+    #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
+    {
+        f()
+    }
+}
+
+fn dynamic_subtitle_overlay<VM: 'static>(
+    controller: VideoController,
+    show_subtitles: Value<bool>,
+    controls_visible: Value<bool>,
+    style: Option<StyleResolver<VideoStyle>>,
+    visual: VisualStyle,
+) -> For<VM> {
+    let items_controller = controller.clone();
+    For::new_with_resolver(
+        move || {
+            if !show_subtitles.resolve() {
+                return Vec::new();
+            }
+            let Some(subtitle) = items_controller
+                .current_subtitle()
+                .get()
+                .filter(|cue| !cue.text.trim().is_empty())
+            else {
+                return Vec::new();
+            };
+            vec![(
+                subtitle.text,
+                items_controller
+                    .current_subtitle_placement()
+                    .get()
+                    .unwrap_or_default(),
+                items_controller
+                    .current_subtitle_style()
+                    .get()
+                    .unwrap_or_default(),
+                controls_visible.resolve(),
+            )]
+        },
+        |_| "__tgui_video_subtitle_overlay",
+        move |_index, (text, placement, subtitle_style, controls_visible)| {
+            subtitle_overlay(
+                text.clone(),
+                *placement,
+                *subtitle_style,
+                *controls_visible,
+                style.clone(),
+                visual.clone(),
+            )
+        },
+    )
+}
+
+#[inline(never)]
 fn video_controls<VM: 'static>(
     controller: VideoController,
-    show_volume: bool,
-    show_looping: bool,
-    show_playback_rate: bool,
-    show_audio_tracks: bool,
-    show_subtitle_tracks: bool,
+    show_volume: Value<bool>,
+    show_looping: Value<bool>,
+    show_playback_rate: Value<bool>,
+    show_audio_tracks: Value<bool>,
+    show_subtitle_tracks: Value<bool>,
     style: Option<StyleResolver<VideoStyle>>,
     visual: VisualStyle,
 ) -> Element<VM> {
@@ -784,41 +809,7 @@ fn video_controls<VM: 'static>(
     let seek_disabled = controller
         .duration()
         .map(|duration| duration.map(|duration| duration.is_zero()).unwrap_or(true));
-
-    let play_controller = controller.clone();
-    let play_disabled: Value<bool> = controller
-        .playback_state()
-        .map(playback_button_disabled)
-        .into();
-    let play_icons = vec![
-        video_icon_with_opacity(
-            SvgIconId::PlayArrow,
-            style.clone(),
-            visual.clone(),
-            false,
-            playback_icon_opacity(controller.playback_state(), SvgIconId::PlayArrow),
-        ),
-        video_icon_with_opacity(
-            SvgIconId::Pause,
-            style.clone(),
-            visual.clone(),
-            false,
-            playback_icon_opacity(controller.playback_state(), SvgIconId::Pause),
-        ),
-    ];
-    let play_button = icon_button(
-        play_icons,
-        play_disabled,
-        style.clone(),
-        Command::new(move |_| match play_controller.playback_state().get() {
-            VideoPlaybackState::Playing => play_controller.pause(),
-            VideoPlaybackState::Ended => play_controller.replay(),
-            VideoPlaybackState::Loading
-            | VideoPlaybackState::Buffering
-            | VideoPlaybackState::Error(_) => {}
-            _ => play_controller.play(),
-        }),
-    );
+    let play_button = video_play_button(controller.clone(), style.clone(), visual.clone());
 
     let seek_controller = controller.clone();
     let seek_end_controller = controller.clone();
@@ -890,128 +881,110 @@ fn video_controls<VM: 'static>(
             );
             container.gap = Value::Static(crate::ui::layout::Length::Px(resolved.controls_gap));
         })
-        .child(play_button);
+        .child(play_button)
+        .child(Show::new(
+            show_looping,
+            looping_button(controller.clone(), style.clone(), visual.clone()),
+        ))
+        .child(time_text(controller.clone(), style.clone(), visual.clone()))
+        .child(Stack::<VM>::new().grow(1.0))
+        .child(Show::new(
+            show_playback_rate,
+            playback_rate_selector(controller.clone(), style.clone(), visual.clone()),
+        ))
+        .child(Show::new(
+            show_audio_tracks,
+            audio_track_selector(controller.clone(), style.clone(), visual.clone()),
+        ))
+        .child(Show::new(
+            show_subtitle_tracks,
+            subtitle_track_selector(controller.clone(), style.clone(), visual.clone()),
+        ));
 
-    if show_looping {
-        controls = controls.child(looping_button(
-            controller.clone(),
+    let mute_controller = controller.clone();
+    let mute_icons = vec![
+        video_icon_with_opacity(
+            SvgIconId::VolumeMute,
             style.clone(),
             visual.clone(),
-        ));
-    }
+            false,
+            volume_icon_opacity(
+                controller.muted(),
+                controller.volume(),
+                SvgIconId::VolumeMute,
+            ),
+        ),
+        video_icon_with_opacity(
+            SvgIconId::VolumeOff,
+            style.clone(),
+            visual.clone(),
+            false,
+            volume_icon_opacity(
+                controller.muted(),
+                controller.volume(),
+                SvgIconId::VolumeOff,
+            ),
+        ),
+        video_icon_with_opacity(
+            SvgIconId::VolumeDown,
+            style.clone(),
+            visual.clone(),
+            false,
+            volume_icon_opacity(
+                controller.muted(),
+                controller.volume(),
+                SvgIconId::VolumeDown,
+            ),
+        ),
+        video_icon_with_opacity(
+            SvgIconId::VolumeUp,
+            style.clone(),
+            visual.clone(),
+            false,
+            volume_icon_opacity(controller.muted(), controller.volume(), SvgIconId::VolumeUp),
+        ),
+    ];
+    let mute = icon_button(
+        mute_icons,
+        Value::Static(false),
+        style.clone(),
+        Command::new(move |_| {
+            let muted = mute_controller.muted().get();
+            mute_controller.set_muted(!muted);
+        }),
+    );
+
+    let volume_controller = controller.clone();
+    let volume_layout_style = style.clone();
+    let volume = Slider::new(controller.volume(), 0.0, 1.0)
+        .step(0.01)
+        .runtime_layout(move |layout, context, style_sheet, visual| {
+            let resolved = resolve_video_style_with_sheet(
+                volume_layout_style.as_ref(),
+                context,
+                style_sheet,
+                visual,
+                WidgetState::default(),
+            );
+            if layout.width.is_none() {
+                layout.width = Some(Value::Static(crate::ui::layout::Length::Px(
+                    resolved.volume_width,
+                )));
+            }
+            if layout.height.is_none() {
+                layout.height = Some(Value::Static(crate::ui::layout::Length::Px(
+                    resolved.control_button_size,
+                )));
+            }
+        })
+        .style_full_with_style_sheet(video_slider_style(style.clone(), visual.clone()))
+        .on_change(ValueCommand::new(move |_, volume| {
+            volume_controller.set_volume(volume);
+        }));
 
     controls = controls
-        .child(time_text(controller.clone(), style.clone(), visual.clone()))
-        .child(Stack::<VM>::new().grow(1.0));
-
-    if show_playback_rate {
-        controls = controls.child(playback_rate_selector(
-            controller.clone(),
-            style.clone(),
-            visual.clone(),
-        ));
-    }
-
-    if show_audio_tracks {
-        if let Some(selector) =
-            audio_track_selector(controller.clone(), style.clone(), visual.clone())
-        {
-            controls = controls.child(selector);
-        }
-    }
-
-    if show_subtitle_tracks {
-        if let Some(selector) =
-            subtitle_track_selector(controller.clone(), style.clone(), visual.clone())
-        {
-            controls = controls.child(selector);
-        }
-    }
-
-    if show_volume {
-        let mute_controller = controller.clone();
-        let mute_icons = vec![
-            video_icon_with_opacity(
-                SvgIconId::VolumeMute,
-                style.clone(),
-                visual.clone(),
-                false,
-                volume_icon_opacity(
-                    controller.muted(),
-                    controller.volume(),
-                    SvgIconId::VolumeMute,
-                ),
-            ),
-            video_icon_with_opacity(
-                SvgIconId::VolumeOff,
-                style.clone(),
-                visual.clone(),
-                false,
-                volume_icon_opacity(
-                    controller.muted(),
-                    controller.volume(),
-                    SvgIconId::VolumeOff,
-                ),
-            ),
-            video_icon_with_opacity(
-                SvgIconId::VolumeDown,
-                style.clone(),
-                visual.clone(),
-                false,
-                volume_icon_opacity(
-                    controller.muted(),
-                    controller.volume(),
-                    SvgIconId::VolumeDown,
-                ),
-            ),
-            video_icon_with_opacity(
-                SvgIconId::VolumeUp,
-                style.clone(),
-                visual.clone(),
-                false,
-                volume_icon_opacity(controller.muted(), controller.volume(), SvgIconId::VolumeUp),
-            ),
-        ];
-        let mute = icon_button(
-            mute_icons,
-            Value::Static(false),
-            style.clone(),
-            Command::new(move |_| {
-                let muted = mute_controller.muted().get();
-                mute_controller.set_muted(!muted);
-            }),
-        );
-
-        let volume_controller = controller.clone();
-        let volume_layout_style = style.clone();
-        let volume = Slider::new(controller.volume(), 0.0, 1.0)
-            .step(0.01)
-            .runtime_layout(move |layout, context, style_sheet, visual| {
-                let resolved = resolve_video_style_with_sheet(
-                    volume_layout_style.as_ref(),
-                    context,
-                    style_sheet,
-                    visual,
-                    WidgetState::default(),
-                );
-                if layout.width.is_none() {
-                    layout.width = Some(Value::Static(crate::ui::layout::Length::Px(
-                        resolved.volume_width,
-                    )));
-                }
-                if layout.height.is_none() {
-                    layout.height = Some(Value::Static(crate::ui::layout::Length::Px(
-                        resolved.control_button_size,
-                    )));
-                }
-            })
-            .style_full_with_style_sheet(video_slider_style(style.clone(), visual.clone()))
-            .on_change(ValueCommand::new(move |_, volume| {
-                volume_controller.set_volume(volume);
-            }));
-
-        controls = controls.child(mute).child(volume);
-    }
+        .child(Show::new(show_volume.clone(), mute))
+        .child(Show::new(show_volume, volume));
 
     let overlay_style = style.clone();
     Flex::vertical()
@@ -1044,6 +1017,48 @@ fn video_controls<VM: 'static>(
         .child(progress_track)
         .child(controls)
         .into()
+}
+
+#[inline(never)]
+fn video_play_button<VM: 'static>(
+    controller: VideoController,
+    style: Option<StyleResolver<VideoStyle>>,
+    visual: VisualStyle,
+) -> Element<VM> {
+    let play_controller = controller.clone();
+    let disabled: Value<bool> = controller
+        .playback_state()
+        .map(playback_button_disabled)
+        .into();
+    let icons = vec![
+        video_icon_with_opacity(
+            SvgIconId::PlayArrow,
+            style.clone(),
+            visual.clone(),
+            false,
+            playback_icon_opacity(controller.playback_state(), SvgIconId::PlayArrow),
+        ),
+        video_icon_with_opacity(
+            SvgIconId::Pause,
+            style.clone(),
+            visual,
+            false,
+            playback_icon_opacity(controller.playback_state(), SvgIconId::Pause),
+        ),
+    ];
+    icon_button(
+        icons,
+        disabled,
+        style,
+        Command::new(move |_| match play_controller.playback_state().get() {
+            VideoPlaybackState::Playing => play_controller.pause(),
+            VideoPlaybackState::Ended => play_controller.replay(),
+            VideoPlaybackState::Loading
+            | VideoPlaybackState::Buffering
+            | VideoPlaybackState::Error(_) => {}
+            _ => play_controller.play(),
+        }),
+    )
 }
 
 #[inline(never)]
@@ -1296,11 +1311,34 @@ fn playback_rate_selector<VM: 'static>(
     style: Option<StyleResolver<VideoStyle>>,
     visual_identity: VisualStyle,
 ) -> Element<VM> {
+    let playback_rate = controller.playback_rate();
+    let render_controller = controller.clone();
+    Stack::new()
+        .child(For::new_with_resolver(
+            move || vec![playback_rate_key(playback_rate.get())],
+            |_| "__tgui_video_playback_rate_selector",
+            move |_index, current_key| {
+                playback_rate_select(
+                    render_controller.clone(),
+                    *current_key,
+                    style.clone(),
+                    visual_identity.clone(),
+                )
+            },
+        ))
+        .into()
+}
+
+fn playback_rate_select<VM: 'static>(
+    controller: VideoController,
+    current_key: i32,
+    style: Option<StyleResolver<VideoStyle>>,
+    visual_identity: VisualStyle,
+) -> Element<VM> {
     let mut options = PLAYBACK_RATE_OPTIONS
         .iter()
         .map(|(key, label)| SelectOption::new(*key, (*label).to_string()))
         .collect::<Vec<_>>();
-    let current_key = playback_rate_key(controller.playback_rate().get());
     if !PLAYBACK_RATE_OPTIONS
         .iter()
         .any(|(key, _)| *key == current_key)
@@ -1375,12 +1413,34 @@ fn audio_track_selector<VM: 'static>(
     controller: VideoController,
     style: Option<StyleResolver<VideoStyle>>,
     visual_identity: VisualStyle,
-) -> Option<Element<VM>> {
-    let tracks = controller.audio_tracks().get();
-    if tracks.is_empty() {
-        return None;
-    }
+) -> Element<VM> {
+    let tracks = controller.audio_tracks();
+    let render_controller = controller.clone();
+    Stack::new()
+        .child(For::new_with_resolver(
+            move || {
+                let tracks = tracks.get();
+                (!tracks.is_empty()).then_some(tracks).into_iter().collect()
+            },
+            |_| "__tgui_video_audio_track_selector",
+            move |_index, tracks| {
+                audio_track_select(
+                    render_controller.clone(),
+                    tracks.clone(),
+                    style.clone(),
+                    visual_identity.clone(),
+                )
+            },
+        ))
+        .into()
+}
 
+fn audio_track_select<VM: 'static>(
+    controller: VideoController,
+    tracks: Vec<VideoAudioTrack>,
+    style: Option<StyleResolver<VideoStyle>>,
+    visual_identity: VisualStyle,
+) -> Element<VM> {
     let mut options = Vec::with_capacity(tracks.len() + 2);
     options.push(SelectOption::new(
         VideoAudioTrackSelection::Auto,
@@ -1396,10 +1456,7 @@ fn audio_track_selector<VM: 'static>(
             audio_track_label(track, index),
         )
     }));
-
-    let selected = controller
-        .audio_track_selection()
-        .map(|selection| Some(selection));
+    let selected = controller.audio_track_selection().map(Some);
     let selection_controller = controller.clone();
     let disabled = controller.playback_state().map(|state| {
         matches!(
@@ -1407,36 +1464,33 @@ fn audio_track_selector<VM: 'static>(
             VideoPlaybackState::Loading | VideoPlaybackState::Error(_)
         )
     });
-
     let layout_style = style.clone();
-    Some(
-        Stack::new()
-            .runtime_layout(move |layout, _container, context, style_sheet, visual| {
-                let resolved = resolve_video_style_with_sheet(
-                    layout_style.as_ref(),
-                    context,
-                    style_sheet,
-                    visual,
-                    WidgetState::default(),
-                );
-                layout.width = Some(Value::Static(crate::ui::layout::Length::Px(
-                    resolved.audio_track_width,
-                )));
-                layout.height = Some(Value::Static(crate::ui::layout::Length::Px(
-                    resolved.control_button_size,
-                )));
-            })
-            .child(
-                Select::new(options, selected)
-                    .size(pct(100.0), pct(100.0))
-                    .disable(disabled)
-                    .style_full(video_track_select_style(style, visual_identity))
-                    .on_change(ValueCommand::new(move |_, (selection, _label)| {
-                        selection_controller.set_audio_track_selection(selection);
-                    })),
-            )
-            .into(),
-    )
+    Stack::new()
+        .runtime_layout(move |layout, _container, context, style_sheet, visual| {
+            let resolved = resolve_video_style_with_sheet(
+                layout_style.as_ref(),
+                context,
+                style_sheet,
+                visual,
+                WidgetState::default(),
+            );
+            layout.width = Some(Value::Static(crate::ui::layout::Length::Px(
+                resolved.audio_track_width,
+            )));
+            layout.height = Some(Value::Static(crate::ui::layout::Length::Px(
+                resolved.control_button_size,
+            )));
+        })
+        .child(
+            Select::new(options, selected)
+                .size(pct(100.0), pct(100.0))
+                .disable(disabled)
+                .style_full(video_track_select_style(style, visual_identity))
+                .on_change(ValueCommand::new(move |_, (selection, _label)| {
+                    selection_controller.set_audio_track_selection(selection);
+                })),
+        )
+        .into()
 }
 
 fn audio_track_label(track: &VideoAudioTrack, index: usize) -> String {
@@ -1480,12 +1534,34 @@ fn subtitle_track_selector<VM: 'static>(
     controller: VideoController,
     style: Option<StyleResolver<VideoStyle>>,
     visual_identity: VisualStyle,
-) -> Option<Element<VM>> {
-    let tracks = controller.subtitle_tracks().get();
-    if tracks.is_empty() {
-        return None;
-    }
+) -> Element<VM> {
+    let tracks = controller.subtitle_tracks();
+    let render_controller = controller.clone();
+    Stack::new()
+        .child(For::new_with_resolver(
+            move || {
+                let tracks = tracks.get();
+                (!tracks.is_empty()).then_some(tracks).into_iter().collect()
+            },
+            |_| "__tgui_video_subtitle_track_selector",
+            move |_index, tracks| {
+                subtitle_track_select(
+                    render_controller.clone(),
+                    tracks.clone(),
+                    style.clone(),
+                    visual_identity.clone(),
+                )
+            },
+        ))
+        .into()
+}
 
+fn subtitle_track_select<VM: 'static>(
+    controller: VideoController,
+    tracks: Vec<VideoSubtitleTrack>,
+    style: Option<StyleResolver<VideoStyle>>,
+    visual_identity: VisualStyle,
+) -> Element<VM> {
     let mut options = Vec::with_capacity(tracks.len() + 1);
     options.push(SelectOption::new(
         VideoSubtitleTrackSelection::Disabled,
@@ -1497,10 +1573,7 @@ fn subtitle_track_selector<VM: 'static>(
             subtitle_track_label(track, index),
         )
     }));
-
-    let selected = controller
-        .subtitle_track_selection()
-        .map(|selection| Some(selection));
+    let selected = controller.subtitle_track_selection().map(Some);
     let selection_controller = controller.clone();
     let disabled = controller.playback_state().map(|state| {
         matches!(
@@ -1508,36 +1581,33 @@ fn subtitle_track_selector<VM: 'static>(
             VideoPlaybackState::Loading | VideoPlaybackState::Error(_)
         )
     });
-
     let layout_style = style.clone();
-    Some(
-        Stack::new()
-            .runtime_layout(move |layout, _container, context, style_sheet, visual| {
-                let resolved = resolve_video_style_with_sheet(
-                    layout_style.as_ref(),
-                    context,
-                    style_sheet,
-                    visual,
-                    WidgetState::default(),
-                );
-                layout.width = Some(Value::Static(crate::ui::layout::Length::Px(
-                    resolved.subtitle_track_width,
-                )));
-                layout.height = Some(Value::Static(crate::ui::layout::Length::Px(
-                    resolved.control_button_size,
-                )));
-            })
-            .child(
-                Select::new(options, selected)
-                    .size(pct(100.0), pct(100.0))
-                    .disable(disabled)
-                    .style_full(video_track_select_style(style, visual_identity))
-                    .on_change(ValueCommand::new(move |_, (selection, _label)| {
-                        selection_controller.set_subtitle_track_selection(selection);
-                    })),
-            )
-            .into(),
-    )
+    Stack::new()
+        .runtime_layout(move |layout, _container, context, style_sheet, visual| {
+            let resolved = resolve_video_style_with_sheet(
+                layout_style.as_ref(),
+                context,
+                style_sheet,
+                visual,
+                WidgetState::default(),
+            );
+            layout.width = Some(Value::Static(crate::ui::layout::Length::Px(
+                resolved.subtitle_track_width,
+            )));
+            layout.height = Some(Value::Static(crate::ui::layout::Length::Px(
+                resolved.control_button_size,
+            )));
+        })
+        .child(
+            Select::new(options, selected)
+                .size(pct(100.0), pct(100.0))
+                .disable(disabled)
+                .style_full(video_track_select_style(style, visual_identity))
+                .on_change(ValueCommand::new(move |_, (selection, _label)| {
+                    selection_controller.set_subtitle_track_selection(selection);
+                })),
+        )
+        .into()
 }
 
 fn subtitle_track_label(track: &VideoSubtitleTrack, index: usize) -> String {
@@ -1585,16 +1655,17 @@ fn time_text<VM: 'static>(
     visual_identity: VisualStyle,
 ) -> Element<VM> {
     let duration = controller.duration();
-    let text = controller.position().map(move |position| {
-        format!(
-            "{} / {}",
-            format_duration(position),
-            duration
-                .get()
-                .map(format_duration)
-                .unwrap_or_else(|| "--:--".to_string())
-        )
-    });
+    let text = controller
+        .position()
+        .map2(&duration, move |position, duration| {
+            format!(
+                "{} / {}",
+                format_duration(position),
+                duration
+                    .map(format_duration)
+                    .unwrap_or_else(|| "--:--".to_string())
+            )
+        });
     styled_video_text(text, style, visual_identity, |style| {
         (style.time_text_style.clone(), style.time_text_color.clone())
     })
@@ -1968,7 +2039,7 @@ fn progress_signal(controller: &VideoController) -> Value<f32> {
     let duration = controller.duration();
     controller
         .position()
-        .map(move |position| duration_fraction(position, duration.get()))
+        .map2(&duration, duration_fraction)
         .into()
 }
 
@@ -1976,8 +2047,8 @@ fn buffered_signal(controller: &VideoController) -> Value<f32> {
     let duration = controller.duration();
     controller
         .buffered_position()
-        .map(move |buffered| match buffered {
-            Some(buffered) => duration_fraction(buffered, duration.get()),
+        .map2(&duration, move |buffered, duration| match buffered {
+            Some(buffered) => duration_fraction(buffered, duration),
             None => 0.0,
         })
         .into()
@@ -2053,8 +2124,8 @@ fn volume_button_icon(muted: bool, volume: f32) -> SvgIconId {
 }
 
 fn volume_icon_opacity(muted: Signal<bool>, volume: Signal<f32>, icon: SvgIconId) -> Value<f32> {
-    Value::Signal(muted.map_memo(move |muted| {
-        if volume_button_icon(muted, volume.get_untracked()) == icon {
+    Value::Signal(muted.map2(&volume, move |muted, volume| {
+        if volume_button_icon(muted, volume) == icon {
             1.0
         } else {
             0.0

@@ -6,6 +6,82 @@ use crate::ui::widget::{HitInteraction, ResolvedWidgetKind, WidgetId};
 use smallvec::SmallVec;
 
 impl<VM: 'static> BoundRuntimeHandler<VM> {
+    pub(super) fn overlay_return_focus_target_for_widget(
+        &self,
+        widget_id: WidgetId,
+        scope_path: &[WidgetId],
+    ) -> Option<WidgetId> {
+        let computed = &self.cached_scene.as_ref()?.computed;
+        let region = computed.overlay_hit_regions.iter().find(|region| {
+            region
+                .focus
+                .as_ref()
+                .is_some_and(|focus| focus.widget_id == widget_id && focus.scope_path == scope_path)
+        })?;
+        computed
+            .overlay_close_handlers
+            .iter()
+            .rev()
+            .find(|handle| {
+                handle.return_focus_to.is_some() && handle.rect.intersect(region.rect).is_some()
+            })
+            .and_then(|handle| handle.return_focus_to)
+    }
+
+    pub(in crate::runtime) fn reconcile_overlay_focus_after_scene_update(&mut self) -> bool {
+        let Some(return_target) = self.focused_overlay_return_target else {
+            return false;
+        };
+        let Some(focused) = self.focused_widget.as_ref() else {
+            self.focused_overlay_return_target = None;
+            return false;
+        };
+        let focus_is_live = self.cached_scene.as_ref().is_some_and(|cached| {
+            cached
+                .computed
+                .hit_regions
+                .iter()
+                .chain(cached.computed.overlay_hit_regions.iter())
+                .any(|region| {
+                    region.focus.as_ref().is_some_and(|focus| {
+                        focus.widget_id == focused.widget_id
+                            && focus.scope_path == focused.scope_path
+                    })
+                })
+        });
+        if focus_is_live {
+            return false;
+        }
+
+        self.focused_overlay_return_target = None;
+        let target = self.cached_scene.as_ref().and_then(|cached| {
+            cached
+                .computed
+                .hit_regions
+                .iter()
+                .chain(cached.computed.overlay_hit_regions.iter())
+                .find_map(|region| {
+                    let focus = region.focus.as_ref()?;
+                    (focus.widget_id == return_target).then(|| {
+                        (
+                            FocusedWidget {
+                                widget_id: focus.widget_id,
+                                scope_path: focus.scope_path.clone(),
+                                on_blur: focus.on_blur.clone(),
+                            },
+                            focus.on_focus.clone(),
+                        )
+                    })
+                })
+        });
+        if let Some((target, on_focus)) = target {
+            self.update_focus(Some(target), on_focus, true);
+        } else {
+            self.clear_focus_after_scene_target_removed();
+        }
+        true
+    }
+
     fn close_menu_layer_source(&mut self, source_widget_id: WidgetId) -> bool {
         if self.close_context_menu(source_widget_id) {
             return true;
@@ -53,17 +129,17 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
     }
 
     fn close_overlay_handle(&mut self, handle: &crate::runtime::overlay::OverlayCloseHandle<VM>) {
-        if let Some(command) = &handle.on_close {
-            self.execute_value_command(command, handle.close_value);
-            return;
-        }
-
         if handle.layer == crate::runtime::overlay::OverlayLayer::Menu {
             if let Some(source_widget_id) = handle.source_widget_id {
                 if self.close_menu_layer_source(source_widget_id) {
                     return;
                 }
             }
+        }
+
+        if let Some(command) = &handle.on_close {
+            self.execute_value_command(command, handle.close_value);
+            return;
         }
 
         let _ = self.set_select_open_state(
@@ -141,9 +217,37 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             .collect();
 
         let mut focus_restore = None;
+        let mut closed_menu_sources = SmallVec::<[WidgetId; 4]>::new();
         for handle in handlers.iter().rev() {
             if handle.rect.contains(click_point) {
                 break;
+            }
+            // The trigger is part of a popover/menu's interactive surface. Closing it as an
+            // outside click before the trigger processes the same press turns a close toggle into
+            // an immediate reopen.
+            if matches!(
+                handle.layer,
+                crate::runtime::overlay::OverlayLayer::Popover
+                    | crate::runtime::overlay::OverlayLayer::Menu
+            ) && handle.source_widget_id.is_some_and(|source_id| {
+                self.cached_scene
+                    .as_ref()
+                    .and_then(|cached| cached.layout.as_ref())
+                    .and_then(|layout| layout.widget_bounds(source_id))
+                    .is_some_and(|rect| rect.contains(click_point))
+            }) {
+                if focus_restore.is_none() {
+                    focus_restore = handle.return_focus_to;
+                }
+                break;
+            }
+            if handle.layer == crate::runtime::overlay::OverlayLayer::Menu {
+                if let Some(source_id) = handle.source_widget_id {
+                    if closed_menu_sources.contains(&source_id) {
+                        continue;
+                    }
+                    closed_menu_sources.push(source_id);
+                }
             }
             self.close_overlay_handle(handle);
             if focus_restore.is_none() {

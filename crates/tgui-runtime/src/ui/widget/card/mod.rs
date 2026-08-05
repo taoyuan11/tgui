@@ -2,7 +2,7 @@ use crate::foundation::view_model::Command;
 use crate::theme::{StyleContext, WidgetState};
 use crate::ui::layout::{LayoutStyle, Length, Value};
 
-use super::common::VisualStyle;
+use super::common::{AccessibilityRole, VisualStyle};
 use super::core::Element;
 use super::p3_support::{
     impl_p3_layout_api, merge_layout, resolve_component_style_with_sheet, with_visual_identity,
@@ -139,6 +139,7 @@ impl<VM: 'static> From<Card<VM>> for Element<VM> {
         if let Some(command) = card.on_click {
             root = root.on_click(command).focusable(true).tab_index(0);
             root.interactions.cursor_style = Some(Value::Static(CursorStyle::Pointer));
+            root.visual.accessibility_role = Some(AccessibilityRole::Button);
         }
         root.key = card.key;
         root = with_visual_identity(root, &card.visual);

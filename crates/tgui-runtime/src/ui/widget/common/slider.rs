@@ -9,6 +9,13 @@ pub(crate) fn slider_effective_step(min: f32, max: f32, step: f32) -> Option<f32
     Some(step.min(range))
 }
 
+pub(crate) fn slider_interaction_step(min: f32, max: f32, step: f32) -> Option<f32> {
+    slider_effective_step(min, max, step).or_else(|| {
+        let range = (max - min).abs();
+        (range.is_finite() && range > f32::EPSILON).then_some(range / 100.0)
+    })
+}
+
 pub(crate) fn slider_clamp_value(value: f32, min: f32, max: f32) -> f32 {
     if !value.is_finite() {
         min

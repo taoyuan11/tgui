@@ -48,6 +48,7 @@ pub(crate) struct ContainerLayout {
     pub overflow_x: Overflow,
     pub overflow_y: Overflow,
     pub scrollbar_style: ScrollbarStyle,
+    pub scrollbar_style_override: Option<Value<ScrollbarStyle>>,
     pub scroll_view: Option<ScrollViewConfig>,
 }
 
@@ -103,6 +104,7 @@ impl ContainerLayout {
             overflow_x: Overflow::Hidden,
             overflow_y: Overflow::Hidden,
             scrollbar_style: ScrollbarStyle::default(),
+            scrollbar_style_override: None,
             scroll_view: None,
         }
     }
@@ -368,7 +370,7 @@ pub(crate) enum WidgetKind<VM> {
         style: Option<StyleResolver<WidgetSwitchStyle>>,
     },
     Select {
-        selected_label: Value<Option<String>>,
+        selected_label: SelectLabelState,
         placeholder: Value<String>,
         options: Vec<SelectOptionState<VM>>,
         open: Option<Value<bool>>,
@@ -386,6 +388,7 @@ pub(crate) enum WidgetKind<VM> {
     },
     Slider {
         value: Value<f32>,
+        label: Option<Value<String>>,
         min: f32,
         max: f32,
         step: f32,
@@ -459,10 +462,58 @@ pub(crate) enum WidgetKind<VM> {
 }
 
 pub(crate) struct SelectOptionState<VM> {
+    pub widget_id: WidgetId,
     pub label: Value<String>,
     pub selected: Value<bool>,
     pub disabled: Value<bool>,
     pub on_select: Option<Command<VM>>,
+}
+
+#[derive(Clone)]
+pub(crate) enum SelectLabelState {
+    Reactive(Arc<[SelectLabelSource]>),
+    Frozen(Option<String>),
+}
+
+#[derive(Clone)]
+pub(crate) struct SelectLabelSource {
+    selected: Value<bool>,
+    label: Value<String>,
+}
+
+impl SelectLabelState {
+    pub(crate) fn from_options<VM>(options: &[SelectOptionState<VM>]) -> Self {
+        Self::Reactive(
+            options
+                .iter()
+                .map(|option| SelectLabelSource {
+                    selected: option.selected.clone(),
+                    label: option.label.clone(),
+                })
+                .collect::<Vec<_>>()
+                .into(),
+        )
+    }
+
+    pub(crate) fn resolve(&self) -> Option<String> {
+        match self {
+            Self::Reactive(options) => options
+                .iter()
+                .find(|option| option.selected.resolve())
+                .map(|option| option.label.resolve()),
+            Self::Frozen(label) => label.clone(),
+        }
+    }
+
+    pub(crate) fn freeze(&mut self) {
+        *self = Self::Frozen(self.resolve());
+    }
+}
+
+impl PartialEq for SelectLabelState {
+    fn eq(&self, other: &Self) -> bool {
+        self.resolve() == other.resolve()
+    }
 }
 
 #[derive(Clone)]
@@ -507,6 +558,7 @@ impl TabPlacement {
 
 pub(crate) struct TabTriggerState<VM> {
     pub group_id: WidgetId,
+    pub scroll_container_id: Option<WidgetId>,
     pub index: usize,
     pub placement: TabPlacement,
     pub key: String,
@@ -522,6 +574,7 @@ impl<VM> Clone for TabTriggerState<VM> {
     fn clone(&self) -> Self {
         Self {
             group_id: self.group_id,
+            scroll_container_id: self.scroll_container_id,
             index: self.index,
             placement: self.placement,
             key: self.key.clone(),
@@ -542,6 +595,7 @@ impl<VM: 'static> TabTriggerState<VM> {
     ) -> TabTriggerState<RootVm> {
         TabTriggerState {
             group_id: self.group_id,
+            scroll_container_id: self.scroll_container_id,
             index: self.index,
             placement: self.placement,
             key: self.key,
@@ -728,6 +782,25 @@ pub(crate) struct DataGridCellState<VM> {
     pub on_cell_edit_commit: Option<ValueCommand<VM, crate::ui::widget::DataGridCellEditCommit>>,
 }
 
+impl<VM> DataGridCellState<VM> {
+    pub(crate) fn can_select(&self) -> bool {
+        self.selection_mode != crate::ui::widget::DataGridSelectionMode::None
+            && self.on_selection_change.is_some()
+    }
+
+    pub(crate) fn can_act(&self) -> bool {
+        self.on_cell_action.is_some()
+    }
+
+    pub(crate) fn can_edit(&self) -> bool {
+        self.editable && self.on_cell_edit_commit.is_some()
+    }
+
+    pub(crate) fn is_actionable(&self) -> bool {
+        self.can_select() || self.can_act() || self.can_edit()
+    }
+}
+
 impl<VM> Clone for DataGridCellState<VM> {
     fn clone(&self) -> Self {
         Self {
@@ -888,6 +961,7 @@ pub(crate) struct DataGridResizeHandleState<VM> {
     pub width: Dp,
     pub min_width: Dp,
     pub max_width: Option<Dp>,
+    pub step: Dp,
     pub on_column_width_change:
         Option<ValueCommand<VM, crate::ui::widget::DataGridColumnWidthChange>>,
 }
@@ -901,6 +975,7 @@ impl<VM> Clone for DataGridResizeHandleState<VM> {
             width: self.width,
             min_width: self.min_width,
             max_width: self.max_width,
+            step: self.step,
             on_column_width_change: self.on_column_width_change.clone(),
         }
     }
@@ -918,6 +993,7 @@ impl<VM: 'static> DataGridResizeHandleState<VM> {
             width: self.width,
             min_width: self.min_width,
             max_width: self.max_width,
+            step: self.step,
             on_column_width_change: self
                 .on_column_width_change
                 .map(|command| command.scope(selector)),
@@ -977,6 +1053,7 @@ pub(crate) struct CarouselAutoPlayState<VM> {
     pub selected: Value<usize>,
     pub count: usize,
     pub interval: std::time::Duration,
+    pub disabled: Value<bool>,
     pub on_change: Option<ValueCommand<VM, usize>>,
 }
 
@@ -988,6 +1065,7 @@ impl<VM> Clone for CarouselAutoPlayState<VM> {
             selected: self.selected.clone(),
             count: self.count,
             interval: self.interval,
+            disabled: self.disabled.clone(),
             on_change: self.on_change.clone(),
         }
     }
@@ -1004,6 +1082,7 @@ impl<VM: 'static> CarouselAutoPlayState<VM> {
             selected: self.selected,
             count: self.count,
             interval: self.interval,
+            disabled: self.disabled,
             on_change: self.on_change.map(|command| command.scope(selector)),
         }
     }
@@ -1184,6 +1263,7 @@ impl<VM: 'static> ListItemState<VM> {
 impl<VM> Clone for SelectOptionState<VM> {
     fn clone(&self) -> Self {
         Self {
+            widget_id: self.widget_id,
             label: self.label.clone(),
             selected: self.selected.clone(),
             disabled: self.disabled.clone(),
@@ -1376,6 +1456,7 @@ impl<VM> Clone for WidgetKind<VM> {
             },
             Self::Slider {
                 value,
+                label,
                 min,
                 max,
                 step,
@@ -1392,6 +1473,7 @@ impl<VM> Clone for WidgetKind<VM> {
                 runtime_layout,
             } => Self::Slider {
                 value: value.clone(),
+                label: label.clone(),
                 min: *min,
                 max: *max,
                 step: *step,

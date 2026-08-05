@@ -15,7 +15,8 @@ use crate::text::font::TextFontRequest;
 use crate::ui::layout::{Insets, Length, Value};
 use crate::ui::unit::Dp;
 use crate::ui::widget::common::{
-    ComputedScene, MeshPrimitive, MeshVertex, Rect, RenderPrimitive, TextPrimitive,
+    AccessibilitySyntheticRole, AccessibilitySyntheticSemantics, ComputedScene,
+    LifecycleEventState, MeshPrimitive, MeshVertex, Rect, RenderPrimitive, TextPrimitive, WidgetId,
 };
 use crate::ui::widget::container::Stack;
 use crate::ui::widget::core::compute_taffy_layout_with_measure;
@@ -32,12 +33,15 @@ use super::super::CARET_WIDTH;
 use super::CollectVisualState;
 use crate::ui::widget::{OverlayPlacementOptions, OverlaySide, OverlaySolvedPlacement};
 
+const TOOLTIP_CONTENT_ROOT_TAG: u64 = 0x5454_4950_5F52_4F4F;
+
 impl<VM: 'static> ResolvedElement<VM> {
     pub(super) fn emit_tooltip_if_visible(
         &self,
         context: &mut CollectContext<'_, '_>,
         computed: &mut ComputedScene<VM>,
         visual: &CollectVisualState,
+        lifecycle_states: &mut std::collections::HashMap<WidgetId, LifecycleEventState<VM>>,
     ) {
         let Some(tooltip) = &self.tooltip else {
             return;
@@ -156,6 +160,7 @@ impl<VM: 'static> ResolvedElement<VM> {
             ),
             TooltipContent::Element(content) => emit_element_tooltip(
                 content.as_ref(),
+                self.id,
                 visual.frame,
                 tooltip.placement,
                 tooltip.flip_policy,
@@ -166,6 +171,7 @@ impl<VM: 'static> ResolvedElement<VM> {
                 overlay,
                 context,
                 computed,
+                lifecycle_states,
             ),
         }
     }
@@ -349,6 +355,7 @@ fn emit_text_tooltip<VM>(
 #[allow(clippy::too_many_arguments)]
 fn emit_element_tooltip<VM: 'static>(
     content: &Element<VM>,
+    owner_id: WidgetId,
     anchor_frame: Rect,
     placement: crate::ui::widget::OverlayPlacement,
     flip_policy: crate::ui::widget::OverlayFlipPolicy,
@@ -359,9 +366,10 @@ fn emit_element_tooltip<VM: 'static>(
     overlay: Overlay<VM>,
     context: &mut CollectContext<'_, '_>,
     computed: &mut ComputedScene<VM>,
+    lifecycle_states: &mut std::collections::HashMap<WidgetId, LifecycleEventState<VM>>,
 ) {
-    let Some((content_scene, content_size)) =
-        build_tooltip_scene(content, style, visibility, context)
+    let Some((content_scene, content_size, content_lifecycle_states)) =
+        build_tooltip_scene(content, owner_id, style, visibility, context)
     else {
         return;
     };
@@ -414,7 +422,7 @@ fn emit_element_tooltip<VM: 'static>(
         .dependencies
         .merge_from(&content_scene.dependencies);
 
-    let _ = emit_overlay(
+    let solved = emit_overlay(
         computed,
         context.viewport,
         overlay,
@@ -425,21 +433,30 @@ fn emit_element_tooltip<VM: 'static>(
             primitives,
         },
     );
+    if !solved.was_hidden {
+        lifecycle_states.extend(content_lifecycle_states);
+    }
 }
 
 fn build_tooltip_scene<VM: 'static>(
     content: &Element<VM>,
+    owner_id: WidgetId,
     style: &TooltipStyle,
     opacity: f32,
     context: &mut CollectContext<'_, '_>,
-) -> Option<(ComputedScene<VM>, (Dp, Dp))> {
-    let (result, dependencies): (Option<(ComputedScene<VM>, _)>, DependencyGraph) =
+) -> Option<(
+    ComputedScene<VM>,
+    (Dp, Dp),
+    std::collections::HashMap<WidgetId, LifecycleEventState<VM>>,
+)> {
+    let (result, dependencies): (Option<(ComputedScene<VM>, _, _)>, DependencyGraph) =
         with_dependency_collection(|| {
             super::super::tree::with_widget_stack(|| {
                 let mut root: Element<VM> = Stack::new()
                     .padding(style.padding)
                     .child(content.clone())
                     .into();
+                root.id = WidgetId::from_raw(owner_id.raw() ^ TOOLTIP_CONTENT_ROOT_TAG);
                 root.background = Some(Value::Static(style.background));
                 root.visual.border_color = Some(Value::Static(style.border));
                 root.visual.border_width = Some(Value::Static(style.border_width));
@@ -448,7 +465,7 @@ fn build_tooltip_scene<VM: 'static>(
                 root.layout.max_width = Some(Value::Static(Length::Px(style.max_width)));
 
                 super::prepare_nested_scene_root(&mut root, context, context.viewport);
-                let resolved = root.resolve(context.theme);
+                let resolved = std::sync::Arc::new(root.resolve(context.theme));
                 let mut taffy = TaffyTree::new();
                 let layout_root = resolved
                     .build_layout_tree(
@@ -480,6 +497,7 @@ fn build_tooltip_scene<VM: 'static>(
                 let mut chunks = std::collections::HashMap::new();
                 let mut chunk_parts = std::collections::HashMap::new();
                 let mut visual_contexts = std::collections::HashMap::new();
+                let mut accessibility_geometry = Vec::new();
                 let mut local_context = CollectContext {
                     taffy: &taffy,
                     font_manager: context.font_manager,
@@ -520,7 +538,7 @@ fn build_tooltip_scene<VM: 'static>(
                     gpu_scroll_enabled: false,
                     gpu_scroll_container: None,
                     transform_stack: context.transform_stack.clone(),
-                    portal_accessibility_geometry: None,
+                    portal_accessibility_geometry: Some(&mut accessibility_geometry),
                     portal_accessibility_path: smallvec::SmallVec::new(),
                 };
                 let root_id = resolved.collect_subtree_cache(
@@ -538,15 +556,39 @@ fn build_tooltip_scene<VM: 'static>(
                     &mut chunk_parts,
                     &mut visual_contexts,
                 );
+                drop(local_context);
                 let mut computed = chunks.get(&root_id).cloned().unwrap_or_default();
+                if let Some(mut accessibility_fragment) =
+                    super::portal::collect_accessibility_fragment(
+                        std::sync::Arc::clone(&resolved),
+                        &layout_root,
+                        &accessibility_geometry,
+                        &computed.hit_regions,
+                        &computed.scroll_regions,
+                    )
+                {
+                    if let Some(root) = accessibility_fragment.nodes.first_mut() {
+                        root.synthetic_semantics = Some(AccessibilitySyntheticSemantics {
+                            role: AccessibilitySyntheticRole::Tooltip,
+                            label: None,
+                            disabled: false,
+                            checked: None,
+                            expanded: None,
+                            has_menu_popup: false,
+                        });
+                    }
+                    computed
+                        .accessibility_fragments
+                        .push(accessibility_fragment);
+                }
                 computed.finalize_portals(context.viewport);
-                Some((computed, size))
+                Some((computed, size, lifecycle_states))
             })
         });
 
-    let (mut computed, size) = result?;
+    let (mut computed, size, lifecycle_states) = result?;
     computed.dependencies = dependencies.clone();
-    Some((computed, size))
+    Some((computed, size, lifecycle_states))
 }
 
 fn insets_max(insets: Insets) -> Dp {

@@ -351,18 +351,20 @@ fn recorded_video_controller_with_subtitle_metadata(
     VideoController,
     std::sync::Arc<std::sync::Mutex<RecordedVideoCommands>>,
 ) {
-    recorded_video_controller_with_tracks_subtitle_and_placement(
-        state,
-        duration,
-        muted,
-        Vec::new(),
-        VideoAudioTrackSelection::Auto,
-        Vec::new(),
-        crate::video::VideoSubtitleTrackSelection::Disabled,
-        current_subtitle,
-        current_subtitle_placement,
-        current_subtitle_style,
-    )
+    let (controller, _shared, commands) =
+        recorded_video_controller_with_tracks_subtitle_and_placement(
+            state,
+            duration,
+            muted,
+            Vec::new(),
+            VideoAudioTrackSelection::Auto,
+            Vec::new(),
+            crate::video::VideoSubtitleTrackSelection::Disabled,
+            current_subtitle,
+            current_subtitle_placement,
+            current_subtitle_style,
+        );
+    (controller, commands)
 }
 
 #[cfg(feature = "video")]
@@ -380,18 +382,20 @@ fn recorded_video_controller_with_tracks_and_subtitle(
     VideoController,
     std::sync::Arc<std::sync::Mutex<RecordedVideoCommands>>,
 ) {
-    recorded_video_controller_with_tracks_subtitle_and_placement(
-        state,
-        duration,
-        muted,
-        audio_tracks,
-        audio_track_selection,
-        subtitle_tracks,
-        subtitle_track_selection,
-        current_subtitle,
-        None,
-        None,
-    )
+    let (controller, _shared, commands) =
+        recorded_video_controller_with_tracks_subtitle_and_placement(
+            state,
+            duration,
+            muted,
+            audio_tracks,
+            audio_track_selection,
+            subtitle_tracks,
+            subtitle_track_selection,
+            current_subtitle,
+            None,
+            None,
+        );
+    (controller, commands)
 }
 
 #[cfg(feature = "video")]
@@ -409,6 +413,7 @@ fn recorded_video_controller_with_tracks_subtitle_and_placement(
     current_subtitle_style: Option<crate::video::VideoSubtitleCueStyle>,
 ) -> (
     VideoController,
+    BackendSharedState,
     std::sync::Arc<std::sync::Mutex<RecordedVideoCommands>>,
 ) {
     let ctx = test_context();
@@ -451,10 +456,8 @@ fn recorded_video_controller_with_tracks_subtitle_and_placement(
     let backend = RecordedVideoBackend {
         commands: commands.clone(),
     };
-    (
-        VideoController::from_parts(shared, std::sync::Arc::new(backend)),
-        commands,
-    )
+    let controller = VideoController::from_parts(shared.clone(), std::sync::Arc::new(backend));
+    (controller, shared, commands)
 }
 
 #[cfg(feature = "video")]
@@ -559,6 +562,385 @@ fn collect_text_contents<VM>(element: &Element<VM>, out: &mut Vec<String>) {
             }
         }
     }
+}
+
+#[cfg(feature = "video")]
+#[test]
+fn video_visibility_signals_update_the_existing_tree() {
+    let (controller, _) = recorded_video_controller(
+        VideoPlaybackState::Ready,
+        Some(std::time::Duration::from_secs(30)),
+        false,
+    );
+    let context = test_context();
+    let show_controls = context.state(false);
+    let show_status = context.state(false);
+    let show_volume = context.state(false);
+    let show_looping = context.state(false);
+    let show_playback_rate = context.state(false);
+    let tree: WidgetTree<()> = WidgetTree::new(
+        Video::new(controller)
+            .show_controls(show_controls.signal())
+            .show_status(show_status.signal())
+            .show_volume(show_volume.signal())
+            .show_looping(show_looping.signal())
+            .show_playback_rate(show_playback_rate.signal()),
+    );
+
+    let snapshot = || {
+        let mut icons = Vec::new();
+        let mut texts = Vec::new();
+        let mut selects = Vec::new();
+        collect_icon_sources(&tree.root, &mut icons);
+        collect_text_contents(&tree.root, &mut texts);
+        collect_select_elements(&tree.root, &mut selects);
+        (icons, texts, selects.len())
+    };
+
+    let (icons, texts, select_count) = snapshot();
+    assert!(!icons.contains(&SvgIconId::PlayArrow));
+    assert!(!texts.iter().any(|text| text == "Ready"));
+    assert_eq!(select_count, 0);
+
+    show_controls.set(true);
+    show_status.set(true);
+    show_volume.set(true);
+    show_looping.set(true);
+    show_playback_rate.set(true);
+    let (icons, texts, select_count) = snapshot();
+    assert!(icons.contains(&SvgIconId::PlayArrow));
+    assert!(icons.contains(&SvgIconId::VolumeUp));
+    assert!(icons.contains(&SvgIconId::Repeat));
+    assert!(texts.iter().any(|text| text == "Ready"));
+    assert!(select_count >= 1, "playback-rate selector should appear");
+
+    show_volume.set(false);
+    show_looping.set(false);
+    show_playback_rate.set(false);
+    let (icons, _, select_count) = snapshot();
+    assert!(!icons.contains(&SvgIconId::VolumeUp));
+    assert!(!icons.contains(&SvgIconId::Repeat));
+    assert_eq!(select_count, 0);
+}
+
+#[cfg(feature = "video")]
+#[test]
+fn video_track_visibility_signals_update_the_existing_tree() {
+    let audio_tracks = vec![VideoAudioTrack {
+        stream_index: 2,
+        language: Some("eng".to_string()),
+        title: Some("English".to_string()),
+        channels: 2,
+        sample_rate: 48_000,
+    }];
+    let subtitle_tracks = vec![crate::video::VideoSubtitleTrack {
+        stream_index: 3,
+        language: Some("eng".to_string()),
+        title: Some("English".to_string()),
+        codec: Some("ass".to_string()),
+    }];
+    let (controller, _) = recorded_video_controller_with_tracks_and_subtitle(
+        VideoPlaybackState::Ready,
+        Some(std::time::Duration::from_secs(30)),
+        false,
+        audio_tracks,
+        VideoAudioTrackSelection::Auto,
+        subtitle_tracks,
+        crate::video::VideoSubtitleTrackSelection::Disabled,
+        None,
+    );
+    let context = test_context();
+    let show_audio = context.state(false);
+    let show_subtitles = context.state(false);
+    let tree: WidgetTree<()> = WidgetTree::new(
+        Video::new(controller)
+            .show_volume(false)
+            .show_audio_tracks(show_audio.signal())
+            .show_subtitle_tracks(show_subtitles.signal()),
+    );
+
+    let select_count = || {
+        let mut selects = Vec::new();
+        collect_select_elements(&tree.root, &mut selects);
+        selects.len()
+    };
+    assert_eq!(select_count(), 0);
+    show_audio.set(true);
+    assert_eq!(select_count(), 1);
+    show_subtitles.set(true);
+    assert_eq!(select_count(), 2);
+    show_audio.set(false);
+    assert_eq!(select_count(), 1);
+}
+
+#[cfg(feature = "video")]
+#[test]
+fn video_track_lists_update_and_clear_on_the_existing_tree() {
+    let (controller, shared, _) = recorded_video_controller_with_tracks_subtitle_and_placement(
+        VideoPlaybackState::Ready,
+        Some(std::time::Duration::from_secs(30)),
+        false,
+        Vec::new(),
+        VideoAudioTrackSelection::Auto,
+        Vec::new(),
+        crate::video::VideoSubtitleTrackSelection::Disabled,
+        None,
+        None,
+        None,
+    );
+    let tree: WidgetTree<()> = WidgetTree::new(Video::new(controller).show_volume(false));
+    let select_options = || {
+        let mut selects = Vec::new();
+        collect_select_elements(&tree.root, &mut selects);
+        selects
+            .iter()
+            .map(|select| match &select.kind {
+                WidgetKind::Select { options, .. } => options
+                    .iter()
+                    .map(|option| option.label.resolve())
+                    .collect::<Vec<_>>(),
+                _ => unreachable!("collected elements must remain Select widgets"),
+            })
+            .collect::<Vec<_>>()
+    };
+
+    assert!(select_options().is_empty());
+    shared.audio_tracks.set(vec![VideoAudioTrack {
+        stream_index: 2,
+        language: Some("en".to_string()),
+        title: Some("Main".to_string()),
+        channels: 2,
+        sample_rate: 48_000,
+    }]);
+    let options = select_options();
+    assert_eq!(options.len(), 1);
+    assert!(options[0]
+        .iter()
+        .any(|label| label == "Main (EN, 2ch, 48kHz)"));
+
+    shared.audio_tracks.set(vec![VideoAudioTrack {
+        stream_index: 5,
+        language: Some("fr".to_string()),
+        title: Some("Commentary".to_string()),
+        channels: 6,
+        sample_rate: 44_100,
+    }]);
+    let options = select_options();
+    assert_eq!(options.len(), 1);
+    assert!(!options[0].iter().any(|label| label.contains("Main")));
+    assert!(options[0]
+        .iter()
+        .any(|label| label == "Commentary (FR, 6ch, 44kHz)"));
+
+    shared.subtitle_tracks.set(vec![VideoSubtitleTrack {
+        stream_index: 7,
+        language: Some("ja".to_string()),
+        title: Some("Japanese".to_string()),
+        codec: Some("ass".to_string()),
+    }]);
+    let options = select_options();
+    assert_eq!(options.len(), 2);
+    assert!(options
+        .iter()
+        .flatten()
+        .any(|label| label == "Subs: Japanese (JA, ass)"));
+
+    shared.audio_tracks.set(Vec::new());
+    let options = select_options();
+    assert_eq!(options.len(), 1);
+    assert!(options[0].iter().all(|label| label.starts_with("Subs:")));
+    shared.subtitle_tracks.set(Vec::new());
+    assert!(select_options().is_empty());
+}
+
+#[cfg(feature = "video")]
+#[test]
+fn video_select_controls_follow_playback_disabled_state_on_the_existing_tree() {
+    let (controller, shared, _) = recorded_video_controller_with_tracks_subtitle_and_placement(
+        VideoPlaybackState::Loading,
+        Some(std::time::Duration::from_secs(30)),
+        false,
+        vec![VideoAudioTrack {
+            stream_index: 2,
+            language: Some("en".to_string()),
+            title: Some("Main".to_string()),
+            channels: 2,
+            sample_rate: 48_000,
+        }],
+        VideoAudioTrackSelection::Auto,
+        Vec::new(),
+        crate::video::VideoSubtitleTrackSelection::Disabled,
+        None,
+        None,
+        None,
+    );
+    let tree: WidgetTree<()> = WidgetTree::new(
+        Video::new(controller)
+            .show_volume(false)
+            .show_playback_rate(true),
+    );
+    let disabled_states = || {
+        let mut selects = Vec::new();
+        collect_select_elements(&tree.root, &mut selects);
+        selects
+            .iter()
+            .map(|select| match &select.kind {
+                WidgetKind::Select { disabled, .. } => disabled.resolve(),
+                _ => unreachable!("collected elements must remain Select widgets"),
+            })
+            .collect::<Vec<_>>()
+    };
+
+    assert_eq!(disabled_states(), vec![true, true]);
+    shared.playback_state.set(VideoPlaybackState::Ready);
+    assert_eq!(disabled_states(), vec![false, false]);
+}
+
+#[cfg(feature = "video")]
+#[test]
+fn video_subtitle_visibility_signal_updates_the_existing_tree() {
+    let cue = VideoSubtitleCue {
+        text: "Reactive caption".to_string(),
+        start: std::time::Duration::ZERO,
+        end: std::time::Duration::from_secs(2),
+    };
+    let (controller, _) = recorded_video_controller_with_audio_tracks_and_subtitle(
+        VideoPlaybackState::Ready,
+        Some(std::time::Duration::from_secs(30)),
+        false,
+        Vec::new(),
+        VideoAudioTrackSelection::Auto,
+        Some(cue),
+    );
+    let context = test_context();
+    let visible = context.state(false);
+    let tree: WidgetTree<()> =
+        WidgetTree::new(Video::new(controller).show_subtitles(visible.signal()));
+    let contains_caption = || {
+        let mut texts = Vec::new();
+        collect_text_contents(&tree.root, &mut texts);
+        texts.iter().any(|text| text == "Reactive caption")
+    };
+
+    assert!(!contains_caption());
+    visible.set(true);
+    assert!(contains_caption());
+    visible.set(false);
+    assert!(!contains_caption());
+}
+
+#[cfg(feature = "video")]
+#[test]
+fn video_subtitle_cue_placement_style_and_controls_update_on_the_existing_tree() {
+    let (controller, shared, _) = recorded_video_controller_with_tracks_subtitle_and_placement(
+        VideoPlaybackState::Ready,
+        Some(std::time::Duration::from_secs(30)),
+        false,
+        Vec::new(),
+        VideoAudioTrackSelection::Auto,
+        Vec::new(),
+        crate::video::VideoSubtitleTrackSelection::Disabled,
+        None,
+        None,
+        None,
+    );
+    let context = test_context();
+    let show_controls = context.state(true);
+    let tree: WidgetTree<()> = WidgetTree::new(
+        Video::new(controller)
+            .size(dp(240.0), dp(160.0))
+            .show_controls(show_controls.signal())
+            .show_status(false)
+            .show_volume(false),
+    );
+    let render_texts = || {
+        let theme = Theme::default();
+        let font_manager = FontManager::new(&FontCatalog::default());
+        let media = test_media();
+        let mut animations = AnimationEngine::default();
+        let rendered = tree.render_output(
+            &font_manager,
+            &theme,
+            &media,
+            &mut animations,
+            None,
+            None,
+            &HashMap::new(),
+            Rect::new(0.0, 0.0, 240.0, 160.0),
+            None,
+            None,
+            None,
+            None,
+            false,
+        );
+        rendered
+            .primitives
+            .texts
+            .iter()
+            .chain(rendered.primitives.overlay_texts.iter())
+            .map(|text| {
+                (
+                    text.content.to_string(),
+                    text.frame,
+                    text.color,
+                    text.font_size,
+                )
+            })
+            .collect::<Vec<_>>()
+    };
+
+    assert!(render_texts().iter().all(|text| text.0 != "First cue"));
+    shared.current_subtitle.set(Some(VideoSubtitleCue {
+        text: "First cue".to_string(),
+        start: std::time::Duration::ZERO,
+        end: std::time::Duration::from_secs(2),
+    }));
+    let controls_frame = render_texts()
+        .into_iter()
+        .find(|text| text.0 == "First cue")
+        .expect("new cue should appear without rebuilding the tree")
+        .1;
+
+    show_controls.set(false);
+    let controls_hidden_frame = render_texts()
+        .into_iter()
+        .find(|text| text.0 == "First cue")
+        .expect("cue should remain visible when controls are hidden")
+        .1;
+    assert!(
+        controls_hidden_frame.y > controls_frame.y,
+        "bottom subtitle should move down when controls disappear"
+    );
+
+    let updated_color = Color::rgb(0x12, 0x34, 0x56);
+    shared.current_subtitle.set(Some(VideoSubtitleCue {
+        text: "Updated cue".to_string(),
+        start: std::time::Duration::from_secs(2),
+        end: std::time::Duration::from_secs(4),
+    }));
+    shared.current_subtitle_placement.set(Some(
+        VideoSubtitleCuePlacement::from_ass_alignment(9).expect("valid ASS alignment"),
+    ));
+    shared
+        .current_subtitle_style
+        .set(Some(crate::video::VideoSubtitleCueStyle {
+            primary_color: Some(updated_color),
+            font_size_centi_px: Some(2450),
+            ..Default::default()
+        }));
+    let texts = render_texts();
+    assert!(texts.iter().all(|text| text.0 != "First cue"));
+    let updated = texts
+        .iter()
+        .find(|text| text.0 == "Updated cue")
+        .expect("updated cue should replace the previous cue");
+    assert!(updated.1.y < controls_hidden_frame.y);
+    assert!(updated.1.x > controls_hidden_frame.x);
+    assert_eq!(updated.2, updated_color);
+    assert_eq!(updated.3, 24.5);
+
+    shared.current_subtitle.set(None);
+    assert!(render_texts().iter().all(|text| text.0 != "Updated cue"));
 }
 
 #[cfg(feature = "video")]
@@ -778,6 +1160,34 @@ fn video_player_mute_and_volume_controls_forward() {
 
 #[cfg(feature = "video")]
 #[test]
+fn video_volume_icon_updates_when_volume_changes_without_muted_changing() {
+    let (controller, shared, _) = recorded_video_controller_with_tracks_subtitle_and_placement(
+        VideoPlaybackState::Ready,
+        Some(std::time::Duration::from_secs(40)),
+        false,
+        Vec::new(),
+        VideoAudioTrackSelection::Auto,
+        Vec::new(),
+        crate::video::VideoSubtitleTrackSelection::Disabled,
+        None,
+        None,
+        None,
+    );
+    let tree: WidgetTree<()> = WidgetTree::new(Video::new(controller));
+
+    let mut icons = Vec::new();
+    collect_visible_icon_sources(&tree.root, &mut icons);
+    assert!(icons.contains(&SvgIconId::VolumeUp));
+
+    shared.volume.set(0.25);
+    icons.clear();
+    collect_visible_icon_sources(&tree.root, &mut icons);
+    assert!(icons.contains(&SvgIconId::VolumeDown));
+    assert!(!icons.contains(&SvgIconId::VolumeUp));
+}
+
+#[cfg(feature = "video")]
+#[test]
 fn video_player_looping_toggle_is_opt_in() {
     let (controller, _) = recorded_video_controller(
         VideoPlaybackState::Ready,
@@ -878,6 +1288,45 @@ fn video_player_playback_rate_selector_forwards_selection() {
         commands.lock().expect("commands lock").playback_rates,
         vec![1.5]
     );
+}
+
+#[cfg(feature = "video")]
+#[test]
+fn video_player_playback_rate_selector_tracks_external_custom_rates() {
+    let (controller, shared, _) = recorded_video_controller_with_tracks_subtitle_and_placement(
+        VideoPlaybackState::Ready,
+        Some(std::time::Duration::from_secs(40)),
+        false,
+        Vec::new(),
+        VideoAudioTrackSelection::Auto,
+        Vec::new(),
+        crate::video::VideoSubtitleTrackSelection::Disabled,
+        None,
+        None,
+        None,
+    );
+    let tree: WidgetTree<()> = WidgetTree::new(
+        Video::new(controller)
+            .show_volume(false)
+            .show_playback_rate(true),
+    );
+
+    shared.playback_rate.set(1.33);
+    let mut selects = Vec::new();
+    collect_select_elements(&tree.root, &mut selects);
+    assert_eq!(selects.len(), 1);
+    let WidgetKind::Select {
+        selected_label,
+        options,
+        ..
+    } = &selects[0].kind
+    else {
+        panic!("playback rate selector should be a Select");
+    };
+    assert_eq!(selected_label.resolve(), Some("Speed: 1.33x".to_string()));
+    assert!(options
+        .iter()
+        .any(|option| option.label.resolve() == "Speed: 1.33x"));
 }
 
 #[cfg(feature = "video")]

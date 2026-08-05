@@ -1,16 +1,17 @@
-use crate::foundation::view_model::{Command, ValueCommand};
+use crate::foundation::view_model::ValueCommand;
 use crate::ui::layout::Value;
 use crate::ui::theme::StyleContext;
 use crate::ui::widget::core::Element;
 use crate::ui::widget::overlay::{Alignment, FlipPolicy, Placement};
 use crate::ui::widget::style::{PopoverStyle, StyleResolver};
+use crate::ui::widget::WidgetId;
 
-use super::descriptor::{PopoverDescriptor, PopoverTriggerMode};
+use super::descriptor::{PopoverDescriptor, PopoverOpenHandle, PopoverTriggerMode};
 
 pub struct Popover<VM> {
     trigger: Element<VM>,
     content: Option<Element<VM>>,
-    open: Value<bool>,
+    open: Option<Value<bool>>,
     on_open_change: Option<ValueCommand<VM, bool>>,
     placement: Placement,
     flip_policy: FlipPolicy,
@@ -20,6 +21,9 @@ pub struct Popover<VM> {
     close_on_escape: bool,
     close_on_outside_click: bool,
     match_anchor_width: bool,
+    internal_open: Option<PopoverOpenHandle>,
+    list_keyboard_navigation: bool,
+    return_focus_to: Option<WidgetId>,
 }
 
 impl<VM: 'static> Popover<VM> {
@@ -27,7 +31,7 @@ impl<VM: 'static> Popover<VM> {
         Self {
             trigger: trigger.into(),
             content: None,
-            open: Value::Static(false),
+            open: None,
             on_open_change: None,
             placement: Placement::bottom().align(Alignment::Start),
             flip_policy: FlipPolicy::FlipSide,
@@ -37,6 +41,9 @@ impl<VM: 'static> Popover<VM> {
             close_on_escape: true,
             close_on_outside_click: true,
             match_anchor_width: false,
+            internal_open: None,
+            list_keyboard_navigation: false,
+            return_focus_to: None,
         }
     }
 
@@ -46,7 +53,7 @@ impl<VM: 'static> Popover<VM> {
     }
 
     pub fn open(mut self, open: impl Into<Value<bool>>) -> Self {
-        self.open = open.into();
+        self.open = Some(open.into());
         self
     }
 
@@ -108,6 +115,26 @@ impl<VM: 'static> Popover<VM> {
         self.match_anchor_width = on;
         self
     }
+
+    #[allow(dead_code)] // Used by composite controls that share the trigger's uncontrolled state.
+    pub(crate) fn open_handle(mut self, handle: PopoverOpenHandle) -> Self {
+        self.internal_open = Some(handle);
+        self
+    }
+
+    pub(crate) fn list_keyboard_navigation(mut self, enabled: bool) -> Self {
+        self.list_keyboard_navigation = enabled;
+        self
+    }
+
+    /// Sets the focus target restored when the popover closes.
+    ///
+    /// This is useful when the visual trigger is a composite element whose
+    /// focusable control is one of its descendants.
+    pub fn return_focus_to(mut self, widget_id: WidgetId) -> Self {
+        self.return_focus_to = Some(widget_id);
+        self
+    }
 }
 
 impl<VM: 'static> From<Popover<VM>> for Element<VM> {
@@ -125,29 +152,32 @@ impl<VM: 'static> From<Popover<VM>> for Element<VM> {
             close_on_escape,
             close_on_outside_click,
             match_anchor_width,
+            internal_open,
+            list_keyboard_navigation,
+            return_focus_to,
         } = popover;
 
         let content = content.expect("Popover::content(...) must be provided");
-        let click_toggle = on_open_change
-            .clone()
-            .filter(|_| trigger_mode.allows_click())
-            .map(|command| {
-                let user_click = trigger.interactions.on_click.clone();
-                let open_value = open.clone();
-                Command::new_with_context(move |vm, context| {
-                    if let Some(command) = user_click.as_ref() {
-                        command.execute_with_context(vm, context);
+        // Omitting `.open(...)` creates an internal uncontrolled state. Explicit static and
+        // signal values remain controlled and require `on_open_change` to accept user requests.
+        let internal_open =
+            internal_open.or_else(|| open.is_none().then(|| PopoverOpenHandle::new(false)));
+        let on_open_change = match (internal_open.clone(), on_open_change) {
+            (Some(internal_open), notify) => {
+                Some(ValueCommand::new_with_context(move |vm, next, context| {
+                    internal_open.set(next);
+                    if let Some(command) = notify.as_ref() {
+                        command.execute_with_context(vm, next, context);
                     }
-                    command.execute_with_context(vm, !open_value.resolve(), context);
-                })
-            });
-        if let Some(command) = click_toggle {
-            trigger.interactions.on_click = Some(command);
-        }
+                }))
+            }
+            (None, command) => command,
+        };
 
         let descriptor = PopoverDescriptor {
             content: Box::new(content),
             open,
+            internal_open,
             on_open_change,
             placement,
             flip_policy,
@@ -157,6 +187,9 @@ impl<VM: 'static> From<Popover<VM>> for Element<VM> {
             close_on_escape,
             close_on_outside_click,
             match_anchor_width,
+            list_keyboard_navigation,
+            virtual_list_navigation: None,
+            return_focus_to,
         };
         trigger.popover = Some(Box::new(descriptor));
         trigger

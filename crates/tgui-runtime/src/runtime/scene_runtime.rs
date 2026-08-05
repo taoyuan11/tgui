@@ -688,7 +688,13 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             #[cfg(test)]
             scroll_view_binding_probe::record_consume_binding_visit();
             binding.controller.bind_widget(binding.widget_id);
-            binding.controller.sync_offset(region.scroll_offset);
+            let smooth_target = self
+                .smooth_scroll_states
+                .get(&binding.widget_id)
+                .map(|state| state.target);
+            binding
+                .controller
+                .sync_offset(region.scroll_offset, smooth_target);
             if let Some(request) = binding.controller.take_request() {
                 requests.push((
                     binding.widget_id,
@@ -986,6 +992,18 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             with_runtime_scene_stack(|| {
                 let _ = self.computed_scene_with_virtual_feedback(0);
             });
+            if self.reconcile_calendar_focus_after_scene_update() {
+                continue;
+            }
+            if self.reconcile_list_focus_after_scene_update() {
+                continue;
+            }
+            if self.reconcile_tree_focus_after_scene_update() {
+                continue;
+            }
+            if self.reconcile_overlay_focus_after_scene_update() {
+                continue;
+            }
             if !self.reconcile_accessibility_focus_after_scene_update() {
                 break;
             }

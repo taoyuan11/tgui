@@ -313,13 +313,35 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             scene_affected_ids.insert(widget_id);
         }
 
+        // Modal and Drawer keep a fixed in-tree subtree while `open` gates several runtime
+        // channels at once. Recognize their root before the generic strict-reactive rejection.
+        let modal_drawer_state_change = saw_scene_owner
+            && scene_affected_ids.iter().any(|widget_id| {
+                layout
+                    .resolved_widget(*widget_id)
+                    .is_some_and(|widget| widget.modal.is_some() || widget.drawer.is_some())
+            });
+
+        // Opening or closing these retained overlays changes more than their primitive stream:
+        // animated layout values, passive occluder topology, focus-scope activity, and overlay
+        // close metadata all move together. A scene-only subtree patch can observe the opening
+        // animation's old endpoint and retain stale hit geometry. Rebuild layout and scene as the
+        // correctness fallback until those channels have one atomic retained patch plan.
+        if modal_drawer_state_change {
+            self.invalidate_scene_with_reason("reactive_modal_drawer_state_change");
+            return Some("reactive_modal_drawer_full_rebuild");
+        }
+
         if strict_reactive && !structure_affected_ids.is_empty() {
-            let roots = self.highest_layout_roots_smallvec(layout, &structure_affected_ids);
-            if roots.is_empty() {
+            let layout_roots = self.highest_layout_roots_smallvec(layout, &layout_affected_ids);
+            if layout_roots.is_empty() {
                 return Some("reactive_unrelated");
             }
-            if self.patch_cached_layout_for_roots(&roots, now)
-                && self.patch_cached_scene_for_roots(&roots, now, true)
+            let mut scene_ids = layout_affected_ids.clone();
+            scene_ids.extend(scene_affected_ids.iter().copied());
+            let scene_roots = self.highest_layout_roots_smallvec(layout, &scene_ids);
+            if self.patch_cached_layout_for_roots(&layout_roots, now)
+                && self.patch_cached_scene_for_roots(&scene_roots, now, true)
             {
                 return Some("reactive_structure_slot_update");
             }
@@ -340,9 +362,19 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 && layout_affected_ids
                     .iter()
                     .all(|widget_id| layout_property_ids.contains(widget_id))
+                && (!strict_reactive || scene_affected_ids.is_empty())
                 && self.try_update_reactive_layout_slots(&layout_property_targets, now)
             {
-                return Some("reactive_layout_slot_update");
+                if scene_affected_ids.is_empty() {
+                    return Some("reactive_layout_slot_update");
+                }
+                let sync_runtime_scene_state =
+                    saw_scene_owner && all_scene_owners_are_property_scoped;
+                if self.patch_cached_scene_for_roots(&scene_roots, now, sync_runtime_scene_state) {
+                    return Some("reactive_layout_scene_patch");
+                }
+                self.invalidate_computed_scene();
+                return Some("reactive_layout_subtree_patch_scene_recollect");
             }
             if strict_reactive {
                 return Some("strict_reactive_layout_rejected");

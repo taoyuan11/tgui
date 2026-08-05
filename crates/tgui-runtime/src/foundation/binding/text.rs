@@ -53,6 +53,7 @@ pub struct TextChangeSet {
 #[derive(Clone)]
 pub struct TextController {
     state: Arc<parking_lot::Mutex<TextControllerState>>,
+    bound_value: Option<super::signal_state::Signal<String>>,
     invalidation: InvalidationSignal,
     dependency: DependencyId,
     signal_id: SignalId,
@@ -72,6 +73,7 @@ impl TextController {
                 text: initial_text.into(),
                 revision: 1,
             })),
+            bound_value: None,
             invalidation,
             dependency: DependencyId::next(),
             signal_id,
@@ -79,7 +81,15 @@ impl TextController {
     }
 
     pub(crate) fn new_legacy(initial_text: impl Into<crate::ui::layout::Value<String>>) -> Self {
-        Self::new(initial_text.into().resolve(), InvalidationSignal::new())
+        match initial_text.into() {
+            crate::ui::layout::Value::Static(text) => Self::new(text, InvalidationSignal::new()),
+            crate::ui::layout::Value::Signal(signal) => {
+                let initial_text = signal.get_untracked();
+                let mut controller = Self::new(initial_text, InvalidationSignal::new());
+                controller.bound_value = Some(signal);
+                controller
+            }
+        }
     }
 
     /// 读取当前完整文本。
@@ -87,12 +97,14 @@ impl TextController {
     /// 返回值: 当前文本内容的克隆副本。
     pub fn text(&self) -> String {
         self.track_read();
+        self.sync_bound_value();
         self.state.lock().text.clone()
     }
 
     /// 以借用方式读取当前完整文本。
     pub fn with_text<R>(&self, reader: impl FnOnce(&str) -> R) -> R {
         self.track_read();
+        self.sync_bound_value();
         let state = self.state.lock();
         reader(&state.text)
     }
@@ -102,6 +114,7 @@ impl TextController {
     /// 返回值: 包含文本内容和修订号的快照。
     pub fn snapshot(&self) -> TextSnapshot {
         self.track_read();
+        self.sync_bound_value();
         let state = self.state.lock();
         TextSnapshot {
             text: state.text.clone(),
@@ -114,6 +127,7 @@ impl TextController {
     /// 返回值: 当前修订号。
     pub fn revision(&self) -> u64 {
         self.track_read();
+        self.sync_bound_value();
         self.state.lock().revision
     }
 
@@ -170,6 +184,19 @@ impl TextController {
                 .reactive_graph()
                 .subscribe_target(self.signal_id, ReactiveTarget::Owner(owner));
         }
+    }
+
+    fn sync_bound_value(&self) {
+        let Some(bound_value) = self.bound_value.as_ref() else {
+            return;
+        };
+        let text = bound_value.get();
+        let mut state = self.state.lock();
+        if state.text == text {
+            return;
+        }
+        state.text = text;
+        state.revision = state.revision.wrapping_add(1).max(1);
     }
 }
 

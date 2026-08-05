@@ -2,7 +2,9 @@ use super::*;
 
 use crate::ui::layout::{Length, Value};
 use crate::ui::theme::Density;
-use crate::ui::widget::{Card, CardStyle, ResolvedWidgetKind};
+use crate::ui::widget::{
+    AccessibilityRole, Card, CardStyle, DefaultActivation, HitInteraction, ResolvedWidgetKind,
+};
 
 #[test]
 fn card_runtime_layout_tracks_real_theme_density_on_the_same_tree() {
@@ -234,4 +236,48 @@ fn clickable_card_uses_theme_focus_ring_for_keyboard_focus() {
             && shape.rect.width > dp(240.0)
             && shape.rect.height > dp(96.0)
     }));
+}
+
+#[test]
+fn clickable_card_is_a_keyboard_activatable_button_but_static_card_is_not() {
+    let static_card: Element<()> = Card::new().body(Text::new("Preview")).into();
+    assert_eq!(static_card.visual.accessibility_role, None);
+    assert!(static_card.interactions.on_click.is_none());
+
+    let clickable: Element<()> = Card::new()
+        .body(Text::new("Open details"))
+        .on_click(Command::new(|_: &mut ()| {}))
+        .size(dp(180.0), dp(72.0))
+        .into();
+    let clickable_id = clickable.id;
+    assert_eq!(
+        clickable.visual.accessibility_role,
+        Some(AccessibilityRole::Button)
+    );
+    assert_eq!(clickable.focus.focusable, Some(true));
+    assert_eq!(clickable.focus.tab_index, Some(0));
+
+    let scene = WidgetTree::new(clickable).compute_scene(
+        &FontManager::new(&FontCatalog::default()),
+        &Theme::default(),
+        &test_media(),
+        &mut AnimationEngine::default(),
+        None,
+        None,
+        &HashMap::new(),
+        Rect::new(0.0, 0.0, 220.0, 100.0),
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+    assert!(scene.hit_regions.iter().any(|hit| matches!(
+        hit.interaction,
+        HitInteraction::Widget {
+            id,
+            default_activation: DefaultActivation::EnterAndSpace,
+            ..
+        } if id == clickable_id
+    )));
 }

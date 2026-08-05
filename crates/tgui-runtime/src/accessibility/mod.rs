@@ -1,13 +1,15 @@
 use std::collections::{HashMap, HashSet};
 
 use accesskit::{
-    Action, Node, NodeId, Rect as AccessRect, Role, Toggled, Tree, TreeId, TreeUpdate,
+    Action, AriaCurrent, AutoComplete, HasPopup, Node, NodeId, Orientation, Rect as AccessRect,
+    Role, SortDirection, Toggled, Tree, TreeId, TreeUpdate,
 };
 
-use crate::runtime::overlay::OverlayId;
+use crate::runtime::overlay::{OverlayId, OverlayLayer};
 use crate::ui::widget::{
-    AccessibilityFragment, ComputedScene, HitInteraction, HitRegion, Rect, ResolvedElement,
-    ResolvedSceneLayout, ResolvedWidgetKind, ScrollRegion, WidgetId,
+    AccessibilityCurrent, AccessibilityFragment, AccessibilityRole, AccessibilitySyntheticRole,
+    AccessibilitySyntheticSemantics, ComputedScene, HitInteraction, HitRegion, Rect,
+    ResolvedElement, ResolvedSceneLayout, ResolvedWidgetKind, ScrollRegion, WidgetId,
 };
 use smallvec::SmallVec;
 
@@ -200,6 +202,16 @@ pub(crate) fn build_tree_update_with_registry<VM: 'static>(
     let trap_widget = trap_scope.as_ref().and_then(|path| path.last().copied());
     let trap_path = trap_widget
         .and_then(|id| layout.and_then(|layout| layout.path_for(id).map(|path| path.to_vec())));
+    let hidden_scope_paths = layout
+        .map(|layout| {
+            computed
+                .focus_scopes
+                .iter()
+                .filter(|scope| scope.options.hides_from_accessibility(scope.active))
+                .filter_map(|scope| layout.path_for(scope.scope_id).map(<[usize]>::to_vec))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
 
     let mut nodes = Vec::new();
     let mut included = HashSet::new();
@@ -214,6 +226,7 @@ pub(crate) fn build_tree_update_with_registry<VM: 'static>(
                 &hit_regions,
                 trap_scope.as_deref(),
                 trap_path.as_deref(),
+                &hidden_scope_paths,
                 layout.root_id(),
                 &mut nodes,
                 &mut included,
@@ -295,11 +308,12 @@ fn collect_widget<VM: 'static>(
     hit_regions: &HashMap<WidgetId, Vec<&HitRegion<VM>>>,
     trap_scope: Option<&[WidgetId]>,
     trap_path: Option<&[usize]>,
+    hidden_scope_paths: &[Vec<usize>],
     widget_id: WidgetId,
     nodes: &mut Vec<(NodeId, Node)>,
     included: &mut HashSet<NodeId>,
 ) -> Option<NodeId> {
-    if !is_visible_to_accessibility(layout, trap_scope, trap_path, widget_id) {
+    if !is_visible_to_accessibility(layout, trap_scope, trap_path, hidden_scope_paths, widget_id) {
         return None;
     }
     let resolved = layout.resolved_widget(widget_id)?;
@@ -310,6 +324,25 @@ fn collect_widget<VM: 'static>(
         hit_regions.get(&widget_id).map(Vec::as_slice),
         None,
     );
+    let is_focus_target = node.supports_action(Action::Focus);
+    if is_focus_target && has_clickable_popover_trigger_ancestor(layout, widget_id) {
+        node.add_action(Action::Click);
+    }
+    if let Some((menu_id, can_toggle)) = composite_menu_trigger_ancestor(layout, widget_id) {
+        if is_focus_target || menu_id == widget_id {
+            node.set_has_popup(HasPopup::Menu);
+            node.set_expanded(menu_source_is_open(computed, menu_id));
+            if is_focus_target && can_toggle {
+                node.add_action(Action::Click);
+            }
+        }
+    }
+    if let Some(context_menu_id) = enabled_context_menu_trigger_ancestor(layout, widget_id) {
+        if !node.is_disabled() && (is_focus_target || context_menu_id == widget_id) {
+            node.set_has_popup(HasPopup::Menu);
+            node.add_action(Action::ShowContextMenu);
+        }
+    }
     if let Some(bounds) = widget_bounds(
         layout,
         hit_regions.get(&widget_id).map(Vec::as_slice),
@@ -326,6 +359,7 @@ fn collect_widget<VM: 'static>(
                 hit_regions,
                 trap_scope,
                 trap_path,
+                hidden_scope_paths,
                 child.id,
                 nodes,
                 included,
@@ -338,6 +372,76 @@ fn collect_widget<VM: 'static>(
     nodes.push((node_id, node));
     included.insert(node_id);
     Some(node_id)
+}
+
+fn has_clickable_popover_trigger_ancestor<VM: 'static>(
+    layout: &ResolvedSceneLayout<VM>,
+    mut widget_id: WidgetId,
+) -> bool {
+    loop {
+        let Some(resolved) = layout.resolved_widget(widget_id) else {
+            return false;
+        };
+        if resolved.popover.as_ref().is_some_and(|popover| {
+            !popover.disabled.resolve()
+                && popover.trigger_mode.allows_click()
+                && popover.on_open_change.is_some()
+        }) {
+            return true;
+        }
+        let Some(parent) = layout.parent_of(widget_id) else {
+            return false;
+        };
+        widget_id = parent;
+    }
+}
+
+fn composite_menu_trigger_ancestor<VM: 'static>(
+    layout: &ResolvedSceneLayout<VM>,
+    mut widget_id: WidgetId,
+) -> Option<(WidgetId, bool)> {
+    loop {
+        let Some(resolved) = layout.resolved_widget(widget_id) else {
+            return None;
+        };
+        if let Some(menu) = resolved
+            .menu
+            .as_ref()
+            .filter(|menu| !menu.disabled.resolve())
+        {
+            return Some((
+                widget_id,
+                menu.open.is_none() || menu.on_open_change.is_some(),
+            ));
+        }
+        let Some(parent) = layout.parent_of(widget_id) else {
+            return None;
+        };
+        widget_id = parent;
+    }
+}
+
+fn enabled_context_menu_trigger_ancestor<VM: 'static>(
+    layout: &ResolvedSceneLayout<VM>,
+    mut widget_id: WidgetId,
+) -> Option<WidgetId> {
+    loop {
+        let resolved = layout.resolved_widget(widget_id)?;
+        if resolved
+            .context_menu
+            .as_ref()
+            .is_some_and(|menu| !menu.disabled.resolve())
+        {
+            return Some(widget_id);
+        }
+        widget_id = layout.parent_of(widget_id)?;
+    }
+}
+
+fn menu_source_is_open<VM>(computed: &ComputedScene<VM>, widget_id: WidgetId) -> bool {
+    computed.overlay_close_handlers.iter().any(|handler| {
+        handler.layer == OverlayLayer::Menu && handler.source_widget_id == Some(widget_id)
+    })
 }
 
 fn collect_accessibility_fragment<VM: 'static>(
@@ -385,10 +489,6 @@ fn collect_accessibility_fragment_node<VM: 'static>(
     included: &mut HashSet<NodeId>,
 ) -> Option<NodeId> {
     let fragment_node = fragment.nodes.get(node_index)?;
-    let resolved = resolved_at_fragment_path(
-        fragment.resolved_root.as_ref(),
-        &fragment_node.resolved_path,
-    )?;
     let visible_bounds = accessibility_fragment_node_visible_bounds(fragment, node_index)?;
     let route = PortalAccessibilityNodeRoute {
         source_window_instance_id: fragment
@@ -407,12 +507,20 @@ fn collect_accessibility_fragment_node<VM: 'static>(
             accessibility_fragment_hit_visible_bounds(fragment, node_index, hit).is_some()
         })
         .collect::<Vec<_>>();
-    let mut node = node_for_widget(
-        resolved,
-        computed,
-        Some(hit_regions.as_slice()),
-        Some(fragment_node.scroll_regions.as_slice()),
-    );
+    let mut node = if let Some(semantics) = fragment_node.synthetic_semantics.as_ref() {
+        node_for_synthetic_fragment(semantics, Some(hit_regions.as_slice()))
+    } else {
+        let resolved = resolved_at_fragment_path(
+            fragment.resolved_root.as_ref(),
+            &fragment_node.resolved_path,
+        )?;
+        node_for_widget(
+            resolved,
+            computed,
+            Some(hit_regions.as_slice()),
+            Some(fragment_node.scroll_regions.as_slice()),
+        )
+    };
     node.set_bounds(access_rect(visible_bounds));
     let children = fragment_node
         .children
@@ -435,6 +543,47 @@ fn collect_accessibility_fragment_node<VM: 'static>(
     nodes.push((node_id, node));
     included.insert(node_id);
     Some(node_id)
+}
+
+fn node_for_synthetic_fragment<VM>(
+    semantics: &AccessibilitySyntheticSemantics,
+    regions: Option<&[&HitRegion<VM>]>,
+) -> Node {
+    let role = match semantics.role {
+        AccessibilitySyntheticRole::Menu => Role::Menu,
+        AccessibilitySyntheticRole::MenuItem => Role::MenuItem,
+        AccessibilitySyntheticRole::MenuItemCheckbox => Role::MenuItemCheckBox,
+        AccessibilitySyntheticRole::Tooltip => Role::Tooltip,
+    };
+    let mut node = Node::new(role);
+    if let Some(label) = semantics.label.as_ref() {
+        node.set_label(label.clone());
+    }
+    if semantics.disabled {
+        node.set_disabled();
+    }
+    if let Some(checked) = semantics.checked {
+        node.set_toggled(if checked {
+            Toggled::True
+        } else {
+            Toggled::False
+        });
+    }
+    if let Some(expanded) = semantics.expanded {
+        node.set_expanded(expanded);
+        if !semantics.disabled {
+            node.add_action(if expanded {
+                Action::Collapse
+            } else {
+                Action::Expand
+            });
+        }
+    }
+    if semantics.has_menu_popup {
+        node.set_has_popup(HasPopup::Menu);
+    }
+    apply_hit_actions(&mut node, regions);
+    node
 }
 
 pub(crate) fn accessibility_fragment_node_visible_bounds<VM>(
@@ -538,8 +687,17 @@ fn is_visible_to_accessibility<VM: 'static>(
     layout: &ResolvedSceneLayout<VM>,
     trap_scope: Option<&[WidgetId]>,
     trap_path: Option<&[usize]>,
+    hidden_scope_paths: &[Vec<usize>],
     widget_id: WidgetId,
 ) -> bool {
+    let widget_path = layout.path_for(widget_id);
+    if widget_path.is_some_and(|path| {
+        hidden_scope_paths
+            .iter()
+            .any(|hidden| path.starts_with(hidden))
+    }) {
+        return false;
+    }
     let Some(scope) = trap_scope else {
         return true;
     };
@@ -549,8 +707,7 @@ fn is_visible_to_accessibility<VM: 'static>(
     let Some(trap_path) = trap_path else {
         return true;
     };
-    layout
-        .path_for(widget_id)
+    widget_path
         .map(|path| path.starts_with(trap_path) || trap_path.starts_with(path))
         .unwrap_or(false)
 }
@@ -561,23 +718,23 @@ fn node_for_widget<VM: 'static>(
     regions: Option<&[&HitRegion<VM>]>,
     scroll_regions: Option<&[ScrollRegion]>,
 ) -> Node {
-    let mut node = Node::new(role_for_widget(resolved));
+    let mut node = Node::new(role_for_widget(resolved, regions));
     if let Some(key) = resolved.key.as_ref() {
         node.set_author_id(format!("{key:?}"));
     }
-    if resolved
-        .focus
-        .focusable
-        .unwrap_or_else(|| regions.is_some_and(|regions| regions.iter().any(|r| r.focus.is_some())))
+    apply_widget_semantics(&mut node, resolved, computed, regions, scroll_regions);
+    if !node.is_disabled()
+        && resolved.focus.focusable.unwrap_or_else(|| {
+            regions.is_some_and(|regions| regions.iter().any(|r| r.focus.is_some()))
+        })
     {
         node.add_action(Action::Focus);
     }
-    apply_widget_semantics(&mut node, resolved, computed, scroll_regions);
     apply_hit_actions(&mut node, regions);
     node
 }
 
-fn role_for_widget<VM>(resolved: &ResolvedElement<VM>) -> Role {
+fn role_for_widget<VM>(resolved: &ResolvedElement<VM>, regions: Option<&[&HitRegion<VM>]>) -> Role {
     if resolved.data_grid_header.is_some() {
         return Role::ColumnHeader;
     }
@@ -616,12 +773,27 @@ fn role_for_widget<VM>(resolved: &ResolvedElement<VM>) -> Role {
     if resolved.splitter_handle.is_some() {
         return Role::Splitter;
     }
+    if resolved.data_grid_resize_handle.is_some() {
+        return Role::Splitter;
+    }
+    if let Some(role) = resolved.visual.accessibility_role {
+        return match role {
+            AccessibilityRole::Button => Role::Button,
+            AccessibilityRole::Link => Role::Link,
+            AccessibilityRole::ComboBox => Role::ComboBox,
+            AccessibilityRole::ListBox => Role::ListBox,
+            AccessibilityRole::ListBoxOption { .. } => Role::ListBoxOption,
+        };
+    }
     match &resolved.kind {
         ResolvedWidgetKind::Container { layout, .. } if layout.scroll_view.is_some() => {
             Role::ScrollView
         }
         ResolvedWidgetKind::Virtual { children, .. }
-            if children.iter().any(|child| child.list_item.is_some()) =>
+            if children.iter().any(|child| {
+                child.list_item.is_some()
+                    || matches!(child.kind, ResolvedWidgetKind::SelectOptionRow { .. })
+            }) =>
         {
             Role::ListBox
         }
@@ -642,7 +814,9 @@ fn role_for_widget<VM>(resolved: &ResolvedElement<VM>) -> Role {
         ResolvedWidgetKind::Spinner { .. } => Role::ProgressIndicator,
         ResolvedWidgetKind::Divider { .. } => Role::Splitter,
         ResolvedWidgetKind::TextEditor { multiline, .. } => {
-            if *multiline {
+            if number_input_interaction(regions).is_some() {
+                Role::SpinButton
+            } else if *multiline {
                 Role::MultilineTextInput
             } else {
                 Role::TextInput
@@ -660,6 +834,7 @@ fn apply_widget_semantics<VM: 'static>(
     node: &mut Node,
     resolved: &ResolvedElement<VM>,
     computed: &ComputedScene<VM>,
+    regions: Option<&[&HitRegion<VM>]>,
     scroll_regions: Option<&[ScrollRegion]>,
 ) {
     if resolved
@@ -683,9 +858,10 @@ fn apply_widget_semantics<VM: 'static>(
         );
         node.set_position_in_set(list_item.item_index + 1);
         node.set_size_of_set(list_item.selection.sibling_keys.len());
-        node.add_action(Action::Click);
         if list_item.disabled.resolve() {
             node.set_disabled();
+        } else {
+            node.add_action(Action::Click);
         }
     }
 
@@ -704,9 +880,17 @@ fn apply_widget_semantics<VM: 'static>(
                 crate::ui::widget::TreeCheckState::Indeterminate => Toggled::Mixed,
             });
         }
-        node.add_action(Action::Click);
         if tree_node.disabled.resolve() {
             node.set_disabled();
+        } else {
+            node.add_action(Action::Click);
+            if tree_node.has_children && tree_node.on_expand_change.is_some() {
+                node.add_action(if tree_node.expanded {
+                    Action::Collapse
+                } else {
+                    Action::Expand
+                });
+            }
         }
     }
 
@@ -729,46 +913,83 @@ fn apply_widget_semantics<VM: 'static>(
         node.set_label(header.label.clone());
         node.set_column_index(header.column_index);
         node.set_column_span(1);
-        node.add_action(Action::Click);
+        if header.sortable && header.on_sort_change.is_some() {
+            node.add_action(Action::Click);
+        }
+        if let Some(sort) = header
+            .sort
+            .resolve()
+            .into_iter()
+            .find(|sort| sort.column_key == header.column_key)
+        {
+            node.set_sort_direction(match sort.direction {
+                crate::ui::widget::DataGridSortDirection::Ascending => SortDirection::Ascending,
+                crate::ui::widget::DataGridSortDirection::Descending => SortDirection::Descending,
+            });
+        }
+    }
+
+    if let Some(handle) = resolved.data_grid_resize_handle.as_ref() {
+        node.set_orientation(Orientation::Horizontal);
+        node.set_numeric_value(handle.width.get() as f64);
+        node.set_min_numeric_value(handle.min_width.get() as f64);
+        node.set_max_numeric_value(
+            handle
+                .max_width
+                .map(|width| width.get() as f64)
+                .unwrap_or(f64::MAX),
+        );
+        node.set_numeric_value_step(handle.step.get() as f64);
+        if handle.on_column_width_change.is_some() {
+            node.add_action(Action::Increment);
+            node.add_action(Action::Decrement);
+            node.add_action(Action::SetValue);
+        }
     }
 
     if let Some(cell) = resolved.data_grid_cell.as_ref() {
         node.set_row_index(cell.row_index);
         node.set_column_index(cell.column_index);
         node.set_selected(cell.selected);
-        node.add_action(Action::Click);
         if cell.disabled.resolve() {
             node.set_disabled();
+        } else if cell.is_actionable() {
+            node.add_action(Action::Click);
         }
     }
 
     if let Some(splitter) = resolved.splitter_handle.as_ref() {
+        node.set_orientation(match splitter.axis {
+            crate::ui::layout::Axis::Horizontal => Orientation::Horizontal,
+            crate::ui::layout::Axis::Vertical => Orientation::Vertical,
+        });
         let sizes = splitter.current_sizes();
-        let current = sizes
+        let current = sizes.get(splitter.index).copied().unwrap_or_default();
+        let adjacent = sizes.get(splitter.index + 1).copied().unwrap_or_default();
+        let pair_total = (current + adjacent).max(0.0);
+        let (current_min, current_max) = splitter
+            .constraints
             .get(splitter.index)
             .copied()
-            .unwrap_or_default()
-            .clamp(0.0, 1.0);
+            .unwrap_or((0.0, 1.0));
+        let (adjacent_min, adjacent_max) = splitter
+            .constraints
+            .get(splitter.index + 1)
+            .copied()
+            .unwrap_or((0.0, 1.0));
+        let min = current_min.max(pair_total - adjacent_max).clamp(0.0, 1.0);
+        let max = current_max.min(pair_total - adjacent_min).clamp(min, 1.0);
+        let current = current.clamp(min, max);
         node.set_numeric_value(current as f64);
-        node.set_min_numeric_value(
-            splitter
-                .constraints
-                .get(splitter.index)
-                .map(|(min, _)| *min)
-                .unwrap_or(0.0) as f64,
-        );
-        node.set_max_numeric_value(
-            splitter
-                .constraints
-                .get(splitter.index)
-                .map(|(_, max)| *max)
-                .unwrap_or(1.0) as f64,
-        );
+        node.set_min_numeric_value(min as f64);
+        node.set_max_numeric_value(max as f64);
         node.set_numeric_value_step(splitter.step as f64);
-        node.add_action(Action::Increment);
-        node.add_action(Action::Decrement);
-        node.add_action(Action::SetValue);
-        node.add_action(Action::Click);
+        if splitter.on_resize.is_some() {
+            node.add_action(Action::Increment);
+            node.add_action(Action::Decrement);
+            node.add_action(Action::SetValue);
+            node.add_action(Action::Click);
+        }
     }
 
     match &resolved.kind {
@@ -801,7 +1022,6 @@ fn apply_widget_semantics<VM: 'static>(
             label, disabled, ..
         } => {
             node.set_label(label.resolve());
-            node.add_action(Action::Click);
             if disabled.resolve() {
                 node.set_disabled();
             }
@@ -816,7 +1036,6 @@ fn apply_widget_semantics<VM: 'static>(
                 node.set_label(label.resolve());
             }
             node.set_toggled(Toggled::from(checked.resolve()));
-            node.add_action(Action::Click);
             if disabled.resolve() {
                 node.set_disabled();
             }
@@ -830,8 +1049,7 @@ fn apply_widget_semantics<VM: 'static>(
             if let Some(label) = label {
                 node.set_label(label.resolve());
             }
-            node.set_selected(checked.resolve());
-            node.add_action(Action::Click);
+            node.set_toggled(Toggled::from(checked.resolve()));
             if disabled.resolve() {
                 node.set_disabled();
             }
@@ -840,7 +1058,6 @@ fn apply_widget_semantics<VM: 'static>(
             checked, disabled, ..
         } => {
             node.set_toggled(Toggled::from(checked.resolve()));
-            node.add_action(Action::Click);
             if disabled.resolve() {
                 node.set_disabled();
             }
@@ -852,36 +1069,55 @@ fn apply_widget_semantics<VM: 'static>(
             disabled,
             ..
         } => {
+            let disabled = disabled.resolve();
             match selected_label.resolve() {
                 Some(label) if !label.is_empty() => node.set_value(label),
                 _ => node.set_placeholder(placeholder.resolve()),
             }
-            if let Some(open) = open {
-                node.set_expanded(open.resolve());
-            }
-            node.add_action(Action::Click);
-            if disabled.resolve() {
+            let is_open = if let Some(is_open) = select_trigger_open(regions) {
+                is_open
+            } else if let Some(open) = open {
+                open.resolve()
+            } else {
+                false
+            };
+            node.set_expanded(!disabled && is_open);
+            node.set_has_popup(HasPopup::Listbox);
+            if disabled {
                 node.set_disabled();
             }
         }
         ResolvedWidgetKind::Slider {
             value,
+            label,
             min,
             max,
             step,
             disabled,
             ..
         } => {
-            let current = value.resolve().clamp(*min, *max);
+            if let Some(label) = label {
+                node.set_label(label.resolve());
+            }
+            let current =
+                crate::ui::widget::slider_resolve_value(value.resolve(), *min, *max, *step);
             node.set_numeric_value(current as f64);
             node.set_min_numeric_value(*min as f64);
             node.set_max_numeric_value(*max as f64);
-            node.set_numeric_value_step(*step as f64);
-            node.add_action(Action::Increment);
-            node.add_action(Action::Decrement);
-            node.add_action(Action::SetValue);
+            if let Some(step) = crate::ui::widget::slider_interaction_step(*min, *max, *step) {
+                node.set_numeric_value_step(step as f64);
+            }
             if disabled.resolve() {
                 node.set_disabled();
+            }
+        }
+        ResolvedWidgetKind::SelectOptionRow { option, .. } => {
+            node.set_label(option.label.resolve());
+            node.set_selected(option.selected.resolve());
+            if option.disabled.resolve() {
+                node.set_disabled();
+            } else if option.on_select.is_some() {
+                node.add_action(Action::Click);
             }
         }
         ResolvedWidgetKind::ProgressBar {
@@ -894,7 +1130,9 @@ fn apply_widget_semantics<VM: 'static>(
                 node.set_label(label.resolve());
             }
             if !indeterminate.resolve() {
-                node.set_numeric_value(value.resolve() as f64);
+                node.set_numeric_value(
+                    crate::ui::widget::normalized_progress_value(value.resolve()) as f64,
+                );
                 node.set_min_numeric_value(0.0);
                 node.set_max_numeric_value(1.0);
             }
@@ -910,18 +1148,101 @@ fn apply_widget_semantics<VM: 'static>(
             disabled,
             ..
         } => {
-            node.set_value(controller.text());
+            let disabled = disabled.resolve();
+            let text = controller.text();
+            node.set_value(text.clone());
             node.set_placeholder(placeholder.resolve());
-            node.add_action(Action::SetValue);
-            if disabled.resolve() {
+            if !disabled {
+                node.add_action(Action::SetValue);
+                if let Some(number_input) = number_input_interaction(regions) {
+                    if let Ok(value) = text.trim().parse::<f64>() {
+                        if value.is_finite() {
+                            let value = number_input.min.map(|min| value.max(min)).unwrap_or(value);
+                            let value = number_input.max.map(|max| value.min(max)).unwrap_or(value);
+                            node.set_numeric_value(value);
+                        }
+                    }
+                    if let Some(min) = number_input.min {
+                        node.set_min_numeric_value(min);
+                    }
+                    if let Some(max) = number_input.max {
+                        node.set_max_numeric_value(max);
+                    }
+                    node.set_numeric_value_step(number_input.step);
+                    node.add_action(Action::Increment);
+                    node.add_action(Action::Decrement);
+                }
+                if resolved.visual.accessibility_role == Some(AccessibilityRole::ComboBox) {
+                    let can_toggle = resolved.popover.as_ref().is_some_and(|popover| {
+                        popover.trigger_mode.allows_click()
+                            && (popover.internal_open.is_some() || popover.on_open_change.is_some())
+                    });
+                    if can_toggle {
+                        node.add_action(Action::Click);
+                    }
+                }
+            }
+            if disabled {
                 node.set_disabled();
             }
         }
         _ => {}
     }
+
+    if let Some(label) = resolved.visual.accessibility_label.as_ref() {
+        let label = label.resolve();
+        if !label.is_empty() {
+            node.set_label(label);
+        }
+    }
+    if let Some(expanded) = resolved.visual.accessibility_expanded.as_ref() {
+        node.set_expanded(expanded.resolve());
+    }
+    if resolved
+        .visual
+        .accessibility_disabled
+        .as_ref()
+        .is_some_and(|disabled| disabled.resolve())
+    {
+        node.set_disabled();
+    }
+    if let Some(selected) = resolved.visual.accessibility_selected.as_ref() {
+        node.set_selected(selected.resolve());
+    }
+    if let Some((current, kind)) = resolved.visual.accessibility_current.as_ref() {
+        if current.resolve() {
+            node.set_aria_current(match kind {
+                AccessibilityCurrent::True => AriaCurrent::True,
+                AccessibilityCurrent::Page => AriaCurrent::Page,
+            });
+        }
+    }
+    if let Some(position) = resolved.visual.accessibility_position_in_set {
+        node.set_position_in_set(position);
+    }
+    if let Some(size) = resolved.visual.accessibility_size_of_set {
+        node.set_size_of_set(size);
+    }
+    match resolved.visual.accessibility_role {
+        Some(AccessibilityRole::Button | AccessibilityRole::Link) => {}
+        Some(AccessibilityRole::ComboBox) => {
+            let expanded = resolved
+                .popover
+                .as_ref()
+                .is_some_and(|popover| !popover.disabled.resolve() && popover.is_open());
+            node.set_expanded(expanded);
+            node.set_auto_complete(AutoComplete::List);
+            node.set_has_popup(HasPopup::Listbox);
+        }
+        Some(AccessibilityRole::ListBoxOption { selected }) => node.set_selected(selected),
+        Some(AccessibilityRole::ListBox) | None => {}
+    }
 }
 
 fn apply_hit_actions<VM>(node: &mut Node, regions: Option<&[&HitRegion<VM>]>) {
+    if node.is_disabled() {
+        return;
+    }
     let Some(regions) = regions else { return };
     if regions.iter().any(|region| region.focus.is_some()) {
         node.add_action(Action::Focus);
@@ -933,34 +1254,98 @@ fn apply_hit_actions<VM>(node: &mut Node, regions: Option<&[&HitRegion<VM>]>) {
                     node.add_action(Action::Click);
                 }
             }
-            HitInteraction::Checkbox { .. }
-            | HitInteraction::Radio { .. }
-            | HitInteraction::Switch { .. }
-            | HitInteraction::SelectTrigger { .. }
-            | HitInteraction::TabTrigger { .. }
+            HitInteraction::Checkbox {
+                interactions,
+                on_change,
+                ..
+            }
+            | HitInteraction::Radio {
+                interactions,
+                on_change,
+                ..
+            }
+            | HitInteraction::Switch {
+                interactions,
+                on_change,
+                ..
+            } if on_change.is_some() || interactions.on_click.is_some() => {
+                node.add_action(Action::Click);
+            }
+            HitInteraction::SelectTrigger {
+                interactions,
+                can_toggle,
+                ..
+            } if *can_toggle || interactions.on_click.is_some() => {
+                node.add_action(Action::Click);
+            }
+            HitInteraction::TabTrigger {
+                on_change: Some(_), ..
+            }
             | HitInteraction::ListItem { .. }
             | HitInteraction::TreeNode { .. }
             | HitInteraction::TreeDisclosure { .. }
             | HitInteraction::TreeCheckbox { .. } => {
                 node.add_action(Action::Click);
             }
-            HitInteraction::Slider { .. } => {
+            HitInteraction::SelectOption {
+                on_select,
+                menu_path,
+                ..
+            } if on_select.is_some() || menu_path.is_some() => {
+                node.add_action(Action::Click);
+            }
+            HitInteraction::Slider {
+                on_change,
+                on_change_end,
+                ..
+            } if on_change.is_some() || on_change_end.is_some() => {
                 node.add_action(Action::Increment);
                 node.add_action(Action::Decrement);
                 node.add_action(Action::SetValue);
             }
-            HitInteraction::SplitterHandle { .. } => {
+            HitInteraction::SplitterHandle { state, .. } if state.on_resize.is_some() => {
                 node.add_action(Action::Increment);
                 node.add_action(Action::Decrement);
                 node.add_action(Action::SetValue);
                 node.add_action(Action::Click);
             }
-            HitInteraction::TextInput { .. } => {
+            HitInteraction::DataGridResizeHandle { state, .. }
+                if state.on_column_width_change.is_some() =>
+            {
+                node.add_action(Action::Increment);
+                node.add_action(Action::Decrement);
                 node.add_action(Action::SetValue);
+            }
+            HitInteraction::TextInput { interactions, .. } => {
+                node.add_action(Action::SetValue);
+                if interactions.number_input.is_some() {
+                    node.add_action(Action::Increment);
+                    node.add_action(Action::Decrement);
+                }
             }
             _ => {}
         }
     }
+}
+
+fn number_input_interaction<'a, VM>(
+    regions: Option<&'a [&HitRegion<VM>]>,
+) -> Option<&'a crate::ui::widget::NumberInputInteraction<VM>> {
+    regions?
+        .iter()
+        .find_map(|region| match &region.interaction {
+            HitInteraction::TextInput { interactions, .. } => interactions.number_input.as_ref(),
+            _ => None,
+        })
+}
+
+fn select_trigger_open<VM>(regions: Option<&[&HitRegion<VM>]>) -> Option<bool> {
+    regions?
+        .iter()
+        .find_map(|region| match &region.interaction {
+            HitInteraction::SelectTrigger { is_open, .. } => Some(*is_open),
+            _ => None,
+        })
 }
 
 fn apply_scroll_region(node: &mut Node, regions: &[ScrollRegion], widget_id: WidgetId) {

@@ -29,7 +29,7 @@ impl<VM: 'static> ResolvedElement<VM> {
         let Some(popover) = &self.popover else {
             return;
         };
-        let fixed_open = popover.open.resolve();
+        let fixed_open = popover.is_open();
         let hover_preview =
             context.active_hover_popover == Some(self.id) && popover.trigger_mode.allows_hover();
         let target_visible = !popover.disabled.resolve() && (fixed_open || hover_preview);
@@ -82,7 +82,7 @@ impl<VM: 'static> ResolvedElement<VM> {
                 overlay = overlay
                     .close_on_escape(popover.close_on_escape)
                     .close_on_outside_click(popover.close_on_outside_click)
-                    .return_focus_to(self.id)
+                    .return_focus_to(popover.return_focus_to.unwrap_or(self.id))
                     .on_close(command);
             }
         }
@@ -218,18 +218,19 @@ fn build_popover_scene<VM: 'static>(
                 }
 
                 super::prepare_nested_scene_root(&mut root, context, context.viewport);
-                let resolved = root.resolve_with_runtime_state_and_style_sheet(
-                    context.theme,
-                    None,
-                    context.scroll_offsets,
-                    context.virtual_states,
-                    crate::ui::widget::r#virtual::VirtualViewportHint {
-                        width: context.viewport.width,
-                        height: context.viewport.height,
-                    },
-                    &context.style_context,
-                    context.style_sheet,
-                );
+                let resolved =
+                    std::sync::Arc::new(root.resolve_with_runtime_state_and_style_sheet(
+                        context.theme,
+                        None,
+                        context.scroll_offsets,
+                        context.virtual_states,
+                        crate::ui::widget::r#virtual::VirtualViewportHint {
+                            width: context.viewport.width,
+                            height: context.viewport.height,
+                        },
+                        &context.style_context,
+                        context.style_sheet,
+                    ));
                 let mut taffy = TaffyTree::new();
                 let layout_root = resolved
                     .build_layout_tree(
@@ -269,6 +270,7 @@ fn build_popover_scene<VM: 'static>(
                 let mut chunks = std::collections::HashMap::new();
                 let mut chunk_parts = std::collections::HashMap::new();
                 let mut visual_contexts = std::collections::HashMap::new();
+                let mut accessibility_geometry = Vec::new();
                 let mut local_context = CollectContext {
                     taffy: &taffy,
                     font_manager: context.font_manager,
@@ -300,7 +302,7 @@ fn build_popover_scene<VM: 'static>(
                     reduced_motion: context.reduced_motion,
                     now: context.now,
                     frame_clock: context.frame_clock,
-                    focus: Default::default(),
+                    focus: context.focus.clone(),
                     tooltip_hover_started_at: context.tooltip_hover_started_at,
                     next_tooltip_wakeup: context.next_tooltip_wakeup,
                     next_toast_wakeup: context.next_toast_wakeup,
@@ -309,7 +311,7 @@ fn build_popover_scene<VM: 'static>(
                     gpu_scroll_enabled: false,
                     gpu_scroll_container: None,
                     transform_stack: context.transform_stack.clone(),
-                    portal_accessibility_geometry: None,
+                    portal_accessibility_geometry: Some(&mut accessibility_geometry),
                     portal_accessibility_path: smallvec::SmallVec::new(),
                 };
                 let root_id = resolved.collect_subtree_cache(
@@ -327,7 +329,21 @@ fn build_popover_scene<VM: 'static>(
                     &mut chunk_parts,
                     &mut visual_contexts,
                 );
+                let next_focus_order = local_context.focus.next_order;
+                drop(local_context);
+                context.focus.next_order = next_focus_order;
                 let mut computed = chunks.get(&root_id).cloned().unwrap_or_default();
+                if let Some(accessibility_fragment) = super::portal::collect_accessibility_fragment(
+                    std::sync::Arc::clone(&resolved),
+                    &layout_root,
+                    &accessibility_geometry,
+                    &computed.hit_regions,
+                    &computed.scroll_regions,
+                ) {
+                    computed
+                        .accessibility_fragments
+                        .push(accessibility_fragment);
+                }
                 computed.finalize_portals(context.viewport);
                 Some((computed, size))
             })

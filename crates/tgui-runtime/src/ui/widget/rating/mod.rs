@@ -11,7 +11,7 @@ use super::p3_support::{
     impl_p3_layout_api, merge_layout, resolve_component_style_with_sheet, with_visual_identity,
 };
 use super::style::{IconStyle, RatingStyle, SliderStyle, StyleResolver, StyleSheet};
-use super::{Flex, Slider, Stack, WidgetKey};
+use super::{Flex, Show, Slider, Stack, ViewSwitch, WidgetKey};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct RatingChange {
@@ -56,7 +56,11 @@ impl<VM> Rating<VM> {
     }
 
     pub fn step(mut self, step: f32) -> Self {
-        self.step = step.clamp(0.1, 1.0);
+        self.step = if step.is_finite() {
+            step.clamp(0.1, 1.0)
+        } else {
+            1.0
+        };
         self
     }
 
@@ -94,39 +98,34 @@ impl<VM> Rating<VM> {
 
 impl<VM: 'static> From<Rating<VM>> for Element<VM> {
     fn from(rating: Rating<VM>) -> Self {
-        let value = rating.value.resolve().clamp(0.0, rating.max as f32);
-        let read_only = rating.read_only.resolve();
         let visual_identity = rating.visual.clone();
         let mut stars = Vec::new();
         for index in 0..rating.max {
-            let threshold = index as f32 + 1.0;
-            let icon = if value + f32::EPSILON >= threshold {
-                BuiltinIcon::Star
-            } else if value + f32::EPSILON >= threshold - 0.5 {
-                BuiltinIcon::StarHalf
-            } else {
-                BuiltinIcon::Star
-            };
-            let active = value + f32::EPSILON >= threshold - 0.5;
-            let style = rating.style.clone();
-            let icon_identity = visual_identity.clone();
-            let icon_element: Element<VM> = with_visual_identity(
-                Icon::builtin(icon)
-                    .style_full(move |context| {
-                        let resolved = resolve_rating_style(style.as_ref(), context);
-                        IconStyle {
-                            color: if active {
-                                resolved.active
-                            } else {
-                                resolved.inactive
-                            },
-                            size: resolved.size,
-                        }
-                    })
-                    .into(),
-                &icon_identity,
-            );
-            stars.push(icon_element);
+            let state = rating_star_state_value(&rating.value, index);
+            let star: Element<VM> = Stack::new()
+                .child(
+                    ViewSwitch::new(state)
+                        .case(rating_icon(
+                            BuiltinIcon::Star,
+                            false,
+                            rating.style.clone(),
+                            visual_identity.clone(),
+                        ))
+                        .case(rating_icon(
+                            BuiltinIcon::StarHalf,
+                            true,
+                            rating.style.clone(),
+                            visual_identity.clone(),
+                        ))
+                        .case(rating_icon(
+                            BuiltinIcon::Star,
+                            true,
+                            rating.style.clone(),
+                            visual_identity.clone(),
+                        )),
+                )
+                .into();
+            stars.push(star);
         }
         let runtime_style = rating.style.clone();
         let star_row: Element<VM> = Flex::horizontal()
@@ -152,48 +151,45 @@ impl<VM: 'static> From<Rating<VM>> for Element<VM> {
             })
             .child(stars)
             .into();
-        let mut root: Element<VM> = if !read_only {
-            if let Some(command) = rating.on_change.clone() {
-                let step = rating.step;
-                let max = rating.max;
-                Stack::new()
-                    .child(star_row)
-                    .child(
-                        Slider::new(value, 0.0, max as f32)
-                            .step(step)
-                            .position_absolute()
-                            .left(pct(0.0))
-                            .top(pct(0.0))
-                            .width(pct(100.0))
-                            .height(pct(100.0))
-                            .style_full_with_style_sheet({
-                                let style = rating.style.clone();
-                                move |context, style_sheet, visual, state| {
-                                    transparent_rating_slider_style(
-                                        style.as_ref(),
-                                        context,
-                                        style_sheet,
-                                        visual,
-                                        state,
-                                    )
-                                }
-                            })
-                            .on_change(ValueCommand::new_with_context(
-                                move |vm, next: f32, context| {
-                                    command.execute_with_context(
-                                        vm,
-                                        RatingChange {
-                                            value: next.clamp(0.0, max as f32),
-                                        },
-                                        context,
-                                    );
-                                },
-                            )),
-                    )
-                    .into()
-            } else {
-                star_row
-            }
+        let mut root: Element<VM> = if let Some(command) = rating.on_change.clone() {
+            let step = rating.step;
+            let max = rating.max;
+            let interactive = inverted_bool_value(&rating.read_only);
+            let slider = Slider::new(rating.value.clone(), 0.0, max as f32)
+                .label("Rating")
+                .step(step)
+                .position_absolute()
+                .left(pct(0.0))
+                .top(pct(0.0))
+                .width(pct(100.0))
+                .height(pct(100.0))
+                .style_full_with_style_sheet({
+                    let style = rating.style.clone();
+                    move |context, style_sheet, visual, state| {
+                        transparent_rating_slider_style(
+                            style.as_ref(),
+                            context,
+                            style_sheet,
+                            visual,
+                            state,
+                        )
+                    }
+                })
+                .on_change(ValueCommand::new_with_context(
+                    move |vm, next: f32, context| {
+                        command.execute_with_context(
+                            vm,
+                            RatingChange {
+                                value: next.clamp(0.0, max as f32),
+                            },
+                            context,
+                        );
+                    },
+                ));
+            Stack::new()
+                .child(star_row)
+                .child(Show::new(interactive, slider))
+                .into()
         } else {
             star_row
         };
@@ -202,6 +198,65 @@ impl<VM: 'static> From<Rating<VM>> for Element<VM> {
         root.layout = merge_layout(root.layout, rating.layout);
         root
     }
+}
+
+fn rating_star_state_value(value: &Value<f32>, index: usize) -> Value<usize> {
+    let resolve = move |value: f32| {
+        let value = if value.is_finite() {
+            value.max(0.0)
+        } else {
+            0.0
+        };
+        let threshold = index as f32 + 1.0;
+        if value + f32::EPSILON >= threshold {
+            2
+        } else if value + f32::EPSILON >= threshold - 0.5 {
+            1
+        } else {
+            0
+        }
+    };
+    match value {
+        Value::Static(value) => Value::Static(resolve(*value)),
+        Value::Signal(signal) => Value::Signal(signal.map_memo(resolve)),
+    }
+}
+
+fn inverted_bool_value(value: &Value<bool>) -> Value<bool> {
+    match value {
+        Value::Static(value) => Value::Static(!value),
+        Value::Signal(signal) => Value::Signal(signal.map_memo(|value| !value)),
+    }
+}
+
+fn rating_icon<VM: 'static>(
+    icon: BuiltinIcon,
+    active: bool,
+    style: Option<StyleResolver<RatingStyle>>,
+    visual_identity: VisualStyle,
+) -> Element<VM> {
+    with_visual_identity(
+        Icon::builtin(icon)
+            .style_full_with_style_sheet(move |context, style_sheet, visual, state| {
+                let resolved = resolve_rating_style_with_sheet(
+                    style.as_ref(),
+                    context,
+                    style_sheet,
+                    visual,
+                    state,
+                );
+                IconStyle {
+                    color: if active {
+                        resolved.active
+                    } else {
+                        resolved.inactive
+                    },
+                    size: resolved.size,
+                }
+            })
+            .into(),
+        &visual_identity,
+    )
 }
 
 fn transparent_rating_slider_style(
@@ -227,20 +282,6 @@ fn transparent_rating_slider_style(
     style.min_width = crate::ui::unit::Dp::ZERO;
     style.min_height = crate::ui::unit::Dp::ZERO;
     style
-}
-
-fn resolve_rating_style(
-    style: Option<&StyleResolver<RatingStyle>>,
-    context: &StyleContext<'_>,
-) -> RatingStyle {
-    let style_sheet = StyleSheet::default();
-    resolve_rating_style_with_sheet(
-        style,
-        context,
-        &style_sheet,
-        &VisualStyle::default(),
-        WidgetState::default(),
-    )
 }
 
 fn resolve_rating_style_with_sheet(

@@ -32,6 +32,19 @@ fn splitter_tree_with_sizes(
     )
 }
 
+fn uncontrolled_splitter_tree() -> WidgetTree<TestVm> {
+    WidgetTree::new(
+        ResizablePanels::new(
+            vec![
+                Pane::new(Stack::<TestVm>::new()),
+                Pane::new(Stack::<TestVm>::new()),
+            ],
+            vec![0.42, 0.58],
+        )
+        .size(dp(200.0), dp(100.0)),
+    )
+}
+
 fn splitter_handle_center(handler: &mut BoundRuntimeHandler<TestVm>) -> Point {
     handler
         .computed_scene()
@@ -187,6 +200,81 @@ fn splitter_drag_updates_handle_layout_from_sizes_signal() {
         moved.x > start.x + dp(10.0),
         "splitter handle should move after dragging; start={start:?}, moved={moved:?}"
     );
+}
+
+#[test]
+fn splitter_static_sizes_drag_without_callback_updates_layout() {
+    let invalidation = InvalidationSignal::new();
+    let mut handler = test_handler(Some(uncontrolled_splitter_tree()), invalidation);
+    let start = splitter_handle_center(&mut handler);
+    let end = Point::new(start.x + dp(30.0), start.y);
+
+    pointer_press(&mut handler, start);
+    pointer_move(&mut handler, end);
+
+    let moved = splitter_handle_center(&mut handler);
+    assert!(
+        moved.x > start.x + dp(10.0),
+        "an uncontrolled splitter should retain its dragged size; start={start:?}, moved={moved:?}"
+    );
+}
+
+#[test]
+fn splitter_static_sizes_keyboard_without_callback_updates_layout() {
+    let invalidation = InvalidationSignal::new();
+    let mut handler = test_handler(Some(uncontrolled_splitter_tree()), invalidation);
+    let start = splitter_handle_center(&mut handler);
+
+    assert!(handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::Tab))));
+    assert!(
+        handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::ArrowRight)))
+    );
+
+    let moved = splitter_handle_center(&mut handler);
+    assert!(
+        moved.x > start.x,
+        "an uncontrolled splitter should retain keyboard adjustments; start={start:?}, moved={moved:?}"
+    );
+}
+
+#[test]
+fn splitter_controlled_sizes_without_callback_are_inert() {
+    let invalidation = InvalidationSignal::new();
+    let sizes = State::new(vec![0.42, 0.58], invalidation.clone());
+    let tree = WidgetTree::new(
+        ResizablePanels::new(
+            vec![
+                Pane::new(Stack::<TestVm>::new()),
+                Pane::new(Stack::<TestVm>::new()),
+            ],
+            sizes.signal(),
+        )
+        .size(dp(200.0), dp(100.0)),
+    );
+    let mut handler = test_handler(Some(tree), invalidation);
+
+    assert!(!handler
+        .computed_scene()
+        .hit_regions
+        .iter()
+        .any(|region| matches!(&region.interaction, HitInteraction::SplitterHandle { .. })));
+
+    let _ = handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::Tab)));
+    let _ =
+        handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::ArrowRight)));
+    assert_eq!(handler.focused_widget_id(), None);
+    assert_sizes_close(&sizes.get(), &[0.42, 0.58]);
+
+    let update = handler.accessibility_tree_update_for_test();
+    assert!(!update
+        .nodes
+        .iter()
+        .any(|(_, node)| node.role() == accesskit::Role::Splitter));
+    assert!(update.nodes.iter().all(|(_, node)| {
+        !node.supports_action(accesskit::Action::Increment)
+            && !node.supports_action(accesskit::Action::Decrement)
+            && !node.supports_action(accesskit::Action::SetValue)
+    }));
 }
 
 #[test]

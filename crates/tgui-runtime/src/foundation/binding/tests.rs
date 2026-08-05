@@ -440,6 +440,20 @@ fn text_controller_set_queues_subscribed_reactive_target() {
 }
 
 #[test]
+fn text_controller_created_from_signal_tracks_later_source_values() {
+    let ctx = context();
+    let source = ctx.state(String::from("before"));
+    let controller = TextController::new_legacy(crate::ui::layout::Value::Signal(source.signal()));
+    let initial_revision = controller.revision();
+
+    assert_eq!(controller.text(), "before");
+    source.set(String::from("after"));
+
+    assert_eq!(controller.text(), "after");
+    assert!(controller.revision() > initial_revision);
+}
+
+#[test]
 fn memo_signal_stops_propagation_when_value_is_unchanged() {
     let ctx = context();
     let state = ctx.state(1);
@@ -506,6 +520,56 @@ fn memo_signal_propagates_when_value_changes() {
 
     let targets = ctx.invalidation().drain_reactive_targets();
     assert_eq!(targets, vec![target]);
+}
+
+#[test]
+fn map2_recomputes_when_either_source_changes() {
+    let ctx = context();
+    let left = ctx.state(2);
+    let right = ctx.state(3);
+    let product = left
+        .signal()
+        .map2(&right.signal(), |left, right| left * right);
+    let target = ReactiveTarget::Custom(15);
+    product.subscribe_target(target);
+    assert_eq!(product.get(), 6);
+
+    right.set(4);
+    assert_eq!(ctx.invalidation().drain_reactive_targets(), vec![target]);
+    assert_eq!(product.get(), 8);
+
+    left.set(5);
+    assert_eq!(ctx.invalidation().drain_reactive_targets(), vec![target]);
+    assert_eq!(product.get(), 20);
+}
+
+#[test]
+fn derive_many_recomputes_when_any_source_changes() {
+    let ctx = context();
+    let first = ctx.state(2);
+    let second = ctx.state(3);
+    let third = ctx.state(5);
+    let first_signal = first.signal();
+    let second_signal = second.signal();
+    let third_signal = third.signal();
+    let read_first = first_signal.clone();
+    let read_second = second_signal.clone();
+    let read_third = third_signal.clone();
+    let total = Signal::derive_many(vec![first_signal, second_signal, third_signal], move || {
+        read_first.get_untracked() + read_second.get_untracked() + read_third.get_untracked()
+    })
+    .expect("signals from one context should compose");
+    let target = ReactiveTarget::Custom(16);
+    total.subscribe_target(target);
+    assert_eq!(total.get(), 10);
+
+    third.set(7);
+    assert_eq!(ctx.invalidation().drain_reactive_targets(), vec![target]);
+    assert_eq!(total.get(), 12);
+
+    second.set(11);
+    assert_eq!(ctx.invalidation().drain_reactive_targets(), vec![target]);
+    assert_eq!(total.get(), 20);
 }
 
 #[test]

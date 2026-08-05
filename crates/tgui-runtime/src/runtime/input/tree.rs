@@ -86,8 +86,23 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             return false;
         }
         self.remember_tree_focus(state);
-        let _ = self.dispatch_tree_selection(state, TreeSelectionTrigger::Click, false, false);
-        true
+        if state.checkable.resolve() {
+            self.dispatch_tree_check(state, TreeCheckTrigger::Click)
+        } else {
+            self.dispatch_tree_selection(state, TreeSelectionTrigger::Click, false, false)
+        }
+    }
+
+    pub(in crate::runtime) fn dispatch_tree_accessibility_expand(
+        &mut self,
+        state: &TreeNodeState<VM>,
+        expanded: bool,
+    ) -> bool {
+        if state.disabled.resolve() {
+            return false;
+        }
+        self.remember_tree_focus(state);
+        self.dispatch_tree_expand(state, TreeExpandTrigger::Click, expanded)
     }
 
     pub(in crate::runtime) fn dispatch_tree_disclosure_click(
@@ -531,6 +546,12 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         let Some(region) = self.scroll_region_for_tree(current.state.tree_id) else {
             return false;
         };
+        let current_scroll = self.effective_scroll_offset(region.id, region.scroll_offset);
+        let page_scroll_target = Point::new(
+            current_scroll.x,
+            (current_scroll.y + region.content_viewport.height * direction.signum() as f32)
+                .clamp(Dp::ZERO, region.max_offset().y),
+        );
         let fallback_extent = row_extent_for_tree_state(&current.state);
         let spacing = current.state.item_spacing.max(Dp::ZERO);
         let (current_top, _) = self.tree_virtual_row_bounds(
@@ -588,8 +609,26 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         if target_index == current.state.row_index {
             return false;
         }
+        let (target_top, target_bottom) = self.tree_virtual_row_bounds(
+            &current.state,
+            target_virtual_row,
+            fallback_extent,
+            spacing,
+        );
+        let target_fits_page = target_top + Dp::new(0.01) >= page_scroll_target.y
+            && target_bottom
+                <= page_scroll_target.y + region.content_viewport.height + Dp::new(0.01);
         let _ = self.materialize_tree_virtual_page(&current.state, direction);
-        self.focus_tree_logical_target(&current.state, target_key, target_virtual_row, extend)
+        let focused =
+            self.focus_tree_logical_target(&current.state, target_key, target_virtual_row, extend);
+        if focused && target_fits_page {
+            // Focusing a retained offscreen row may request the smaller "make visible"
+            // offset. Page navigation owns the scroll destination when its logical target
+            // already fits inside the page-sized viewport.
+            self.cancel_scroll_motion(region.id);
+            self.set_scroll_offset(region.id, page_scroll_target);
+        }
+        focused
     }
 
     pub(super) fn collapse_or_focus_parent_tree_node(&mut self) -> bool {
@@ -640,9 +679,21 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
     }
 
     fn focus_tree_target(&mut self, target: TreeKeyboardTarget<VM>, extend: bool) -> bool {
+        let state = target.state.clone();
+        if !self.focus_tree_target_without_selection(target) {
+            return false;
+        }
+        let _ = self.dispatch_tree_selection(&state, TreeSelectionTrigger::Keyboard, extend, false);
+        true
+    }
+
+    fn focus_tree_target_without_selection(&mut self, target: TreeKeyboardTarget<VM>) -> bool {
         let Some(focus) = target.focus.clone() else {
             return false;
         };
+        if target.state.disabled.resolve() {
+            return false;
+        }
         self.remember_tree_focus(&target.state);
         self.update_focus(
             Some(FocusedWidget {
@@ -654,12 +705,141 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             true,
         );
         self.ensure_tree_row_visible(&target.state);
-        let _ = self.dispatch_tree_selection(
-            &target.state,
-            TreeSelectionTrigger::Keyboard,
-            extend,
-            false,
-        );
+        true
+    }
+
+    pub(in crate::runtime) fn reconcile_tree_focus_after_scene_update(&mut self) -> bool {
+        let Some(focused_id) = self.focused_widget_id() else {
+            return false;
+        };
+        let current = self.cached_scene.as_ref().and_then(|cached| {
+            cached
+                .computed
+                .hit_regions
+                .iter()
+                .chain(cached.computed.overlay_hit_regions.iter())
+                .find_map(|region| match &region.interaction {
+                    HitInteraction::TreeNode { id, state, .. } if *id == focused_id => {
+                        Some(TreeKeyboardTarget {
+                            id: *id,
+                            state: state.clone(),
+                            focus: region.focus.clone(),
+                        })
+                    }
+                    _ => None,
+                })
+        });
+        let Some(current) = current else {
+            return false;
+        };
+        if !current.state.disabled.resolve() {
+            return false;
+        }
+
+        if let Some(target) = self.nearest_cached_tree_target(
+            current.state.tree_id,
+            current.state.row_index,
+            &HashSet::new(),
+        ) {
+            return self.focus_tree_target_without_selection(target);
+        }
+        self.focus_tree_root_without_selection(current.state.tree_id)
+    }
+
+    pub(in crate::runtime) fn restore_tree_focus_after_target_removal(
+        &mut self,
+        previous: &FocusedWidget<VM>,
+        removed_ids: &HashSet<WidgetId>,
+    ) -> bool {
+        let removed = self.cached_scene.as_ref().and_then(|cached| {
+            cached
+                .computed
+                .hit_regions
+                .iter()
+                .chain(cached.computed.overlay_hit_regions.iter())
+                .find_map(|region| match &region.interaction {
+                    HitInteraction::TreeNode { id, state, .. } if *id == previous.widget_id => {
+                        Some((state.tree_id, state.row_index))
+                    }
+                    _ => None,
+                })
+        });
+        let Some((tree_id, row_index)) = removed else {
+            return false;
+        };
+
+        if let Some(target) = self.nearest_cached_tree_target(tree_id, row_index, removed_ids) {
+            return self.focus_tree_target_without_selection(target);
+        }
+        self.focus_tree_root_without_selection(tree_id)
+    }
+
+    fn nearest_cached_tree_target(
+        &self,
+        tree_id: WidgetId,
+        row_index: usize,
+        excluded_ids: &HashSet<WidgetId>,
+    ) -> Option<TreeKeyboardTarget<VM>> {
+        let cached = self.cached_scene.as_ref()?;
+        cached
+            .computed
+            .hit_regions
+            .iter()
+            .chain(cached.computed.overlay_hit_regions.iter())
+            .filter_map(|region| match &region.interaction {
+                HitInteraction::TreeNode { id, state, .. }
+                    if state.tree_id == tree_id
+                        && !excluded_ids.contains(id)
+                        && !state.disabled.resolve() =>
+                {
+                    Some(TreeKeyboardTarget {
+                        id: *id,
+                        state: state.clone(),
+                        focus: region.focus.clone(),
+                    })
+                }
+                _ => None,
+            })
+            .min_by_key(|target| {
+                (
+                    target.state.row_index.abs_diff(row_index),
+                    target.state.row_index < row_index,
+                )
+            })
+    }
+
+    fn focus_tree_root_without_selection(&mut self, tree_id: WidgetId) -> bool {
+        let target = self.cached_scene.as_ref().and_then(|cached| {
+            cached
+                .computed
+                .hit_regions
+                .iter()
+                .chain(cached.computed.overlay_hit_regions.iter())
+                .find_map(|region| {
+                    let focus = region.focus.as_ref()?;
+                    (focus.widget_id == tree_id).then(|| {
+                        (
+                            FocusedWidget {
+                                widget_id: tree_id,
+                                scope_path: focus.scope_path.clone(),
+                                on_blur: focus.on_blur.clone(),
+                            },
+                            focus.on_focus.clone(),
+                        )
+                    })
+                })
+        });
+        let Some((target, on_focus)) = target else {
+            return false;
+        };
+        if self
+            .tree_focus_state
+            .as_ref()
+            .is_some_and(|(focused_tree_id, _)| *focused_tree_id == tree_id)
+        {
+            self.tree_focus_state = None;
+        }
+        self.update_focus(Some(target), on_focus, true);
         true
     }
 

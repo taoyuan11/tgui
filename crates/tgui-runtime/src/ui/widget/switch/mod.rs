@@ -269,6 +269,12 @@ impl<VM> Switch<VM> {
         self
     }
 
+    /// 设置辅助技术朗读的开关名称。
+    pub fn label(mut self, label: impl Into<Value<String>>) -> Self {
+        self.element.visual.accessibility_label = Some(label.into());
+        self
+    }
+
     /// 设置点击命令。
     pub fn on_click(mut self, command: Command<VM>) -> Self {
         self.element.interactions.on_click = Some(command);

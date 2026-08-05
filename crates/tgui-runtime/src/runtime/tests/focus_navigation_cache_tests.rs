@@ -412,7 +412,7 @@ fn changing_tab_or_activation_metadata_rebuilds_snapshot() {
 }
 
 #[test]
-fn duplicate_overlay_hit_reuses_snapshot_but_moving_first_hit_rebuilds() {
+fn duplicate_overlay_hit_reuses_snapshot_and_moving_first_hit_keeps_global_order() {
     let clicks = Arc::new(AtomicUsize::new(0));
     let last_click = Arc::new(AtomicUsize::new(usize::MAX));
     let (tree, ids) = dense_focus_tree(2, &clicks, &last_click);
@@ -494,7 +494,7 @@ fn duplicate_overlay_hit_reuses_snapshot_but_moving_first_hit_rebuilds() {
             .iter()
             .map(|item| item.widget_id)
             .collect::<Vec<_>>(),
-        vec![ids[1], ids[0]]
+        ids
     );
     let after_move = cache_stats(&handler);
     assert_eq!(after_move.builds, after_duplicate.builds + 1);

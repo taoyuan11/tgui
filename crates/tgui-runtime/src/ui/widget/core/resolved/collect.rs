@@ -2373,7 +2373,7 @@ impl<VM: 'static> ResolvedElement<VM> {
                     return None;
                 }
                 let style = visual.styles.progress_bar_style.as_ref()?;
-                let progress = value.resolve().clamp(0.0, 1.0);
+                let progress = normalized_progress_value(value.resolve());
                 let track_rect = progress_bar_track_rect(
                     visual.frame,
                     style,
@@ -3284,7 +3284,7 @@ impl<VM: 'static> ResolvedElement<VM> {
             widget_state,
         );
         let progress = track_property_scope(PropertySlot::ProgressValue, || {
-            value.resolve().clamp(0.0, 1.0)
+            normalized_progress_value(value.resolve())
         });
         let track_rect =
             progress_bar_track_rect(frame, &style, *show_label, context.theme, context.units);
@@ -5110,7 +5110,8 @@ impl<VM: 'static> ResolvedElement<VM> {
         chunk_parts: &mut HashMap<WidgetId, SceneChunkParts<VM>>,
         visual_contexts: &mut HashMap<WidgetId, VisualContextSnapshot>,
     ) -> WidgetId {
-        let previous_focus = context.focus.clone();
+        let previous_scope_path = context.focus.scope_path.clone();
+        let previous_disabled_depth = context.focus.disabled_depth;
         let (focus_scope_active, suppress_inactive_interactions) = self
             .focus
             .scope
@@ -5120,6 +5121,8 @@ impl<VM: 'static> ResolvedElement<VM> {
                 (Some(active), scope.suppresses_interactions(active))
             })
             .unwrap_or((None, false));
+        let lifecycle_state_ids_before = suppress_inactive_interactions
+            .then(|| lifecycle_states.keys().copied().collect::<HashSet<_>>());
         if let Some(active) = focus_scope_active {
             context.focus.scope_path.push(self.id);
             if !active {
@@ -5213,19 +5216,28 @@ impl<VM: 'static> ResolvedElement<VM> {
         let before_overlays = (is_container_like && self.may_emit_runtime_overlay())
             .then(|| SceneDeltaSnapshot::capture(&computed));
 
-        self.emit_tooltip_if_visible(context, &mut computed, &visual);
+        self.emit_tooltip_if_visible(context, &mut computed, &visual, caches.lifecycle_states);
         self.emit_popover_overlay_if_visible(context, &mut computed, &visual);
         self.emit_menu_overlay_if_open(context, &mut computed, &visual);
         self.emit_modal_close_overlay_if_open(context, &mut computed, &visual);
         self.emit_drawer_close_overlay_if_open(context, &mut computed, &visual);
         self.emit_toast_overlay_if_visible(context, &mut computed, &visual);
-        self.emit_portal_if_open(context, &mut computed, &visual);
+        self.emit_portal_if_open(context, &mut computed, &visual, caches.lifecycle_states);
 
         if let Some(before_overlays) = before_overlays {
             let overlay_delta = before_overlays.delta(&computed);
             if let Some(parts) = caches.chunk_parts.get_mut(&self.id) {
                 parts.after_children.extend(&overlay_delta);
             }
+        }
+
+        if let Some(ids_before) = lifecycle_state_ids_before.as_ref() {
+            // Inactive view-stack content is still collected for its exit animation. Keep it out
+            // of runtime lifecycle membership, including lifecycle states emitted by nested
+            // Portals that are not represented by the owning SceneLayout subtree.
+            caches
+                .lifecycle_states
+                .retain(|widget_id, _| ids_before.contains(widget_id));
         }
 
         if suppress_inactive_interactions {
@@ -5291,7 +5303,8 @@ impl<VM: 'static> ResolvedElement<VM> {
             caches
                 .visual_contexts
                 .insert(self.id, visual_context.into());
-            context.focus = previous_focus;
+            context.focus.scope_path = previous_scope_path;
+            context.focus.disabled_depth = previous_disabled_depth;
             // 把合并后的子树移动进 chunks(此前是 `clone` + 返回 owned 的双份拷贝)。
             // 父节点改为 `chunks.get(&child.id)` 只读引用来 extend。
             caches.chunks.insert(self.id, computed);

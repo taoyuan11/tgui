@@ -1,4 +1,5 @@
 use super::*;
+use crate::ui::layout::Value;
 use crate::ui::theme::Density;
 use crate::ui::widget::{MeshPrimitive, ScenePrimitives};
 use crate::widgets::{
@@ -40,6 +41,47 @@ fn progress_bar_renders_track_fill_and_label() {
     let track = rendered.primitives.shapes[0].rect;
     let fill = rendered.primitives.shapes[1].rect;
     assert!((fill.width.get() - track.width.get()).abs() <= 0.01);
+}
+
+#[test]
+fn progress_bar_non_finite_value_renders_empty_finite_fill() {
+    let theme = Theme::default();
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let mut animations = AnimationEngine::default();
+    let tree: WidgetTree<()> =
+        WidgetTree::new(ProgressBar::new(f32::NAN).width(dp(220.0)).show_label(true));
+
+    let rendered = tree.render_output(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        None,
+        None,
+        &HashMap::new(),
+        Rect::new(0.0, 0.0, 240.0, 48.0),
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+
+    assert!(rendered.primitives.shapes.len() >= 2);
+    let fill = rendered.primitives.shapes[1].rect;
+    assert_eq!(fill.width, Dp::ZERO);
+    assert!(rendered.primitives.shapes.iter().all(|shape| {
+        shape.rect.x.get().is_finite()
+            && shape.rect.y.get().is_finite()
+            && shape.rect.width.get().is_finite()
+            && shape.rect.height.get().is_finite()
+    }));
+    assert!(rendered
+        .primitives
+        .texts
+        .iter()
+        .any(|text| text.content.as_ref() == "0%"));
 }
 
 #[test]
@@ -99,6 +141,86 @@ fn progress_bar_indeterminate_reduced_motion_uses_static_segment() {
     let reduced_segment = reduced.primitives.shapes[1].rect;
     let centered_x = reduced_track.x + ((reduced_track.width - reduced_segment.width) * 0.5);
     assert!((reduced_segment.x.get() - centered_x.get()).abs() <= 0.01);
+}
+
+#[test]
+fn indeterminate_progress_only_reserves_and_renders_an_explicit_label() {
+    let theme = Theme::default();
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let viewport = Rect::new(0.0, 0.0, 240.0, 40.0);
+
+    let measure_height = |progress: ProgressBar<()>| {
+        let layout = WidgetTree::new(Stack::new().child(progress.width(dp(220.0))))
+            .build_scene_layout(
+                &font_manager,
+                &theme,
+                &media,
+                &mut AnimationEngine::default(),
+                UnitContext::default(),
+                &HashMap::new(),
+                &HashMap::new(),
+                viewport,
+            );
+        let progress = layout
+            .layout_root
+            .children
+            .first()
+            .expect("test stack should contain its progress bar");
+        layout
+            .taffy
+            .layout(progress.node)
+            .expect("progress layout should be available")
+            .size
+            .height
+    };
+
+    let hidden_height = measure_height(ProgressBar::indeterminate(true).show_label(false));
+    let implicit_height = measure_height(ProgressBar::indeterminate(true).show_label(true));
+    let explicit_height = measure_height(
+        ProgressBar::indeterminate(true)
+            .show_label(true)
+            .label("Loading"),
+    );
+    assert_eq!(implicit_height, hidden_height);
+    assert!(explicit_height > implicit_height);
+
+    let render = |progress: ProgressBar<()>, animations: &mut AnimationEngine| {
+        WidgetTree::new(progress.width(dp(220.0))).render_output(
+            &font_manager,
+            &theme,
+            &media,
+            animations,
+            None,
+            None,
+            &HashMap::new(),
+            viewport,
+            None,
+            None,
+            None,
+            None,
+            false,
+        )
+    };
+
+    let implicit = render(
+        ProgressBar::indeterminate(true).show_label(true),
+        &mut AnimationEngine::default(),
+    );
+    assert!(implicit.primitives.texts.is_empty());
+
+    let explicit = render(
+        ProgressBar::indeterminate(true)
+            .show_label(true)
+            .label("Loading"),
+        &mut AnimationEngine::default(),
+    );
+    assert!(explicit
+        .primitives
+        .texts
+        .iter()
+        .any(|text| text.content.as_ref() == "Loading"));
+    assert!(explicit.primitives.shapes[0].rect.y > implicit.primitives.shapes[0].rect.y);
 }
 
 #[test]
@@ -305,6 +427,161 @@ fn spinner_default_is_indicator_only_and_track_override_restores_full_ring() {
         );
         assert!(with_track.meshes[0].vertices.len() > with_track.meshes[1].vertices.len());
     }
+}
+
+#[test]
+fn spinner_non_finite_style_values_emit_finite_mesh_vertices() {
+    let theme = Theme::default();
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let mut animations = AnimationEngine::default();
+    let tree: WidgetTree<()> = WidgetTree::new(
+        Spinner::new()
+            .thickness(Dp::new(f32::INFINITY))
+            .style_full(|context| {
+                let mut style = SpinnerStyle::default_for_theme(context.theme);
+                style.size = Dp::new(f32::INFINITY);
+                style.sweep_degrees = f32::NAN;
+                style
+            }),
+    );
+    let rendered = tree.render_output(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        None,
+        None,
+        &HashMap::new(),
+        Rect::new(0.0, 0.0, 48.0, 48.0),
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+
+    assert!(!rendered.primitives.meshes.is_empty());
+    assert!(rendered.primitives.meshes.iter().all(|mesh| {
+        mesh.vertices
+            .iter()
+            .all(|vertex| vertex.position.iter().all(|value| value.is_finite()))
+    }));
+}
+
+#[test]
+fn spinner_non_finite_intrinsic_size_stays_finite_when_nested() {
+    let theme = Theme::default();
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let tree: WidgetTree<()> =
+        WidgetTree::new(Stack::new().child(Spinner::new().style_full(|context| {
+            let mut style = SpinnerStyle::default_for_theme(context.theme);
+            style.size = Dp::new(f32::NAN);
+            style
+        })));
+    let layout = tree.build_scene_layout(
+        &font_manager,
+        &theme,
+        &media,
+        &mut AnimationEngine::default(),
+        UnitContext::default(),
+        &HashMap::new(),
+        &HashMap::new(),
+        Rect::new(0.0, 0.0, 48.0, 48.0),
+    );
+    let spinner = layout
+        .layout_root
+        .children
+        .first()
+        .expect("test stack should contain its spinner");
+    let size = layout
+        .taffy
+        .layout(spinner.node)
+        .expect("spinner layout should be available")
+        .size;
+
+    assert!(size.width.is_finite() && size.height.is_finite());
+    assert!(size.width > 0.0 && size.height > 0.0);
+}
+
+#[test]
+fn progress_bar_non_finite_style_stays_finite_in_layout_and_scene() {
+    let progress = ProgressBar::indeterminate(true)
+        .show_label(true)
+        .label("Loading")
+        .style_full(|context| {
+            let mut style = ProgressBarStyle::default_for_theme(context.theme);
+            style.min_width = Dp::new(f32::INFINITY);
+            style.height = Dp::new(f32::NAN);
+            style.gap = Dp::new(f32::INFINITY);
+            style.radius = Value::Static(Dp::new(f32::INFINITY));
+            style.indeterminate_segment_ratio = f32::NAN;
+            style
+        });
+    let theme = Theme::default();
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let viewport = Rect::new(0.0, 0.0, 240.0, 64.0);
+    let tree: WidgetTree<()> = WidgetTree::new(Stack::new().child(progress));
+    let layout = tree.build_scene_layout(
+        &font_manager,
+        &theme,
+        &media,
+        &mut AnimationEngine::default(),
+        UnitContext::default(),
+        &HashMap::new(),
+        &HashMap::new(),
+        viewport,
+    );
+    let progress = layout
+        .layout_root
+        .children
+        .first()
+        .expect("test stack should contain its progress bar");
+    let size = layout
+        .taffy
+        .layout(progress.node)
+        .expect("progress layout should be available")
+        .size;
+    assert!(size.width.is_finite() && size.height.is_finite());
+
+    let rendered = tree.render_output(
+        &font_manager,
+        &theme,
+        &media,
+        &mut AnimationEngine::default(),
+        None,
+        None,
+        &HashMap::new(),
+        viewport,
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+    assert!(rendered.primitives.shapes.iter().all(|shape| {
+        [
+            shape.rect.x.get(),
+            shape.rect.y.get(),
+            shape.rect.width.get(),
+            shape.rect.height.get(),
+            shape.corner_radius,
+        ]
+        .iter()
+        .all(|value| value.is_finite())
+    }));
+    assert!(rendered.primitives.texts.iter().all(|text| {
+        [
+            text.frame.x.get(),
+            text.frame.y.get(),
+            text.frame.width.get(),
+            text.frame.height.get(),
+        ]
+        .iter()
+        .all(|value| value.is_finite())
+    }));
 }
 
 #[test]
@@ -634,6 +911,113 @@ fn pagination_page_size_options_are_explicit_and_default_scene_stays_compact() {
     assert_eq!(option_labels, 4);
 }
 
+#[test]
+fn pagination_static_values_are_uncontrolled_and_controlled_values_without_callback_are_inert() {
+    let theme = Theme::default();
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let viewport = Rect::new(0.0, 0.0, 420.0, 64.0);
+    let tree: WidgetTree<()> = WidgetTree::new(Pagination::new(1usize, 3usize));
+
+    let mut animations = AnimationEngine::default();
+    let initial = tree.compute_scene(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        None,
+        None,
+        &HashMap::new(),
+        viewport,
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+    let next_text = initial
+        .rendered()
+        .primitives
+        .texts
+        .iter()
+        .find(|text| text.content.as_ref() == "Next")
+        .expect("next label should render")
+        .frame;
+    let next_center = Point::new(
+        next_text.x + next_text.width * 0.5,
+        next_text.y + next_text.height * 0.5,
+    );
+    let next = initial
+        .hit_regions
+        .iter()
+        .find_map(|region| {
+            if !region.rect.contains(next_center) {
+                return None;
+            }
+            region
+                .interaction
+                .interactions()
+                .and_then(|interactions| interactions.on_click.clone())
+        })
+        .expect("static pagination should expose a working Next command");
+    next.execute(&mut ());
+
+    let updated = tree.build_scene_layout(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        UnitContext::default(),
+        &HashMap::new(),
+        &HashMap::new(),
+        viewport,
+    );
+    let current = updated
+        .all_widget_ids()
+        .filter_map(|id| updated.resolved_widget(id))
+        .find_map(|element| {
+            let current = element
+                .visual
+                .accessibility_current
+                .as_ref()
+                .is_some_and(|(current, _)| current.resolve());
+            if !current {
+                return None;
+            }
+            match &element.kind {
+                ResolvedWidgetKind::Button { label, .. } => Some(label.resolve()),
+                _ => None,
+            }
+        });
+    assert_eq!(current.as_deref(), Some("2"));
+
+    let context = test_context();
+    let controlled_page = context.state(1usize);
+    let controlled: WidgetTree<()> =
+        WidgetTree::new(Pagination::new(controlled_page.signal(), 3usize));
+    let controlled_scene = controlled.compute_scene(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        None,
+        None,
+        &HashMap::new(),
+        viewport,
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+    assert!(controlled_scene.hit_regions.iter().all(|region| {
+        region
+            .interaction
+            .interactions()
+            .is_none_or(|interactions| interactions.on_click.is_none())
+    }));
+}
+
 fn render_indeterminate_progress_at(
     tree: &WidgetTree<()>,
     font_manager: &FontManager,
@@ -709,6 +1093,27 @@ fn divider_descriptor_mounts() {
         Rect::new(0.0, 0.0, 240.0, 24.0),
     );
     assert!(!rendered.primitives.shapes.is_empty());
+}
+
+#[test]
+fn divider_non_finite_metrics_emit_finite_geometry() {
+    let rendered = render_divider(
+        Divider::new()
+            .thickness(Dp::new(f32::INFINITY))
+            .end_inset(Dp::new(f32::INFINITY))
+            .width(dp(200.0)),
+        Rect::new(0.0, 0.0, 240.0, 24.0),
+    );
+    assert!(rendered.primitives.shapes.iter().all(|shape| {
+        [
+            shape.rect.x.get(),
+            shape.rect.y.get(),
+            shape.rect.width.get(),
+            shape.rect.height.get(),
+        ]
+        .iter()
+        .all(|value| value.is_finite())
+    }));
 }
 
 #[test]

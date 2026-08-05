@@ -717,19 +717,35 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             }
         }
 
-        // 退出 hover 的 widget：从 tooltip_hover_started_at 移除。
-        for previous in previous_hovered[prefix_len..].iter() {
-            if let HoverTargetId::Widget(id) = previous.target_id {
-                self.tooltip_hover_started_at.remove(&id);
-                self.clear_tooltip_hover_suppression_if_needed(id);
+        // Tooltip timing and suppression belong to the descriptor owner. A composite trigger can
+        // expose several descendant hit regions, so moving between those descendants must not
+        // restart the delay or accidentally retain an Escape dismissal forever.
+        let previous_tooltip_owners = previous_hovered
+            .iter()
+            .filter_map(|hovered| match hovered.target_id {
+                HoverTargetId::Widget(id) => self.tooltip_trigger_ancestor(id),
+                _ => None,
+            })
+            .collect::<SmallVec<[WidgetId; 4]>>();
+        let next_tooltip_owners = next_hovered
+            .iter()
+            .filter_map(|hovered| match hovered.target_id {
+                HoverTargetId::Widget(id) => self.tooltip_trigger_ancestor(id),
+                _ => None,
+            })
+            .collect::<SmallVec<[WidgetId; 4]>>();
+        for owner in previous_tooltip_owners.iter().copied() {
+            if !next_tooltip_owners.contains(&owner) {
+                self.tooltip_hover_started_at.remove(&owner);
+                self.clear_tooltip_hover_suppression_if_needed(owner);
             }
         }
 
-        // 新进入 hover 的 widget：记录起始时间，用于 Tooltip delay 计算。
+        // Newly entered Tooltip owners establish one stable delay for the whole composite.
         let now = Instant::now();
-        for hovered in next_hovered[prefix_len..].iter() {
-            if let HoverTargetId::Widget(id) = hovered.target_id {
-                self.tooltip_hover_started_at.entry(id).or_insert(now);
+        for owner in next_tooltip_owners.iter().copied() {
+            if !previous_tooltip_owners.contains(&owner) {
+                self.tooltip_hover_started_at.entry(owner).or_insert(now);
             }
         }
 

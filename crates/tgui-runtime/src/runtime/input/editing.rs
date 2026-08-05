@@ -137,25 +137,39 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         if inserted.is_empty() {
             return false;
         }
-        let inserted_owned = inserted.to_string();
-        self.edit_focused_text_input(|buffer: &mut RopeBuffer, state: &TextEditState| {
-            let (start, end) = state
-                .selection_range()
-                .unwrap_or((state.cursor, state.cursor));
-            buffer.replace_byte_range(start, end, &inserted_owned);
-            let cursor = start + inserted_owned.len();
-            Some((
-                TextEditState {
-                    cursor,
-                    anchor: cursor,
-                    composition: None,
-                    scroll_x: state.scroll_x,
-                    scroll_y: state.scroll_y,
-                    preferred_column_x: None,
-                },
-                TextChange::new((start, end), inserted_owned.clone()),
-            ))
-        })
+        let Some(widget_id) = self.focused_text_input_id() else {
+            return false;
+        };
+        let Some(region) = self.sync_text_input_buffer(widget_id) else {
+            return false;
+        };
+        let inserted_owned = normalize_text_input_value(inserted, region.multiline);
+        if inserted_owned.is_empty() {
+            return false;
+        }
+        let changed =
+            self.edit_focused_text_input(|buffer: &mut RopeBuffer, state: &TextEditState| {
+                let (start, end) = state
+                    .selection_range()
+                    .unwrap_or((state.cursor, state.cursor));
+                buffer.replace_byte_range(start, end, &inserted_owned);
+                let cursor = start + inserted_owned.len();
+                Some((
+                    TextEditState {
+                        cursor,
+                        anchor: cursor,
+                        composition: None,
+                        scroll_x: state.scroll_x,
+                        scroll_y: state.scroll_y,
+                        preferred_column_x: None,
+                    },
+                    TextChange::new((start, end), inserted_owned.clone()),
+                ))
+            });
+        if changed {
+            let _ = self.open_focused_text_input_popover();
+        }
+        changed
     }
 
     pub(super) fn delete_backward_at_focused_input(&mut self) -> bool {

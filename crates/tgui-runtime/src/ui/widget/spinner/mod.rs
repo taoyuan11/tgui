@@ -195,6 +195,12 @@ impl<VM> Spinner<VM> {
         self
     }
 
+    /// Sets the name announced for this progress indicator.
+    pub fn label(mut self, label: impl Into<Value<String>>) -> Self {
+        self.element.visual.accessibility_label = Some(label.into());
+        self
+    }
+
     pub fn thickness(mut self, thickness: impl Into<Value<crate::ui::unit::Dp>>) -> Self {
         if let WidgetKind::Spinner {
             thickness_override, ..

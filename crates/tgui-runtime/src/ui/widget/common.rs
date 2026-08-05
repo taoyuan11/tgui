@@ -285,8 +285,31 @@ pub(crate) fn text_input_layout_width(
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum AccessibilityRole {
+    Button,
+    Link,
+    ComboBox,
+    ListBox,
+    ListBoxOption { selected: bool },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum AccessibilityCurrent {
+    True,
+    Page,
+}
+
 #[derive(Clone, PartialEq)]
 pub struct VisualStyle {
+    pub(crate) accessibility_label: Option<Value<String>>,
+    pub(crate) accessibility_role: Option<AccessibilityRole>,
+    pub(crate) accessibility_expanded: Option<Value<bool>>,
+    pub(crate) accessibility_disabled: Option<Value<bool>>,
+    pub(crate) accessibility_selected: Option<Value<bool>>,
+    pub(crate) accessibility_current: Option<(Value<bool>, AccessibilityCurrent)>,
+    pub(crate) accessibility_position_in_set: Option<usize>,
+    pub(crate) accessibility_size_of_set: Option<usize>,
     pub style_id: Option<String>,
     pub classes: Vec<String>,
     pub border_color: Option<Value<Color>>,
@@ -304,6 +327,14 @@ pub struct VisualStyle {
 impl Default for VisualStyle {
     fn default() -> Self {
         Self {
+            accessibility_label: None,
+            accessibility_role: None,
+            accessibility_expanded: None,
+            accessibility_disabled: None,
+            accessibility_selected: None,
+            accessibility_current: None,
+            accessibility_position_in_set: None,
+            accessibility_size_of_set: None,
             style_id: None,
             classes: Vec::new(),
             border_color: None,

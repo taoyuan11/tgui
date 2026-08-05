@@ -10,7 +10,7 @@ use crate::ui::unit::Dp;
 use crate::ui::widget::core::compute_taffy_layout_with_measure;
 use crate::ui::widget::{
     AccessibilityFragment, AccessibilityFragmentNode, ComputedScene, Element, FocusScopeState,
-    HitRegion, PortalAnchor, PortalTarget, Rect, ScrollRegion, WidgetId,
+    HitRegion, LifecycleEventState, PortalAnchor, PortalTarget, Rect, ScrollRegion, WidgetId,
 };
 
 use super::super::LayoutNode;
@@ -27,6 +27,7 @@ impl<VM: 'static> ResolvedElement<VM> {
         context: &mut CollectContext<'_, '_>,
         computed: &mut ComputedScene<VM>,
         visual: &CollectVisualState,
+        lifecycle_states: &mut std::collections::HashMap<WidgetId, LifecycleEventState<VM>>,
     ) {
         let ResolvedWidgetKind::Portal {
             content,
@@ -62,7 +63,7 @@ impl<VM: 'static> ResolvedElement<VM> {
                 ) else {
                     return;
                 };
-                let Some((content_scene, content_size)) =
+                let Some((content_scene, content_size, content_lifecycle_states)) =
                     collect_portal_content_scene(content.as_ref(), context)
                 else {
                     return;
@@ -83,13 +84,16 @@ impl<VM: 'static> ResolvedElement<VM> {
                     focus_scope.clone(),
                     Some(self.id),
                 );
-                let _ = crate::runtime::overlay::collect::emit_overlay(
+                let solved = crate::runtime::overlay::collect::emit_overlay(
                     computed,
                     context.viewport,
                     portal,
                     content_size,
                     OverlayContent::Scene(Box::new(content_scene)),
                 );
+                if !solved.was_hidden {
+                    lifecycle_states.extend(content_lifecycle_states);
+                }
             }
             PortalTarget::WindowKey(target_window_key) => {
                 let anchor = anchor.clone().unwrap_or(PortalAnchor::Viewport);
@@ -100,6 +104,10 @@ impl<VM: 'static> ResolvedElement<VM> {
                     ));
                     return;
                 }
+                lifecycle_states.extend(collect_portal_source_lifecycle_states(
+                    content.as_ref(),
+                    context,
+                ));
                 computed
                     .external_portal_requests
                     .push(ExternalPortalRequest {
@@ -128,8 +136,12 @@ impl<VM: 'static> ResolvedElement<VM> {
 pub(crate) fn collect_portal_content_scene<VM: 'static>(
     content: &Element<VM>,
     context: &mut CollectContext<'_, '_>,
-) -> Option<(ComputedScene<VM>, (Dp, Dp))> {
-    let (result, dependencies): (Option<(ComputedScene<VM>, _)>, DependencyGraph) =
+) -> Option<(
+    ComputedScene<VM>,
+    (Dp, Dp),
+    std::collections::HashMap<WidgetId, LifecycleEventState<VM>>,
+)> {
+    let (result, dependencies): (Option<(ComputedScene<VM>, _, _)>, DependencyGraph) =
         with_dependency_collection(|| {
             super::super::tree::with_widget_stack(|| {
                 let mut root = content.clone();
@@ -239,19 +251,34 @@ pub(crate) fn collect_portal_content_scene<VM: 'static>(
                         .push(accessibility_fragment);
                 }
                 computed.finalize_portals(context.viewport);
-                Some((computed, size))
+                Some((computed, size, lifecycle_states))
             })
         });
-    let (mut computed, size) = result?;
+    let (mut computed, size, lifecycle_states) = result?;
     computed.dependencies = dependencies;
     // Cross-window Portal transport is intentionally one hop. Nested external requests need a
     // provenance/lease model (and cycle handling) before they can be forwarded safely; dropping
     // only that metadata preserves the outer Portal's visuals, hits, and accessibility fragment.
     computed.external_portal_requests.clear();
-    Some((computed, size))
+    Some((computed, size, lifecycle_states))
 }
 
-fn collect_accessibility_fragment<VM>(
+fn collect_portal_source_lifecycle_states<VM: 'static>(
+    content: &Element<VM>,
+    context: &CollectContext<'_, '_>,
+) -> std::collections::HashMap<WidgetId, LifecycleEventState<VM>> {
+    let mut root = content.clone();
+    super::prepare_nested_scene_root(&mut root, context, context.viewport);
+    let mut states = Vec::new();
+    root.resolve(context.theme)
+        .collect_lifecycle_event_states(&mut states);
+    states
+        .into_iter()
+        .map(|state| (state.widget_id, state))
+        .collect()
+}
+
+pub(super) fn collect_accessibility_fragment<VM>(
     resolved_root: std::sync::Arc<ResolvedElement<VM>>,
     layout_node: &LayoutNode,
     geometry: &[PortalAccessibilityGeometryRecord],
@@ -373,6 +400,7 @@ fn collect_accessibility_fragment_node<VM>(
             .cloned()
             .unwrap_or_default(),
         children: smallvec::SmallVec::new(),
+        synthetic_semantics: None,
     });
     for (child_index, (child, child_layout)) in resolved_children
         .iter()

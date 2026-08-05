@@ -2,6 +2,8 @@ use super::*;
 
 use std::time::Duration;
 
+use crate::runtime::{LONG_PRESS_THRESHOLD, TOOLTIP_LONG_PRESS_HIDE_DELAY};
+
 fn tooltip_transition_wait() {
     std::thread::sleep(Duration::from_millis(170));
 }
@@ -332,4 +334,75 @@ fn tooltip_shows_on_focus_and_hides_on_escape() {
         hidden.scene.overlay_texts.is_empty(),
         "escape should hide focused tooltip"
     );
+}
+
+fn touch_tooltip_event(state: ElementState) -> WindowEvent {
+    WindowEvent::PointerButton {
+        device_id: None,
+        position: PhysicalPosition::new(40.0, 20.0),
+        state,
+        button: ButtonSource::Touch {
+            finger_id: FingerId::from_raw(1),
+            force: None,
+        },
+        primary: true,
+    }
+}
+
+fn tooltip_text_is_visible(handler: &mut BoundRuntimeHandler<TestVm>, label: &str) -> bool {
+    handler
+        .computed_scene()
+        .scene
+        .overlay_texts
+        .iter()
+        .any(|text| text.content.as_ref() == label)
+}
+
+#[test]
+fn touch_long_press_shows_plain_tooltip_and_hides_after_release_delay() {
+    let invalidation = InvalidationSignal::new();
+    let tree = WidgetTree::new(
+        Button::new("Hold")
+            .size(dp(120.0), dp(40.0))
+            .tooltip(Tooltip::new("touch hint")),
+    );
+    let mut handler = test_handler(Some(tree), invalidation);
+    handler.reduced_motion = true;
+
+    handler.handle_bound_window_event(&TestEventLoop, touch_tooltip_event(ElementState::Pressed));
+    let _ = handler.drive_animations(
+        &TestEventLoop,
+        Instant::now() + LONG_PRESS_THRESHOLD + Duration::from_millis(10),
+    );
+    assert!(tooltip_text_is_visible(&mut handler, "touch hint"));
+
+    handler.handle_bound_window_event(&TestEventLoop, touch_tooltip_event(ElementState::Released));
+    let _ = handler.drive_animations(
+        &TestEventLoop,
+        Instant::now() + TOOLTIP_LONG_PRESS_HIDE_DELAY + Duration::from_millis(10),
+    );
+    assert!(
+        !tooltip_text_is_visible(&mut handler, "touch hint"),
+        "release must clear the long-press candidate instead of reopening the tooltip"
+    );
+}
+
+#[test]
+fn touch_long_press_finds_tooltip_on_composite_ancestor() {
+    let invalidation = InvalidationSignal::new();
+    let trigger: Element<TestVm> = Flex::horizontal()
+        .size(dp(140.0), dp(40.0))
+        .child(Button::new("Nested").size(dp(140.0), dp(40.0)))
+        .into();
+    let tree = WidgetTree::new(trigger.with_tooltip(Tooltip::new("ancestor hint")));
+    let mut handler = test_handler(Some(tree), invalidation);
+    handler.reduced_motion = true;
+
+    handler.handle_bound_window_event(&TestEventLoop, touch_tooltip_event(ElementState::Pressed));
+    let _ = handler.drive_animations(
+        &TestEventLoop,
+        Instant::now() + LONG_PRESS_THRESHOLD + Duration::from_millis(10),
+    );
+
+    assert!(tooltip_text_is_visible(&mut handler, "ancestor hint"));
 }

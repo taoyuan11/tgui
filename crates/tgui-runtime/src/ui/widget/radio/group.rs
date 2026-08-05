@@ -1,9 +1,12 @@
 use crate::foundation::view_model::ValueCommand;
 use crate::ui::layout::{Axis, Value};
 use crate::ui::unit::dp;
+use std::sync::Arc;
 
+use super::super::common::{RadioGroupInteraction, WidgetId};
 use super::super::container::Flex;
 use super::super::core::Element;
+use super::super::For;
 use super::widget::{radio_option_selected, Radio};
 
 /// 单选项定义。
@@ -47,6 +50,7 @@ impl<K, V> From<(K, V)> for RadioOption<K, V> {
 
 /// 单选按钮组。
 pub struct RadioGroup<VM, K, V> {
+    id: WidgetId,
     options: Vec<RadioOption<K, V>>,
     selected_key: Value<K>,
     direction: Axis,
@@ -60,6 +64,7 @@ impl<VM, K, V> RadioGroup<VM, K, V> {
         O: Into<RadioOption<K, V>>,
     {
         Self {
+            id: WidgetId::next(),
             options: options.into_iter().map(Into::into).collect(),
             selected_key: selected_key.into(),
             direction: Axis::Vertical,
@@ -90,6 +95,12 @@ impl<VM, K, V> RadioGroup<VM, K, V> {
     }
 }
 
+#[derive(Clone, Copy)]
+struct RadioGroupEntry {
+    index: usize,
+    tab_stop: bool,
+}
+
 impl<VM, K, V> From<RadioGroup<VM, K, V>> for Element<VM>
 where
     VM: 'static,
@@ -97,37 +108,85 @@ where
     V: Clone + Into<Value<String>> + Send + Sync + 'static,
 {
     fn from(group: RadioGroup<VM, K, V>) -> Self {
-        let mut children = Vec::with_capacity(group.options.len());
-        for option in group.options {
-            let selected = radio_option_selected(&group.selected_key, option.key.clone());
-            let label = option
-                .label
-                .clone()
-                .unwrap_or_else(|| option.value.clone().into());
-            let mut radio = Radio::new(selected).label(label).disable(option.disabled);
+        let RadioGroup {
+            id,
+            options,
+            selected_key,
+            direction,
+            on_change,
+        } = group;
+        let options = Arc::new(
+            options
+                .into_iter()
+                .map(|option| {
+                    let selected = radio_option_selected(&selected_key, option.key.clone());
+                    (option, selected)
+                })
+                .collect::<Vec<_>>(),
+        );
+        let entry_options = Arc::clone(&options);
+        let render_options = Arc::clone(&options);
+        let children = For::new_with_resolver(
+            move || {
+                let enabled = entry_options
+                    .iter()
+                    .map(|(option, _)| !option.disabled.resolve())
+                    .collect::<Vec<_>>();
+                let tab_stop = entry_options
+                    .iter()
+                    .enumerate()
+                    .find_map(|(index, (_, selected))| {
+                        (enabled[index] && selected.resolve()).then_some(index)
+                    })
+                    .or_else(|| enabled.iter().position(|enabled| *enabled));
+                (0..entry_options.len())
+                    .map(|index| RadioGroupEntry {
+                        index,
+                        tab_stop: Some(index) == tab_stop,
+                    })
+                    .collect()
+            },
+            |entry| entry.index,
+            move |_position, entry| {
+                let (option, selected) = &render_options[entry.index];
+                let label = option
+                    .label
+                    .clone()
+                    .unwrap_or_else(|| option.value.clone().into());
+                let mut radio = Radio::new(selected.clone())
+                    .label(label)
+                    .disable(option.disabled.clone())
+                    .group_item(
+                        RadioGroupInteraction {
+                            group_id: id,
+                            index: entry.index,
+                            direction,
+                        },
+                        entry.tab_stop,
+                    );
 
-            if let Some(command) = group.on_change.clone() {
-                let key = option.key.clone();
-                let value = option.value.clone();
-                radio = radio.on_change(ValueCommand::new_with_context(
-                    move |view_model: &mut VM, checked, context| {
-                        if checked {
-                            command.execute_with_context(
-                                view_model,
-                                (key.clone(), value.clone()),
-                                context,
-                            );
-                        }
-                    },
-                ));
-            }
+                if let Some(command) = on_change.clone() {
+                    let key = option.key.clone();
+                    let value = option.value.clone();
+                    radio = radio.on_change(ValueCommand::new_with_context(
+                        move |view_model: &mut VM, checked, context| {
+                            if checked {
+                                command.execute_with_context(
+                                    view_model,
+                                    (key.clone(), value.clone()),
+                                    context,
+                                );
+                            }
+                        },
+                    ));
+                }
 
-            children.push(Element::from(radio));
-        }
+                Element::from(radio)
+            },
+        );
 
-        Flex::new(group.direction)
-            .gap(dp(8.0))
-            .child(children)
-            .into()
+        let mut element: Element<VM> = Flex::new(direction).gap(dp(8.0)).child(children).into();
+        element.id = id;
+        element
     }
 }

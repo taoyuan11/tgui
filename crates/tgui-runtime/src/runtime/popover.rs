@@ -1,6 +1,44 @@
 use super::*;
 
 impl<VM: 'static> BoundRuntimeHandler<VM> {
+    pub(super) fn popover_trigger_ancestor(&self, mut widget_id: WidgetId) -> Option<WidgetId> {
+        let layout = self.cached_scene.as_ref()?.layout.as_ref()?;
+        loop {
+            if layout
+                .resolved_widget(widget_id)
+                .and_then(|resolved| resolved.popover.as_ref())
+                .is_some()
+            {
+                return Some(widget_id);
+            }
+            widget_id = layout.parent_of(widget_id)?;
+        }
+    }
+
+    pub(super) fn toggle_popover_from_trigger_descendant(&mut self, widget_id: WidgetId) -> bool {
+        let Some((current, command)) =
+            self.popover_trigger_ancestor(widget_id)
+                .and_then(|source_id| {
+                    let popover = self
+                        .cached_scene
+                        .as_ref()?
+                        .layout
+                        .as_ref()?
+                        .resolved_widget(source_id)?
+                        .popover
+                        .as_ref()?;
+                    if popover.disabled.resolve() || !popover.trigger_mode.allows_click() {
+                        return None;
+                    }
+                    Some((popover.is_open(), popover.on_open_change.clone()?))
+                })
+        else {
+            return false;
+        };
+        self.execute_value_command(&command, !current);
+        true
+    }
+
     pub(super) fn resolve_active_hover_popover(&mut self) -> Option<WidgetId> {
         let resolved = self.resolve_active_hover_popover_from_cache();
         // 命令执行（如点击浮层内的交互元素）会把 `cached_scene` 硬清空，这一帧无法从上一帧

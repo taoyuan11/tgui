@@ -164,7 +164,11 @@ impl<VM: 'static> Element<VM> {
                     runtime_explicit_visual
                         .apply_runtime_layout_overrides(&before_runtime_layout, &visual);
                 }
-                resolved_container_layout.scrollbar_style = resolved_style.scrollbar;
+                resolved_container_layout.scrollbar_style = resolved_container_layout
+                    .scrollbar_style_override
+                    .as_ref()
+                    .map(Value::resolve)
+                    .unwrap_or(resolved_style.scrollbar);
                 let previous_children = previous
                     .and_then(|previous| match &previous.kind {
                         ResolvedWidgetKind::Container { children, .. } => Some(children.as_slice()),
@@ -426,7 +430,9 @@ impl<VM: 'static> Element<VM> {
                 );
                 apply_surface_style(&mut background, &mut visual, &resolved_style.surface);
                 image.background = resolved_style.surface.background.clone();
-                image.fit = resolved_style.fit;
+                if !image.fit_overridden {
+                    image.fit = resolved_style.fit;
+                }
                 ResolvedWidgetKind::Image {
                     image,
                     runtime_style: ResolvedRuntimeSurfaceStyle {
@@ -682,6 +688,7 @@ impl<VM: 'static> Element<VM> {
             },
             WidgetKind::Slider {
                 value,
+                label,
                 min,
                 max,
                 step,
@@ -710,6 +717,7 @@ impl<VM: 'static> Element<VM> {
                 );
                 ResolvedWidgetKind::Slider {
                     value: value.clone(),
+                    label: label.clone(),
                     min: *min,
                     max: *max,
                     step: *step,

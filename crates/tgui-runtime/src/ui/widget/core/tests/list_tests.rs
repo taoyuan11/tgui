@@ -1,6 +1,7 @@
 use super::*;
 
 use crate::theme::WidgetState;
+use crate::ui::widget::common::RenderedWidgetScene;
 use crate::ui::widget::{
     ItemLayout, List, ListItem, ListSection, ListSelectionMode, ListStyle, VirtualCacheState,
     WidgetKey,
@@ -206,6 +207,370 @@ fn list_empty_slot_renders_when_not_loading() {
 
     assert!(labels.contains(&"empty"));
     assert!(!labels.contains(&"loading"));
+}
+
+#[test]
+fn list_loading_signal_switches_slots_on_the_existing_tree() {
+    let context = test_context();
+    let loading = context.state(true);
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let theme = Theme::default();
+    let mut animations = AnimationEngine::default();
+    let viewport = Rect::new(0.0, 0.0, 240.0, 120.0);
+    let tree: WidgetTree<()> = WidgetTree::new(
+        List::<&'static str, ()>::new(vec![ListItem::keyed("a", "Alpha")], |ctx| {
+            Text::new(ctx.item).into()
+        })
+        .loading(loading.signal())
+        .loading_view(Text::new("loading"))
+        .size(dp(240.0), dp(120.0)),
+    );
+    let labels = |rendered: &RenderedWidgetScene| {
+        rendered
+            .primitives
+            .texts
+            .iter()
+            .map(|text| text.content.to_string())
+            .collect::<Vec<_>>()
+    };
+
+    let first = tree.render_output(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        None,
+        None,
+        &HashMap::new(),
+        viewport,
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+    assert!(labels(&first).iter().any(|label| label == "loading"));
+    assert!(!labels(&first).iter().any(|label| label == "Alpha"));
+    let loading_layout = tree.build_scene_layout(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        UnitContext::default(),
+        &HashMap::new(),
+        &HashMap::new(),
+        viewport,
+    );
+    let ResolvedWidgetKind::Container {
+        children: loading_children,
+        ..
+    } = &loading_layout.resolved_root.kind
+    else {
+        panic!("reactive List slots should resolve through a retained container");
+    };
+    assert_eq!(loading_children.len(), 1);
+    assert!(loading_children[0].list_item.is_none());
+    assert!(!matches!(
+        loading_children[0].kind,
+        ResolvedWidgetKind::Virtual { .. }
+    ));
+
+    loading.set(false);
+    let loaded = tree.render_output(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        None,
+        None,
+        &HashMap::new(),
+        viewport,
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+    assert!(labels(&loaded).iter().any(|label| label == "Alpha"));
+    assert!(!labels(&loaded).iter().any(|label| label == "loading"));
+
+    loading.set(true);
+    let loading_again = tree.render_output(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        None,
+        None,
+        &HashMap::new(),
+        viewport,
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+    assert!(labels(&loading_again)
+        .iter()
+        .any(|label| label == "loading"));
+    assert!(!labels(&loading_again).iter().any(|label| label == "Alpha"));
+}
+
+#[test]
+fn list_loading_signal_prioritizes_loading_over_empty_on_the_existing_tree() {
+    let context = test_context();
+    let loading = context.state(false);
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let theme = Theme::default();
+    let mut animations = AnimationEngine::default();
+    let viewport = Rect::new(0.0, 0.0, 240.0, 220.0);
+    let tree: WidgetTree<()> = WidgetTree::new(
+        List::<&'static str, ()>::new(Vec::<ListItem<&'static str>>::new(), |ctx| {
+            Text::new(ctx.item).into()
+        })
+        .loading(loading.signal())
+        .loading_view(
+            Stack::new()
+                .child(Text::new("loading"))
+                .size(dp(240.0), dp(160.0)),
+        )
+        .empty(
+            Stack::new()
+                .child(Text::new("empty"))
+                .size(dp(240.0), dp(150.0)),
+        )
+        .size(dp(240.0), dp(220.0)),
+    );
+    let render_labels = |animations: &mut AnimationEngine| {
+        tree.render_output(
+            &font_manager,
+            &theme,
+            &media,
+            animations,
+            None,
+            None,
+            &HashMap::new(),
+            viewport,
+            None,
+            None,
+            None,
+            None,
+            false,
+        )
+        .primitives
+        .texts
+        .iter()
+        .map(|text| text.content.to_string())
+        .collect::<Vec<_>>()
+    };
+
+    let empty = render_labels(&mut animations);
+    assert!(empty.iter().any(|label| label == "empty"));
+    assert!(!empty.iter().any(|label| label == "loading"));
+    let empty_layout = tree.build_scene_layout(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        UnitContext::default(),
+        &HashMap::new(),
+        &HashMap::new(),
+        viewport,
+    );
+    let ResolvedWidgetKind::Container {
+        children: empty_children,
+        ..
+    } = &empty_layout.resolved_root.kind
+    else {
+        panic!("reactive List slots should resolve through a retained container");
+    };
+    assert_eq!(empty_children.len(), 1);
+    assert_eq!(
+        empty_children[0]
+            .layout
+            .height
+            .as_ref()
+            .map(|height| height.resolve()),
+        Some(crate::ui::layout::Length::Px(dp(150.0)))
+    );
+    assert!(!matches!(
+        empty_children[0].kind,
+        ResolvedWidgetKind::Virtual { .. }
+    ));
+
+    loading.set(true);
+    let loading_labels = render_labels(&mut animations);
+    assert!(loading_labels.iter().any(|label| label == "loading"));
+    assert!(!loading_labels.iter().any(|label| label == "empty"));
+    let loading_layout = tree.build_scene_layout(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        UnitContext::default(),
+        &HashMap::new(),
+        &HashMap::new(),
+        viewport,
+    );
+    let ResolvedWidgetKind::Container {
+        children: loading_children,
+        ..
+    } = &loading_layout.resolved_root.kind
+    else {
+        panic!("reactive List slots should keep their retained container");
+    };
+    assert_eq!(loading_children.len(), 1);
+    assert_eq!(
+        loading_children[0]
+            .layout
+            .height
+            .as_ref()
+            .map(|height| height.resolve()),
+        Some(crate::ui::layout::Length::Px(dp(160.0)))
+    );
+    assert!(!matches!(
+        loading_children[0].kind,
+        ResolvedWidgetKind::Virtual { .. }
+    ));
+
+    loading.set(false);
+    let empty_again = render_labels(&mut animations);
+    assert!(empty_again.iter().any(|label| label == "empty"));
+    assert!(!empty_again.iter().any(|label| label == "loading"));
+}
+
+#[test]
+fn list_selected_and_disabled_signals_update_rows_on_the_existing_tree() {
+    let context = test_context();
+    let selected = context.state(Vec::<WidgetKey>::new());
+    let disabled = context.state(false);
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let theme = Theme::default();
+    let mut animations = AnimationEngine::default();
+    let viewport = Rect::new(0.0, 0.0, 240.0, 120.0);
+    let tree: WidgetTree<()> = WidgetTree::new(
+        List::<&'static str, ()>::new(
+            vec![
+                ListItem::keyed("a", "Alpha"),
+                ListItem::keyed("b", "Beta").disable(disabled.signal()),
+            ],
+            |ctx| {
+                let status = match (ctx.selected, ctx.disabled) {
+                    (true, true) => "selected-disabled",
+                    (true, false) => "selected",
+                    (false, true) => "disabled",
+                    (false, false) => ctx.item,
+                };
+                Text::new(status).into()
+            },
+        )
+        .selected_keys(selected.signal())
+        .selection_mode(ListSelectionMode::Multiple)
+        .size(dp(240.0), dp(120.0)),
+    );
+
+    let initial = tree.build_scene_layout(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        UnitContext::default(),
+        &HashMap::new(),
+        &HashMap::new(),
+        viewport,
+    );
+    let ResolvedWidgetKind::Virtual {
+        children: initial_rows,
+        ..
+    } = &initial.resolved_root.kind
+    else {
+        panic!("List should resolve to a virtual widget");
+    };
+    let initial_beta = initial_rows
+        .iter()
+        .find(|row| {
+            row.list_item
+                .as_ref()
+                .is_some_and(|state| state.key == WidgetKey::from("b"))
+        })
+        .expect("Beta row should resolve");
+    let initial_beta_id = initial_beta.id;
+    let initial_state = initial_beta.list_item.as_ref().expect("Beta row state");
+    assert!(!initial_state
+        .selection
+        .selected_key_membership
+        .resolve()
+        .contains(&WidgetKey::from("b")));
+    assert!(!initial_state.disabled.resolve());
+
+    selected.set(vec![WidgetKey::from("b")]);
+    disabled.set(true);
+    let updated = tree.build_scene_layout_at_with_previous(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        UnitContext::default(),
+        &HashMap::new(),
+        &HashMap::new(),
+        viewport,
+        Instant::now(),
+        Some(&initial),
+    );
+    let ResolvedWidgetKind::Virtual {
+        children: updated_rows,
+        ..
+    } = &updated.resolved_root.kind
+    else {
+        panic!("List should remain a virtual widget");
+    };
+    let updated_beta = updated_rows
+        .iter()
+        .find(|row| {
+            row.list_item
+                .as_ref()
+                .is_some_and(|state| state.key == WidgetKey::from("b"))
+        })
+        .expect("updated Beta row should resolve");
+    assert_eq!(updated_beta.id, initial_beta_id);
+    let updated_state = updated_beta.list_item.as_ref().expect("updated Beta state");
+    assert!(updated_state
+        .selection
+        .selected_key_membership
+        .resolve()
+        .contains(&WidgetKey::from("b")));
+    assert!(updated_state.disabled.resolve());
+    assert_eq!(
+        updated_beta
+            .interactions
+            .cursor_style
+            .as_ref()
+            .map(|cursor| cursor.resolve()),
+        Some(crate::ui::widget::CursorStyle::Default)
+    );
+    let rendered = tree.render_output(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        None,
+        None,
+        &HashMap::new(),
+        viewport,
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+    assert!(rendered
+        .primitives
+        .texts
+        .iter()
+        .any(|text| text.content.as_ref() == "selected-disabled"));
 }
 
 #[test]

@@ -44,6 +44,7 @@ pub struct Image {
     pub(crate) source: Value<MediaSource>,
     pub(crate) background: Option<Value<Color>>,
     pub(crate) fit: ContentFit,
+    pub(crate) fit_overridden: bool,
     pub(crate) cursor_style: Option<Value<CursorStyle>>,
     pub(crate) style: Option<StyleResolver<ImageStyle>>,
     pub(crate) runtime_layout: Option<RuntimeImageLayoutResolver>,
@@ -223,6 +224,7 @@ impl Image {
             source: source.into(),
             background: None,
             fit: ContentFit::Contain,
+            fit_overridden: false,
             cursor_style: None,
             style: None,
             runtime_layout: None,
@@ -251,6 +253,26 @@ impl Image {
     pub fn key(mut self, key: impl Into<WidgetKey>) -> Self {
         self.key = Some(key.into());
         self
+    }
+
+    /// Sets how the image is fitted into its layout frame.
+    pub fn fit(mut self, fit: ContentFit) -> Self {
+        self.fit = fit;
+        self.fit_overridden = true;
+        self
+    }
+
+    /// Sets alternative text for assistive technologies.
+    ///
+    /// An empty value leaves the image unnamed, which is suitable for decorative images.
+    pub fn alt(mut self, alt: impl Into<Value<String>>) -> Self {
+        self.visual.accessibility_label = Some(alt.into());
+        self
+    }
+
+    /// Sets the accessible name announced for the image.
+    pub fn accessibility_label(self, label: impl Into<Value<String>>) -> Self {
+        self.alt(label)
     }
 
     /// 设置图片样式 patch。

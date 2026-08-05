@@ -48,7 +48,7 @@ fn popover_builder_attaches_descriptor() {
         .popover
         .as_ref()
         .expect("popover descriptor attached");
-    assert!(!descriptor.open.resolve());
+    assert!(!descriptor.is_open());
     assert_eq!(descriptor.trigger_mode, PopoverTriggerMode::Click);
 }
 
@@ -123,6 +123,64 @@ fn popover_open_true_emits_overlay_content() {
     assert!(labels.iter().any(|text| *text == "popover body"));
     assert!(labels.iter().any(|text| *text == "Action"));
     assert!(!rendered.primitives.overlay_shapes.is_empty());
+}
+
+#[test]
+fn popover_focus_order_stays_global_across_page_siblings() {
+    let theme = Theme::default();
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let mut animations = AnimationEngine::default();
+
+    let before: Element<()> = Button::new("Before").into();
+    let before_id = before.id;
+    let trigger: Element<()> = Button::new("Trigger").into();
+    let trigger_id = trigger.id;
+    let popover_first: Element<()> = Button::new("Popover first").into();
+    let popover_first_id = popover_first.id;
+    let popover_second: Element<()> = Button::new("Popover second").into();
+    let popover_second_id = popover_second.id;
+    let after: Element<()> = Button::new("After").into();
+    let after_id = after.id;
+    let popover: Element<()> = Popover::new(trigger)
+        .content(Flex::vertical().child(popover_first).child(popover_second))
+        .open(true)
+        .into();
+    let tree = WidgetTree::new(Flex::vertical().child(before).child(popover).child(after));
+
+    let computed = popover_scene_at(
+        &tree,
+        &theme,
+        &font_manager,
+        &media,
+        &mut animations,
+        false,
+        Rect::new(0.0, 0.0, 640.0, 480.0),
+        Instant::now(),
+    );
+    let mut focus_order = computed
+        .hit_regions
+        .iter()
+        .chain(computed.overlay_hit_regions.iter())
+        .filter_map(|region| {
+            region
+                .focus
+                .as_ref()
+                .map(|focus| (focus.order, focus.widget_id))
+        })
+        .collect::<Vec<_>>();
+    focus_order.sort_by_key(|(order, _)| *order);
+
+    assert_eq!(
+        focus_order,
+        vec![
+            (0, before_id),
+            (1, trigger_id),
+            (2, popover_first_id),
+            (3, popover_second_id),
+            (4, after_id),
+        ]
+    );
 }
 
 #[test]
@@ -284,14 +342,18 @@ fn popover_scene_tracks_theme_density_without_custom_style() {
 }
 
 #[test]
-fn click_and_hover_preview_wraps_trigger_click_when_controlled() {
+fn click_and_hover_preview_exposes_a_controlled_open_request() {
     let element: Element<()> = Popover::new(Button::new("More"))
         .content(Text::new("popover"))
         .open(true)
         .trigger_mode(PopoverTriggerMode::ClickAndHoverPreview)
         .on_open_change(ValueCommand::new(|_: &mut (), _: bool| {}))
         .into();
-    assert!(element.interactions.on_click.is_some());
+    assert!(element
+        .popover
+        .as_ref()
+        .and_then(|popover| popover.on_open_change.as_ref())
+        .is_some());
 }
 
 #[test]

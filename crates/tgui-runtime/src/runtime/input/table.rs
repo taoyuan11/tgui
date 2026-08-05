@@ -31,14 +31,14 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         now: Instant,
         button: CanvasMouseButton,
     ) -> bool {
-        if button != CanvasMouseButton::Left || state.disabled.resolve() {
+        if button != CanvasMouseButton::Left || state.disabled.resolve() || !state.is_actionable() {
             return false;
         }
         let target_id = HoverTargetId::Widget(widget_id);
         let is_double_click = self.pending_click_matches_target(target_id, now);
         if is_double_click {
             self.pending_click = None;
-            if state.editable {
+            if state.can_edit() {
                 return self.dispatch_data_grid_edit_commit(state);
             }
             return self.dispatch_data_grid_cell_action(state);
@@ -53,6 +53,8 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         let extend = self.modifiers.shift_key();
         let toggle = is_primary_shortcut_modifier(self.modifiers);
         self.dispatch_data_grid_selection(state, DataGridSelectionTrigger::Click, extend, toggle)
+            || state.can_edit()
+            || state.can_act()
     }
 
     pub(in crate::runtime) fn dispatch_data_grid_accessibility_click(
@@ -62,9 +64,13 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         if state.disabled.resolve() {
             return false;
         }
-        let _ =
-            self.dispatch_data_grid_selection(state, DataGridSelectionTrigger::Click, false, false);
-        true
+        if self.dispatch_data_grid_selection(state, DataGridSelectionTrigger::Click, false, false) {
+            return true;
+        }
+        if state.can_edit() && self.dispatch_data_grid_edit_commit(state) {
+            return true;
+        }
+        self.dispatch_data_grid_cell_action(state)
     }
 
     pub(in crate::runtime) fn dispatch_data_grid_header_click(
@@ -258,7 +264,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         extend: bool,
         toggle: bool,
     ) -> bool {
-        if state.selection_mode == DataGridSelectionMode::None {
+        if state.disabled.resolve() || state.selection_mode == DataGridSelectionMode::None {
             return false;
         }
         let Some(command) = state.on_selection_change.as_ref() else {
@@ -296,6 +302,9 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
     }
 
     fn dispatch_data_grid_cell_action(&mut self, state: &DataGridCellState<VM>) -> bool {
+        if state.disabled.resolve() {
+            return false;
+        }
         let Some(command) = state.on_cell_action.as_ref() else {
             return false;
         };
@@ -312,6 +321,9 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
     }
 
     fn dispatch_data_grid_edit_commit(&mut self, state: &DataGridCellState<VM>) -> bool {
+        if state.disabled.resolve() {
+            return false;
+        }
         let Some(command) = state.on_cell_edit_commit.as_ref() else {
             return false;
         };
@@ -377,12 +389,55 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         self.focused_data_grid_target().is_some()
     }
 
+    fn focused_data_grid_resize_handle(&mut self) -> Option<DataGridResizeHandleState<VM>> {
+        let focused_id = self.focused_widget_id()?;
+        let computed = self.computed_scene();
+        computed
+            .hit_regions
+            .iter()
+            .chain(computed.overlay_hit_regions.iter())
+            .find_map(|region| match &region.interaction {
+                HitInteraction::DataGridResizeHandle { id, state, .. } if *id == focused_id => {
+                    Some(state.clone())
+                }
+                _ => None,
+            })
+    }
+
+    pub(super) fn adjust_focused_data_grid_resize(&mut self, direction: i32) -> bool {
+        if direction == 0 {
+            return false;
+        }
+        let Some(state) = self.focused_data_grid_resize_handle() else {
+            return false;
+        };
+        let Some(command) = state.on_column_width_change.as_ref() else {
+            return false;
+        };
+        let max_width = state.max_width.unwrap_or(Dp::new(f32::MAX));
+        let width = Dp::new(
+            (state.width.get() + state.step.get() * direction as f32)
+                .clamp(state.min_width.get(), max_width.get()),
+        );
+        if (width - state.width).abs() <= Dp::new(0.01) {
+            return false;
+        }
+        self.execute_value_command(
+            command,
+            DataGridColumnWidthChange {
+                column_key: state.column_key,
+                width,
+            },
+        );
+        true
+    }
+
     pub(super) fn activate_focused_data_grid_cell(&mut self, enter: bool, space: bool) -> bool {
         let Some(target) = self.focused_data_grid_target() else {
             return false;
         };
         if enter {
-            if target.state.editable && self.dispatch_data_grid_edit_commit(&target.state) {
+            if target.state.can_edit() && self.dispatch_data_grid_edit_commit(&target.state) {
                 return true;
             }
             return self.dispatch_data_grid_cell_action(&target.state);

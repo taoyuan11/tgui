@@ -3,9 +3,9 @@ use super::*;
 use crate::ui::layout::Value;
 use crate::ui::theme::Density;
 use crate::ui::widget::{
-    DataGrid, DataGridColumn, DataGridColumnPin, DataGridDensity, DataGridRow, DataGridSection,
-    DataGridSelectionMode, DataGridStyle, HitInteraction, ItemLayout, ResolvedElement, WidgetId,
-    WidgetKey,
+    CursorStyle, DataGrid, DataGridCellContext, DataGridColumn, DataGridColumnPin, DataGridDensity,
+    DataGridRow, DataGridSection, DataGridSelectionMode, DataGridSort, DataGridSortDirection,
+    DataGridStyle, HitInteraction, ItemLayout, ResolvedElement, WidgetId, WidgetKey,
 };
 
 fn resolved_children<'a, VM>(kind: &'a ResolvedWidgetKind<VM>) -> &'a [ResolvedElement<VM>] {
@@ -34,6 +34,22 @@ fn subtree_container_padding<VM>(element: &ResolvedElement<VM>) -> Option<Value<
         .find_map(subtree_container_padding)
 }
 
+fn resolved_data_grid_header<'a, VM>(
+    element: &'a ResolvedElement<VM>,
+    column_key: &WidgetKey,
+) -> Option<&'a ResolvedElement<VM>> {
+    if element
+        .data_grid_header
+        .as_ref()
+        .is_some_and(|header| &header.column_key == column_key)
+    {
+        return Some(element);
+    }
+    resolved_children(&element.kind)
+        .iter()
+        .find_map(|child| resolved_data_grid_header(child, column_key))
+}
+
 fn resolved_data_grid_row<'a, VM>(
     element: &'a ResolvedElement<VM>,
     row_key: &WidgetKey,
@@ -49,6 +65,15 @@ fn resolved_data_grid_row<'a, VM>(
     resolved_children(&element.kind)
         .iter()
         .find_map(|child| resolved_data_grid_row(child, row_key))
+}
+
+fn rendered_text_labels(rendered: &crate::ui::widget::common::RenderedWidgetScene) -> Vec<String> {
+    rendered
+        .primitives
+        .texts
+        .iter()
+        .map(|text| text.content.to_string())
+        .collect()
 }
 
 fn columns<VM: 'static>() -> Vec<DataGridColumn<String, VM>> {
@@ -206,7 +231,7 @@ fn data_grid_row_visual_state_prioritizes_disabled_selected_and_hover() {
     let hover = Color::rgb(17, 79, 131);
     let selected = Color::rgb(139, 53, 19);
     let tree: WidgetTree<()> = WidgetTree::new(
-        DataGrid::new(
+        DataGrid::<String, ()>::new(
             vec![
                 DataGridRow::keyed("selected", "Selected".to_string()),
                 DataGridRow::keyed("hovered", "Hovered".to_string()),
@@ -620,6 +645,701 @@ fn data_grid_supports_sections_empty_loading_and_density() {
     assert!(
         loading_layout.resolved_root.data_grid_root.is_none(),
         "loading slot should replace the grid body"
+    );
+}
+
+#[test]
+fn data_grid_column_signals_update_header_rows_and_horizontal_extent_on_the_same_tree() {
+    let context = test_context();
+    let first_width = context.state(dp(80.0));
+    let second_width = context.state(dp(100.0));
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let theme = Theme::default();
+    let mut animations = AnimationEngine::default();
+    let viewport = Rect::new(0.0, 0.0, 120.0, 120.0);
+    let tree: WidgetTree<()> = WidgetTree::new(
+        DataGrid::<String, ()>::new(
+            vec![DataGridRow::keyed("row", "Alpha".to_string())],
+            vec![
+                DataGridColumn::new(
+                    "first",
+                    "First".to_string(),
+                    |ctx: DataGridCellContext<String>| Text::new(ctx.row).into(),
+                )
+                .width(first_width.signal())
+                .resizable(false),
+                DataGridColumn::new("second", "Second".to_string(), |_ctx| {
+                    Text::new("value").into()
+                })
+                .width(second_width.signal())
+                .resizable(false),
+            ],
+        )
+        .size(dp(120.0), dp(120.0)),
+    );
+
+    let initial = tree.build_scene_layout(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        UnitContext::default(),
+        &HashMap::new(),
+        &HashMap::new(),
+        viewport,
+    );
+    let initial_header =
+        resolved_data_grid_header(&initial.resolved_root, &WidgetKey::from("second"))
+            .expect("second header should resolve");
+    assert_eq!(
+        initial_header
+            .layout
+            .width
+            .as_ref()
+            .map(|width| width.resolve()),
+        Some(crate::ui::layout::Length::Px(dp(100.0)))
+    );
+    let initial_row = resolved_data_grid_row(&initial.resolved_root, &WidgetKey::from("row"))
+        .expect("data row should resolve");
+    assert_eq!(
+        initial_row
+            .layout
+            .width
+            .as_ref()
+            .map(|width| width.resolve()),
+        Some(crate::ui::layout::Length::Px(dp(180.0)))
+    );
+    let ResolvedWidgetKind::Container { children, .. } = &initial.resolved_root.kind else {
+        panic!("DataGrid root should resolve to a container");
+    };
+    let body_id = children[1].id;
+    let initial_scene = tree.collect_scene_from_layout(
+        &font_manager,
+        &initial,
+        &theme,
+        &media,
+        &mut animations,
+        false,
+        None,
+        None,
+        &WidgetStateMap::default(),
+        &HashMap::new(),
+        &HashMap::new(),
+        viewport,
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+    assert_eq!(
+        initial_scene
+            .scroll_regions
+            .iter()
+            .find(|region| region.id == body_id)
+            .expect("DataGrid body should expose a scroll region")
+            .content_bounds
+            .width,
+        dp(180.0)
+    );
+
+    second_width.set(dp(170.0));
+    let updated = tree.build_scene_layout(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        UnitContext::default(),
+        &HashMap::new(),
+        &HashMap::new(),
+        viewport,
+    );
+    let updated_header =
+        resolved_data_grid_header(&updated.resolved_root, &WidgetKey::from("second"))
+            .expect("second header should remain resolved");
+    assert_eq!(updated_header.id, initial_header.id);
+    assert_eq!(
+        updated_header
+            .layout
+            .width
+            .as_ref()
+            .map(|width| width.resolve()),
+        Some(crate::ui::layout::Length::Px(dp(170.0)))
+    );
+    assert_eq!(
+        updated_header
+            .data_grid_header
+            .as_ref()
+            .expect("header interaction state")
+            .width,
+        dp(170.0)
+    );
+    let updated_row = resolved_data_grid_row(&updated.resolved_root, &WidgetKey::from("row"))
+        .expect("data row should remain resolved");
+    assert_eq!(updated_row.id, initial_row.id);
+    assert_eq!(
+        updated_row
+            .layout
+            .width
+            .as_ref()
+            .map(|width| width.resolve()),
+        Some(crate::ui::layout::Length::Px(dp(250.0)))
+    );
+    let updated_scene = tree.collect_scene_from_layout(
+        &font_manager,
+        &updated,
+        &theme,
+        &media,
+        &mut animations,
+        false,
+        None,
+        None,
+        &WidgetStateMap::default(),
+        &HashMap::new(),
+        &HashMap::new(),
+        viewport,
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+    assert_eq!(
+        updated_scene
+            .scroll_regions
+            .iter()
+            .find(|region| region.id == body_id)
+            .expect("DataGrid body scroll region should survive the update")
+            .content_bounds
+            .width,
+        dp(250.0)
+    );
+}
+
+#[test]
+fn data_grid_label_and_sort_signals_update_default_header_on_the_same_tree() {
+    let context = test_context();
+    let label = context.state("Name".to_string());
+    let sort = context.state(Vec::<DataGridSort>::new());
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let theme = Theme::default();
+    let mut animations = AnimationEngine::default();
+    let viewport = Rect::new(0.0, 0.0, 240.0, 120.0);
+    let tree: WidgetTree<()> = WidgetTree::new(
+        DataGrid::<String, ()>::new(
+            vec![DataGridRow::keyed("row", "Alpha".to_string())],
+            vec![DataGridColumn::new(
+                "name",
+                label.signal(),
+                |ctx: DataGridCellContext<String>| Text::new(ctx.row).into(),
+            )
+            .sortable(true)],
+        )
+        .sort(sort.signal())
+        .size(dp(240.0), dp(120.0)),
+    );
+
+    let initial = tree.render_output(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        None,
+        None,
+        &HashMap::new(),
+        viewport,
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+    assert!(rendered_text_labels(&initial)
+        .iter()
+        .any(|text| text == "Name"));
+
+    label.set("Display name".to_string());
+    sort.set(vec![DataGridSort {
+        column_key: WidgetKey::from("name"),
+        direction: DataGridSortDirection::Ascending,
+    }]);
+    let ascending = tree.render_output(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        None,
+        None,
+        &HashMap::new(),
+        viewport,
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+    assert!(rendered_text_labels(&ascending)
+        .iter()
+        .any(|text| text == "Display name ↑"));
+    let ascending_layout = tree.build_scene_layout(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        UnitContext::default(),
+        &HashMap::new(),
+        &HashMap::new(),
+        viewport,
+    );
+    let header =
+        resolved_data_grid_header(&ascending_layout.resolved_root, &WidgetKey::from("name"))
+            .expect("reactive header should resolve");
+    let state = header
+        .data_grid_header
+        .as_ref()
+        .expect("reactive header interaction state");
+    assert_eq!(state.label, "Display name");
+    assert_eq!(
+        state.sort.resolve(),
+        vec![DataGridSort {
+            column_key: WidgetKey::from("name"),
+            direction: DataGridSortDirection::Ascending,
+        }]
+    );
+
+    sort.set(vec![DataGridSort {
+        column_key: WidgetKey::from("name"),
+        direction: DataGridSortDirection::Descending,
+    }]);
+    let descending = tree.render_output(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        None,
+        None,
+        &HashMap::new(),
+        viewport,
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+    assert!(rendered_text_labels(&descending)
+        .iter()
+        .any(|text| text == "Display name ↓"));
+    assert!(!rendered_text_labels(&descending)
+        .iter()
+        .any(|text| text == "Display name ↑"));
+}
+
+#[test]
+fn data_grid_loading_signal_switches_header_and_rows_on_the_same_tree() {
+    let context = test_context();
+    let loading = context.state(false);
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let theme = Theme::default();
+    let mut animations = AnimationEngine::default();
+    let viewport = Rect::new(0.0, 0.0, 240.0, 120.0);
+    let tree: WidgetTree<()> = WidgetTree::new(
+        DataGrid::<String, ()>::new(
+            vec![DataGridRow::keyed("row", "Alpha".to_string())],
+            columns(),
+        )
+        .loading(loading.signal())
+        .loading_view(Text::new("Working"))
+        .size(dp(240.0), dp(120.0)),
+    );
+
+    let loaded = tree.render_output(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        None,
+        None,
+        &HashMap::new(),
+        viewport,
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+    let loaded_labels = rendered_text_labels(&loaded);
+    assert!(loaded_labels.iter().any(|text| text == "Name"));
+    assert!(loaded_labels.iter().any(|text| text == "Alpha"));
+    assert!(!loaded_labels.iter().any(|text| text == "Working"));
+    let loaded_layout = tree.build_scene_layout(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        UnitContext::default(),
+        &HashMap::new(),
+        &HashMap::new(),
+        viewport,
+    );
+    let loaded_grid = resolved_children(&loaded_layout.resolved_root.kind)
+        .first()
+        .expect("reactive DataGrid should expose its loaded branch");
+    assert_eq!(
+        loaded_grid
+            .data_grid_root
+            .as_ref()
+            .expect("loaded DataGrid root metadata")
+            .row_count,
+        1
+    );
+
+    loading.set(true);
+    let loading_scene = tree.render_output(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        None,
+        None,
+        &HashMap::new(),
+        viewport,
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+    let loading_labels = rendered_text_labels(&loading_scene);
+    assert!(loading_labels.iter().any(|text| text == "Working"));
+    assert!(!loading_labels.iter().any(|text| text == "Name"));
+    assert!(!loading_labels.iter().any(|text| text == "Alpha"));
+    let loading_layout = tree.build_scene_layout(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        UnitContext::default(),
+        &HashMap::new(),
+        &HashMap::new(),
+        viewport,
+    );
+    assert!(
+        resolved_data_grid_header(&loading_layout.resolved_root, &WidgetKey::from("name"))
+            .is_none()
+    );
+    let loading_branch = resolved_children(&loading_layout.resolved_root.kind)
+        .first()
+        .expect("reactive DataGrid should expose its loading branch");
+    assert!(loading_branch.data_grid_root.is_none());
+
+    loading.set(false);
+    let restored = tree.render_output(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        None,
+        None,
+        &HashMap::new(),
+        viewport,
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+    let restored_labels = rendered_text_labels(&restored);
+    assert!(restored_labels.iter().any(|text| text == "Name"));
+    assert!(restored_labels.iter().any(|text| text == "Alpha"));
+    assert!(!restored_labels.iter().any(|text| text == "Working"));
+}
+
+#[test]
+fn data_grid_loading_signal_prioritizes_loading_over_empty_without_showing_header() {
+    let context = test_context();
+    let loading = context.state(false);
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let theme = Theme::default();
+    let mut animations = AnimationEngine::default();
+    let viewport = Rect::new(0.0, 0.0, 240.0, 220.0);
+    let tree: WidgetTree<()> = WidgetTree::new(
+        DataGrid::<String, ()>::new(Vec::<DataGridRow<String>>::new(), columns())
+            .loading(loading.signal())
+            .loading_view(
+                Stack::new()
+                    .child(Text::new("Working"))
+                    .size(dp(240.0), dp(160.0)),
+            )
+            .empty(
+                Stack::new()
+                    .child(Text::new("Nothing here"))
+                    .size(dp(240.0), dp(150.0)),
+            )
+            .size(dp(240.0), dp(220.0)),
+    );
+
+    let empty = tree.render_output(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        None,
+        None,
+        &HashMap::new(),
+        viewport,
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+    let empty_labels = rendered_text_labels(&empty);
+    assert!(empty_labels.iter().any(|text| text == "Nothing here"));
+    assert!(!empty_labels.iter().any(|text| text == "Working"));
+    assert!(!empty_labels.iter().any(|text| text == "Name"));
+    let empty_layout = tree.build_scene_layout(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        UnitContext::default(),
+        &HashMap::new(),
+        &HashMap::new(),
+        viewport,
+    );
+    let empty_branch = resolved_children(&empty_layout.resolved_root.kind)
+        .first()
+        .expect("reactive DataGrid should expose its empty branch");
+    assert_eq!(
+        empty_branch
+            .layout
+            .height
+            .as_ref()
+            .map(|height| height.resolve()),
+        Some(crate::ui::layout::Length::Px(dp(150.0)))
+    );
+    assert!(empty_branch.data_grid_root.is_none());
+
+    loading.set(true);
+    let loading_scene = tree.render_output(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        None,
+        None,
+        &HashMap::new(),
+        viewport,
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+    let loading_labels = rendered_text_labels(&loading_scene);
+    assert!(loading_labels.iter().any(|text| text == "Working"));
+    assert!(!loading_labels.iter().any(|text| text == "Nothing here"));
+    assert!(!loading_labels.iter().any(|text| text == "Name"));
+    let loading_layout = tree.build_scene_layout(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        UnitContext::default(),
+        &HashMap::new(),
+        &HashMap::new(),
+        viewport,
+    );
+    let loading_branch = resolved_children(&loading_layout.resolved_root.kind)
+        .first()
+        .expect("reactive DataGrid should expose its loading branch");
+    assert_eq!(
+        loading_branch
+            .layout
+            .height
+            .as_ref()
+            .map(|height| height.resolve()),
+        Some(crate::ui::layout::Length::Px(dp(160.0)))
+    );
+    assert!(loading_branch.data_grid_root.is_none());
+
+    loading.set(false);
+    let empty_again = tree.render_output(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        None,
+        None,
+        &HashMap::new(),
+        viewport,
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+    let empty_again_labels = rendered_text_labels(&empty_again);
+    assert!(empty_again_labels.iter().any(|text| text == "Nothing here"));
+    assert!(!empty_again_labels.iter().any(|text| text == "Working"));
+}
+
+#[test]
+fn data_grid_disabled_signal_updates_cell_behavior_on_the_same_tree() {
+    let context = test_context();
+    let disabled = context.state(false);
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let theme = Theme::default();
+    let mut animations = AnimationEngine::default();
+    let viewport = Rect::new(0.0, 0.0, 240.0, 120.0);
+    let tree: WidgetTree<()> = WidgetTree::new(
+        DataGrid::<String, ()>::new(
+            vec![DataGridRow::keyed("row", "Alpha".to_string()).disable(disabled.signal())],
+            vec![DataGridColumn::new(
+                "name",
+                "Name".to_string(),
+                |ctx: DataGridCellContext<String>| {
+                    Text::new(if ctx.disabled { "disabled" } else { "enabled" }).into()
+                },
+            )],
+        )
+        .size(dp(240.0), dp(120.0)),
+    );
+
+    let enabled_layout = tree.build_scene_layout(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        UnitContext::default(),
+        &HashMap::new(),
+        &HashMap::new(),
+        viewport,
+    );
+    let enabled_row =
+        resolved_data_grid_row(&enabled_layout.resolved_root, &WidgetKey::from("row"))
+            .expect("enabled row should resolve");
+    let enabled_cell = resolved_children(&enabled_row.kind)
+        .first()
+        .expect("enabled cell should resolve");
+    assert_eq!(enabled_cell.focus.focusable, Some(true));
+    assert_eq!(
+        enabled_cell
+            .interactions
+            .cursor_style
+            .as_ref()
+            .map(|cursor| cursor.resolve()),
+        Some(CursorStyle::Default)
+    );
+    assert!(!enabled_cell
+        .data_grid_cell
+        .as_ref()
+        .expect("enabled cell state")
+        .disabled
+        .resolve());
+
+    disabled.set(true);
+    let disabled_layout = tree.build_scene_layout(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        UnitContext::default(),
+        &HashMap::new(),
+        &HashMap::new(),
+        viewport,
+    );
+    let disabled_row =
+        resolved_data_grid_row(&disabled_layout.resolved_root, &WidgetKey::from("row"))
+            .expect("disabled row should remain resolved");
+    assert_eq!(disabled_row.id, enabled_row.id);
+    let disabled_cell = resolved_children(&disabled_row.kind)
+        .first()
+        .expect("disabled cell should remain resolved");
+    assert_eq!(disabled_cell.focus.focusable, Some(false));
+    assert_eq!(
+        disabled_cell
+            .interactions
+            .cursor_style
+            .as_ref()
+            .map(|cursor| cursor.resolve()),
+        Some(CursorStyle::Default)
+    );
+    assert!(disabled_cell
+        .data_grid_cell
+        .as_ref()
+        .expect("disabled cell state")
+        .disabled
+        .resolve());
+    let disabled_scene = tree.render_output(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        None,
+        None,
+        &HashMap::new(),
+        viewport,
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+    let labels = rendered_text_labels(&disabled_scene);
+    assert!(labels.iter().any(|text| text == "disabled"));
+    assert!(!labels.iter().any(|text| text == "enabled"));
+}
+
+#[test]
+fn data_grid_normalizes_non_finite_and_inverted_column_width_bounds() {
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let theme = Theme::default();
+    let mut animations = AnimationEngine::default();
+    let viewport = Rect::new(0.0, 0.0, 240.0, 120.0);
+    let tree: WidgetTree<()> = WidgetTree::new(
+        DataGrid::<String, ()>::new(
+            vec![DataGridRow::keyed("row", "Alpha".to_string())],
+            vec![
+                DataGridColumn::new("name", "Name".to_string(), |ctx| Text::new(ctx.row).into())
+                    .width(Dp::new(f32::NAN))
+                    .min_width(dp(72.0))
+                    .max_width(dp(40.0)),
+            ],
+        )
+        .size(dp(240.0), dp(120.0)),
+    );
+
+    let layout = tree.build_scene_layout(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        UnitContext::default(),
+        &HashMap::new(),
+        &HashMap::new(),
+        viewport,
+    );
+    let header = resolved_data_grid_header(&layout.resolved_root, &WidgetKey::from("name"))
+        .expect("normalized header should resolve");
+    let state = header
+        .data_grid_header
+        .as_ref()
+        .expect("normalized header state");
+    assert_eq!(state.width, dp(72.0));
+    assert_eq!(state.min_width, dp(72.0));
+    assert_eq!(state.max_width, Some(dp(72.0)));
+    let row = resolved_data_grid_row(&layout.resolved_root, &WidgetKey::from("row"))
+        .expect("normalized row should resolve");
+    assert_eq!(
+        row.layout.width.as_ref().map(|width| width.resolve()),
+        Some(crate::ui::layout::Length::Px(dp(72.0)))
     );
 }
 

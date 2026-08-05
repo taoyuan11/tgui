@@ -1,4 +1,5 @@
 use super::*;
+use crate::ui::widget::{Drawer, DrawerHost, DrawerMode, Image, Modal, Portal};
 
 #[test]
 fn lifecycle_mount_dispatches_once_without_update() {
@@ -201,4 +202,285 @@ fn lifecycle_unmount_dispatches_when_component_is_removed() {
     assert_eq!(vm.mounts, 1);
     assert_eq!(vm.unmounts, 1);
     assert_eq!(vm.updates, 0);
+}
+
+#[test]
+fn portal_content_lifecycle_tracks_open_state() {
+    let invalidation = InvalidationSignal::new();
+    let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+    let open = context.state(false);
+    let content = Text::new("portal content")
+        .key("portal-lifecycle-content")
+        .on_mount(Command::new(|vm: &mut LifecycleVm| vm.mounts += 1))
+        .on_unmount(Command::new(|vm: &mut LifecycleVm| vm.unmounts += 1));
+    let portal: Element<LifecycleVm> = crate::ui::widget::Portal::new(content)
+        .open(open.signal())
+        .anchor(Rect::new(dp(24.0), dp(18.0), dp(1.0), dp(1.0)))
+        .into();
+    let tree = WidgetTree::new_legacy(Stack::new().child(portal));
+    let mut handler = test_handler_with_vm(LifecycleVm::default(), Some(tree), invalidation);
+
+    handler.invalidation.mark_dirty();
+    dispatch_lifecycle_if_dirty(&mut handler);
+    {
+        let vm = handler
+            .view_model
+            .lock()
+            .expect("view model lock should not be poisoned");
+        assert_eq!((vm.mounts, vm.unmounts), (0, 0));
+    }
+
+    open.set(true);
+    dispatch_lifecycle_if_dirty(&mut handler);
+    {
+        let vm = handler
+            .view_model
+            .lock()
+            .expect("view model lock should not be poisoned");
+        assert_eq!((vm.mounts, vm.unmounts), (1, 0));
+    }
+
+    open.set(false);
+    dispatch_lifecycle_if_dirty(&mut handler);
+    let vm = handler
+        .view_model
+        .lock()
+        .expect("view model lock should not be poisoned");
+    assert_eq!((vm.mounts, vm.unmounts), (1, 1));
+}
+
+#[test]
+fn rich_tooltip_content_lifecycle_tracks_visibility() {
+    let invalidation = InvalidationSignal::new();
+    let tooltip_content = Text::new("tooltip content")
+        .key("tooltip-lifecycle-content")
+        .on_mount(Command::new(|vm: &mut LifecycleVm| vm.mounts += 1))
+        .on_unmount(Command::new(|vm: &mut LifecycleVm| vm.unmounts += 1));
+    let tree = WidgetTree::new(
+        Button::new("Inspect")
+            .size(dp(120.0), dp(40.0))
+            .tooltip(Tooltip::content(tooltip_content).delay(Duration::ZERO)),
+    );
+    let mut handler = test_handler_with_vm(LifecycleVm::default(), Some(tree), invalidation);
+    handler.reduced_motion = true;
+
+    handler.invalidation.mark_dirty();
+    dispatch_lifecycle_if_dirty(&mut handler);
+    {
+        let vm = handler
+            .view_model
+            .lock()
+            .expect("view model lock should not be poisoned");
+        assert_eq!((vm.mounts, vm.unmounts), (0, 0));
+    }
+
+    let viewport = handler.viewport_rect();
+    handler.cursor_position = Some(Point::new(dp(40.0), dp(20.0)));
+    assert!(handler.handle_hover(viewport));
+    let _ = handler.computed_scene();
+    dispatch_lifecycle_if_dirty(&mut handler);
+    {
+        let vm = handler
+            .view_model
+            .lock()
+            .expect("view model lock should not be poisoned");
+        assert_eq!((vm.mounts, vm.unmounts), (1, 0));
+    }
+
+    handler.cursor_position = Some(Point::new(dp(500.0), dp(500.0)));
+    assert!(handler.handle_hover(viewport));
+    let _ = handler.computed_scene();
+    dispatch_lifecycle_if_dirty(&mut handler);
+    let vm = handler
+        .view_model
+        .lock()
+        .expect("view model lock should not be poisoned");
+    assert_eq!((vm.mounts, vm.unmounts), (1, 1));
+}
+
+#[test]
+fn modal_content_lifecycle_tracks_open_state() {
+    let invalidation = InvalidationSignal::new();
+    let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+    let open = context.state(false);
+    let content = Text::new("modal content")
+        .key("modal-lifecycle-content")
+        .on_mount(Command::new(|vm: &mut LifecycleVm| vm.mounts += 1))
+        .on_unmount(Command::new(|vm: &mut LifecycleVm| vm.unmounts += 1));
+    let tree = WidgetTree::new(Modal::new(open.signal()).content(content));
+    let mut handler = test_handler_with_vm(LifecycleVm::default(), Some(tree), invalidation);
+    handler.reduced_motion = true;
+
+    handler.invalidation.mark_dirty();
+    dispatch_lifecycle_if_dirty(&mut handler);
+    {
+        let vm = handler.view_model.lock().unwrap();
+        assert_eq!((vm.mounts, vm.unmounts), (0, 0));
+    }
+
+    open.set(true);
+    dispatch_lifecycle_if_dirty(&mut handler);
+    {
+        let vm = handler.view_model.lock().unwrap();
+        assert_eq!((vm.mounts, vm.unmounts), (1, 0));
+    }
+
+    open.set(false);
+    dispatch_lifecycle_if_dirty(&mut handler);
+    let vm = handler.view_model.lock().unwrap();
+    assert_eq!((vm.mounts, vm.unmounts), (1, 1));
+}
+
+#[test]
+fn overlay_drawer_content_lifecycle_tracks_open_state() {
+    let invalidation = InvalidationSignal::new();
+    let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+    let open = context.state(false);
+    let content = Text::new("drawer content")
+        .key("overlay-drawer-lifecycle-content")
+        .on_mount(Command::new(|vm: &mut LifecycleVm| vm.mounts += 1))
+        .on_unmount(Command::new(|vm: &mut LifecycleVm| vm.unmounts += 1));
+    let tree = WidgetTree::new(Drawer::new(open.signal()).content(content));
+    let mut handler = test_handler_with_vm(LifecycleVm::default(), Some(tree), invalidation);
+    handler.reduced_motion = true;
+
+    handler.invalidation.mark_dirty();
+    dispatch_lifecycle_if_dirty(&mut handler);
+    {
+        let vm = handler.view_model.lock().unwrap();
+        assert_eq!((vm.mounts, vm.unmounts), (0, 0));
+    }
+
+    open.set(true);
+    dispatch_lifecycle_if_dirty(&mut handler);
+    {
+        let vm = handler.view_model.lock().unwrap();
+        assert_eq!((vm.mounts, vm.unmounts), (1, 0));
+    }
+
+    open.set(false);
+    dispatch_lifecycle_if_dirty(&mut handler);
+    let vm = handler.view_model.lock().unwrap();
+    assert_eq!((vm.mounts, vm.unmounts), (1, 1));
+}
+
+#[test]
+fn push_drawer_only_gates_panel_lifecycle_and_interactions() {
+    let invalidation = InvalidationSignal::new();
+    let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+    let open = context.state(false);
+    let main_content: Element<LifecycleVm> = Button::new("Main action")
+        .size(dp(120.0), dp(32.0))
+        .on_mount(Command::new(|vm: &mut LifecycleVm| vm.mounts += 10))
+        .on_unmount(Command::new(|vm: &mut LifecycleVm| vm.unmounts += 10))
+        .into();
+    let main_content_id = main_content.id;
+    let panel_content = Text::new("drawer panel")
+        .key("push-drawer-lifecycle-content")
+        .on_mount(Command::new(|vm: &mut LifecycleVm| vm.mounts += 1))
+        .on_unmount(Command::new(|vm: &mut LifecycleVm| vm.unmounts += 1));
+    let drawer = Drawer::new(open.signal())
+        .mode(DrawerMode::Push)
+        .content(panel_content);
+    let tree = WidgetTree::new(DrawerHost::new(main_content, drawer).size(dp(480.0), dp(320.0)));
+    let mut handler = test_handler_with_vm(LifecycleVm::default(), Some(tree), invalidation);
+    handler.reduced_motion = true;
+
+    handler.invalidation.mark_dirty();
+    dispatch_lifecycle_if_dirty(&mut handler);
+    {
+        let vm = handler.view_model.lock().unwrap();
+        assert_eq!((vm.mounts, vm.unmounts), (10, 0));
+    }
+    assert!(handler
+        .computed_scene()
+        .hit_regions
+        .iter()
+        .any(|region| { region.interaction.widget_id() == main_content_id }));
+
+    open.set(true);
+    dispatch_lifecycle_if_dirty(&mut handler);
+    {
+        let vm = handler.view_model.lock().unwrap();
+        assert_eq!((vm.mounts, vm.unmounts), (11, 0));
+    }
+
+    open.set(false);
+    dispatch_lifecycle_if_dirty(&mut handler);
+    let vm = handler.view_model.lock().unwrap();
+    assert_eq!((vm.mounts, vm.unmounts), (11, 1));
+    drop(vm);
+    assert!(handler
+        .computed_scene()
+        .hit_regions
+        .iter()
+        .any(|region| { region.interaction.widget_id() == main_content_id }));
+}
+
+#[test]
+fn closed_modal_suppresses_nested_portal_lifecycle() {
+    let invalidation = InvalidationSignal::new();
+    let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+    let open = context.state(false);
+    let portal_content = Text::new("portal in modal")
+        .key("modal-portal-lifecycle-content")
+        .on_mount(Command::new(|vm: &mut LifecycleVm| vm.mounts += 1))
+        .on_unmount(Command::new(|vm: &mut LifecycleVm| vm.unmounts += 1));
+    let portal: Element<LifecycleVm> = Portal::new(portal_content)
+        .open(true)
+        .anchor(Rect::new(dp(24.0), dp(18.0), dp(1.0), dp(1.0)))
+        .into();
+    let tree = WidgetTree::new(Modal::new(open.signal()).content(portal));
+    let mut handler = test_handler_with_vm(LifecycleVm::default(), Some(tree), invalidation);
+    handler.reduced_motion = true;
+
+    handler.invalidation.mark_dirty();
+    dispatch_lifecycle_if_dirty(&mut handler);
+    {
+        let vm = handler.view_model.lock().unwrap();
+        assert_eq!((vm.mounts, vm.unmounts), (0, 0));
+    }
+
+    open.set(true);
+    dispatch_lifecycle_if_dirty(&mut handler);
+    {
+        let vm = handler.view_model.lock().unwrap();
+        assert_eq!((vm.mounts, vm.unmounts), (1, 0));
+    }
+
+    open.set(false);
+    dispatch_lifecycle_if_dirty(&mut handler);
+    let vm = handler.view_model.lock().unwrap();
+    assert_eq!((vm.mounts, vm.unmounts), (1, 1));
+}
+
+#[test]
+fn closed_modal_skips_media_event_subtree_walk() {
+    let invalidation = InvalidationSignal::new();
+    let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+    let open = context.state(false);
+    let image: Element<LifecycleVm> = Image::new(crate::media::MediaSource::path(
+        "missing-modal-media-event-test.png",
+    ))
+    .on_loading(Command::new(|_: &mut LifecycleVm| {}));
+    let tree = WidgetTree::new(Modal::new(open.signal()).content(image));
+    let handler = test_handler_with_vm(LifecycleVm::default(), Some(tree), invalidation);
+
+    crate::ui::widget::media_event_walk_probe::reset();
+    let states = handler
+        .widget_tree
+        .as_ref()
+        .unwrap()
+        .media_event_states(&handler.media_manager, &handler.theme);
+    assert!(states.is_empty());
+    assert_eq!(crate::ui::widget::media_event_walk_probe::visits(), 0);
+
+    open.set(true);
+    crate::ui::widget::media_event_walk_probe::reset();
+    let _ = handler
+        .widget_tree
+        .as_ref()
+        .unwrap()
+        .media_event_states(&handler.media_manager, &handler.theme);
+    assert!(crate::ui::widget::media_event_walk_probe::visits() > 0);
 }

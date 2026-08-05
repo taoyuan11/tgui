@@ -23,6 +23,204 @@ impl<VM> Clone for ListKeyboardTarget<VM> {
 }
 
 impl<VM: 'static> BoundRuntimeHandler<VM> {
+    pub(in crate::runtime) fn reconcile_list_focus_after_scene_update(&mut self) -> bool {
+        let Some(focused_id) = self.focused_widget_id() else {
+            return false;
+        };
+        let Some((list_id, item_index)) = self.cached_scene.as_ref().and_then(|cached| {
+            cached
+                .computed
+                .hit_regions
+                .iter()
+                .chain(cached.computed.overlay_hit_regions.iter())
+                .find_map(|region| match &region.interaction {
+                    HitInteraction::ListItem { id, state, .. }
+                        if *id == focused_id && state.disabled.resolve() =>
+                    {
+                        Some((state.list_id, state.item_index))
+                    }
+                    _ => None,
+                })
+        }) else {
+            return false;
+        };
+
+        let (replacement, root) = self
+            .cached_scene
+            .as_ref()
+            .map(|cached| {
+                let mut regions = cached
+                    .computed
+                    .hit_regions
+                    .iter()
+                    .chain(cached.computed.overlay_hit_regions.iter());
+                let replacement = regions
+                    .clone()
+                    .filter_map(|region| match &region.interaction {
+                        HitInteraction::ListItem { id, state, .. }
+                            if state.list_id == list_id && !state.disabled.resolve() =>
+                        {
+                            let focus = region.focus.as_ref()?;
+                            Some((
+                                item_index.abs_diff(state.item_index),
+                                state.item_index < item_index,
+                                state.item_index,
+                                state.key.clone(),
+                                *id,
+                                focus.clone(),
+                            ))
+                        }
+                        _ => None,
+                    })
+                    .min_by_key(|(distance, before, index, ..)| (*distance, *before, *index));
+                let root = regions.find_map(|region| {
+                    let focus = region.focus.as_ref()?;
+                    (focus.widget_id == list_id).then(|| focus.clone())
+                });
+                (replacement, root)
+            })
+            .unwrap_or((None, None));
+
+        if let Some((_, _, _, key, id, focus)) = replacement {
+            self.list_focus_state = Some((list_id, key));
+            self.update_focus(
+                Some(FocusedWidget {
+                    widget_id: id,
+                    scope_path: focus.scope_path,
+                    on_blur: focus.on_blur.clone(),
+                }),
+                focus.on_focus,
+                true,
+            );
+        } else if let Some(focus) = root {
+            self.list_focus_state = None;
+            self.update_focus(
+                Some(FocusedWidget {
+                    widget_id: list_id,
+                    scope_path: focus.scope_path,
+                    on_blur: focus.on_blur.clone(),
+                }),
+                focus.on_focus,
+                true,
+            );
+        } else {
+            self.list_focus_state = None;
+            self.clear_focus_after_scene_target_removed();
+        }
+        true
+    }
+
+    pub(in crate::runtime) fn restore_list_focus_after_target_removal(
+        &mut self,
+        previous: &FocusedWidget<VM>,
+        removed_ids: &HashSet<WidgetId>,
+    ) -> bool {
+        let removed = self.cached_scene.as_ref().and_then(|cached| {
+            cached
+                .computed
+                .hit_regions
+                .iter()
+                .chain(cached.computed.overlay_hit_regions.iter())
+                .find_map(|region| match &region.interaction {
+                    HitInteraction::ListItem { id, state, .. } if *id == previous.widget_id => {
+                        Some((state.list_id, state.item_index))
+                    }
+                    _ => None,
+                })
+        });
+        let Some((list_id, item_index)) = removed else {
+            return false;
+        };
+
+        let target = self.cached_scene.as_ref().and_then(|cached| {
+            cached
+                .computed
+                .hit_regions
+                .iter()
+                .chain(cached.computed.overlay_hit_regions.iter())
+                .filter_map(|region| match &region.interaction {
+                    HitInteraction::ListItem { id, state, .. }
+                        if state.list_id == list_id
+                            && !removed_ids.contains(id)
+                            && !state.disabled.resolve() =>
+                    {
+                        Some(ListKeyboardTarget {
+                            id: *id,
+                            state: state.clone(),
+                            focus: region.focus.clone(),
+                        })
+                    }
+                    _ => None,
+                })
+                .min_by_key(|target| {
+                    (
+                        target.state.item_index.abs_diff(item_index),
+                        target.state.item_index < item_index,
+                    )
+                })
+        });
+        if let Some(target) = target {
+            return self.focus_list_target_without_selection(target);
+        }
+        self.focus_list_root_without_selection(list_id)
+    }
+
+    fn focus_list_target_without_selection(&mut self, target: ListKeyboardTarget<VM>) -> bool {
+        let Some(focus) = target.focus.clone() else {
+            return false;
+        };
+        if target.state.disabled.resolve() {
+            return false;
+        }
+        self.remember_list_focus(&target.state);
+        self.update_focus(
+            Some(FocusedWidget {
+                widget_id: target.id,
+                scope_path: focus.scope_path,
+                on_blur: focus.on_blur.clone(),
+            }),
+            focus.on_focus,
+            true,
+        );
+        self.ensure_list_row_visible(&target.state);
+        true
+    }
+
+    fn focus_list_root_without_selection(&mut self, list_id: WidgetId) -> bool {
+        let target = self.cached_scene.as_ref().and_then(|cached| {
+            cached
+                .computed
+                .hit_regions
+                .iter()
+                .chain(cached.computed.overlay_hit_regions.iter())
+                .find_map(|region| {
+                    let focus = region.focus.as_ref()?;
+                    (focus.widget_id == list_id).then(|| {
+                        (
+                            FocusedWidget {
+                                widget_id: list_id,
+                                scope_path: focus.scope_path.clone(),
+                                on_blur: focus.on_blur.clone(),
+                            },
+                            focus.on_focus.clone(),
+                        )
+                    })
+                })
+        });
+        let Some((target, on_focus)) = target else {
+            return false;
+        };
+        if self
+            .list_focus_state
+            .as_ref()
+            .is_some_and(|(focused_list_id, _)| *focused_list_id == list_id)
+        {
+            self.list_focus_state = None;
+        }
+        self.update_focus(Some(target), on_focus, true);
+        true
+    }
+
     pub(super) fn dispatch_list_item_click(
         &mut self,
         state: &ListItemState<VM>,

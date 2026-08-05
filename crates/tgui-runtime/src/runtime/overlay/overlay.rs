@@ -1,7 +1,7 @@
 use crate::foundation::view_model::ValueCommand;
 use crate::ui::widget::{
-    BackdropBlurPrimitive, ComputedScene, FocusScopeState, HitRegion, MeshPrimitive, RenderCommand,
-    RenderPrimitive, TextPrimitive, TexturePrimitive, WidgetId,
+    AccessibilityFragment, BackdropBlurPrimitive, ComputedScene, FocusScopeState, HitRegion,
+    MeshPrimitive, RenderCommand, RenderPrimitive, TextPrimitive, TexturePrimitive, WidgetId,
 };
 
 use super::anchor::Anchor;
@@ -185,6 +185,12 @@ pub(crate) enum OverlayContent<VM> {
         hits: Vec<HitRegion<VM>>,
         clip_rect: Option<crate::ui::widget::Rect>,
     },
+    AccessibleBatch {
+        primitives: Vec<OverlayPrimitive>,
+        hits: Vec<HitRegion<VM>>,
+        clip_rect: Option<crate::ui::widget::Rect>,
+        fragment: AccessibilityFragment<VM>,
+    },
     Scene(Box<ComputedScene<VM>>),
     SceneWithPrimitives {
         scene: Box<ComputedScene<VM>>,
@@ -206,6 +212,17 @@ impl<VM> Clone for OverlayContent<VM> {
                 primitives: primitives.clone(),
                 hits: hits.clone(),
                 clip_rect: *clip_rect,
+            },
+            Self::AccessibleBatch {
+                primitives,
+                hits,
+                clip_rect,
+                fragment,
+            } => Self::AccessibleBatch {
+                primitives: primitives.clone(),
+                hits: hits.clone(),
+                clip_rect: *clip_rect,
+                fragment: fragment.clone(),
             },
             Self::Scene(scene) => Self::Scene(Box::new((**scene).clone())),
             Self::SceneWithPrimitives {

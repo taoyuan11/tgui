@@ -8,4 +8,5 @@ mod descriptor;
 mod widget;
 
 pub use descriptor::{PopoverDescriptor, PopoverTriggerMode};
+pub(crate) use descriptor::{PopoverOpenHandle, PopoverVirtualListNavigation};
 pub use widget::Popover;

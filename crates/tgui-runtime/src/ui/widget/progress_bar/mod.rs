@@ -9,6 +9,14 @@ use super::container::{set_layout_inset, set_layout_length, set_layout_lengths, 
 use super::core::Element;
 use super::style::{ProgressBarStyle, StyleResolver};
 
+pub(crate) fn normalized_progress_value(value: f32) -> f32 {
+    if value.is_finite() {
+        value.clamp(0.0, 1.0)
+    } else {
+        0.0
+    }
+}
+
 /// 线性进度条组件。
 pub struct ProgressBar<VM> {
     element: Element<VM>,

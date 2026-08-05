@@ -305,6 +305,84 @@ impl<T> Signal<T> {
         signal
     }
 
+    fn new_memo_tracked_many(
+        reader: impl Fn() -> T + Send + Sync + 'static,
+        invalidation: InvalidationSignal,
+        sources: Vec<SignalId>,
+        equals: Option<Arc<dyn Fn(&T, &T) -> bool + Send + Sync>>,
+    ) -> Self
+    where
+        T: Clone + Send + Sync + 'static,
+    {
+        let graph = invalidation.reactive_graph();
+        let signal_id = graph.create_signal();
+        let reader: Arc<dyn SignalReader<T>> = Arc::new(reader);
+        let cache = Arc::new(parking_lot::Mutex::new(SignalCache {
+            revision: 0,
+            dependency_revision: None,
+            value: None,
+        }));
+        let signal = Self {
+            reader: reader.clone(),
+            invalidation: invalidation.clone(),
+            graph: graph.clone(),
+            signal_id,
+            cache: cache.clone(),
+            transition: None,
+            dependency: None,
+        };
+        let recompute_invalidation = invalidation.clone();
+        let recompute = Arc::new(move || {
+            let next = reader.read();
+            let mut cache = cache.lock();
+            let changed = match (cache.value.as_ref(), equals.as_ref()) {
+                (Some(previous), Some(equals)) => !equals(previous, &next),
+                (Some(_), None) => true,
+                (None, _) => true,
+            };
+            cache.revision = recompute_invalidation.revision();
+            cache.dependency_revision = None;
+            cache.value = Some(next);
+            changed
+        });
+        graph.register_memo(signal_id, recompute);
+        for source in sources {
+            graph.subscribe_signal(source, signal_id);
+        }
+        signal
+    }
+
+    /// Builds a memo value from a dynamic number of source signals.
+    ///
+    /// This is kept crate-private because widget implementations generally expose
+    /// a domain-specific `Value<T>` instead. All sources must belong to the same
+    /// view-model context so one retained reactive graph can fan their changes in
+    /// to the derived signal.
+    pub(crate) fn derive_many<U>(
+        sources: Vec<Self>,
+        reader: impl Fn() -> U + Send + Sync + 'static,
+    ) -> Option<Signal<U>>
+    where
+        T: Clone + Send + Sync + 'static,
+        U: Clone + PartialEq + Send + Sync + 'static,
+    {
+        let first = sources.first()?;
+        if sources
+            .iter()
+            .any(|source| !first.graph.shares_storage_with(&source.graph))
+        {
+            return None;
+        }
+        let invalidation = first.invalidation.clone();
+        let source_ids = sources.into_iter().map(|source| source.signal_id).collect();
+        Some(Signal::new_memo_tracked_many(
+            reader,
+            invalidation,
+            source_ids,
+            Some(Arc::new(|left: &U, right: &U| left == right)),
+        ))
+    }
+
     fn new_with_parts(
         reader: Arc<dyn SignalReader<T>>,
         invalidation: InvalidationSignal,
@@ -502,6 +580,43 @@ impl<T: Clone> Signal<T> {
             self.dependency,
             [self.signal_id],
             Some(Arc::new(|left: &U, right: &U| left == right)),
+        )
+        .with_transition(self.transition)
+    }
+
+    /// Combines two signals from the same reactive context into one memoized signal.
+    ///
+    /// Reading another signal from inside [`Signal::map`] does not make that
+    /// second signal a memo source. This helper records both source edges so a
+    /// change to either input recomputes and invalidates the derived value.
+    #[cfg(any(test, feature = "video"))]
+    pub(crate) fn map2<U, V>(
+        &self,
+        other: &Signal<U>,
+        mapper: impl Fn(T, U) -> V + Send + Sync + 'static,
+    ) -> Signal<V>
+    where
+        T: Clone + Send + Sync + 'static,
+        U: Clone + Send + Sync + 'static,
+        V: Clone + PartialEq + Send + Sync + 'static,
+    {
+        debug_assert!(
+            self.graph.shares_storage_with(&other.graph),
+            "map2 inputs must belong to the same reactive context"
+        );
+        let left = self.clone();
+        let right = other.clone();
+        let shared_dependency = if self.dependency == other.dependency {
+            self.dependency
+        } else {
+            None
+        };
+        Signal::new_memo_tracked(
+            move || mapper(left.get_untracked(), right.get_untracked()),
+            self.invalidation.clone(),
+            shared_dependency,
+            [self.signal_id, other.signal_id],
+            Some(Arc::new(|left: &V, right: &V| left == right)),
         )
         .with_transition(self.transition)
     }

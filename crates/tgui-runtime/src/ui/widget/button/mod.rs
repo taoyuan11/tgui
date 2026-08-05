@@ -5,8 +5,8 @@ use crate::theme::{StyleContext, WidgetState};
 use crate::ui::layout::{Align, Insets, LayoutStyle, Value};
 
 use super::common::{
-    ButtonVariantKind, CursorStyle, InteractionHandlers, LifecycleEventHandlers,
-    MediaEventHandlers, Point, VisualStyle, WidgetId, WidgetKind,
+    ButtonVariantKind, CalendarDayInteraction, CursorStyle, InteractionHandlers,
+    LifecycleEventHandlers, MediaEventHandlers, Point, VisualStyle, WidgetId, WidgetKind,
 };
 use super::container::{set_layout_inset, set_layout_length, set_layout_lengths, IntoLengthValue};
 use super::core::Element;
@@ -262,6 +262,33 @@ impl<VM> Button<VM> {
     /// 设置组件 key。
     pub fn key(mut self, key: impl Into<super::WidgetKey>) -> Self {
         self.element.key = Some(key.into());
+        self
+    }
+
+    /// Controls whether the button can receive focus.
+    pub fn focusable(mut self, focusable: bool) -> Self {
+        self.element.focus.focusable = Some(focusable);
+        self
+    }
+
+    /// Sets the button's keyboard tab order. Negative values keep it
+    /// programmatically focusable while removing it from sequential Tab order.
+    pub fn tab_index(mut self, tab_index: i32) -> Self {
+        self.element.focus.tab_index = Some(tab_index);
+        self
+    }
+
+    pub(crate) fn calendar_day_behavior(
+        mut self,
+        owner_id: WidgetId,
+        date: chrono::NaiveDate,
+        on_focus_move: ValueCommand<VM, chrono::NaiveDate>,
+    ) -> Self {
+        self.element.interactions.calendar_day = Some(CalendarDayInteraction {
+            owner_id,
+            date,
+            on_focus_move,
+        });
         self
     }
 

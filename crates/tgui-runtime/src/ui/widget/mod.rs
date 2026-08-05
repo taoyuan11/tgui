@@ -29,6 +29,7 @@ mod icon;
 mod image;
 mod input;
 mod input_controls;
+pub(crate) use input_controls::normalize_number_input_accessibility_value;
 mod list;
 mod menu;
 mod modal;
@@ -100,18 +101,20 @@ pub use combobox::{AutoComplete, Combobox, ComboboxChange, ComboboxOption};
 #[cfg(all(test, feature = "video"))]
 pub(crate) use common::VideoTexturePrimitive;
 pub(crate) use common::{
-    slider_effective_step, slider_resolve_value, slider_value_from_normalized,
+    slider_interaction_step, slider_resolve_value, slider_value_from_normalized,
     text_input_content_geometry, text_input_content_viewport, text_input_layout_width,
-    AccessibilityFragment, AccessibilityFragmentNode, BackdropBlurPrimitive,
+    AccessibilityCurrent, AccessibilityFragment, AccessibilityFragmentNode, AccessibilityRole,
+    AccessibilitySyntheticRole, AccessibilitySyntheticSemantics, BackdropBlurPrimitive,
     BackdropBlurPrimitiveSlot, BrushPrimitive, BrushPrimitiveData, BrushPrimitiveSlot,
-    CanvasCompositePrimitive, CanvasItemInteractionHandlers, CanvasTextHitRegion,
-    CanvasTextSpanPrimitive, ClipMask, CompositionState, ComputedScene, ContainerLayout,
-    DataGridCellState, DataGridHeaderState, DataGridResizeHandleState, DefaultActivation,
-    DirtyDrawRange, FocusScopeState, FocusTargetMeta, HitGeometry, HitInteraction, HitPath,
-    HitRegion, HitTargetId, InteractionHandlers, LifecycleEventHandlers, LifecycleEventState,
-    ListItemState, MeasureContext, MediaEventPhase, MediaEventState, MeshPrimitive, MeshVertex,
-    OverlayShapePrimitiveSlot, OverlayTextDecorationPrimitiveSlot, OverlayTextPrimitiveSlot,
-    OverlayTexturePrimitiveSlot, RenderCommand, SceneCounts, SceneDrawStream, ScrollRegion,
+    CalendarDayInteraction, CanvasCompositePrimitive, CanvasItemInteractionHandlers,
+    CanvasTextHitRegion, CanvasTextSpanPrimitive, ClipMask, CompositionState, ComputedScene,
+    ContainerLayout, DataGridCellState, DataGridHeaderState, DataGridResizeHandleState,
+    DefaultActivation, DirtyDrawRange, FocusScopeState, FocusTargetMeta, HitGeometry,
+    HitInteraction, HitPath, HitRegion, HitTargetId, InteractionHandlers, LifecycleEventHandlers,
+    LifecycleEventState, ListItemState, MeasureContext, MediaEventPhase, MediaEventState,
+    MeshPrimitive, MeshVertex, NumberInputInteraction, OverlayShapePrimitiveSlot,
+    OverlayTextDecorationPrimitiveSlot, OverlayTextPrimitiveSlot, OverlayTexturePrimitiveSlot,
+    RadioGroupInteraction, RenderCommand, SceneCounts, SceneDrawStream, ScrollRegion,
     ScrollbarAxis, ScrollbarHandle, ShapePrimitiveSlot, SplitterHandleState,
     TextDecorationPrimitiveSlot, TextEditState, TextInputContentGeometry, TextPrimitiveSlot,
     TexturePrimitive, TexturePrimitiveSlot, TransformChain, TransformRecord, TreeNodeState,
@@ -186,8 +189,10 @@ pub use overlay::{
     Side as OverlaySide, SolvedPlacement as OverlaySolvedPlacement,
 };
 pub use pagination::{Pagination, PaginationChange};
+pub(crate) use popover::PopoverVirtualListNavigation;
 pub use popover::{Popover, PopoverTriggerMode};
 pub use portal::{LayerStack, Portal, PortalAnchor, PortalTarget};
+pub(crate) use progress_bar::normalized_progress_value;
 pub use progress_bar::ProgressBar;
 pub(crate) use r#virtual::VirtualSceneStateUpdate;
 pub use r#virtual::{
@@ -198,6 +203,7 @@ pub use radio::{Radio, RadioGroup, RadioOption};
 pub use rating::{Rating, RatingChange};
 pub use rich_text::{RichText, RichTextImage, RichTextLinkClick};
 pub use scroll_view::ScrollView;
+pub(crate) use select::select_virtual_list_id;
 pub use select::{Select, SelectOption};
 pub use show::Show;
 pub use skeleton::{Skeleton, SkeletonShape};

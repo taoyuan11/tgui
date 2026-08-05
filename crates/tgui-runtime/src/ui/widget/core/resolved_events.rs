@@ -1,75 +1,108 @@
 use super::resolved_freeze::lifecycle_snapshot;
 use super::*;
 
-impl<VM> ResolvedElement<VM> {
+impl<VM: 'static> ResolvedElement<VM> {
+    fn inactive_scope_suppresses_runtime_events(&self) -> bool {
+        self.focus
+            .scope
+            .as_ref()
+            .is_some_and(|scope| scope.suppresses_interactions(scope.is_active_untracked()))
+    }
+
     pub(super) fn collect_media_event_states(
         &self,
         media: &MediaManager,
+        theme: &Theme,
+        active_tooltip: Option<WidgetId>,
         states: &mut Vec<MediaEventState<VM>>,
     ) {
+        if self.inactive_scope_suppresses_runtime_events() {
+            return;
+        }
         #[cfg(test)]
         media_event_walk_probe::record_visit();
         match &self.kind {
             ResolvedWidgetKind::Container { children, .. } => {
                 for child in children {
-                    child.collect_media_event_states(media, states);
+                    child.collect_media_event_states(media, theme, active_tooltip, states);
                 }
             }
             ResolvedWidgetKind::Virtual { children, .. } => {
                 for child in children {
-                    child.collect_media_event_states(media, states);
+                    child.collect_media_event_states(media, theme, active_tooltip, states);
                 }
             }
+            ResolvedWidgetKind::Portal { content, open, .. } if open.resolve() => content
+                .resolve(theme)
+                .collect_media_event_states(media, theme, active_tooltip, states),
             #[cfg(feature = "audio")]
             ResolvedWidgetKind::Audio { audio } => {
-                if !self.media_events.has_any() {
-                    return;
-                }
-                let snapshot = audio.controller.snapshot();
-                if let Some(phase) = media_event_phase(snapshot.loading, snapshot.error.as_deref())
-                {
-                    states.push(MediaEventState {
-                        widget_id: self.id,
-                        media_phase: Some(phase),
-                        handlers: self.media_events.clone(),
-                    });
+                if self.media_events.has_any() {
+                    let snapshot = audio.controller.snapshot();
+                    if let Some(phase) =
+                        media_event_phase(snapshot.loading, snapshot.error.as_deref())
+                    {
+                        states.push(MediaEventState {
+                            widget_id: self.id,
+                            media_phase: Some(phase),
+                            handlers: self.media_events.clone(),
+                        });
+                    }
                 }
             }
             ResolvedWidgetKind::Image { image, .. } => {
-                if !self.media_events.has_any() {
-                    return;
-                }
-                let source = image.source.resolve();
-                let snapshot = media.image_snapshot(&source, None);
-                if let Some(phase) = media_event_phase(snapshot.loading, snapshot.error.as_deref())
-                {
-                    states.push(MediaEventState {
-                        widget_id: self.id,
-                        media_phase: Some(phase),
-                        handlers: self.media_events.clone(),
-                    });
+                if self.media_events.has_any() {
+                    let source = image.source.resolve();
+                    let snapshot = media.image_snapshot(&source, None);
+                    if let Some(phase) =
+                        media_event_phase(snapshot.loading, snapshot.error.as_deref())
+                    {
+                        states.push(MediaEventState {
+                            widget_id: self.id,
+                            media_phase: Some(phase),
+                            handlers: self.media_events.clone(),
+                        });
+                    }
                 }
             }
             #[cfg(feature = "video")]
             ResolvedWidgetKind::VideoSurface { video, .. } => {
-                if !self.media_events.has_any() {
-                    return;
-                }
-                let snapshot = video.controller.surface_metadata();
-                if let Some(phase) = media_event_phase(snapshot.loading, snapshot.error.as_deref())
-                {
-                    states.push(MediaEventState {
-                        widget_id: self.id,
-                        media_phase: Some(phase),
-                        handlers: self.media_events.clone(),
-                    });
+                if self.media_events.has_any() {
+                    let snapshot = video.controller.surface_metadata();
+                    if let Some(phase) =
+                        media_event_phase(snapshot.loading, snapshot.error.as_deref())
+                    {
+                        states.push(MediaEventState {
+                            widget_id: self.id,
+                            media_phase: Some(phase),
+                            handlers: self.media_events.clone(),
+                        });
+                    }
                 }
             }
             _ => {}
         }
+
+        if active_tooltip == Some(self.id) {
+            if let Some(tooltip) = self.tooltip.as_ref() {
+                if let crate::ui::widget::tooltip::TooltipContent::Element(content) =
+                    &tooltip.content
+                {
+                    content.resolve(theme).collect_media_event_states(
+                        media,
+                        theme,
+                        active_tooltip,
+                        states,
+                    );
+                }
+            }
+        }
     }
 
     pub(super) fn collect_lifecycle_event_states(&self, states: &mut Vec<LifecycleEventState<VM>>) {
+        if self.inactive_scope_suppresses_runtime_events() {
+            return;
+        }
         if self.lifecycle_events.has_any() || self.requires_runtime_lifecycle() {
             states.push(LifecycleEventState {
                 widget_id: self.id,
@@ -92,6 +125,9 @@ impl<VM> ResolvedElement<VM> {
         &self,
         controllers: &mut Vec<crate::video::VideoController>,
     ) {
+        if self.inactive_scope_suppresses_runtime_events() {
+            return;
+        }
         match &self.kind {
             ResolvedWidgetKind::Container { children, .. }
             | ResolvedWidgetKind::Virtual { children, .. } => {

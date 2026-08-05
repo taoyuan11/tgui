@@ -161,7 +161,15 @@ fn emit_drawer_backdrop_hit_regions<VM: 'static>(
 impl<VM: 'static> ResolvedElement<VM> {
     pub(super) fn clear_closed_drawer_interactions(&self, computed: &mut ComputedScene<VM>) {
         let Some(drawer) = &self.drawer else { return };
+        for scope in &mut computed.focus_scopes {
+            scope.active = scope.options.is_active_untracked();
+        }
         if drawer.open.resolve() {
+            return;
+        }
+        if matches!(drawer.mode, crate::ui::widget::drawer::DrawerMode::Push) {
+            // The push panel owns its own inactive interaction scope. Clearing the host here would
+            // also disable the always-visible main-content sibling.
             return;
         }
 
@@ -171,7 +179,9 @@ impl<VM: 'static> ResolvedElement<VM> {
         computed.overlay_hit_regions.clear();
         computed.overlay_close_handlers.clear();
         computed.scroll_regions.clear();
-        computed.focus_scopes.clear();
+        computed
+            .focus_scopes
+            .retain(|scope| scope.options.hides_from_accessibility(scope.active));
         computed.ime_cursor_area = None;
         computed.overlay_layers = crate::ui::widget::common::fresh_overlay_layers();
     }

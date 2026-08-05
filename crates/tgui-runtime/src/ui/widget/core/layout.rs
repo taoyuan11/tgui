@@ -481,8 +481,8 @@ fn measure_node_tracked(
             style,
             ..
         }) => {
-            let base_width = units.resolve_dp(style.min_width);
-            let track_height = units.resolve_dp(style.height);
+            let base_width = finite_non_negative(units.resolve_dp(style.min_width), 0.0);
+            let track_height = finite_non_negative(units.resolve_dp(style.height), 1.0).max(1.0);
             if *show_label {
                 let content = label
                     .as_ref()
@@ -490,9 +490,10 @@ fn measure_node_tracked(
                     .unwrap_or_else(|| Value::Static(String::from("0%")));
                 let label_text = progress_bar_label_with_theme(&content, style);
                 let label_size = measure_text_content(&label_text, font_manager, theme, units);
+                let gap = finite_non_negative(units.resolve_dp(style.gap), 0.0);
                 (
                     base_width.max(label_size.0),
-                    track_height + units.resolve_dp(style.gap) + label_size.1,
+                    track_height + gap + label_size.1,
                 )
             } else {
                 (base_width, track_height)
@@ -507,7 +508,7 @@ fn measure_node_tracked(
                 .as_ref()
                 .map(Value::resolve)
                 .unwrap_or(style.size);
-            let resolved = units.resolve_dp(size);
+            let resolved = finite_non_negative(units.resolve_dp(size), 1.0).max(1.0);
             (resolved, resolved)
         }
         Some(MeasureContext::Divider {
@@ -582,5 +583,13 @@ fn measure_node_tracked(
     TaffySize {
         width: known_dimensions.width.unwrap_or(measured.0),
         height: known_dimensions.height.unwrap_or(measured.1),
+    }
+}
+
+fn finite_non_negative(value: f32, fallback: f32) -> f32 {
+    if value.is_finite() {
+        value.max(0.0)
+    } else {
+        fallback
     }
 }

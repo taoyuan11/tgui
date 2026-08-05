@@ -1,4 +1,6 @@
 use super::*;
+use crate::foundation::binding::State;
+use crate::ui::widget::ComputedScene;
 
 #[test]
 fn radio_group_renders_selected_option_and_dispatches_key_value() {
@@ -195,4 +197,120 @@ fn radio_group_disabled_option_exposes_disabled_hit_for_cursor_only() {
         enabled_hit,
         Some(super::HitInteraction::Radio { .. })
     ));
+}
+
+#[test]
+fn radio_group_roving_tab_stop_tracks_selection_and_skips_disabled_options() {
+    let invalidation = InvalidationSignal::new();
+    let selected = State::new("email".to_string(), invalidation);
+    let tree: WidgetTree<ScopeChildVm> = WidgetTree::new(
+        RadioGroup::new(
+            vec![
+                RadioOption::new("email".to_string(), "Email".to_string()),
+                RadioOption::new("sms".to_string(), "SMS".to_string()).disable(true),
+                RadioOption::new("push".to_string(), "Push".to_string()),
+            ],
+            selected.signal(),
+        )
+        .horizontal(),
+    );
+    let theme = Theme::default();
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let mut animations = AnimationEngine::default();
+    let viewport = Rect::new(0.0, 0.0, 260.0, 60.0);
+
+    let radio_stops = |scene: &ComputedScene<ScopeChildVm>| {
+        scene
+            .hit_regions
+            .iter()
+            .filter_map(|hit| match &hit.interaction {
+                HitInteraction::Radio { interactions, .. } => {
+                    let group = interactions
+                        .radio_group
+                        .expect("RadioGroup child should carry group metadata");
+                    Some((
+                        group.index,
+                        group.direction,
+                        hit.focus
+                            .as_ref()
+                            .expect("enabled radio should be focusable")
+                            .tab_index,
+                    ))
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    };
+
+    let initial = tree.compute_scene(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        None,
+        None,
+        &HashMap::new(),
+        viewport,
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+    assert_eq!(
+        radio_stops(&initial),
+        vec![
+            (0, Axis::Horizontal, Some(0)),
+            (2, Axis::Horizontal, Some(-1))
+        ]
+    );
+
+    selected.set("push".to_string());
+    let selected_push = tree.compute_scene(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        None,
+        None,
+        &HashMap::new(),
+        viewport,
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+    assert_eq!(
+        radio_stops(&selected_push),
+        vec![
+            (0, Axis::Horizontal, Some(-1)),
+            (2, Axis::Horizontal, Some(0))
+        ]
+    );
+
+    selected.set("sms".to_string());
+    let disabled_selection = tree.compute_scene(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        None,
+        None,
+        &HashMap::new(),
+        viewport,
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+    assert_eq!(
+        radio_stops(&disabled_selection),
+        vec![
+            (0, Axis::Horizontal, Some(0)),
+            (2, Axis::Horizontal, Some(-1))
+        ]
+    );
 }

@@ -68,6 +68,10 @@ pub(crate) struct ReactiveGraph {
 }
 
 impl ReactiveGraph {
+    pub(crate) fn shares_storage_with(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.inner, &other.inner)
+    }
+
     pub(crate) fn create_signal(&self) -> SignalId {
         SignalId::next()
     }

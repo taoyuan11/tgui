@@ -185,7 +185,13 @@ impl<VM> Slider<VM> {
     /// # 返回值
     /// 返回一个新的滑块组件；如果 `min > max`，会按原语义自动交换二者。
     pub fn new(value: impl Into<Value<f32>>, min: f32, max: f32) -> Self {
-        let (min, max) = if min <= max { (min, max) } else { (max, min) };
+        let (min, max) = match (min.is_finite(), max.is_finite()) {
+            (true, true) if min <= max => (min, max),
+            (true, true) => (max, min),
+            (true, false) => (min, min),
+            (false, true) => (max, max),
+            (false, false) => (0.0, 0.0),
+        };
         let interactions = InteractionHandlers {
             cursor_style: Some(Value::Static(CursorStyle::Pointer)),
             ..Default::default()
@@ -220,6 +226,7 @@ impl<VM> Slider<VM> {
                 carousel_auto_play: None,
                 kind: WidgetKind::Slider {
                     value: value.into(),
+                    label: None,
                     min,
                     max,
                     step: 1.0,
@@ -258,6 +265,14 @@ impl<VM> Slider<VM> {
     /// 设置组件 key。
     pub fn key(mut self, key: impl Into<super::WidgetKey>) -> Self {
         self.element.key = Some(key.into());
+        self
+    }
+
+    /// Sets the accessible name announced for the slider.
+    pub fn label(mut self, label: impl Into<Value<String>>) -> Self {
+        if let WidgetKind::Slider { label: target, .. } = &mut self.element.kind {
+            *target = Some(label.into());
+        }
         self
     }
 

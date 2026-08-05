@@ -52,7 +52,11 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             return;
         }
 
-        let states = tree.media_event_states(&self.media_manager, &self.theme);
+        let states = tree.media_event_states_with_active_tooltip(
+            &self.media_manager,
+            &self.theme,
+            self.tooltip_state.active.map(|active| active.widget_id),
+        );
         let current_ids: HashSet<_> = states.iter().map(|state| state.widget_id).collect();
         self.media_event_states
             .retain(|widget_id, _| current_ids.contains(widget_id));
@@ -109,6 +113,9 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
 
         if current.looping != previous.looping {
             current.controller.set_looping(current.looping);
+        }
+        if current.autoplay && !previous.autoplay {
+            current.controller.play();
         }
     }
 
@@ -198,6 +205,34 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 .map(|state| (state.widget_id, state))
                 .collect::<HashMap<_, _>>()
         });
+
+        #[cfg(feature = "audio")]
+        let refreshed_audio_states = self
+            .cached_scene
+            .as_ref()
+            .and_then(|cached| cached.layout.as_ref().map(|layout| (cached, layout)))
+            .map(|(cached, layout)| {
+                cached
+                    .lifecycle_states
+                    .iter()
+                    .filter_map(|(widget_id, state)| {
+                        audio_lifecycle_state(&state.snapshot)?;
+                        let mut state = state.clone();
+                        state.snapshot = layout.lifecycle_snapshot(*widget_id)?;
+                        Some((*widget_id, state))
+                    })
+                    .collect::<HashMap<_, _>>()
+            })
+            .unwrap_or_default();
+
+        #[cfg(feature = "audio")]
+        let states = self
+            .cached_scene
+            .as_ref()
+            .map(|cached| &cached.lifecycle_states)
+            .or(fallback_states.as_ref())
+            .expect("lifecycle states should be available");
+        #[cfg(not(feature = "audio"))]
         let states = fallback_states
             .as_ref()
             .or_else(|| {
@@ -217,6 +252,10 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
 
         let mut pending = Vec::new();
         for state in states.values() {
+            #[cfg(feature = "audio")]
+            let state = refreshed_audio_states
+                .get(&state.widget_id)
+                .unwrap_or(state);
             let previous = self.lifecycle_event_states.get(&state.widget_id);
             #[cfg(feature = "audio")]
             self.sync_audio_widget_lifecycle(state, previous);
@@ -233,12 +272,16 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             }
         }
 
-        for state in states.values().cloned() {
+        for state in states.values() {
+            #[cfg(feature = "audio")]
+            let state = refreshed_audio_states
+                .get(&state.widget_id)
+                .unwrap_or(state);
             self.lifecycle_event_states.insert(
                 state.widget_id,
                 DispatchedLifecycleState {
-                    snapshot: state.snapshot,
-                    handlers: state.handlers,
+                    snapshot: state.snapshot.clone(),
+                    handlers: state.handlers.clone(),
                 },
             );
         }
@@ -266,14 +309,38 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             self.request_redraw_if_dirty(Instant::now());
         }
         if revision == self.last_lifecycle_dispatch_revision {
-            return;
+            let scene_needs_refresh = self
+                .cached_scene
+                .as_ref()
+                .map(|cached| !cached.computed_valid)
+                .unwrap_or_else(|| self.widget_tree.is_some());
+            if scene_needs_refresh {
+                let _ = self.computed_scene();
+            }
+            let membership_changed = self.cached_scene.as_ref().map_or_else(
+                || !self.lifecycle_event_states.is_empty(),
+                |cached| {
+                    cached.lifecycle_states.len() != self.lifecycle_event_states.len()
+                        || cached
+                            .lifecycle_states
+                            .keys()
+                            .any(|widget_id| !self.lifecycle_event_states.contains_key(widget_id))
+                },
+            );
+            if !membership_changed {
+                return;
+            }
         }
 
-        let cached_has_lifecycle_handlers = self
-            .cached_scene
-            .as_ref()
-            .map(|cached| !cached.lifecycle_states.is_empty());
+        let cached_has_lifecycle_handlers = self.cached_scene.as_ref().and_then(|cached| {
+            cached
+                .computed_valid
+                .then_some(!cached.lifecycle_states.is_empty())
+        });
 
+        // An invalid scene cache still describes the previous frame. In particular, opening an
+        // initially hidden Modal/Drawer can change lifecycle membership from empty to non-empty.
+        // Only use the empty-membership shortcut after the scene has been refreshed.
         if cached_has_lifecycle_handlers == Some(false) && self.lifecycle_event_states.is_empty() {
             self.last_lifecycle_dispatch_revision = revision;
             return;

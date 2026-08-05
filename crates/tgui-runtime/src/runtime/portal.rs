@@ -195,7 +195,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             let Some(anchor) = resolve_external_portal_anchor(request, viewport, computed) else {
                 continue;
             };
-            let Some((mut content_scene, content_size)) =
+            let Some((mut content_scene, content_size, _source_lifecycle_states)) =
                 collect_portal_content_scene(request.content.as_ref(), &mut context)
             else {
                 continue;

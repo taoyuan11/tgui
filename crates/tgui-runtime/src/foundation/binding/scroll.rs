@@ -25,6 +25,7 @@ pub struct ScrollViewController {
 struct ScrollViewControllerInner {
     offset: State<Point>,
     request: State<Option<ScrollRequest>>,
+    request_target: parking_lot::Mutex<Option<Point>>,
     widget_id: Arc<parking_lot::Mutex<Option<WidgetId>>>,
     dependency: DependencyId,
     invalidation: InvalidationSignal,
@@ -57,6 +58,7 @@ impl ScrollViewController {
             inner: Arc::new(ScrollViewControllerInner {
                 offset: State::new(Point::ZERO, invalidation.clone()),
                 request: State::new(None, invalidation.clone()),
+                request_target: parking_lot::Mutex::new(None),
                 widget_id: Arc::new(parking_lot::Mutex::new(None)),
                 dependency: DependencyId::next(),
                 invalidation,
@@ -81,11 +83,18 @@ impl ScrollViewController {
     }
 
     pub fn scroll_by(&self, delta: Point) {
-        let current = self.inner.offset.get();
-        self.enqueue_request(
-            Point::new(current.x + delta.x, current.y + delta.y),
-            ScrollRequestMode::Smooth,
-        );
+        let offset = {
+            let mut request_target = self.inner.request_target.lock();
+            let current = request_target.unwrap_or_else(|| self.inner.offset.get());
+            let offset =
+                normalized_scroll_offset(Point::new(current.x + delta.x, current.y + delta.y));
+            *request_target = Some(offset);
+            offset
+        };
+        self.inner.request.set(Some(ScrollRequest {
+            offset,
+            mode: ScrollRequestMode::Smooth,
+        }));
     }
 
     pub(crate) fn bind_widget(&self, widget_id: WidgetId) {
@@ -103,8 +112,11 @@ impl ScrollViewController {
         *self.inner.widget_id.lock()
     }
 
-    pub(crate) fn sync_offset(&self, offset: Point) {
+    pub(crate) fn sync_offset(&self, offset: Point, smooth_target: Option<Point>) {
         self.inner.offset.set(offset);
+        if self.inner.request.read(Option::is_none) {
+            *self.inner.request_target.lock() = smooth_target;
+        }
     }
 
     pub(crate) fn take_request(&self) -> Option<ScrollRequest> {
@@ -120,9 +132,12 @@ impl ScrollViewController {
     }
 
     fn enqueue_request(&self, offset: Point, mode: ScrollRequestMode) {
-        self.inner.request.set(Some(ScrollRequest {
-            offset: Point::new(offset.x.max(0.0), offset.y.max(0.0)),
-            mode,
-        }));
+        let offset = normalized_scroll_offset(offset);
+        *self.inner.request_target.lock() = Some(offset);
+        self.inner.request.set(Some(ScrollRequest { offset, mode }));
     }
+}
+
+fn normalized_scroll_offset(offset: Point) -> Point {
+    Point::new(offset.x.max(0.0), offset.y.max(0.0))
 }

@@ -2,7 +2,7 @@ use crate::foundation::view_model::Command;
 use crate::theme::{StyleContext, WidgetState};
 use crate::ui::layout::{Align, LayoutStyle, Length, Value, Wrap};
 
-use super::common::VisualStyle;
+use super::common::{AccessibilityCurrent, AccessibilityRole, VisualStyle};
 use super::core::Element;
 use super::p3_support::{
     impl_p3_layout_api, merge_layout, resolve_component_style_with_sheet, with_visual_identity,
@@ -62,7 +62,9 @@ impl<VM> Breadcrumb<VM> {
     }
 
     pub fn max_visible(mut self, max_visible: usize) -> Self {
-        self.max_visible = max_visible.max(2);
+        // Collapsed breadcrumbs always need one slot each for the first item,
+        // overflow trigger, and final item.
+        self.max_visible = max_visible.max(3);
         self
     }
 
@@ -146,7 +148,7 @@ impl<VM: 'static> From<Breadcrumb<VM>> for Element<VM> {
                     let text = Text::new(item.label.clone()).style_full_with_style_sheet(
                         breadcrumb_text_style(breadcrumb.style.clone(), current),
                     );
-                    let text_element = if let Some(command) = item.on_click {
+                    let mut text_element = if let Some(command) = item.on_click {
                         text.cursor(CursorStyle::Pointer)
                             .on_click(command)
                             .focusable(true)
@@ -154,6 +156,11 @@ impl<VM: 'static> From<Breadcrumb<VM>> for Element<VM> {
                     } else {
                         text.into()
                     };
+                    if text_element.interactions.on_click.is_some() {
+                        text_element.visual.accessibility_role = Some(AccessibilityRole::Button);
+                    }
+                    text_element.visual.accessibility_current =
+                        Some((Value::Static(current), AccessibilityCurrent::Page));
                     children.push(with_visual_identity(text_element, &breadcrumb.visual));
                 }
                 BreadcrumbRenderItem::Overflow(items) => {
@@ -169,11 +176,10 @@ impl<VM: 'static> From<Breadcrumb<VM>> for Element<VM> {
                             menu_item
                         })
                         .collect::<Vec<_>>();
-                    children.push(
-                        Menu::new(Button::new("...").ghost())
-                            .items(menu_items)
-                            .into(),
-                    );
+                    let mut trigger: Element<VM> = Button::new("...").ghost().into();
+                    trigger.visual.accessibility_label =
+                        Some(Value::Static("More breadcrumbs".to_string()));
+                    children.push(Menu::new(trigger).items(menu_items).into());
                 }
             }
         }

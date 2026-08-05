@@ -1,4 +1,5 @@
 use super::*;
+use crate::foundation::binding::State;
 use crate::ui::layout::Value;
 use crate::ui::theme::Density;
 use crate::ui::widget::ComputedScene;
@@ -88,6 +89,83 @@ fn disabled_tabs_do_not_create_tab_trigger_hit_region() {
 
     assert_eq!(tab_trigger_count, 2);
     assert!(disabled_count >= 1);
+}
+
+#[test]
+fn tabs_roving_tab_stop_tracks_selection_and_falls_back_from_disabled_selection() {
+    let invalidation = InvalidationSignal::new();
+    let selected = State::new("two".to_string(), invalidation);
+    let tree: WidgetTree<()> = WidgetTree::new(Tabs::new(
+        vec![
+            TabItem::new("one", "One", Text::new("Panel one")),
+            TabItem::new("two", "Two", Text::new("Panel two")),
+            TabItem::new("disabled", "Disabled", Text::new("Hidden")).disabled(true),
+        ],
+        selected.signal(),
+    ));
+    let theme = Theme::default();
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let mut animations = AnimationEngine::default();
+    let viewport = Rect::new(0.0, 0.0, 320.0, 180.0);
+
+    let tab_stops = |computed: &ComputedScene<()>| {
+        computed
+            .hit_regions
+            .iter()
+            .filter_map(|hit| match &hit.interaction {
+                HitInteraction::TabTrigger { key, .. } => Some((
+                    key.clone(),
+                    hit.focus
+                        .as_ref()
+                        .expect("enabled tab should be focusable")
+                        .tab_index,
+                )),
+                _ => None,
+            })
+            .collect::<HashMap<_, _>>()
+    };
+
+    let selected_scene = tree.compute_scene(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        None,
+        None,
+        &HashMap::new(),
+        viewport,
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+    let selected_stops = tab_stops(&selected_scene);
+    assert_eq!(selected_stops.get("one"), Some(&Some(-1)));
+    assert_eq!(selected_stops.get("two"), Some(&Some(0)));
+    assert!(!selected_stops.contains_key("disabled"));
+
+    selected.set("disabled".to_string());
+    let fallback_scene = tree.compute_scene(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        None,
+        None,
+        &HashMap::new(),
+        viewport,
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+    let fallback_stops = tab_stops(&fallback_scene);
+    assert_eq!(fallback_stops.get("one"), Some(&Some(0)));
+    assert_eq!(fallback_stops.get("two"), Some(&Some(-1)));
+    assert!(!fallback_stops.contains_key("disabled"));
 }
 
 #[test]

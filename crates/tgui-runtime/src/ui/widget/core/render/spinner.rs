@@ -177,13 +177,14 @@ pub(crate) fn push_spinner_primitives(
     units: UnitContext,
     scene: &mut ScenePrimitives,
 ) -> Rect {
-    let size = units
-        .resolve_dp(size_override.unwrap_or(style.size))
-        .max(1.0);
-    let thickness = units
-        .resolve_dp(thickness_override.unwrap_or(style.thickness))
-        .max(1.0)
-        .min(size * 0.5);
+    let size = units.resolve_dp(size_override.unwrap_or(style.size));
+    let size = if size.is_finite() { size.max(1.0) } else { 1.0 };
+    let thickness = units.resolve_dp(thickness_override.unwrap_or(style.thickness));
+    let thickness = if thickness.is_finite() {
+        thickness.max(1.0).min(size * 0.5)
+    } else {
+        1.0_f32.min(size * 0.5)
+    };
     let spinner_rect = Rect::new(
         frame.x + ((frame.width - size).max(Dp::ZERO) * 0.5),
         frame.y + ((frame.height - size).max(Dp::ZERO) * 0.5),
@@ -216,7 +217,12 @@ pub(crate) fn push_spinner_primitives(
         }
     }
 
-    let sweep = style.sweep_degrees.clamp(10.0, 359.0).to_radians();
+    let sweep_degrees = if style.sweep_degrees.is_finite() {
+        style.sweep_degrees.clamp(10.0, 359.0)
+    } else {
+        104.0
+    };
+    let sweep = sweep_degrees.to_radians();
     let start_angle = -PI * 0.5 + phase.clamp(0.0, 1.0) * PI * 2.0;
     if let Some(mesh) = ring_arc_mesh(
         center,

@@ -2118,6 +2118,85 @@ fn scroll_view_controller_scroll_to_updates_runtime_offset() {
 }
 
 #[test]
+fn scroll_view_controller_scroll_by_accumulates_before_runtime_consumes_request() {
+    let invalidation = InvalidationSignal::new();
+    let ctx = ViewModelContext::for_benchmarks();
+    let controller = ScrollViewController::new(&ctx);
+    let scroller: Element<TestVm> = ScrollView::new()
+        .size(dp(160.0), dp(100.0))
+        .controller(controller.clone())
+        .child(Stack::new().size(dp(160.0), dp(500.0)))
+        .into();
+    let scroller_id = scroller.id;
+    let mut handler = test_handler(Some(WidgetTree::new(scroller)), invalidation);
+    let _ = handler.computed_scene();
+
+    controller.scroll_by(Point::new(Dp::ZERO, dp(20.0)));
+    controller.scroll_by(Point::new(Dp::ZERO, dp(20.0)));
+    assert_eq!(
+        controller
+            .take_request()
+            .expect("scroll request should remain pending")
+            .offset,
+        Point::new(Dp::ZERO, dp(40.0))
+    );
+
+    let _ = handler.computed_scene();
+    assert_eq!(
+        handler
+            .smooth_scroll_states
+            .get(&scroller_id)
+            .expect("runtime should consume the accumulated smooth request")
+            .target,
+        Point::new(Dp::ZERO, dp(40.0))
+    );
+}
+
+#[test]
+fn scroll_view_controller_scroll_by_extends_active_smooth_target() {
+    let invalidation = InvalidationSignal::new();
+    let ctx = ViewModelContext::for_benchmarks();
+    let controller = ScrollViewController::new(&ctx);
+    let scroller: Element<TestVm> = ScrollView::new()
+        .size(dp(160.0), dp(100.0))
+        .controller(controller.clone())
+        .child(Stack::new().size(dp(160.0), dp(500.0)))
+        .into();
+    let scroller_id = scroller.id;
+    let mut handler = test_handler(Some(WidgetTree::new(scroller)), invalidation);
+    let _ = handler.computed_scene();
+
+    controller.scroll_to(Point::new(Dp::ZERO, dp(120.0)));
+    let _ = handler.computed_scene();
+    assert_eq!(
+        handler
+            .smooth_scroll_states
+            .get(&scroller_id)
+            .expect("first request should start smooth scrolling")
+            .target,
+        Point::new(Dp::ZERO, dp(120.0))
+    );
+
+    controller.scroll_by(Point::new(Dp::ZERO, dp(30.0)));
+    assert_eq!(
+        controller
+            .take_request()
+            .expect("follow-up request should remain pending")
+            .offset,
+        Point::new(Dp::ZERO, dp(150.0))
+    );
+    let _ = handler.computed_scene();
+    assert_eq!(
+        handler
+            .smooth_scroll_states
+            .get(&scroller_id)
+            .expect("follow-up request should replace the active target")
+            .target,
+        Point::new(Dp::ZERO, dp(150.0))
+    );
+}
+
+#[test]
 fn scroll_view_controller_cached_hit_visits_only_bound_controllers() {
     let invalidation = InvalidationSignal::new();
     let ctx = ViewModelContext::for_benchmarks();

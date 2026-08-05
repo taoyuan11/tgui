@@ -9,7 +9,7 @@ use crate::ui::widget::core::Element;
 use crate::ui::widget::menu::{Menu, MenuItem};
 use crate::ui::widget::scroll_view::ScrollView;
 use crate::ui::widget::style::{ButtonStyle, ContainerStyle, StyleResolver, StyleSheet, TabsStyle};
-use crate::ui::widget::{FocusScopeOptions, Stack};
+use crate::ui::widget::{FocusScopeOptions, For, Stack};
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -323,6 +323,7 @@ fn build_tab_strip<VM: 'static>(
     on_change: Option<ValueCommand<VM, (String, String)>>,
     on_reorder: Option<ValueCommand<VM, TabsReorderEvent>>,
 ) -> Element<VM> {
+    let scroll_container_id = (overflow_mode == TabsOverflowMode::Scroll).then(WidgetId::next);
     let axis = if placement.is_horizontal() {
         Axis::Horizontal
     } else {
@@ -352,48 +353,77 @@ fn build_tab_strip<VM: 'static>(
             container.gap = Value::Static(Length::Px(resolved.tab_gap));
         })
         .align(Align::Start);
-    let list = list.child(build_triggers(
-        group_id,
-        &specs,
-        &selected,
-        placement,
-        overflow_mode,
-        reorderable.clone(),
-        style.clone(),
-        on_change,
-        on_reorder,
+    let entry_specs = specs.clone();
+    let entry_selected = selected.clone();
+    let render_selected = selected.clone();
+    let render_style = style.clone();
+    let render_on_change = on_change.clone();
+    let render_on_reorder = on_reorder.clone();
+    let render_reorderable = reorderable.clone();
+    let list = list.child(For::new_with_resolver(
+        move || tab_trigger_entries(&entry_specs, &entry_selected.resolve(), overflow_mode),
+        TabTriggerEntry::stable_key,
+        move |_index, entry| match entry {
+            TabTriggerEntry::Tab { item, tab_stop } => build_tab_trigger(
+                group_id,
+                scroll_container_id,
+                item,
+                *tab_stop,
+                &render_selected,
+                placement,
+                render_reorderable.clone(),
+                render_style.clone(),
+                render_on_change.clone(),
+                render_on_reorder.clone(),
+            ),
+            TabTriggerEntry::More(items) => build_more_trigger(
+                items.clone(),
+                &render_selected,
+                placement,
+                render_style.clone(),
+                render_on_change.clone(),
+            ),
+        },
     ));
     match overflow_mode {
-        TabsOverflowMode::Scroll => ScrollView::new()
-            .focusable(false)
-            .overflow_x(if placement.is_horizontal() {
-                Overflow::Scroll
-            } else {
-                Overflow::Hidden
-            })
-            .overflow_y(if placement.is_horizontal() {
-                Overflow::Hidden
-            } else {
-                Overflow::Scroll
-            })
-            .show_scrollbar(false)
-            .style_full_with_style_sheet({
-                let style = style.clone();
-                move |context, style_sheet, visual, state| {
-                    tab_bar_container_style(
-                        resolve_tabs_style_with_sheet(
-                            style.as_ref(),
+        TabsOverflowMode::Scroll => {
+            let strip = ScrollView::new()
+                .focusable(false)
+                .overflow_x(if placement.is_horizontal() {
+                    Overflow::Scroll
+                } else {
+                    Overflow::Hidden
+                })
+                .overflow_y(if placement.is_horizontal() {
+                    Overflow::Hidden
+                } else {
+                    Overflow::Scroll
+                })
+                .show_scrollbar(false)
+                .style_full_with_style_sheet({
+                    let style = style.clone();
+                    move |context, style_sheet, visual, state| {
+                        tab_bar_container_style(
+                            resolve_tabs_style_with_sheet(
+                                style.as_ref(),
+                                context,
+                                style_sheet,
+                                visual,
+                                state,
+                            ),
                             context,
-                            style_sheet,
-                            visual,
-                            state,
-                        ),
-                        context,
-                    )
-                }
-            })
-            .child(list)
-            .into(),
+                        )
+                    }
+                });
+            let strip = if placement.is_horizontal() {
+                strip.width(Length::Percent(1.0))
+            } else {
+                strip.height(Length::Percent(1.0))
+            };
+            let mut element: Element<VM> = strip.child(list).into();
+            element.id = scroll_container_id.expect("scroll tabs should own a scroll container");
+            element
+        }
         TabsOverflowMode::More => Flex::new(axis)
             .style_full_with_style_sheet({
                 let style = style.clone();
@@ -424,92 +454,134 @@ struct TabTriggerSpec {
     disabled: Value<bool>,
 }
 
-fn build_triggers<VM: 'static>(
-    group_id: WidgetId,
+#[derive(Clone)]
+enum TabTriggerEntry {
+    Tab {
+        item: TabTriggerSpec,
+        tab_stop: bool,
+    },
+    More(Vec<TabTriggerSpec>),
+}
+
+impl TabTriggerEntry {
+    fn stable_key(&self) -> String {
+        match self {
+            Self::Tab { item, .. } => format!("__tgui_tab_trigger_tab_{}", item.key),
+            Self::More(_) => "__tgui_tab_trigger_more".to_string(),
+        }
+    }
+}
+
+fn tab_trigger_entries(
     specs: &[TabTriggerSpec],
+    selected: &str,
+    overflow_mode: TabsOverflowMode,
+) -> Vec<TabTriggerEntry> {
+    let enabled = specs
+        .iter()
+        .map(|spec| !spec.disabled.resolve())
+        .collect::<Vec<_>>();
+    let tab_stop_index = specs
+        .iter()
+        .enumerate()
+        .find_map(|(index, spec)| (enabled[index] && spec.key == selected).then_some(spec.index))
+        .or_else(|| {
+            specs
+                .iter()
+                .enumerate()
+                .find_map(|(index, spec)| enabled[index].then_some(spec.index))
+        });
+    let visibility_selection = tab_stop_index
+        .and_then(|index| specs.iter().find(|spec| spec.index == index))
+        .map(|spec| spec.key.as_str())
+        .unwrap_or(selected);
+    let (visible, overflow) = split_tabs_for_overflow(specs, visibility_selection, overflow_mode);
+    let mut entries = visible
+        .into_iter()
+        .cloned()
+        .map(|item| TabTriggerEntry::Tab {
+            tab_stop: Some(item.index) == tab_stop_index,
+            item,
+        })
+        .collect::<Vec<_>>();
+    if !overflow.is_empty() {
+        entries.push(TabTriggerEntry::More(
+            overflow.into_iter().cloned().collect(),
+        ));
+    }
+    entries
+}
+
+fn build_tab_trigger<VM: 'static>(
+    group_id: WidgetId,
+    scroll_container_id: Option<WidgetId>,
+    item: &TabTriggerSpec,
+    tab_stop: bool,
     selected: &Value<String>,
     placement: TabPlacement,
-    overflow_mode: TabsOverflowMode,
     reorderable: Value<bool>,
     style: Option<StyleResolver<TabsStyle>>,
     on_change: Option<ValueCommand<VM, (String, String)>>,
     on_reorder: Option<ValueCommand<VM, TabsReorderEvent>>,
-) -> Vec<Element<VM>> {
-    let initial_selected = selected.resolve_untracked();
-    let (visible_specs, overflow_specs) =
-        split_tabs_for_overflow(specs, &initial_selected, overflow_mode);
-    let mut triggers =
-        Vec::with_capacity(visible_specs.len() + usize::from(!overflow_specs.is_empty()));
-    for item in visible_specs {
-        let active = tab_active_value(selected, &item.key);
-        let trigger_style = style.clone();
-        let mut button = Button::new(item.label.clone())
-            .ghost()
-            .disable(item.disabled.clone())
-            .runtime_layout(move |layout, context, style_sheet, visual| {
-                let resolved = resolve_tabs_style_with_sheet(
-                    trigger_style.as_ref(),
-                    context,
-                    style_sheet,
-                    visual,
-                    WidgetState::default(),
-                );
-                layout.min_width = Some(Value::Static(Length::Px(resolved.tab_min_width)));
-            })
-            .style_full_with_style_sheet({
-                let style = style.clone();
-                let active = active.clone();
-                move |context, style_sheet, visual, state| {
-                    tab_button_style(
-                        resolve_tabs_style_with_sheet(
-                            style.as_ref(),
-                            context,
-                            style_sheet,
-                            visual,
-                            state,
-                        ),
+) -> Element<VM> {
+    let active = tab_active_value(selected, &item.key);
+    let trigger_style = style.clone();
+    let mut button = Button::new(item.label.clone())
+        .ghost()
+        .disable(item.disabled.clone())
+        .runtime_layout(move |layout, context, style_sheet, visual| {
+            let resolved = resolve_tabs_style_with_sheet(
+                trigger_style.as_ref(),
+                context,
+                style_sheet,
+                visual,
+                WidgetState::default(),
+            );
+            layout.min_width = Some(Value::Static(Length::Px(resolved.tab_min_width)));
+        })
+        .style_full_with_style_sheet({
+            let style = style.clone();
+            let active = active.clone();
+            move |context, style_sheet, visual, state| {
+                tab_button_style(
+                    resolve_tabs_style_with_sheet(
+                        style.as_ref(),
                         context,
-                        active.clone(),
-                    )
-                }
-            });
-        if let Some(command) = on_change.clone() {
-            let key = item.key.clone();
-            let label = item.label.clone();
-            button = button.on_click(Command::new_with_context(
-                move |vm: &mut VM, ctx: &CommandContext<VM>| {
-                    command.execute_with_context(vm, (key.clone(), label.clone()), ctx);
-                },
-            ));
-        }
-
-        let mut element: Element<VM> = button.into();
-        element.focus.focusable = Some(true);
-        element.focus.tab_index = Some(0);
-        element = element.with_tab_trigger_state(TabTriggerState {
-            group_id,
-            index: item.index,
-            placement,
-            key: item.key.clone(),
-            label: item.label.clone(),
-            selected: selected.clone(),
-            active,
-            on_change: on_change.clone(),
-            reorderable: reorderable.clone(),
-            on_reorder: on_reorder.clone(),
+                        style_sheet,
+                        visual,
+                        state,
+                    ),
+                    context,
+                    active.clone(),
+                )
+            }
         });
-        triggers.push(element);
-    }
-    if !overflow_specs.is_empty() {
-        triggers.push(build_more_trigger(
-            overflow_specs,
-            selected,
-            placement,
-            style,
-            on_change,
+    if let Some(command) = on_change.clone() {
+        let key = item.key.clone();
+        let label = item.label.clone();
+        button = button.on_click(Command::new_with_context(
+            move |vm: &mut VM, ctx: &CommandContext<VM>| {
+                command.execute_with_context(vm, (key.clone(), label.clone()), ctx);
+            },
         ));
     }
-    triggers
+
+    let mut element: Element<VM> = button.into();
+    element.focus.focusable = Some(true);
+    element.focus.tab_index = Some(if tab_stop { 0 } else { -1 });
+    element.with_tab_trigger_state(TabTriggerState {
+        group_id,
+        scroll_container_id,
+        index: item.index,
+        placement,
+        key: item.key.clone(),
+        label: item.label.clone(),
+        selected: selected.clone(),
+        active,
+        on_change,
+        reorderable,
+        on_reorder,
+    })
 }
 
 fn split_tabs_for_overflow<'a>(
@@ -549,7 +621,7 @@ fn split_tabs_for_overflow<'a>(
 }
 
 fn build_more_trigger<VM: 'static>(
-    overflow_specs: Vec<&TabTriggerSpec>,
+    overflow_specs: Vec<TabTriggerSpec>,
     selected: &Value<String>,
     placement: TabPlacement,
     style: Option<StyleResolver<TabsStyle>>,
@@ -673,7 +745,8 @@ fn build_panel<VM: 'static>(
             .focus_scope(
                 FocusScopeOptions::new()
                     .active(active)
-                    .suppress_interactions_when_inactive(),
+                    .suppress_interactions_when_inactive()
+                    .hide_from_accessibility_when_inactive(),
             )
             .child(item.panel);
         panel = panel.child(slot);
@@ -892,6 +965,31 @@ mod tests {
     use super::*;
     use crate::foundation::color::Color;
     use crate::ui::theme::Theme;
+
+    #[test]
+    fn overflow_entry_key_does_not_collide_with_a_tab_named_more() {
+        let specs = ["more", "two", "three", "four", "five"]
+            .into_iter()
+            .enumerate()
+            .map(|(index, key)| TabTriggerSpec {
+                index,
+                key: key.to_string(),
+                label: key.to_string(),
+                disabled: Value::Static(false),
+            })
+            .collect::<Vec<_>>();
+        let keys = tab_trigger_entries(&specs, "five", TabsOverflowMode::More)
+            .iter()
+            .map(TabTriggerEntry::stable_key)
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            keys.len(),
+            keys.iter().collect::<std::collections::HashSet<_>>().len()
+        );
+        assert!(keys.iter().any(|key| key == "__tgui_tab_trigger_tab_more"));
+        assert!(keys.iter().any(|key| key == "__tgui_tab_trigger_more"));
+    }
 
     #[test]
     fn active_tab_tokens_override_hover_and_pressed_while_inactive_tabs_remain_stateful() {

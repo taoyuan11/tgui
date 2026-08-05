@@ -430,7 +430,8 @@ fn finalize_portal_entry<VM>(
 
     let origin = Point::new(solved.rect.x, solved.rect.y);
     let content_clip = match &entry.content {
-        OverlayContent::Batch { clip_rect, .. } => clip_rect
+        OverlayContent::Batch { clip_rect, .. }
+        | OverlayContent::AccessibleBatch { clip_rect, .. } => clip_rect
             .map(|clip| translate_rect(clip, origin))
             .or(Some(solved.clip_rect)),
         OverlayContent::Scene(_) | OverlayContent::SceneWithPrimitives { .. } => {
@@ -465,20 +466,28 @@ fn finalize_portal_entry<VM>(
         }
     }
 
-    let (primitives, hits, nested_scene, nested_scene_offset) = match entry.content {
-        OverlayContent::Primitives(primitives) => (primitives, Vec::new(), None, Point::ZERO),
-        OverlayContent::Hits(hits) => (Vec::new(), hits, None, Point::ZERO),
+    let (primitives, hits, nested_scene, nested_scene_offset, accessibility_fragment) = match entry
+        .content
+    {
+        OverlayContent::Primitives(primitives) => (primitives, Vec::new(), None, Point::ZERO, None),
+        OverlayContent::Hits(hits) => (Vec::new(), hits, None, Point::ZERO, None),
         OverlayContent::Batch {
             primitives,
             hits,
             clip_rect: _,
-        } => (primitives, hits, None, Point::ZERO),
-        OverlayContent::Scene(scene) => (Vec::new(), Vec::new(), Some(scene), Point::ZERO),
+        } => (primitives, hits, None, Point::ZERO, None),
+        OverlayContent::AccessibleBatch {
+            primitives,
+            hits,
+            clip_rect: _,
+            fragment,
+        } => (primitives, hits, None, Point::ZERO, Some(fragment)),
+        OverlayContent::Scene(scene) => (Vec::new(), Vec::new(), Some(scene), Point::ZERO, None),
         OverlayContent::SceneWithPrimitives {
             scene,
             scene_offset,
             primitives,
-        } => (primitives, Vec::new(), Some(scene), scene_offset),
+        } => (primitives, Vec::new(), Some(scene), scene_offset, None),
     };
 
     for prim in primitives {
@@ -550,6 +559,18 @@ fn finalize_portal_entry<VM>(
         {
             bucket.hits.push(hit);
         }
+    }
+
+    if let Some(fragment) = accessibility_fragment {
+        bucket
+            .accessibility_fragments
+            .push(translate_accessibility_fragment(
+                fragment,
+                origin,
+                entry.overlay_id,
+                overlay_scope_path.as_ref(),
+                content_clip,
+            ));
     }
 
     if let Some(scene) = nested_scene {

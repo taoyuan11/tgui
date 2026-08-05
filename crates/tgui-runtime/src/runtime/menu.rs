@@ -18,8 +18,8 @@ use crate::foundation::view_model::ValueCommand;
 use crate::platform::keyboard::{Key, KeyCode, ModifiersState};
 use crate::runtime::overlay::OverlayLayer;
 use crate::ui::widget::{
-    menu_item_state_owner, HitInteraction, KeyChord, MenuItemKind, MenuItemState, Rect, WidgetId,
-    WidgetStateMap,
+    menu_item_state_owner, GesturePhase, GestureSource, HitInteraction, KeyChord, LongPressEvent,
+    MenuItemKind, MenuItemState, Rect, ResolvedWidgetKind, WidgetId, WidgetStateMap,
 };
 use smallvec::SmallVec;
 
@@ -35,6 +35,61 @@ pub(super) struct MenuKeyboardItem<VM> {
 }
 
 impl<VM: 'static> BoundRuntimeHandler<VM> {
+    pub(super) fn menu_trigger_ancestor(&self, mut widget_id: WidgetId) -> Option<WidgetId> {
+        let layout = self.cached_scene.as_ref()?.layout.as_ref()?;
+        loop {
+            if layout
+                .resolved_widget(widget_id)
+                .and_then(|resolved| resolved.menu.as_ref())
+                .is_some_and(|menu| !menu.disabled.resolve())
+            {
+                return Some(widget_id);
+            }
+            widget_id = layout.parent_of(widget_id)?;
+        }
+    }
+
+    pub(super) fn context_menu_trigger_ancestor(
+        &self,
+        mut widget_id: WidgetId,
+    ) -> Option<WidgetId> {
+        let layout = self.cached_scene.as_ref()?.layout.as_ref()?;
+        loop {
+            if layout
+                .resolved_widget(widget_id)
+                .and_then(|resolved| resolved.context_menu.as_ref())
+                .is_some_and(|menu| !menu.disabled.resolve())
+            {
+                return Some(widget_id);
+            }
+            widget_id = layout.parent_of(widget_id)?;
+        }
+    }
+
+    pub(super) fn is_menu_layer_source(&self, widget_id: WidgetId) -> bool {
+        self.cached_scene
+            .as_ref()
+            .and_then(|cached| cached.layout.as_ref())
+            .and_then(|layout| layout.resolved_widget(widget_id))
+            .is_some_and(|resolved| resolved.menu.is_some() || resolved.context_menu.is_some())
+    }
+
+    pub(super) fn close_menu_source_for_activation(&mut self, widget_id: WidgetId) -> bool {
+        if self.close_context_menu(widget_id) {
+            return true;
+        }
+        if self
+            .cached_scene
+            .as_ref()
+            .and_then(|cached| cached.layout.as_ref())
+            .and_then(|layout| layout.resolved_widget(widget_id))
+            .is_some_and(|resolved| resolved.menu.is_some())
+        {
+            return self.set_menu_open_state(widget_id, false);
+        }
+        false
+    }
+
     pub(in crate::runtime) fn resolved_menu_open_state(&self, menu_id: WidgetId) -> bool {
         let Some(cached) = self.cached_scene.as_ref() else {
             return self
@@ -86,7 +141,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         menu_id: WidgetId,
         open: bool,
     ) -> bool {
-        let Some((is_controlled, group_index, on_open_change)) = self
+        let Some((is_controlled, group_index, disabled, on_open_change)) = self
             .cached_scene
             .as_ref()
             .and_then(|cached| cached.layout.as_ref())
@@ -98,21 +153,29 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     menu.menubar_group
                         .zip(menu.menubar_index)
                         .map(|(group, index)| (group.raw(), index)),
+                    menu.disabled.resolve(),
                     menu.on_open_change.clone(),
                 )
             })
         else {
             return false;
         };
+        if open && disabled {
+            return false;
+        }
         let previous = self.resolved_menu_open_state(menu_id);
         if previous == open {
             return false;
         }
 
         if is_controlled {
-            if let Some(command) = on_open_change.as_ref() {
-                self.execute_value_command(command, open);
+            let Some(command) = on_open_change.as_ref() else {
+                return false;
+            };
+            if !open {
+                self.menu_keyboard_cursor.remove(&menu_id);
             }
+            self.execute_value_command(command, open);
         } else if let Some((group, index)) = group_index {
             self.menubar_active_states
                 .insert(group, open.then_some(index));
@@ -123,6 +186,11 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             self.menu_keyboard_cursor.remove(&menu_id);
         }
         self.invalidate_scene_with_reason("menu_open_state");
+        if !is_controlled {
+            if let Some(command) = on_open_change.as_ref() {
+                self.execute_value_command(command, open);
+            }
+        }
         true
     }
 
@@ -136,37 +204,120 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         widget_id: WidgetId,
         position: crate::ui::widget::Point,
     ) -> bool {
-        self.context_menu_anchor_states.insert(widget_id, position);
-        if let Some(command) = self
+        self.open_context_menu_with_event(LongPressEvent {
+            widget_id,
+            source: GestureSource::Mouse,
+            phase: GesturePhase::Recognized,
+            start_position: position,
+            position,
+            finger_id: None,
+        })
+    }
+
+    pub(in crate::runtime) fn open_context_menu_with_event(
+        &mut self,
+        event: LongPressEvent,
+    ) -> bool {
+        self.open_context_menu_at_anchor(event.widget_id, event.position, Some(event))
+    }
+
+    pub(in crate::runtime) fn open_context_menu_semantically(
+        &mut self,
+        target_widget_id: WidgetId,
+    ) -> bool {
+        let Some(widget_id) = self.context_menu_trigger_ancestor(target_widget_id) else {
+            return false;
+        };
+        let Some(position) = self.context_menu_semantic_anchor(target_widget_id, widget_id) else {
+            return false;
+        };
+        self.open_context_menu_at_anchor(widget_id, position, None)
+    }
+
+    fn context_menu_semantic_anchor(
+        &self,
+        target_widget_id: WidgetId,
+        owner_widget_id: WidgetId,
+    ) -> Option<crate::ui::widget::Point> {
+        let cached = self.cached_scene.as_ref()?;
+        let layout = cached.layout.as_ref()?;
+        let bounds = cached
+            .computed
+            .hit_regions
+            .iter()
+            .chain(cached.computed.overlay_hit_regions.iter())
+            .find(|region| {
+                region.interaction.widget_id() == target_widget_id
+                    || region
+                        .focus
+                        .as_ref()
+                        .is_some_and(|focus| focus.widget_id == target_widget_id)
+            })
+            .map(|region| region.rect)
+            .or_else(|| layout.widget_bounds(target_widget_id))
+            .or_else(|| layout.widget_bounds(owner_widget_id))?;
+        Some(crate::ui::widget::Point::new(bounds.x, bounds.bottom()))
+    }
+
+    fn open_context_menu_at_anchor(
+        &mut self,
+        widget_id: WidgetId,
+        position: crate::ui::widget::Point,
+        event: Option<LongPressEvent>,
+    ) -> bool {
+        let Some((disabled, on_show, on_open_change)) = self
             .cached_scene
             .as_ref()
             .and_then(|cached| cached.layout.as_ref())
             .and_then(|layout| layout.resolved_widget(widget_id))
             .and_then(|resolved| resolved.context_menu.as_ref())
-            .and_then(|menu| menu.on_open_change.clone())
-        {
-            self.execute_value_command(&command, true);
+            .map(|menu| {
+                (
+                    menu.disabled.resolve(),
+                    menu.on_show.clone(),
+                    menu.on_open_change.clone(),
+                )
+            })
+        else {
+            return false;
+        };
+        if disabled {
+            return false;
         }
+
+        let was_open = self
+            .context_menu_anchor_states
+            .insert(widget_id, position)
+            .is_some();
         self.invalidate_scene_with_reason("context_menu_open_state");
+        if was_open {
+            return true;
+        }
+        if let (Some(command), Some(event)) = (on_show.as_ref(), event) {
+            self.execute_value_command(command, event);
+        }
+        if let Some(command) = on_open_change.as_ref() {
+            self.execute_value_command(command, true);
+        }
         true
     }
 
     pub(in crate::runtime) fn close_context_menu(&mut self, widget_id: WidgetId) -> bool {
-        if self.context_menu_anchor_states.remove(&widget_id).is_none() {
-            return false;
-        }
-        if let Some(command) = self
+        let on_open_change = self
             .cached_scene
             .as_ref()
             .and_then(|cached| cached.layout.as_ref())
             .and_then(|layout| layout.resolved_widget(widget_id))
             .and_then(|resolved| resolved.context_menu.as_ref())
-            .and_then(|menu| menu.on_open_change.clone())
-        {
-            self.execute_value_command(&command, false);
+            .and_then(|menu| menu.on_open_change.clone());
+        if self.context_menu_anchor_states.remove(&widget_id).is_none() {
+            return false;
         }
         self.menu_keyboard_cursor.remove(&widget_id);
         self.invalidate_scene_with_reason("context_menu_open_state");
+        if let Some(command) = on_open_change.as_ref() {
+            self.execute_value_command(command, false);
+        }
         true
     }
 
@@ -179,6 +330,41 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         for handle in cached.computed.overlay_close_handlers.iter().rev() {
             if handle.layer != OverlayLayer::Menu {
                 continue;
+            }
+            if let Some(source_id) = handle.source_widget_id {
+                let resolved_source = cached
+                    .layout
+                    .as_ref()
+                    .and_then(|layout| layout.resolved_widget(source_id));
+                if let Some(ResolvedWidgetKind::Select { open, .. }) =
+                    resolved_source.map(|resolved| &resolved.kind)
+                {
+                    let source_is_open = open
+                        .as_ref()
+                        .map(|open| open.resolve())
+                        .or_else(|| self.select_open_states.get(&source_id).copied())
+                        .unwrap_or(false);
+                    if source_is_open {
+                        // Select owns its own option navigation. Do not let the generic Menu
+                        // router consume its arrow/activation keys or reach an underlying menu.
+                        return None;
+                    }
+                    continue;
+                }
+                let source_is_open = resolved_source
+                    .map(|resolved| {
+                        if resolved.menu.is_some() {
+                            self.resolved_menu_open_state(source_id)
+                        } else if resolved.context_menu.is_some() {
+                            self.context_menu_anchor_states.contains_key(&source_id)
+                        } else {
+                            true
+                        }
+                    })
+                    .unwrap_or(true);
+                if !source_is_open {
+                    continue;
+                }
             }
             if let Some(target) = handle.return_focus_to {
                 return Some(target);
@@ -226,19 +412,11 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
 
     /// 沿 `path` 在 resolved menu 的 items 树里走到目标项（不含路径最末元素之外的更深）。
     /// path = [3, 1] → 返回 items[3].submenu[1]。失败返回 None。
-    fn menu_item_at_path<'a>(
-        &self,
-        menu_id: WidgetId,
-        path: &[usize],
-    ) -> Option<MenuItemSnapshot<VM>> {
-        let cached = self.cached_scene.as_ref()?;
-        let layout = cached.layout.as_ref()?;
-        let resolved = layout.resolved_widget(menu_id)?;
-        let menu = resolved.menu.as_ref()?;
+    fn menu_item_at_path(&self, menu_id: WidgetId, path: &[usize]) -> Option<MenuItemSnapshot<VM>> {
         if path.is_empty() {
             return None;
         }
-        let mut current = menu.items.get(path[0])?;
+        let mut current = self.menu_items(menu_id)?.get(path[0])?;
         for idx in &path[1..] {
             current = current.submenu.get(*idx)?;
         }
@@ -251,23 +429,83 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         })
     }
 
+    pub(super) fn activate_menu_accessibility_item(
+        &mut self,
+        menu_id: WidgetId,
+        path: &[usize],
+    ) -> bool {
+        let Some(snapshot) = self.menu_item_at_path(menu_id, path) else {
+            return false;
+        };
+        if snapshot.disabled {
+            return false;
+        }
+        if matches!(snapshot.kind, MenuItemKind::Submenu) && snapshot.has_submenu {
+            self.menu_keyboard_cursor.insert(menu_id, path.to_vec());
+            self.invalidate_computed_scene();
+            return true;
+        }
+        let _ = self.close_menu_source_for_activation(menu_id);
+        if let Some(command) = snapshot.on_select {
+            self.execute_command(&command);
+        }
+        true
+    }
+
+    pub(super) fn set_menu_accessibility_item_expanded(
+        &mut self,
+        menu_id: WidgetId,
+        path: &[usize],
+        expanded: bool,
+    ) -> bool {
+        let Some(snapshot) = self.menu_item_at_path(menu_id, path) else {
+            return false;
+        };
+        if snapshot.disabled
+            || !matches!(snapshot.kind, MenuItemKind::Submenu)
+            || !snapshot.has_submenu
+        {
+            return false;
+        }
+        if expanded {
+            self.menu_keyboard_cursor.insert(menu_id, path.to_vec());
+        } else if path.len() == 1 {
+            self.menu_keyboard_cursor.remove(&menu_id);
+        } else {
+            self.menu_keyboard_cursor
+                .insert(menu_id, path[..path.len() - 1].to_vec());
+        }
+        self.invalidate_computed_scene();
+        true
+    }
+
+    fn menu_items(&self, menu_id: WidgetId) -> Option<&[MenuItemState<VM>]> {
+        let resolved = self
+            .cached_scene
+            .as_ref()?
+            .layout
+            .as_ref()?
+            .resolved_widget(menu_id)?;
+        resolved
+            .menu
+            .as_ref()
+            .map(|menu| menu.items.as_slice())
+            .or_else(|| {
+                resolved
+                    .context_menu
+                    .as_ref()
+                    .map(|menu| menu.items.as_slice())
+            })
+    }
+
     /// 返回某菜单某层级（`parent_path` 指定）下所有可"游走"的索引：跳过 Separator
     /// 与 disabled 项。parent_path 空表示根菜单。
     fn selectable_indices(&self, menu_id: WidgetId, parent_path: &[usize]) -> SmallVec<[usize; 8]> {
-        let Some(cached) = self.cached_scene.as_ref() else {
-            return SmallVec::new();
-        };
-        let Some(layout) = cached.layout.as_ref() else {
-            return SmallVec::new();
-        };
-        let Some(resolved) = layout.resolved_widget(menu_id) else {
-            return SmallVec::new();
-        };
-        let Some(menu) = resolved.menu.as_ref() else {
+        let Some(root_items) = self.menu_items(menu_id) else {
             return SmallVec::new();
         };
         // 走到目标父级 items 列表。
-        let mut items: &[MenuItemState<VM>] = &menu.items;
+        let mut items = root_items;
         for idx in parent_path {
             let Some(parent) = items.get(*idx) else {
                 return SmallVec::new();
@@ -418,7 +656,8 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             .filter_map(|id| {
                 let resolved = layout.resolved_widget(id)?;
                 let menu = resolved.menu.as_ref()?;
-                (menu.menubar_group == Some(group)).then(|| menu.menubar_index)?
+                (menu.menubar_group == Some(group) && !menu.disabled.resolve())
+                    .then(|| menu.menubar_index)?
             })
             .collect::<SmallVec<[_; 8]>>();
         peers.sort();
@@ -463,19 +702,10 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             path[..path.len() - 1].to_vec()
         };
         // 在父级 items 列表里找匹配。
-        let Some(cached) = self.cached_scene.as_ref() else {
+        let Some(root_items) = self.menu_items(menu_id) else {
             return false;
         };
-        let Some(layout) = cached.layout.as_ref() else {
-            return false;
-        };
-        let Some(resolved) = layout.resolved_widget(menu_id) else {
-            return false;
-        };
-        let Some(menu) = resolved.menu.as_ref() else {
-            return false;
-        };
-        let mut items: &[MenuItemState<VM>] = &menu.items;
+        let mut items = root_items;
         for idx in &parent_path {
             let Some(parent) = items.get(*idx) else {
                 return false;
@@ -547,24 +777,12 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         if matches!(snapshot.kind, MenuItemKind::Submenu) && snapshot.has_submenu {
             return self.enter_submenu_or_advance_menubar(1);
         }
+        // Close while the resolved source is still available. Item commands may request a root
+        // rebuild, which intentionally drops the cached layout.
+        let _ = self.close_menu_source_for_activation(menu_id);
         if let Some(command) = snapshot.on_select {
             self.execute_command(&command);
         }
-        // on_open_change 在 menu descriptor 上，不在 item 上；从顶层 menu 取并触发关闭。
-        let close_cmd = self
-            .cached_scene
-            .as_ref()
-            .and_then(|cached| cached.layout.as_ref())
-            .and_then(|layout| layout.resolved_widget(menu_id))
-            .and_then(|el| el.menu.as_ref())
-            .and_then(|m| m.on_open_change.clone());
-        if let Some(close) = close_cmd {
-            self.execute_value_command(&close, false);
-        } else {
-            let _ = self.set_menu_open_state(menu_id, false);
-        }
-        self.menu_keyboard_cursor.remove(&menu_id);
-        self.invalidate_computed_scene();
         true
     }
 
@@ -578,7 +796,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 .overlay_close_handlers
                 .iter()
                 .filter(|h| h.layer == OverlayLayer::Menu)
-                .map(|h| WidgetId::from_raw(h.overlay_id.0))
+                .filter_map(|h| h.source_widget_id)
                 .collect::<SmallVec<[_; 4]>>()
         } else {
             SmallVec::new()
@@ -621,10 +839,20 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 continue;
             };
             if let Some(menu) = resolved.menu.as_ref() {
-                collect_shortcut_matches(&menu.items, mods, key, code, &mut matched_commands);
+                if !menu.disabled.resolve() {
+                    collect_shortcut_matches(&menu.items, mods, key, code, &mut matched_commands);
+                }
             }
             if let Some(ctx_menu) = resolved.context_menu.as_ref() {
-                collect_shortcut_matches(&ctx_menu.items, mods, key, code, &mut matched_commands);
+                if !ctx_menu.disabled.resolve() {
+                    collect_shortcut_matches(
+                        &ctx_menu.items,
+                        mods,
+                        key,
+                        code,
+                        &mut matched_commands,
+                    );
+                }
             }
         }
         if matched_commands.is_empty() {

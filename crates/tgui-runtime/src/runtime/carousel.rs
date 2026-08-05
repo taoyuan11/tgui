@@ -11,6 +11,7 @@ struct CarouselAutoPlaySnapshot {
     selected: usize,
     count: usize,
     interval: Duration,
+    disabled: bool,
     has_on_change: bool,
 }
 
@@ -29,6 +30,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                         selected: state.selected.resolve_untracked(),
                         count: state.count,
                         interval: state.interval,
+                        disabled: state.disabled.resolve_untracked(),
                         has_on_change: state.on_change.is_some(),
                     })
                     .collect::<SmallVec<[_; 2]>>()
@@ -49,18 +51,39 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
 
         let mut next_deadline: Option<Instant> = None;
         let cursor_position = self.cursor_position;
+        let focused_ancestors = self
+            .focused_widget_id()
+            .and_then(|focused_id| {
+                let layout = self.cached_scene.as_ref()?.layout.as_ref()?;
+                let mut ancestors = SmallVec::<[WidgetId; 8]>::new();
+                let mut current = Some(focused_id);
+                while let Some(widget_id) = current {
+                    ancestors.push(widget_id);
+                    current = layout.parent_of(widget_id);
+                }
+                Some(ancestors)
+            })
+            .unwrap_or_default();
         let mut due_targets = SmallVec::<[(WidgetId, usize); 2]>::new();
 
         for state in &snapshots {
-            if state.count < 2 || state.interval == Duration::ZERO || !state.has_on_change {
+            if state.disabled
+                || state.count < 2
+                || state.interval == Duration::ZERO
+                || !state.has_on_change
+            {
+                self.carousel_auto_play_last.remove(&state.id);
                 continue;
             }
 
             let paused = cursor_position
                 .map(|position| state.frame.contains(position))
-                .unwrap_or(false);
+                .unwrap_or(false)
+                || focused_ancestors.contains(&state.id);
             if paused {
-                self.carousel_auto_play_last.insert(state.id, now);
+                // Removing the clock makes resume start a fresh interval. Keeping the previous
+                // timestamp would make a long hover/disabled pause advance immediately on exit.
+                self.carousel_auto_play_last.remove(&state.id);
                 continue;
             }
 

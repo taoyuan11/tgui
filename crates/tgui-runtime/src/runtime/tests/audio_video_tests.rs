@@ -194,6 +194,36 @@ fn audio_widget_mount_autoplay_and_looping_do_not_reload_controller_source() {
 
 #[cfg(feature = "audio")]
 #[test]
+fn audio_widget_autoplay_and_looping_signals_update_the_existing_tree() {
+    let invalidation = InvalidationSignal::new();
+    let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+    let autoplay = context.state(false);
+    let looping = context.state(false);
+    let (controller, _shared, recorded) = test_audio_controller();
+    let tree = WidgetTree::new(
+        Audio::new(controller)
+            .autoplay(autoplay.signal())
+            .looping(looping.signal()),
+    );
+    let mut handler = test_handler_with_vm(AudioEventVm::default(), Some(tree), invalidation);
+
+    handler.invalidation.mark_dirty();
+    dispatch_lifecycle_if_dirty(&mut handler);
+    looping.set(true);
+    dispatch_lifecycle_if_dirty(&mut handler);
+    autoplay.set(true);
+    dispatch_lifecycle_if_dirty(&mut handler);
+    autoplay.set(false);
+    looping.set(false);
+    dispatch_lifecycle_if_dirty(&mut handler);
+
+    let recorded = recorded.lock().expect("audio commands lock poisoned");
+    assert_eq!(recorded.loopings, vec![false, true, false]);
+    assert_eq!(recorded.commands, vec!["play"]);
+}
+
+#[cfg(feature = "audio")]
+#[test]
 fn audio_widget_controller_change_stops_previous_and_autoplays_new_controller() {
     let invalidation = InvalidationSignal::new();
     let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());

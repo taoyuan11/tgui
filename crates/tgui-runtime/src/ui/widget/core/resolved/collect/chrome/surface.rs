@@ -248,6 +248,7 @@ impl<VM> ResolvedElement<VM> {
                     HitInteraction::TabTrigger {
                         id: self.id,
                         group_id: trigger.group_id,
+                        scroll_container_id: trigger.scroll_container_id,
                         index: trigger.index,
                         placement: trigger.placement,
                         key: trigger.key.clone(),
@@ -297,6 +298,12 @@ impl<VM> ResolvedElement<VM> {
                         focusable: fallback_focusable,
                         default_activation: match self.kind {
                             ResolvedWidgetKind::Button { .. } => DefaultActivation::EnterAndSpace,
+                            _ if self.visual.accessibility_role
+                                == Some(crate::ui::widget::AccessibilityRole::Link)
+                                && keyboard_click_activation =>
+                            {
+                                DefaultActivation::Enter
+                            }
                             _ if keyboard_click_activation => DefaultActivation::EnterAndSpace,
                             _ => DefaultActivation::None,
                         },

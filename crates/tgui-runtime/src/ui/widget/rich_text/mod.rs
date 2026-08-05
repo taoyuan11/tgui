@@ -15,7 +15,7 @@ use super::p3_support::{
 use super::style::{
     ContainerStyle, ImageStyle, RichTextStyle, StyleResolver, StyleSheet, TextWidgetStyle,
 };
-use super::{CursorStyle, Flex, Image, Stack, Text, WidgetKey};
+use super::{AccessibilityRole, CursorStyle, Flex, For, Image, Stack, Text, WidgetKey};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct RichTextLinkClick {
@@ -79,18 +79,22 @@ impl<VM> RichText<VM> {
 
 impl<VM: 'static> From<RichText<VM>> for Element<VM> {
     fn from(rich: RichText<VM>) -> Self {
-        let blocks = markdown_blocks(&rich.markdown.resolve());
-        let children = blocks
-            .into_iter()
-            .map(|block| {
+        let blocks = rich_text_blocks(rich.markdown);
+        let block_style = rich.style.clone();
+        let block_on_link_click = rich.on_link_click.clone();
+        let block_visual = rich.visual.clone();
+        let children = For::new(
+            blocks,
+            |(index, _)| format!("__tgui_rich_text_block_{index}"),
+            move |_index, (_, block)| {
                 rich_block_element(
-                    block,
-                    rich.style.clone(),
-                    rich.on_link_click.clone(),
-                    rich.visual.clone(),
+                    block.clone(),
+                    block_style.clone(),
+                    block_on_link_click.clone(),
+                    block_visual.clone(),
                 )
-            })
-            .collect::<Vec<_>>();
+            },
+        );
         let runtime_style = rich.style.clone();
         let mut root: Element<VM> = Flex::vertical()
             .gap(dp(0.0))
@@ -110,6 +114,14 @@ impl<VM: 'static> From<RichText<VM>> for Element<VM> {
         root = with_visual_identity(root, &rich.visual);
         root.layout = merge_layout(root.layout, rich.layout);
         root
+    }
+}
+
+fn rich_text_blocks(markdown: Value<String>) -> Value<Vec<(usize, RichBlock)>> {
+    let parse = |markdown: String| markdown_blocks(&markdown).into_iter().enumerate().collect();
+    match markdown {
+        Value::Static(markdown) => Value::Static(parse(markdown)),
+        Value::Signal(signal) => Value::Signal(signal.map(parse)),
     }
 }
 
@@ -377,15 +389,18 @@ fn rich_block_element<VM: 'static>(
                 &visual_identity,
             )
         }
-        RichBlock::Image(image) => with_visual_identity(
-            Image::new(image.source)
+        RichBlock::Image(image) => {
+            let mut element: Element<VM> = Image::new(image.source)
                 .height(dp(160.0))
                 .style_full_with_style_sheet(|context, _style_sheet, _visual, _state| {
                     ImageStyle::default_for_theme(context.theme)
                 })
-                .into(),
-            &visual_identity,
-        ),
+                .into();
+            if !image.alt.is_empty() {
+                element.visual.accessibility_label = Some(Value::Static(image.alt));
+            }
+            with_visual_identity(element, &visual_identity)
+        }
     }
 }
 
@@ -512,43 +527,44 @@ fn rich_inline_row_with_style<VM: 'static>(
                 &visual_identity,
             ),
             RichInline::Link { href, label } => {
-                let command = on_link_click.clone();
-                with_visual_identity(
-                    Text::new(label.clone())
-                        .cursor(CursorStyle::Pointer)
-                        .style_full_with_style_sheet({
-                            let style = link_style.clone();
-                            move |context, style_sheet, visual, state| {
-                                let resolved = resolve_rich_text_style_with_sheet(
-                                    style.as_ref(),
-                                    context,
-                                    style_sheet,
-                                    visual,
-                                    state,
-                                );
-                                TextWidgetStyle {
-                                    surface: Default::default(),
-                                    color: resolved.link,
-                                    typography: resolved.text_style,
-                                }
-                            }
-                        })
+                let text = Text::new(label.clone()).style_full_with_style_sheet({
+                    let style = link_style.clone();
+                    move |context, style_sheet, visual, state| {
+                        let resolved = resolve_rich_text_style_with_sheet(
+                            style.as_ref(),
+                            context,
+                            style_sheet,
+                            visual,
+                            state,
+                        );
+                        TextWidgetStyle {
+                            surface: Default::default(),
+                            color: resolved.link,
+                            typography: resolved.text_style,
+                        }
+                    }
+                });
+                let mut element: Element<VM> = if let Some(command) = on_link_click.clone() {
+                    text.cursor(CursorStyle::Pointer)
                         .on_click(Command::new_with_context(move |vm, context| {
-                            if let Some(command) = command.as_ref() {
-                                command.execute_with_context(
-                                    vm,
-                                    RichTextLinkClick {
-                                        href: href.clone(),
-                                        label: label.clone(),
-                                    },
-                                    context,
-                                );
-                            }
+                            command.execute_with_context(
+                                vm,
+                                RichTextLinkClick {
+                                    href: href.clone(),
+                                    label: label.clone(),
+                                },
+                                context,
+                            );
                         }))
                         .focusable(true)
-                        .tab_index(0),
-                    &visual_identity,
-                )
+                        .tab_index(0)
+                } else {
+                    text.into()
+                };
+                if element.interactions.on_click.is_some() {
+                    element.visual.accessibility_role = Some(AccessibilityRole::Link);
+                }
+                with_visual_identity(element, &visual_identity)
             }
         })
         .collect::<Vec<Element<VM>>>();

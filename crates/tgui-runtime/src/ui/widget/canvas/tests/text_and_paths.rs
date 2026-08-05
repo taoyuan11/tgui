@@ -202,3 +202,16 @@ fn source_rect_is_normalized_and_converted_to_uv() {
     assert_eq!(normalized, Rect::new(0.0, 10.0, 60.0, 90.0));
     assert_eq!(uv, Rect::new(0.0, 0.1, 0.3, 0.9));
 }
+
+#[test]
+fn canvas_unit_values_normalize_non_finite_input() {
+    assert_eq!(super::super::normalized_unit_interval(f32::NAN), 0.0);
+    assert_eq!(
+        CanvasGradientStop::new(f32::INFINITY, Color::WHITE).offset,
+        0.0
+    );
+    assert_eq!(
+        CanvasColorFilter::tint(Color::WHITE, f32::NAN),
+        CanvasColorFilter::IDENTITY
+    );
+}

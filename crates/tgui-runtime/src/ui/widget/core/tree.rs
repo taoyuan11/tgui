@@ -134,6 +134,15 @@ fn element_may_have_media_event_handlers<VM>(element: &Element<VM>) -> bool {
     if element.media_events.has_any() {
         return true;
     }
+    if element.tooltip.as_ref().is_some_and(|tooltip| {
+        matches!(
+            &tooltip.content,
+            crate::ui::widget::tooltip::TooltipContent::Element(content)
+                if element_may_have_media_event_handlers(content)
+        )
+    }) {
+        return true;
+    }
 
     match &element.kind {
         WidgetKind::Container { children, .. } => children.iter().any(|source| match source {
@@ -160,6 +169,7 @@ fn element_may_have_media_event_handlers<VM>(element: &Element<VM>) -> bool {
         // Virtual item sources resolve runtime-owned children, so their
         // handler capability cannot be proven empty from the root element.
         WidgetKind::Virtual { .. } => true,
+        WidgetKind::Portal { content, .. } => element_may_have_media_event_handlers(content),
         _ => false,
     }
 }

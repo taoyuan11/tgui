@@ -459,12 +459,15 @@ impl<VM: 'static> From<Modal<VM>> for Element<VM> {
                 FocusScopeOptions::new()
                     .trap(true)
                     .auto_focus_first(auto_focus_first)
+                    .suppress_interactions_when_inactive()
+                    .hide_from_accessibility_when_inactive()
                     .active(open.clone()),
             )
             .child(backdrop_element)
             .child(card_element);
 
         let mut outer_element: Element<VM> = outer.into();
+        outer_element.visual.accessibility_label = title;
         outer_element.modal = Some(Box::new(ModalDescriptor {
             open,
             on_open_change,

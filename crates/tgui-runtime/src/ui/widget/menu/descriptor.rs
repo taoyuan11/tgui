@@ -15,6 +15,7 @@ use crate::ui::widget::overlay::{FlipPolicy, Placement};
 use crate::ui::widget::style::{MenuStyle, StyleResolver};
 
 use super::types::{KeyChord, MenuBarGroupId, MenuIcon, MenuItem, MenuItemKind};
+use crate::ui::widget::LongPressEvent;
 
 /// Menu / ContextMenu 内部存储的运行时项状态。所有 `Command<VM>` 已 scope 完毕。
 pub(crate) struct MenuItemState<VM> {
@@ -176,6 +177,7 @@ impl<VM> MenuDescriptor<VM> {
 ///   而非 widget frame。
 pub struct ContextMenuDescriptor<VM> {
     pub(crate) items: Vec<MenuItemState<VM>>,
+    pub(crate) on_show: Option<ValueCommand<VM, LongPressEvent>>,
     pub(crate) on_open_change: Option<ValueCommand<VM, bool>>,
     pub(crate) disabled: Value<bool>,
     pub(crate) style: Option<StyleResolver<MenuStyle>>,
@@ -185,6 +187,7 @@ impl<VM> Clone for ContextMenuDescriptor<VM> {
     fn clone(&self) -> Self {
         Self {
             items: self.items.clone(),
+            on_show: self.on_show.clone(),
             on_open_change: self.on_open_change.clone(),
             disabled: self.disabled.clone(),
             style: self.style.clone(),
@@ -206,6 +209,7 @@ impl<VM> ContextMenuDescriptor<VM> {
                 .into_iter()
                 .map(|item| item.scope(selector.clone()))
                 .collect(),
+            on_show: self.on_show.map(|cmd| cmd.scope(selector.clone())),
             on_open_change: self.on_open_change.map(|cmd| cmd.scope(selector)),
             disabled: self.disabled,
             style: self.style,

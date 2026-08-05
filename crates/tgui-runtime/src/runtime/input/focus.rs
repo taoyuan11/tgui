@@ -469,6 +469,28 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         Some(candidate.is_text_input || snapshot.text_input_widgets.contains(&widget_id))
     }
 
+    fn cached_scene_focus_target_is_text_input(&self, widget_id: WidgetId) -> Option<bool> {
+        let computed = &self.cached_scene.as_ref()?.computed;
+        let regions = computed
+            .hit_regions
+            .iter()
+            .chain(computed.overlay_hit_regions.iter());
+        let has_focus = regions.clone().any(|region| {
+            region
+                .focus
+                .as_ref()
+                .is_some_and(|focus| focus.widget_id == widget_id)
+        });
+        has_focus.then(|| {
+            regions.clone().any(|region| {
+                matches!(
+                    &region.interaction,
+                    HitInteraction::TextInput { id, .. } if *id == widget_id
+                )
+            })
+        })
+    }
+
     #[cfg(any(test, feature = "bench-support"))]
     pub(in crate::runtime) fn focus_navigation_cache_stats(&self) -> (u64, u64, u64) {
         (
@@ -481,6 +503,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
     pub(in crate::runtime) fn clear_focus_after_scene_target_removed(&mut self) {
         self.accessibility_focused_node = None;
         self.active_key_repeat = None;
+        self.focused_overlay_return_target = None;
         let previous = self.focused_widget.take();
         self.focus_visible = false;
         let Some(previous) = previous else {
@@ -811,6 +834,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         )
     }
 
+    #[cfg(any(test, feature = "bench-support"))]
     pub(in crate::runtime) fn focusable_widgets_in_tab_order(&mut self) -> Vec<FocusedWidget<VM>> {
         self.ensure_focus_navigation_cache();
         let candidates = self
@@ -892,11 +916,15 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             .as_ref()
             .map(|focused| focused.widget_id);
         let next_id = next_widget.as_ref().map(|focused| focused.widget_id);
+        let next_overlay_return_target = next_widget.as_ref().and_then(|focused| {
+            self.overlay_return_focus_target_for_widget(focused.widget_id, &focused.scope_path)
+        });
         // The focus navigation snapshot carries the text-input bit for every keyboard focus
         // target.  Use it to keep ordinary focus transitions entirely out of the scene collector;
         // only an unknown target falls back to the exact region lookup.
         let previous_text_input = current_id.and_then(|widget_id| {
             self.cached_focus_target_is_text_input(widget_id)
+                .or_else(|| self.cached_scene_focus_target_is_text_input(widget_id))
                 .or_else(|| {
                     self.cached_scene
                         .as_ref()
@@ -906,6 +934,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         });
         let next_text_input = next_id.and_then(|widget_id| {
             self.cached_focus_target_is_text_input(widget_id)
+                .or_else(|| self.cached_scene_focus_target_is_text_input(widget_id))
                 .or_else(|| {
                     self.cached_scene
                         .as_ref()
@@ -916,14 +945,15 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         let previous_single_line_input = match previous_text_input {
             Some(true) => current_id.and_then(|widget_id| {
                 self.cached_text_input_region_data(widget_id)
-                    .or_else(|| self.text_input_region_data(widget_id))
+                    .or_else(|| self.text_input_region_data_from_cached_scene(widget_id))
                     .map(|region| (widget_id, region))
                     .filter(|(_, region)| !region.multiline)
             }),
             Some(false) => None,
             None => current_id
                 .and_then(|widget_id| {
-                    self.text_input_region_data(widget_id)
+                    self.cached_text_input_region_data(widget_id)
+                        .or_else(|| self.text_input_region_data_from_cached_scene(widget_id))
                         .map(|region| (widget_id, region))
                 })
                 .filter(|(_, region)| !region.multiline),
@@ -936,11 +966,15 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             || previous_text_input == Some(true)
             || next_text_input == Some(true);
         let tooltip_focus_transition = current_id
-            .is_some_and(|widget_id| self.widget_has_tooltip_in_computed(widget_id))
-            || next_id.is_some_and(|widget_id| self.widget_has_tooltip_in_computed(widget_id));
+            .and_then(|widget_id| self.tooltip_trigger_ancestor(widget_id))
+            .is_some()
+            || next_id
+                .and_then(|widget_id| self.tooltip_trigger_ancestor(widget_id))
+                .is_some();
 
         if current_id == next_id {
             self.focused_widget = next_widget;
+            self.focused_overlay_return_target = next_overlay_return_target;
             self.focus_visible = next_id.is_some() && focus_visible;
             return;
         }
@@ -966,6 +1000,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         }
 
         self.focused_widget = next_widget;
+        self.focused_overlay_return_target = next_overlay_return_target;
         self.focus_visible = next_id.is_some() && focus_visible;
 
         if let Some(command) = on_focus {

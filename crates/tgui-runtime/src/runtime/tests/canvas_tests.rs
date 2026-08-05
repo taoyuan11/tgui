@@ -246,6 +246,126 @@ fn canvas_item_mouse_down_up_wheel_and_drag_dispatch() {
 }
 
 #[test]
+fn canvas_drag_end_only_requires_pointer_movement() {
+    let invalidation = InvalidationSignal::new();
+    let tree = WidgetTree::new(
+        Canvas::new(CanvasRecorder::build(|canvas| {
+            canvas
+                .next_item_id(13_u64)
+                .set_fill(Color::WHITE)
+                .fill_rect(10.0, 10.0, 50.0, 30.0);
+        }))
+        .size(dp(100.0), dp(80.0))
+        .on_item_drag_end(ValueCommand::new(
+            |vm: &mut CanvasEventVm, event: CanvasDragEvent| {
+                vm.drag_sequence.push(("end", event.button));
+            },
+        )),
+    );
+    let mut handler = test_handler_with_vm(CanvasEventVm::default(), Some(tree), invalidation);
+    let viewport = handler.viewport_rect();
+    handler.cursor_position = Some(Point::new(dp(20.0), dp(20.0)));
+
+    handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Left);
+    handler.handle_canvas_mouse_release(CanvasMouseButton::Left);
+    assert!(handler.view_model.lock().unwrap().drag_sequence.is_empty());
+
+    handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Left);
+    handler.cursor_position = Some(Point::new(dp(30.0), dp(25.0)));
+    assert!(handler.handle_canvas_drag());
+    handler.handle_canvas_mouse_release(CanvasMouseButton::Left);
+    assert_eq!(
+        handler.view_model.lock().unwrap().drag_sequence,
+        [("end", CanvasMouseButton::Left)]
+    );
+}
+
+#[test]
+fn canvas_drag_start_only_fires_once_after_pointer_movement() {
+    let invalidation = InvalidationSignal::new();
+    let tree = WidgetTree::new(
+        Canvas::new(CanvasRecorder::build(|canvas| {
+            canvas
+                .next_item_id(14_u64)
+                .set_fill(Color::WHITE)
+                .fill_rect(10.0, 10.0, 50.0, 30.0);
+        }))
+        .size(dp(100.0), dp(80.0))
+        .on_item_drag_start(ValueCommand::new(
+            |vm: &mut CanvasEventVm, event: CanvasDragEvent| {
+                vm.drag_sequence.push(("start", event.button));
+            },
+        )),
+    );
+    let mut handler = test_handler_with_vm(CanvasEventVm::default(), Some(tree), invalidation);
+    let viewport = handler.viewport_rect();
+    handler.cursor_position = Some(Point::new(dp(20.0), dp(20.0)));
+
+    handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Left);
+    handler.handle_canvas_mouse_release(CanvasMouseButton::Left);
+    assert!(handler.view_model.lock().unwrap().drag_sequence.is_empty());
+
+    handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Left);
+    handler.cursor_position = Some(Point::new(dp(30.0), dp(25.0)));
+    assert!(handler.handle_canvas_drag());
+    handler.cursor_position = Some(Point::new(dp(35.0), dp(28.0)));
+    assert!(handler.handle_canvas_drag());
+    handler.handle_canvas_mouse_release(CanvasMouseButton::Left);
+    assert_eq!(
+        handler.view_model.lock().unwrap().drag_sequence,
+        [("start", CanvasMouseButton::Left)]
+    );
+}
+
+#[test]
+fn canvas_drag_sequence_preserves_initiating_button_until_matching_release() {
+    let invalidation = InvalidationSignal::new();
+    let tree = WidgetTree::new(
+        Canvas::new(CanvasRecorder::build(|canvas| {
+            canvas
+                .next_item_id(15_u64)
+                .set_fill(Color::WHITE)
+                .fill_rect(10.0, 10.0, 50.0, 30.0);
+        }))
+        .size(dp(100.0), dp(80.0))
+        .on_item_drag_start(ValueCommand::new(
+            |vm: &mut CanvasEventVm, event: CanvasDragEvent| {
+                vm.drag_sequence.push(("start", event.button));
+            },
+        ))
+        .on_item_drag(ValueCommand::new(
+            |vm: &mut CanvasEventVm, event: CanvasDragEvent| {
+                vm.drag_sequence.push(("drag", event.button));
+            },
+        ))
+        .on_item_drag_end(ValueCommand::new(
+            |vm: &mut CanvasEventVm, event: CanvasDragEvent| {
+                vm.drag_sequence.push(("end", event.button));
+            },
+        )),
+    );
+    let mut handler = test_handler_with_vm(CanvasEventVm::default(), Some(tree), invalidation);
+    let viewport = handler.viewport_rect();
+    handler.cursor_position = Some(Point::new(dp(20.0), dp(20.0)));
+
+    handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Right);
+    handler.cursor_position = Some(Point::new(dp(30.0), dp(25.0)));
+    assert!(handler.handle_canvas_drag());
+    handler.handle_canvas_mouse_release(CanvasMouseButton::Left);
+    assert!(handler.active_canvas_drag.is_some());
+    handler.handle_canvas_mouse_release(CanvasMouseButton::Right);
+
+    assert_eq!(
+        handler.view_model.lock().unwrap().drag_sequence,
+        [
+            ("start", CanvasMouseButton::Right),
+            ("drag", CanvasMouseButton::Right),
+            ("end", CanvasMouseButton::Right),
+        ]
+    );
+}
+
+#[test]
 fn canvas_recorder_items_preserve_item_interaction_dispatch() {
     let invalidation = InvalidationSignal::new();
     let items = CanvasRecorder::build(|canvas| {

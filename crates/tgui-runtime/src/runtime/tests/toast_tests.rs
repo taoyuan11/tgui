@@ -1,7 +1,7 @@
 use super::*;
 
 use crate::foundation::binding::{Toast, ToastQueue};
-use crate::ui::widget::{ComputedScene, ToastHost};
+use crate::ui::widget::{ComputedScene, DefaultActivation, ToastHost};
 
 struct ToastRuntimeVm {
     queue: ToastQueue<Self>,
@@ -58,6 +58,46 @@ fn toast_overlay_widget_ids(scene: &ComputedScene<ToastRuntimeVm>) -> Vec<Widget
 }
 
 #[test]
+fn toast_close_button_is_in_tab_order_and_handles_enter_and_space() {
+    for key in [KeyCode::Enter, KeyCode::Space] {
+        let invalidation = InvalidationSignal::new();
+        let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+        let view_model = ToastRuntimeVm::new(&context);
+        let queue = view_model.queue.clone();
+        queue.push_at(
+            Toast::new("Keyboard dismiss").persistent(true),
+            Instant::now() - Duration::from_secs(1),
+        );
+        let tree = WidgetTree::new(ToastRuntimeVm::view(&view_model));
+        let mut handler = test_handler_with_vm(view_model, Some(tree), invalidation);
+
+        let close_id = handler
+            .computed_scene()
+            .overlay_hit_regions
+            .iter()
+            .find_map(|hit| match &hit.interaction {
+                HitInteraction::Widget {
+                    id,
+                    interactions,
+                    focusable: true,
+                    default_activation: DefaultActivation::EnterAndSpace,
+                } if interactions.on_click.is_some() => Some(*id),
+                _ => None,
+            })
+            .expect("Toast close button should be a focusable overlay Button");
+
+        assert!(handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::Tab,))));
+        assert_eq!(handler.focused_widget_id(), Some(close_id));
+        assert!(handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(key))));
+        assert!(queue
+            .snapshot()
+            .first()
+            .and_then(|entry| entry.deadline)
+            .is_some_and(|deadline| deadline <= Instant::now()));
+    }
+}
+
+#[test]
 fn sole_toast_tick_reuses_prepared_card_tree() {
     let invalidation = InvalidationSignal::new();
     let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
@@ -109,7 +149,10 @@ fn toast_prepared_card_path_rejects_coincident_widget_state_change() {
     let after_ids = toast_overlay_widget_ids(handler.computed_scene());
     let path = crate::runtime::scene_runtime::frame_path_probe::finish();
 
-    assert_ne!(after_ids, before_ids, "fallback must rebuild the card tree");
+    assert_eq!(
+        after_ids, before_ids,
+        "fallback must rebuild card state without changing widget identity"
+    );
     assert_eq!(path.scene_recollects, 1);
     assert_eq!(path.layout_reuses, 1);
     assert_eq!(path.layout_builds, 0);
@@ -137,9 +180,9 @@ fn toast_prepared_card_path_rejects_coincident_signal_change() {
     let scene = handler.computed_scene();
     let after_ids = toast_overlay_widget_ids(scene);
 
-    assert_ne!(
+    assert_eq!(
         after_ids, before_ids,
-        "signal change must rebuild card layout"
+        "signal change must rebuild card layout without changing widget identity"
     );
     assert!(scene
         .scene

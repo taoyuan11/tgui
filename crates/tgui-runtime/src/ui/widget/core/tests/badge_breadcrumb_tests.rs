@@ -1,10 +1,11 @@
 use super::*;
 
+use crate::foundation::view_model::Command;
 use crate::ui::layout::{Length, Value};
 use crate::ui::theme::Density;
 use crate::ui::widget::{
-    Badge, BadgeStyle, BadgeTone, Breadcrumb, BreadcrumbItem, BreadcrumbStyle, ResolvedElement,
-    ResolvedSceneLayout,
+    AccessibilityCurrent, AccessibilityRole, Badge, BadgeStyle, BadgeTone, Breadcrumb,
+    BreadcrumbItem, BreadcrumbStyle, ResolvedElement, ResolvedSceneLayout,
 };
 
 fn resolved_children<VM>(element: &ResolvedElement<VM>) -> &[ResolvedElement<VM>] {
@@ -221,6 +222,60 @@ fn breadcrumb_runtime_gap_tracks_density_and_component_theme() {
         panic!("breadcrumb should resolve to a container");
     };
     assert_eq!(container_layout.gap, Value::Static(Length::Px(dp(13.0))));
+}
+
+#[test]
+fn breadcrumb_collapsed_slots_and_accessibility_semantics_are_consistent() {
+    let tree: WidgetTree<()> = WidgetTree::new(
+        Breadcrumb::new(vec![
+            BreadcrumbItem::new("Root").on_click(Command::new(|_: &mut ()| {})),
+            BreadcrumbItem::new("One"),
+            BreadcrumbItem::new("Two"),
+            BreadcrumbItem::new("Three"),
+            BreadcrumbItem::new("Current"),
+        ])
+        .max_visible(2),
+    );
+    let layout = build_layout(&tree, &Theme::light());
+    let children = resolved_children(&layout.resolved_root);
+
+    // Three rendered slots plus two separators. Values below three are clamped because
+    // a collapsed breadcrumb needs first, overflow, and current slots.
+    assert_eq!(children.len(), 5);
+    assert_eq!(
+        children[0].visual.accessibility_role,
+        Some(AccessibilityRole::Button)
+    );
+    assert_eq!(
+        children[0]
+            .visual
+            .accessibility_current
+            .as_ref()
+            .map(|(current, kind)| (current.resolve(), *kind)),
+        Some((false, AccessibilityCurrent::Page))
+    );
+
+    let ResolvedWidgetKind::Button { label, .. } = &children[2].kind else {
+        panic!("collapsed breadcrumb should use a real overflow button");
+    };
+    assert_eq!(label.resolve(), "...");
+    assert_eq!(
+        children[2]
+            .visual
+            .accessibility_label
+            .as_ref()
+            .map(Value::resolve),
+        Some("More breadcrumbs".to_string())
+    );
+
+    assert_eq!(
+        children[4]
+            .visual
+            .accessibility_current
+            .as_ref()
+            .map(|(current, kind)| (current.resolve(), *kind)),
+        Some((true, AccessibilityCurrent::Page))
+    );
 }
 
 #[test]

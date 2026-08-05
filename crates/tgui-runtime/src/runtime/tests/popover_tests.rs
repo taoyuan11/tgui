@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use crate::platform::event::MouseButton;
-use crate::ui::widget::{Button, Input, Popover, PopoverTriggerMode};
+use crate::ui::widget::{Button, DatePicker, Input, Popover, PopoverTriggerMode};
 
 #[derive(Default)]
 struct PopoverVm {
@@ -30,6 +30,318 @@ impl crate::foundation::view_model::ViewModel for PopoverVm {
     }
 }
 
+fn press_popover_point(handler: &mut BoundRuntimeHandler<PopoverVm>, point: Point) {
+    let viewport = handler.viewport_rect();
+    handler.cursor_position = Some(point);
+    let _ = handler.handle_hover(viewport);
+    handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Left);
+}
+
+fn has_open_popover(handler: &mut BoundRuntimeHandler<PopoverVm>) -> bool {
+    handler
+        .computed_scene()
+        .overlay_close_handlers
+        .iter()
+        .any(|handle| {
+            handle.layer == crate::runtime::overlay::OverlayLayer::Popover
+                && (handle.close_on_escape || handle.close_on_outside_click)
+        })
+}
+
+#[test]
+fn default_popover_opens_and_trigger_click_closes_without_reopening() {
+    let invalidation = InvalidationSignal::new();
+    let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+    let tree = WidgetTree::new(
+        Popover::new(Button::new("More").size(dp(90.0), dp(36.0)))
+            .content(Text::new("Uncontrolled body")),
+    );
+    let mut handler = test_handler_with_vm(PopoverVm::new(&context), Some(tree), invalidation);
+
+    assert!(!has_open_popover(&mut handler));
+    press_popover_point(&mut handler, Point::new(dp(40.0), dp(18.0)));
+    assert!(has_open_popover(&mut handler));
+    assert!(popover_content_visible(&mut handler, "Uncontrolled body"));
+
+    press_popover_point(&mut handler, Point::new(dp(40.0), dp(18.0)));
+    assert!(
+        !has_open_popover(&mut handler),
+        "the trigger must count as part of the popover surface so its toggle can close it"
+    );
+}
+
+#[test]
+fn popover_toggle_finds_composite_trigger_from_child_hit() {
+    let invalidation = InvalidationSignal::new();
+    let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+    let trigger = Flex::horizontal().child(Button::new("Nested trigger").size(dp(140.0), dp(36.0)));
+    let tree = WidgetTree::new(Popover::new(trigger).content(Text::new("Composite trigger body")));
+    let mut handler = test_handler_with_vm(PopoverVm::new(&context), Some(tree), invalidation);
+
+    press_popover_point(&mut handler, Point::new(dp(70.0), dp(18.0)));
+    assert!(
+        has_open_popover(&mut handler),
+        "a child hit should toggle the popover attached to its trigger ancestor"
+    );
+}
+
+#[test]
+fn uncontrolled_popover_closes_on_outside_click() {
+    let invalidation = InvalidationSignal::new();
+    let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+    let tree = WidgetTree::new(
+        Popover::new(Button::new("More").size(dp(90.0), dp(36.0)))
+            .content(Text::new("Outside close body")),
+    );
+    let mut handler = test_handler_with_vm(PopoverVm::new(&context), Some(tree), invalidation);
+
+    press_popover_point(&mut handler, Point::new(dp(40.0), dp(18.0)));
+    assert!(has_open_popover(&mut handler));
+    press_popover_point(&mut handler, Point::new(dp(380.0), dp(260.0)));
+    assert!(!has_open_popover(&mut handler));
+}
+
+#[test]
+fn controlled_popover_trigger_requests_latest_signal_toggle() {
+    let invalidation = InvalidationSignal::new();
+    let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+    let open = context.state(false);
+    let open_for_command = open.clone();
+    let tree = WidgetTree::new(
+        Popover::new(Button::new("More").size(dp(90.0), dp(36.0)))
+            .content(Text::new("Controlled body"))
+            .open(open.signal())
+            .on_open_change(ValueCommand::new(move |_vm: &mut PopoverVm, next| {
+                open_for_command.set(next);
+            })),
+    );
+    let mut handler = test_handler_with_vm(PopoverVm::new(&context), Some(tree), invalidation);
+
+    press_popover_point(&mut handler, Point::new(dp(40.0), dp(18.0)));
+    assert!(open.get());
+    assert!(has_open_popover(&mut handler));
+
+    press_popover_point(&mut handler, Point::new(dp(40.0), dp(18.0)));
+    assert!(!open.get());
+    assert!(!has_open_popover(&mut handler));
+}
+
+#[test]
+fn combobox_click_with_open_callback_toggles_only_once() {
+    let invalidation = InvalidationSignal::new();
+    let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let requests_for_command = Arc::clone(&requests);
+    let tree = WidgetTree::new(
+        Combobox::new(
+            TextController::new_legacy(""),
+            vec![ComboboxOption::new("one", "One")],
+        )
+        .on_open_change(ValueCommand::new(move |_vm: &mut PopoverVm, open| {
+            requests_for_command.lock().unwrap().push(open);
+        })),
+    );
+    let mut handler = test_handler_with_vm(PopoverVm::new(&context), Some(tree), invalidation);
+
+    press_popover_point(&mut handler, Point::new(dp(20.0), dp(18.0)));
+
+    assert!(has_open_popover(&mut handler));
+    assert_eq!(*requests.lock().unwrap(), vec![true]);
+}
+
+#[test]
+fn combobox_arrow_key_opens_closed_popup_and_focuses_an_option() {
+    let invalidation = InvalidationSignal::new();
+    let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+    let tree = WidgetTree::new(Combobox::new(
+        TextController::new_legacy(""),
+        vec![
+            ComboboxOption::new("one", "One"),
+            ComboboxOption::new("two", "Two"),
+        ],
+    ));
+    let mut handler = test_handler_with_vm(PopoverVm::new(&context), Some(tree), invalidation);
+
+    assert!(handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::Tab))));
+    let input_id = handler
+        .focused_widget_id()
+        .expect("combobox input should focus");
+    assert!(
+        handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::ArrowDown,)))
+    );
+
+    assert!(has_open_popover(&mut handler));
+    assert_ne!(handler.focused_widget_id(), Some(input_id));
+}
+
+#[test]
+fn combobox_enter_activates_the_current_keyboard_option() {
+    let invalidation = InvalidationSignal::new();
+    let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+    let controller = TextController::new_legacy("");
+    let selections = Arc::new(Mutex::new(Vec::new()));
+    let selections_for_command = Arc::clone(&selections);
+    let tree = WidgetTree::new(
+        Combobox::new(
+            controller.clone(),
+            vec![
+                ComboboxOption::new("one", "One"),
+                ComboboxOption::new("two", "Two"),
+            ],
+        )
+        .on_change(ValueCommand::new(move |_vm: &mut PopoverVm, change| {
+            selections_for_command.lock().unwrap().push(change);
+        })),
+    );
+    let mut handler = test_handler_with_vm(PopoverVm::new(&context), Some(tree), invalidation);
+    handler.reduced_motion = true;
+
+    assert!(handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::Tab))));
+    assert!(
+        handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::ArrowDown,)))
+    );
+    assert!(
+        handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::ArrowDown,)))
+    );
+    assert!(handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::Enter))));
+
+    assert_eq!(controller.text(), "Two");
+    let selections = selections.lock().unwrap();
+    assert_eq!(selections.len(), 1);
+    assert_eq!(selections[0].selected_key.as_deref(), Some("two"));
+    assert_eq!(selections[0].text, "Two");
+}
+
+#[test]
+fn long_combobox_keyboard_navigation_scrolls_beyond_the_first_visible_window() {
+    let invalidation = InvalidationSignal::new();
+    let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+    let controller = TextController::new_legacy("");
+    let tree = WidgetTree::new(
+        Combobox::new(
+            controller.clone(),
+            (0..20)
+                .map(|index| {
+                    let option =
+                        ComboboxOption::new(format!("item-{index}"), format!("Option {index}"));
+                    if index == 4 {
+                        option.disabled(true)
+                    } else {
+                        option
+                    }
+                })
+                .collect::<Vec<_>>(),
+        )
+        .style(|style, _| {
+            style.option_height = dp(32.0);
+            style.max_visible_options = 3;
+        }),
+    );
+    let mut handler = test_handler_with_config(
+        PopoverVm::new(&context),
+        Some(tree),
+        invalidation,
+        test_config_with_size(240.0, 180.0),
+    );
+    handler.reduced_motion = true;
+
+    assert!(handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::Tab))));
+    let input_id = handler
+        .focused_widget_id()
+        .expect("combobox input should focus");
+    for _ in 0..8 {
+        assert!(handler
+            .handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::ArrowDown))));
+    }
+    let list_id = handler
+        .cached_scene
+        .as_ref()
+        .and_then(|cached| cached.layout.as_ref())
+        .and_then(|layout| layout.resolved_widget(input_id))
+        .and_then(|resolved| resolved.popover.as_ref())
+        .and_then(|popover| popover.virtual_list_navigation.as_ref())
+        .map(|navigation| navigation.list_id)
+        .expect("combobox virtual list navigation metadata should be retained");
+    assert!(handler
+        .scroll_states
+        .get(&list_id)
+        .is_some_and(|offset| offset.y > Dp::ZERO));
+    assert!(handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::Enter))));
+
+    assert_eq!(controller.text(), "Option 8");
+}
+
+#[test]
+fn long_combobox_arrow_up_focuses_the_last_logical_option() {
+    let invalidation = InvalidationSignal::new();
+    let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+    let controller = TextController::new_legacy("");
+    let tree = WidgetTree::new(
+        Combobox::new(
+            controller.clone(),
+            (0..20)
+                .map(|index| {
+                    ComboboxOption::new(format!("item-{index}"), format!("Option {index}"))
+                })
+                .collect::<Vec<_>>(),
+        )
+        .style(|style, _| {
+            style.option_height = dp(32.0);
+            style.max_visible_options = 3;
+        }),
+    );
+    let mut handler = test_handler_with_config(
+        PopoverVm::new(&context),
+        Some(tree),
+        invalidation,
+        test_config_with_size(240.0, 180.0),
+    );
+    handler.reduced_motion = true;
+
+    assert!(handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::Tab))));
+    assert!(handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::ArrowUp))));
+    assert!(handler
+        .scroll_states
+        .values()
+        .any(|offset| offset.y > Dp::ZERO));
+    assert!(handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::Enter))));
+
+    assert_eq!(controller.text(), "Option 19");
+}
+
+#[test]
+fn typing_in_uncontrolled_combobox_opens_its_filtered_popup() {
+    let invalidation = InvalidationSignal::new();
+    let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+    let controller = TextController::new_legacy("");
+    let tree = WidgetTree::new(Combobox::new(
+        controller.clone(),
+        vec![
+            ComboboxOption::new("alpha", "Alpha"),
+            ComboboxOption::new("beta", "Beta"),
+        ],
+    ));
+    let mut handler = test_handler_with_vm(PopoverVm::new(&context), Some(tree), invalidation);
+
+    assert!(handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::Tab))));
+    let input_id = handler
+        .focused_widget_id()
+        .expect("combobox input should focus");
+    assert!(handler.handle_ime_event(&Ime::Commit("a".to_string())));
+    flush_text_input_commits(&mut handler);
+
+    assert_eq!(controller.text(), "a");
+    let _ = handler.computed_scene();
+    assert!(handler
+        .cached_scene
+        .as_ref()
+        .and_then(|cached| cached.layout.as_ref())
+        .and_then(|layout| layout.resolved_widget(input_id))
+        .and_then(|resolved| resolved.popover.as_ref())
+        .is_some_and(|popover| popover.is_open()));
+    assert!(has_open_popover(&mut handler));
+}
+
 #[test]
 fn escape_closes_fixed_open_popover() {
     let invalidation = InvalidationSignal::new();
@@ -50,6 +362,34 @@ fn escape_closes_fixed_open_popover() {
 
     assert!(handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::Escape))));
     assert_eq!(close_calls.lock().unwrap().as_slice(), &[false]);
+}
+
+#[test]
+fn date_picker_escape_restores_focus_to_its_input_descendant() {
+    let invalidation = InvalidationSignal::new();
+    let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+    let tree = WidgetTree::new(
+        DatePicker::new(
+            "2026-06-06",
+            Some(chrono::NaiveDate::from_ymd_opt(2026, 6, 6).unwrap()),
+            chrono::NaiveDate::from_ymd_opt(2026, 6, 1).unwrap(),
+        )
+        .open(true),
+    );
+    let mut handler = test_handler_with_vm(PopoverVm::new(&context), Some(tree), invalidation);
+    handler.reduced_motion = true;
+
+    assert!(handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::Tab))));
+    let input_id = handler
+        .focused_text_input_id()
+        .expect("DatePicker input should be the first focus target");
+    assert!(handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::Tab))));
+    assert!(handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::Tab))));
+    assert_ne!(handler.focused_widget_id(), Some(input_id));
+
+    assert!(handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::Escape))));
+    assert_eq!(handler.focused_widget_id(), Some(input_id));
+    assert!(!has_open_popover(&mut handler));
 }
 
 #[test]

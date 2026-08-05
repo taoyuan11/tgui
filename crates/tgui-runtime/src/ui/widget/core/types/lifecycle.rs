@@ -1,4 +1,5 @@
 use super::*;
+use crate::ui::widget::common::SelectLabelState;
 use crate::ui::widget::r#virtual::{
     ItemLayout, VirtualArrangement, VirtualResolvedItemMeta, VirtualWindowPlan,
 };
@@ -86,7 +87,7 @@ pub(crate) enum LifecycleWidgetKind {
         style: WidgetSwitchStyle,
     },
     Select {
-        selected_label: Value<Option<String>>,
+        selected_label: SelectLabelState,
         placeholder: Value<String>,
         options: Vec<LifecycleSelectOption>,
         open: Option<Value<bool>>,
@@ -102,6 +103,7 @@ pub(crate) enum LifecycleWidgetKind {
     },
     Slider {
         value: Value<f32>,
+        label: Option<Value<String>>,
         min: f32,
         max: f32,
         step: f32,
@@ -299,6 +301,7 @@ impl Clone for LifecycleWidgetKind {
             },
             Self::Slider {
                 value,
+                label,
                 min,
                 max,
                 step,
@@ -312,6 +315,7 @@ impl Clone for LifecycleWidgetKind {
                 style,
             } => Self::Slider {
                 value: value.clone(),
+                label: label.clone(),
                 min: *min,
                 max: *max,
                 step: *step,

@@ -11,6 +11,80 @@ pub(crate) struct InteractionHandlers<VM> {
     pub on_file_drop: Option<ValueCommand<VM, FileDropEvent>>,
     pub gesture: Option<crate::ui::widget::GestureRecognizer<VM>>,
     pub cursor_style: Option<Value<CursorStyle>>,
+    pub number_input: Option<NumberInputInteraction<VM>>,
+    pub calendar_day: Option<CalendarDayInteraction<VM>>,
+    pub radio_group: Option<RadioGroupInteraction>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct RadioGroupInteraction {
+    pub(crate) group_id: WidgetId,
+    pub(crate) index: usize,
+    pub(crate) direction: Axis,
+}
+
+pub(crate) struct CalendarDayInteraction<VM> {
+    pub(crate) owner_id: WidgetId,
+    pub(crate) date: chrono::NaiveDate,
+    pub(crate) on_focus_move: ValueCommand<VM, chrono::NaiveDate>,
+}
+
+impl<VM> Clone for CalendarDayInteraction<VM> {
+    fn clone(&self) -> Self {
+        Self {
+            owner_id: self.owner_id,
+            date: self.date,
+            on_focus_move: self.on_focus_move.clone(),
+        }
+    }
+}
+
+impl<VM: 'static> CalendarDayInteraction<VM> {
+    fn scope<RootVm: 'static>(
+        self,
+        selector: Arc<dyn for<'a> Fn(&'a mut RootVm) -> &'a mut VM + Send + Sync>,
+    ) -> CalendarDayInteraction<RootVm> {
+        CalendarDayInteraction {
+            owner_id: self.owner_id,
+            date: self.date,
+            on_focus_move: self.on_focus_move.scope(selector),
+        }
+    }
+}
+
+pub(crate) struct NumberInputInteraction<VM> {
+    pub(crate) increment: Command<VM>,
+    pub(crate) decrement: Command<VM>,
+    pub(crate) min: Option<f64>,
+    pub(crate) max: Option<f64>,
+    pub(crate) step: f64,
+}
+
+impl<VM> Clone for NumberInputInteraction<VM> {
+    fn clone(&self) -> Self {
+        Self {
+            increment: self.increment.clone(),
+            decrement: self.decrement.clone(),
+            min: self.min,
+            max: self.max,
+            step: self.step,
+        }
+    }
+}
+
+impl<VM: 'static> NumberInputInteraction<VM> {
+    fn scope<RootVm: 'static>(
+        self,
+        selector: Arc<dyn for<'a> Fn(&'a mut RootVm) -> &'a mut VM + Send + Sync>,
+    ) -> NumberInputInteraction<RootVm> {
+        NumberInputInteraction {
+            increment: self.increment.scope(selector.clone()),
+            decrement: self.decrement.scope(selector),
+            min: self.min,
+            max: self.max,
+            step: self.step,
+        }
+    }
 }
 
 pub(crate) struct CanvasItemInteractionHandlers<VM> {
@@ -168,6 +242,9 @@ impl<VM> Clone for InteractionHandlers<VM> {
             on_file_drop: self.on_file_drop.clone(),
             gesture: self.gesture.clone(),
             cursor_style: self.cursor_style.clone(),
+            number_input: self.number_input.clone(),
+            calendar_day: self.calendar_day.clone(),
+            radio_group: self.radio_group,
         }
     }
 }
@@ -203,6 +280,9 @@ impl<VM> Default for InteractionHandlers<VM> {
             on_file_drop: None,
             gesture: None,
             cursor_style: None,
+            number_input: None,
+            calendar_day: None,
+            radio_group: None,
         }
     }
 }
@@ -241,6 +321,9 @@ impl<VM> InteractionHandlers<VM> {
                 .map(|gesture| gesture.has_any())
                 .unwrap_or(false)
             || self.cursor_style.is_some()
+            || self.number_input.is_some()
+            || self.calendar_day.is_some()
+            || self.radio_group.is_some()
     }
 
     pub(crate) fn scope<RootVm: 'static>(
@@ -271,6 +354,13 @@ impl<VM> InteractionHandlers<VM> {
                 .map(|command| command.scope(selector.clone())),
             gesture: self.gesture.map(|gesture| gesture.scope(selector.clone())),
             cursor_style: self.cursor_style,
+            number_input: self
+                .number_input
+                .map(|number_input| number_input.scope(selector.clone())),
+            calendar_day: self
+                .calendar_day
+                .map(|calendar_day| calendar_day.scope(selector)),
+            radio_group: self.radio_group,
         }
     }
 }
