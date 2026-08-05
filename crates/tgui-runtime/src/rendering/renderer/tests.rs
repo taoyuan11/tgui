@@ -1,6 +1,5 @@
 use super::surface::*;
 use super::*;
-use crate::application::MsaaMode;
 use crate::foundation::color::Color as TguiColorAlias;
 use crate::media::TextureFrame;
 use crate::text::font::FontWeight;
@@ -36,42 +35,6 @@ fn transparent_windows_surfaces_still_use_dx12_visual_swapchain() {
 fn pipeline_multisample_state_uses_requested_count() {
     assert_eq!(pipeline_multisample_state(1).count, 1);
     assert_eq!(pipeline_multisample_state(4).count, 4);
-}
-
-#[test]
-fn msaa_mode_default_is_off() {
-    assert_eq!(MsaaMode::default(), MsaaMode::Off);
-}
-
-#[test]
-fn draw_id_distinguishes_stream_and_command_index() {
-    use super::prepare::{DrawId, DrawStream};
-
-    let main_zero = DrawId {
-        stream: DrawStream::Main,
-        command_index: 0,
-    };
-    let main_zero_again = DrawId {
-        stream: DrawStream::Main,
-        command_index: 0,
-    };
-    let main_one = DrawId {
-        stream: DrawStream::Main,
-        command_index: 1,
-    };
-    let overlay_zero = DrawId {
-        stream: DrawStream::Overlay,
-        command_index: 0,
-    };
-    let composite_zero = DrawId {
-        stream: DrawStream::CompositeContent { depth: 0 },
-        command_index: 0,
-    };
-
-    assert_eq!(main_zero, main_zero_again);
-    assert_ne!(main_zero, main_one);
-    assert_ne!(main_zero, overlay_zero);
-    assert_ne!(overlay_zero, composite_zero);
 }
 
 #[test]

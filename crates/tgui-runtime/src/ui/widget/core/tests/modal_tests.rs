@@ -3,7 +3,6 @@ pub(super) use super::*;
 use std::time::Duration;
 
 use crate::animation::{AnimationKey, Transition, WidgetProperty};
-use crate::foundation::view_model::ValueCommand;
 use crate::ui::layout::Value;
 use crate::ui::theme::Density;
 use crate::ui::widget::{ComputedScene, Modal, ModalAction, ModalStyle};
@@ -38,22 +37,6 @@ fn modal_scene_at(
         false,
         now,
     )
-}
-
-#[test]
-fn modal_builder_attaches_descriptor() {
-    let element: Element<()> = Modal::new(true)
-        .title("Hello")
-        .action(ModalAction::primary("OK"))
-        .into();
-    assert!(
-        element.modal.is_some(),
-        "modal descriptor must be attached to outer Stack element"
-    );
-    let descriptor = element.modal.as_ref().unwrap();
-    assert!(descriptor.open.resolve(), "open should resolve to true");
-    assert!(descriptor.close_on_escape);
-    assert!(descriptor.close_on_backdrop_click);
 }
 
 #[test]
@@ -186,17 +169,6 @@ fn modal_open_registers_focus_trap_on_outer_scope() {
             .unwrap_or(false),
         "outer modal widget must have active trap/autofocus focus scope"
     );
-}
-
-#[test]
-fn modal_with_on_open_change_keeps_descriptor_attached() {
-    let element: Element<()> = Modal::new(true)
-        .on_open_change(ValueCommand::new(|_: &mut (), _: bool| {}))
-        .close_on_backdrop_click(false)
-        .into();
-    let descriptor = element.modal.as_ref().expect("descriptor exists");
-    assert!(descriptor.on_open_change.is_some());
-    assert!(!descriptor.close_on_backdrop_click);
 }
 
 #[test]

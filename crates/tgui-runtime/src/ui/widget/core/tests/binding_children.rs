@@ -193,22 +193,3 @@ fn hit_testing_tracks_currently_resolved_children() {
     );
     assert!(hit.is_none());
 }
-
-#[derive(Default)]
-#[allow(dead_code)]
-struct ScopeChildVm {
-    count: i32,
-    checked: bool,
-    selected_key: String,
-    selected_value: String,
-    canvas_hits: usize,
-    context_hits: usize,
-}
-
-#[derive(Default)]
-#[allow(dead_code)]
-struct ScopeRootVm {
-    child: ScopeChildVm,
-    other: ScopeChildVm,
-    root_count: i32,
-}

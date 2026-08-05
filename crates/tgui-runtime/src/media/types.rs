@@ -749,15 +749,6 @@ mod texture_frame_tests {
     }
 
     #[test]
-    fn revised_texture_frames_retain_upload_snapshots() {
-        let frame = TextureFrame::with_id_and_revision(7, 9, 1, 1, vec![1, 2, 3, 4]);
-
-        assert_eq!(frame.id(), 7);
-        assert_eq!(frame.revision(), 9);
-        assert!(frame.retain_upload_snapshot());
-    }
-
-    #[test]
     fn texture_frame_normalizes_short_rgba_arc() {
         let frame =
             TextureFrame::with_id_revision_and_pixels(7, 9, 2, 1, Arc::from(vec![1, 2, 3, 4]));

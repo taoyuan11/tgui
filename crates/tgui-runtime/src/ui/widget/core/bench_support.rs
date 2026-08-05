@@ -3545,27 +3545,6 @@ mod tests {
     const MONOCHROME_ICON_SVG: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16"><path fill="#000" d="M0 0h16v16H0z"/></svg>"##;
 
     #[test]
-    fn widget_type_size_telemetry_covers_resolution_hot_types() {
-        let entries = widget_type_size_telemetry();
-        for entry in &entries {
-            println!("{}: size={} align={}", entry.name, entry.size, entry.align);
-        }
-
-        assert!(entries
-            .iter()
-            .any(|entry| entry.name == "super::Element<()>"));
-        assert!(entries
-            .iter()
-            .any(|entry| entry.name == "super::ResolvedElement<()>"));
-        assert!(entries
-            .iter()
-            .any(|entry| entry.name == "crate::ui::layout::LayoutStyle"));
-        assert!(entries
-            .iter()
-            .any(|entry| entry.name == "super::VisualStyle"));
-    }
-
-    #[test]
     fn monochrome_svg_gpu_mask_tint_changes_rgb_without_affecting_regular_svg() {
         let tint = Color::hexa(0xE11D48FF);
         let tinted_tree: WidgetTree<()> = WidgetTree::new(

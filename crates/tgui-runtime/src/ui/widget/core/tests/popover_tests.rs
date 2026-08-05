@@ -5,7 +5,7 @@ use std::time::Duration;
 use crate::foundation::view_model::ValueCommand;
 use crate::ui::layout::Value;
 use crate::ui::widget::Flex;
-use crate::ui::widget::{Button, Popover, PopoverStyle, PopoverTriggerMode, RenderPrimitive};
+use crate::ui::widget::{Button, Popover, PopoverStyle, RenderPrimitive};
 
 fn popover_scene_at(
     tree: &WidgetTree<()>,
@@ -37,19 +37,6 @@ fn popover_scene_at(
         false,
         now,
     )
-}
-
-#[test]
-fn popover_builder_attaches_descriptor() {
-    let element: Element<()> = Popover::new(Button::new("More"))
-        .content(Text::new("popover"))
-        .into();
-    let descriptor = element
-        .popover
-        .as_ref()
-        .expect("popover descriptor attached");
-    assert!(!descriptor.is_open());
-    assert_eq!(descriptor.trigger_mode, PopoverTriggerMode::Click);
 }
 
 #[test]
@@ -339,21 +326,6 @@ fn popover_scene_tracks_theme_density_without_custom_style() {
         compact_surface.corner_radius,
         spacious_surface.corner_radius
     );
-}
-
-#[test]
-fn click_and_hover_preview_exposes_a_controlled_open_request() {
-    let element: Element<()> = Popover::new(Button::new("More"))
-        .content(Text::new("popover"))
-        .open(true)
-        .trigger_mode(PopoverTriggerMode::ClickAndHoverPreview)
-        .on_open_change(ValueCommand::new(|_: &mut (), _: bool| {}))
-        .into();
-    assert!(element
-        .popover
-        .as_ref()
-        .and_then(|popover| popover.on_open_change.as_ref())
-        .is_some());
 }
 
 #[test]

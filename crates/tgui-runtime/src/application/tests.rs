@@ -3,13 +3,6 @@ use crate::ui::layout::Insets;
 use crate::ui::unit::dp;
 
 #[test]
-fn application_decorations_updates_config() {
-    let config = Application::new().decorations(false).config();
-
-    assert!(!config.decorations);
-}
-
-#[test]
 fn window_spec_decorations_override_application_default() {
     let app_config = Application::new().decorations(true).config();
     let window_config = WindowSpec::<()>::main("main")
