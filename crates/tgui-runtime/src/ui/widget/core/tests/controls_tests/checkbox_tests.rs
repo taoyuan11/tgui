@@ -580,7 +580,7 @@ fn focused_unchecked_checkbox_keeps_default_box_colors() {
         .shapes
         .iter()
         .any(|shape| shape.stroke_width > 0.0 && shape.color == default_style.border));
-    assert!(rendered
+    assert!(!rendered
         .primitives
         .overlay_shapes
         .iter()

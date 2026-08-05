@@ -190,7 +190,7 @@ fn card_shadow_is_texture_free_by_default_and_remains_explicitly_available() {
 }
 
 #[test]
-fn clickable_card_uses_theme_focus_ring_for_keyboard_focus() {
+fn clickable_card_does_not_add_focus_ring_for_keyboard_focus_by_default() {
     let theme = Theme::default();
     let font_manager = FontManager::new(&FontCatalog::default());
     let media = test_media();
@@ -230,7 +230,7 @@ fn clickable_card_uses_theme_focus_ring_for_keyboard_focus() {
         false,
     );
 
-    assert!(rendered.primitives.overlay_shapes.iter().any(|shape| {
+    assert!(!rendered.primitives.overlay_shapes.iter().any(|shape| {
         shape.color == theme.focus_ring.color
             && shape.stroke_width == theme.focus_ring.width.get()
             && shape.rect.width > dp(240.0)

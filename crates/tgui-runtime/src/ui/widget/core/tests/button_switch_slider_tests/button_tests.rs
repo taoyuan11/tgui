@@ -389,7 +389,7 @@ fn focused_secondary_button_keeps_default_border() {
             .any(|shape| shape.stroke_width > 0.0
                 && shape.color == hovered_pressed_style.border_color)
     );
-    assert!(rendered
+    assert!(!rendered
         .primitives
         .overlay_shapes
         .iter()

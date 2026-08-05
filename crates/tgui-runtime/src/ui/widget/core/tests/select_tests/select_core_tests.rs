@@ -25,7 +25,7 @@ fn default_select_keeps_active_border_for_focus_and_open_state() {
             },
         );
         assert_eq!(keyboard_focused.border, theme.colors.primary);
-        assert_eq!(keyboard_focused.focus_ring, Some(theme.focus_ring.clone()));
+        assert!(keyboard_focused.focus_ring.is_none());
 
         let open = default_select_style(
             &theme,

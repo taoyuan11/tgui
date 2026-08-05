@@ -58,7 +58,7 @@ impl Theme {
         let radius = RadiusScale::default();
         let border = BorderScale::default();
         let focus_ring = FocusRingStyle {
-            enabled: true,
+            enabled: false,
             color: colors.focus_ring,
             width: border.thick,
             gap: spacing.xxs,
@@ -82,5 +82,16 @@ impl Theme {
             components,
             mode,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Theme;
+
+    #[test]
+    fn built_in_themes_do_not_enable_focus_rings_by_default() {
+        assert!(!Theme::light().focus_ring.enabled);
+        assert!(!Theme::dark().focus_ring.enabled);
     }
 }

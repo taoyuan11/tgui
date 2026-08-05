@@ -219,7 +219,8 @@ fn rounded_overflow_clips_children_with_parent_corner_mask() {
 
 #[test]
 fn rounded_overflow_clips_child_focus_ring_overlay() {
-    let theme = Theme::default();
+    let mut theme = Theme::default();
+    theme.focus_ring.enabled = true;
     let font_manager = FontManager::new(&FontCatalog::default());
     let media = test_media();
     let mut animations = AnimationEngine::default();

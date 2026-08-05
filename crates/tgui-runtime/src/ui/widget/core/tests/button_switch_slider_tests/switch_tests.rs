@@ -87,7 +87,8 @@ fn switch_renders_custom_track_and_thumb_colors() {
 
 #[test]
 fn focused_switch_keeps_pressed_colors_and_renders_focus_ring() {
-    let theme = Theme::default();
+    let mut theme = Theme::default();
+    theme.focus_ring.enabled = true;
     let font_manager = FontManager::new(&FontCatalog::default());
     let media = test_media();
     let switch: Element<()> = Switch::new(true).into();
@@ -221,7 +222,8 @@ fn button_focus_ring_override_changes_overlay_without_affecting_layout() {
 
 #[test]
 fn focus_ring_overlay_is_not_clipped() {
-    let theme = Theme::default();
+    let mut theme = Theme::default();
+    theme.focus_ring.enabled = true;
     let font_manager = FontManager::new(&FontCatalog::default());
     let media = test_media();
     let mut animations = AnimationEngine::default();
