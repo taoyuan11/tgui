@@ -1,6 +1,6 @@
 use super::*;
 use crate::runtime::state::CaretDecorationBinding;
-use crate::ui::widget::RenderCommand;
+use crate::ui::widget::{OverlayTextDecorationPrimitiveSlot, RenderCommand};
 
 impl<VM: 'static> BoundRuntimeHandler<VM> {
     pub(super) fn rebuild_caret_decoration_binding(&mut self) {
@@ -25,37 +25,30 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         } else {
             binding.visible_color.with_alpha_factor(0.0)
         };
-        let Some(current) = cached
+        let Some(mut decoration) = cached
             .computed
             .scene
             .overlay_text_decorations
             .get(binding.overlay_text_decoration_index)
-            .map(|decoration| decoration.color)
+            .cloned()
         else {
             return false;
         };
-        if current == color {
+        if decoration.color == color {
             cached.caret_visible = caret_visible;
             return true;
         }
-        let Some(decoration) = cached
-            .computed
-            .scene
-            .overlay_text_decorations
-            .get_mut(binding.overlay_text_decoration_index)
-        else {
-            return false;
-        };
         decoration.color = color;
-        let Some(RenderCommand::TextDecoration(command)) = cached
-            .computed
-            .scene
-            .overlay_commands
-            .get_mut(binding.overlay_command_index)
-        else {
+        if !cached.computed.scene.write_overlay_text_decoration_slot(
+            &SceneCounts::default(),
+            OverlayTextDecorationPrimitiveSlot {
+                text_decoration_index: binding.overlay_text_decoration_index,
+                command_index: binding.overlay_command_index,
+            },
+            decoration,
+        ) {
             return false;
-        };
-        command.color = color;
+        }
         cached.caret_visible = caret_visible;
         super::action_stats::record("caret_visibility_slot_write");
         true

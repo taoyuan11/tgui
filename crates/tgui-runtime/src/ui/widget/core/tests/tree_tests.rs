@@ -1,7 +1,8 @@
 use super::*;
 
 use crate::ui::widget::{
-    ItemLayout, Tree, TreeCheckState, TreeNode, TreeSelectionMode, TreeStyle, WidgetKey,
+    ItemLayout, ResolvedElement, Tree, TreeCheckState, TreeNode, TreeSelectionMode, TreeStyle,
+    WidgetKey,
 };
 
 fn sample_nodes() -> Vec<TreeNode<&'static str>> {
@@ -12,6 +13,19 @@ fn sample_nodes() -> Vec<TreeNode<&'static str>> {
         ]),
         TreeNode::keyed("sibling", "Sibling"),
     ]
+}
+
+fn subtree_tree_root<VM>(element: &ResolvedElement<VM>) -> Option<&ResolvedElement<VM>> {
+    if element.tree_root.is_some() {
+        return Some(element);
+    }
+    match &element.kind {
+        ResolvedWidgetKind::Container { children, .. }
+        | ResolvedWidgetKind::Virtual { children, .. } => {
+            children.iter().find_map(subtree_tree_root)
+        }
+        _ => None,
+    }
 }
 
 #[test]
@@ -168,6 +182,86 @@ fn tree_loading_signal_switches_slots_on_the_existing_tree() {
     let loading_again = render_labels(&mut animations);
     assert!(loading_again.iter().any(|label| label == "loading"));
     assert!(!loading_again.iter().any(|label| label == "Root"));
+}
+
+#[test]
+fn reactive_tree_keeps_its_layout_inside_a_flex_parent() {
+    let context = test_context();
+    let loading = context.state(false);
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let theme = Theme::default();
+    let mut animations = AnimationEngine::default();
+    let viewport = Rect::new(0.0, 0.0, 760.0, 620.0);
+    let tree: WidgetTree<()> = WidgetTree::new(
+        Flex::vertical()
+            .size(pct(100.0), pct(100.0))
+            .padding(Insets::all(dp(24.0)))
+            .gap(dp(14.0))
+            .child(Text::new("Header"))
+            .child(
+                Tree::<&'static str, ()>::new(vec![TreeNode::keyed("root", "Root")], |ctx| {
+                    Text::new(ctx.item).into()
+                })
+                .loading(loading.signal())
+                .loading_view(Text::new("loading"))
+                .width(pct(100.0))
+                .height(dp(420.0)),
+            )
+            .child(Text::new("Footer")),
+    );
+
+    let layout = tree.build_scene_layout(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        UnitContext::default(),
+        &HashMap::new(),
+        &HashMap::new(),
+        viewport,
+    );
+    let tree_root = subtree_tree_root(&layout.resolved_root).expect("resolved Tree root");
+    let tree_bounds = layout
+        .widget_bounds(tree_root.id)
+        .expect("Tree root bounds");
+    let ResolvedWidgetKind::Virtual { children, .. } = &tree_root.kind else {
+        panic!("Tree root should remain the virtual viewport");
+    };
+    let row_bounds = layout
+        .widget_bounds(children[0].id)
+        .expect("first Tree row bounds");
+
+    assert_eq!(tree_bounds.width, dp(712.0));
+    assert_eq!(tree_bounds.height, dp(420.0));
+    assert_eq!(row_bounds.width, dp(712.0));
+    assert_eq!(row_bounds.height, dp(40.0));
+
+    let rendered = tree.render_output(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        None,
+        None,
+        &HashMap::new(),
+        viewport,
+        None,
+        None,
+        None,
+        None,
+        false,
+    );
+    let labels = rendered
+        .primitives
+        .texts
+        .iter()
+        .map(|text| text.content.as_ref())
+        .collect::<Vec<_>>();
+
+    assert!(labels.contains(&"Header"));
+    assert!(labels.contains(&"Root"), "Tree labels: {labels:?}");
+    assert!(labels.contains(&"Footer"));
 }
 
 #[test]

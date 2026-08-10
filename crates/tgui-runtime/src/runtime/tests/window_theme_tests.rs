@@ -5,8 +5,8 @@ use raw_window_handle::{
     DisplayHandle, HandleError, HasDisplayHandle, HasWindowHandle, WindowHandle,
 };
 
-struct BindingProbeWindow {
-    redraw_calls: AtomicUsize,
+pub(super) struct BindingProbeWindow {
+    pub(super) redraw_calls: AtomicUsize,
     title_calls: AtomicUsize,
     title: Mutex<String>,
     theme_calls: AtomicUsize,
@@ -14,7 +14,7 @@ struct BindingProbeWindow {
 }
 
 impl BindingProbeWindow {
-    fn new(theme: Option<crate::platform::window::Theme>) -> Self {
+    pub(super) fn new(theme: Option<crate::platform::window::Theme>) -> Self {
         Self {
             redraw_calls: AtomicUsize::new(0),
             title_calls: AtomicUsize::new(0),

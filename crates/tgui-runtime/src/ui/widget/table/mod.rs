@@ -1006,6 +1006,7 @@ where
                     section.layout.width = Some(Value::Static(crate::ui::layout::Length::Px(
                         row_total_width.resolve(),
                     )));
+                    section.layout.min_width = Some(Value::Static(pct(100.0)));
                     section.layout.height =
                         Some(Value::Static(crate::ui::layout::Length::Px(row_height)));
                     section
@@ -1177,6 +1178,7 @@ where
             )));
         })
         .width(total_width)
+        .min_width(pct(100.0))
         .child(cells)
         .into();
     apply_data_grid_header_container_style(&mut header, style_resolver);
@@ -1384,6 +1386,7 @@ where
     let row_metrics = runtime_metrics.clone();
     let mut row_element = Flex::horizontal()
         .width(total_width)
+        .min_width(pct(100.0))
         .height(initial_metrics.row_height)
         .runtime_layout(move |layout, _, _, _, _| {
             layout.height = Some(Value::Static(crate::ui::layout::Length::Px(

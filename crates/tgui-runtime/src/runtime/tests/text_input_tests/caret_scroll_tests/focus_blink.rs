@@ -1,4 +1,6 @@
 use super::*;
+use crate::runtime::CARET_BLINK_INTERVAL;
+use crate::ui::widget::SceneDrawStream;
 
 #[test]
 fn focused_text_input_schedules_caret_blink_deadline() {
@@ -68,6 +70,113 @@ fn caret_blink_requests_redraw_when_visibility_flips() {
 }
 
 #[test]
+fn idle_input_blink_requests_redraw_and_dirties_the_retained_caret_draw() {
+    let invalidation = InvalidationSignal::new();
+    let input: Element<TestVm> = Input::<TestVm>::new("hello").into();
+    let input_id = input.id;
+    let tree = WidgetTree::new(input);
+    let mut handler = test_handler(Some(tree), invalidation);
+    let viewport = handler.viewport_rect();
+    let frame = {
+        let computed = handler.computed_scene();
+        computed
+            .hit_regions
+            .iter()
+            .find_map(|region| match &region.interaction {
+                HitInteraction::TextInput { .. } => Some(region.rect),
+                _ => None,
+            })
+            .expect("input hit region should exist")
+    };
+
+    handler.cursor_position = Some(Point {
+        x: frame.x + (frame.width * 0.5),
+        y: frame.y + (frame.height * 0.5),
+    });
+    handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Left);
+    let _ = handler.computed_scene();
+    assert_eq!(
+        handler.cached_focus_target_is_text_input(input_id),
+        Some(true),
+        "the blink path should use the current focus-navigation cache"
+    );
+
+    let visible_color = {
+        let cached = handler.cached_scene.as_mut().expect("focused input cache");
+        cached.computed.scene.clear_dirty_draw_ranges();
+        assert!(cached.caret_visible);
+        let binding = cached.caret_decoration.expect("retained caret binding");
+        cached.computed.scene.overlay_text_decorations[binding.overlay_text_decoration_index].color
+    };
+    assert!(visible_color.a > 0);
+
+    let window = Arc::new(super::super::super::window_theme_tests::BindingProbeWindow::new(None));
+    handler.window = Some(window.clone());
+    handler.caret_blink_origin = Instant::now() - CARET_BLINK_INTERVAL - Duration::from_millis(10);
+    window.redraw_calls.store(0, Ordering::Relaxed);
+
+    assert!(!handler.handle_bound_about_to_wait(&TestEventLoop));
+    assert!(
+        window.redraw_calls.load(Ordering::Relaxed) > 0,
+        "the idle blink deadline should request a redraw"
+    );
+
+    let _ = handler.computed_scene();
+    let cached = handler.cached_scene.as_ref().expect("cache after redraw");
+    let binding = cached.caret_decoration.expect("retained caret binding");
+    assert!(!cached.caret_visible);
+    assert_eq!(
+        cached.computed.scene.overlay_text_decorations[binding.overlay_text_decoration_index]
+            .color
+            .a,
+        0
+    );
+    assert!(cached
+        .computed
+        .scene
+        .dirty_draw_ranges()
+        .iter()
+        .any(|range| {
+            range.stream == SceneDrawStream::Overlay
+                && range.range.contains(&binding.overlay_command_index)
+        }));
+
+    handler
+        .cached_scene
+        .as_mut()
+        .expect("cache before next blink")
+        .computed
+        .scene
+        .clear_dirty_draw_ranges();
+    handler.caret_blink_origin =
+        Instant::now() - CARET_BLINK_INTERVAL - CARET_BLINK_INTERVAL - Duration::from_millis(10);
+    window.redraw_calls.store(0, Ordering::Relaxed);
+
+    assert!(!handler.handle_bound_about_to_wait(&TestEventLoop));
+    assert!(window.redraw_calls.load(Ordering::Relaxed) > 0);
+    let _ = handler.computed_scene();
+    let cached = handler
+        .cached_scene
+        .as_ref()
+        .expect("cache after next redraw");
+    let binding = cached.caret_decoration.expect("retained caret binding");
+    assert!(cached.caret_visible);
+    assert_eq!(
+        cached.computed.scene.overlay_text_decorations[binding.overlay_text_decoration_index].color,
+        visible_color
+    );
+    assert!(cached
+        .computed
+        .scene
+        .dirty_draw_ranges()
+        .iter()
+        .any(|range| {
+            range.stream == SceneDrawStream::Overlay
+                && range.range.contains(&binding.overlay_command_index)
+        }));
+}
+
+#[test]
 #[cfg(feature = "bench-support")]
 fn caret_blink_updates_retained_decoration_slot() {
     let invalidation = InvalidationSignal::new();
@@ -111,6 +220,12 @@ fn caret_blink_updates_retained_decoration_slot() {
         "caret blink should not add or remove overlay decorations"
     );
     assert_eq!(cached.computed.scene.overlay_text_decorations[0].color.a, 0);
+    assert!(cached
+        .computed
+        .scene
+        .dirty_draw_ranges()
+        .iter()
+        .any(|range| { range.stream == SceneDrawStream::Overlay && range.range.contains(&0) }));
     assert!(
         snapshot
             .iter()

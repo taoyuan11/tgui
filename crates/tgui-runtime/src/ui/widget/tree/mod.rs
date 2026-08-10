@@ -1038,8 +1038,8 @@ where
             container
         })
         .into();
-        tree.key = self.key;
-        tree.layout = self.layout;
+        let outer_key = self.key;
+        let outer_layout = self.layout;
         tree.focus.focusable = self.focusable;
         tree.focus.tab_index = self.tab_index;
         tree.focus.scope = self.focus_scope;
@@ -1055,15 +1055,27 @@ where
             checkable: root_checkable,
         });
         match reactive_slot_index {
-            Some(index) => Stack::new()
-                .child(
-                    ViewSwitch::new(index)
-                        .case(loading_view)
-                        .case(empty_view)
-                        .case(tree),
-                )
-                .into(),
-            None => tree,
+            Some(index) => {
+                tree.layout.height = Some(Value::Static(pct(100.0)));
+                tree.layout.min_width = Some(Value::Static(dp(0.0).into()));
+                tree.layout.min_height = Some(Value::Static(dp(0.0).into()));
+                let mut wrapper: Element<VM> = Stack::new()
+                    .child(
+                        ViewSwitch::new(index)
+                            .case(loading_view)
+                            .case(empty_view)
+                            .case(tree),
+                    )
+                    .into();
+                wrapper.key = outer_key;
+                wrapper.layout = outer_layout;
+                wrapper
+            }
+            None => {
+                tree.key = outer_key;
+                tree.layout = outer_layout;
+                tree
+            }
         }
     }
 }

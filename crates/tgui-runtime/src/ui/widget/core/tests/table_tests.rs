@@ -388,6 +388,55 @@ fn data_grid_exposes_horizontal_scroll_bounds_for_wide_columns() {
 }
 
 #[test]
+fn data_grid_header_and_rows_fill_viewport_when_columns_are_narrow() {
+    let font_manager = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    let theme = Theme::default();
+    let mut animations = AnimationEngine::default();
+    let viewport = Rect::new(0.0, 0.0, 560.0, 120.0);
+    let tree: WidgetTree<()> = WidgetTree::new(
+        DataGrid::new(
+            vec![DataGridRow::keyed("a", "Alpha".to_string())],
+            columns(),
+        )
+        .size(dp(560.0), dp(120.0)),
+    );
+
+    let layout = tree.build_scene_layout(
+        &font_manager,
+        &theme,
+        &media,
+        &mut animations,
+        UnitContext::default(),
+        &HashMap::new(),
+        &HashMap::new(),
+        viewport,
+    );
+    let ResolvedWidgetKind::Container { children, .. } = &layout.resolved_root.kind else {
+        panic!("DataGrid root should resolve to a container");
+    };
+    let row = resolved_data_grid_row(&layout.resolved_root, &WidgetKey::from("a"))
+        .expect("data row should resolve");
+
+    assert_eq!(
+        layout
+            .widget_bounds(children[0].id)
+            .expect("DataGrid header bounds")
+            .width,
+        viewport.width,
+        "the header surface should fill the DataGrid viewport"
+    );
+    assert_eq!(
+        layout
+            .widget_bounds(row.id)
+            .expect("DataGrid row bounds")
+            .width,
+        viewport.width,
+        "row surfaces should fill the DataGrid viewport"
+    );
+}
+
+#[test]
 fn data_grid_defaults_render_readably_in_dark_theme() {
     let font_manager = FontManager::new(&FontCatalog::default());
     let media = test_media();
