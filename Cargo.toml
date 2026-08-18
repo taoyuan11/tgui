@@ -26,6 +26,10 @@ webview = ["desktop"]
 name = "p0_arena"
 harness = false
 
+[[bench]]
+name = "p1_widget"
+harness = false
+
 [lints.rust]
 unsafe_code = "forbid"
 

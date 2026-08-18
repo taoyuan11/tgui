@@ -5,11 +5,136 @@
 
 use crate::animation::FrameClock;
 use crate::core::{Color, ElementId, Error, Rect, Result};
+use crate::core::{PropertyId, WidgetKey};
 use crate::diagnostics::{BudgetDomain, FixedBudgetResourceManager};
 use crate::render::{PaintCommand, SceneSnapshot};
+use crate::widget::element::ElementTree;
+use crate::widget::{
+    ElementNodeDiagnostics, ElementTreeStats, PropertyValue, ReconcileReport, View, WidgetNode,
+    WidgetType,
+};
 use std::cell::Cell;
 use std::fmt;
 use std::time::{Duration, Instant};
+
+/// Public headless façade over the crate-private retained element tree.
+///
+/// It intentionally exposes copies and read-only diagnostics rather than the
+/// mutable element arena itself.
+pub struct WidgetHarness {
+    tree: ElementTree,
+    work_scheduled: bool,
+}
+
+impl WidgetHarness {
+    pub fn new() -> Self {
+        Self {
+            tree: ElementTree::new(),
+            work_scheduled: false,
+        }
+    }
+
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self {
+            tree: ElementTree::with_capacity(capacity),
+            work_scheduled: false,
+        }
+    }
+
+    pub fn mount(&mut self, widget: WidgetNode) -> Result<ReconcileReport> {
+        let report = self.tree.mount(widget)?;
+        self.work_scheduled = true;
+        Ok(report)
+    }
+
+    pub fn reconcile(&mut self, widget: WidgetNode) -> Result<ReconcileReport> {
+        let report = self.tree.reconcile(widget)?;
+        self.work_scheduled = true;
+        Ok(report)
+    }
+
+    pub fn rebuild_view(&mut self, view: &dyn View) -> Result<ReconcileReport> {
+        let report = self.tree.rebuild_view(view)?;
+        self.work_scheduled = true;
+        Ok(report)
+    }
+
+    pub fn unmount(&mut self) -> Result<ReconcileReport> {
+        let report = self.tree.unmount()?;
+        self.work_scheduled = true;
+        Ok(report)
+    }
+
+    pub fn root(&self) -> Option<ElementId> {
+        self.tree.root()
+    }
+
+    pub fn contains(&self, id: ElementId) -> bool {
+        self.tree.contains(id)
+    }
+
+    pub fn len(&self) -> usize {
+        self.tree.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.tree.is_empty()
+    }
+
+    pub fn parent(&self, id: ElementId) -> Option<ElementId> {
+        self.tree.parent(id)
+    }
+
+    pub fn children(&self, parent: ElementId) -> Vec<ElementId> {
+        self.tree.children(parent)
+    }
+
+    pub fn ids(&self) -> Vec<ElementId> {
+        self.tree.ids().collect()
+    }
+
+    pub fn child_for_key(&self, parent: ElementId, key: &WidgetKey) -> Option<ElementId> {
+        self.tree
+            .children(parent)
+            .into_iter()
+            .find(|id| self.tree.key(*id) == Some(key))
+    }
+
+    pub fn elements_for_key(&self, key: &WidgetKey) -> Vec<ElementId> {
+        self.tree
+            .ids()
+            .filter(|id| self.tree.key(*id) == Some(key))
+            .collect()
+    }
+
+    pub fn widget_type(&self, id: ElementId) -> Option<WidgetType> {
+        self.tree.widget_type(id).cloned()
+    }
+
+    pub fn property(&self, id: ElementId, property: PropertyId) -> Option<PropertyValue> {
+        self.tree.property(id, property).cloned()
+    }
+
+    pub fn diagnostics(&self) -> Vec<ElementNodeDiagnostics> {
+        self.tree.diagnostics()
+    }
+
+    pub fn stats(&self) -> ElementTreeStats {
+        self.tree.stats()
+    }
+
+    /// Consumes a pending headless build/reconcile request. Repeated idle polls
+    /// return false, proving that an inactive tree does not self-schedule.
+    pub fn take_scheduled_work(&mut self) -> bool {
+        std::mem::take(&mut self.work_scheduled)
+    }
+}
+
+impl Default for WidgetHarness {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 /// Stable textual representation of a recorded command stream.
 #[derive(Clone, Debug, PartialEq, Eq)]

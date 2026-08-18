@@ -1,8 +1,9 @@
 //! Transactional, data-oriented GUI foundations.
 //!
-//! P0 deliberately contains contracts and a headless implementation rather
-//! than a platform renderer. The minimal core has no backend dependencies and
-//! remains available with `--no-default-features`.
+//! P1 provides immutable widget declarations, a retained generational Element
+//! tree, reactive State/Signal transactions, and backend-neutral event routing.
+//! The minimal core remains headless and dependency-free with
+//! `--no-default-features`.
 
 #![forbid(unsafe_code)]
 
@@ -25,8 +26,14 @@ pub mod virtualization;
 pub mod widget;
 pub mod widgets;
 
-pub use application::{Application, AtomicSnapshotStore, CpuSnapshot, WindowContext, WindowSpec};
+pub use application::{
+    Application, ApplicationTxnReceipt, AtomicSnapshotStore, BackgroundDispatchReceipt,
+    CpuSnapshot, EventDispatchReceipt, WindowContext, WindowSpec,
+};
 pub use core::{
     Color, DpiScale, ElementId, Error, Point, Rect, RenderNodeId, Result, Size, WindowId,
 };
-pub use state::{BackgroundMessage, UiDispatcher, UiInbox, UpdateTxn, ui_channel};
+pub use state::{
+    BackgroundMessage, DependencyPhase, RevisionMask, Signal, State, StateInvalidation, TxnReceipt,
+    UiCommand, UiDispatcher, UiInbox, UpdateTxn, ui_channel,
+};

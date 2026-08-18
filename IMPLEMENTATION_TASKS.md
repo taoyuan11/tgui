@@ -78,42 +78,42 @@ P0 契约与骨架
 
 ### P1.1 Widget 声明模型
 
-- [ ] 定义 `WidgetNode`、`Widget`/`View` 构建接口和 `WidgetKey`；Widget 构建结果为不可变声明，不直接持有可变 Element。
-- [ ] 明确 WidgetType、key、属性、子节点和可选构建上下文的比较规则。
-- [ ] 提供最小 `Container`、`Text` 占位节点和 `Button` 示例，全部走统一 Widget 管线。
+- [x] 定义 `WidgetNode`、`Widget`/`View` 构建接口和 `WidgetKey`；Widget 构建结果为不可变声明，不直接持有可变 Element。
+- [x] 明确 WidgetType、key、属性、子节点和可选构建上下文的比较规则。
+- [x] 提供最小 `Container`、`Text` 占位节点和 `Button` 示例，全部走统一 Widget 管线。
 
 ### P1.2 Element Tree 与 reconciliation
 
-- [ ] 在 arena 中实现 Element 节点、父子/兄弟索引、稳定 `ElementId`、挂载/卸载/更新生命周期。
-- [ ] 按 `Key + WidgetType` 对齐旧 Element 与新 Widget；稳定 key 的节点保留身份、状态和焦点。
-- [ ] 处理插入、删除、类型替换、重复 key、key 缺失和 keyed reorder，并提供可诊断错误/安全回退。
-- [ ] 实现状态槽位、依赖订阅、生命周期清理和卸载时取消资源/动画订阅。
-- [ ] 记录每节点分配数、slot 使用、generation 和内存占用，供基准和诊断读取。
+- [x] 在 arena 中实现 Element 节点、父子/兄弟索引、稳定 `ElementId`、挂载/卸载/更新生命周期。
+- [x] 按 `Key + WidgetType` 对齐旧 Element 与新 Widget；稳定 key 的节点保留身份、状态和焦点。
+- [x] 处理插入、删除、类型替换、重复 key、key 缺失和 keyed reorder，并提供可诊断错误/安全回退。
+- [x] 实现状态槽位、依赖订阅、生命周期清理和卸载时取消资源/动画订阅。
+- [x] 记录每节点分配数、slot 使用、generation 和内存占用，供基准和诊断读取。
 
 ### P1.3 State、Signal 与事务
 
-- [ ] 实现 `State<T>` 可写句柄、`Signal<T>` 只读/派生句柄和一致的读取/写入 API。
-- [ ] 在 build、measure、paint、semantics 等读取上下文自动记录依赖；禁止这些阶段直接修改应用状态。
-- [ ] 实现 `UpdateTxn`：同一事务多次写入合并，事件传播结束后批量提交，并产生最小失效集合。
-- [ ] 实现派生 Signal 的依赖图、失效传播、订阅清理和循环/重入保护。
-- [ ] 实现 `UiDispatcher` 消费后台结果；消息必须携带 source generation 和相关 revision，过期结果丢弃。
+- [x] 实现 `State<T>` 可写句柄、`Signal<T>` 只读/派生句柄和一致的读取/写入 API。
+- [x] 在 build、measure、paint、semantics 等读取上下文自动记录依赖；禁止这些阶段直接修改应用状态。
+- [x] 实现 `UpdateTxn`：同一事务多次写入合并，事件传播结束后批量提交，并产生最小失效集合。
+- [x] 实现派生 Signal 的依赖图、失效传播、订阅清理和循环/重入保护。
+- [x] 实现 `UiDispatcher` 消费后台结果；消息必须携带 source generation 和相关 revision，过期结果丢弃。
 
 ### P1.4 事件、焦点与输入
 
-- [ ] 定义覆盖鼠标、触摸、滚轮、拖拽、键盘、焦点、文本/IME、窗口变化和 Accessibility action 的 `UiEvent`。
-- [ ] 实现命中路径上的 capture → target → bubble 三阶段传播及稳定的事件路径快照。
-- [ ] 实现 `EventContext`：`stop_propagation`、`prevent_default`、事务命令、`request_focus`/`release_focus`。
-- [ ] 实现 pointer capture/release、焦点管理、快捷键入口和基础 IME 路由。
-- [ ] 命中测试只读取上一帧已提交的 Layout/Render 快照，事件中间更新不得改变当前传播路径。
-- [ ] 为窗口 resize、DPI、激活和关闭请求保留统一事件入口。
+- [x] 定义覆盖鼠标、触摸、滚轮、拖拽、键盘、焦点、文本/IME、窗口变化和 Accessibility action 的 `UiEvent`。
+- [x] 实现命中路径上的 capture → target → bubble 三阶段传播及稳定的事件路径快照。
+- [x] 实现 `EventContext`：`stop_propagation`、`prevent_default`、事务命令、`request_focus`/`release_focus`。
+- [x] 实现 pointer capture/release、焦点管理、快捷键入口和基础 IME 路由。
+- [x] 命中测试只读取上一帧已提交的 Layout/Render 快照，事件中间更新不得改变当前传播路径。
+- [x] 为窗口 resize、DPI、激活和关闭请求保留统一事件入口。
 
 ### P1.5 P1 验证与退出条件
 
-- [ ] 测试 keyed reorder 后 `ElementId`、State、焦点和订阅保持正确；旧 generation 永不重新指向新节点。
-- [ ] 测试事务合并、派生依赖、卸载清理、后台过期消息和重入保护。
-- [ ] 测试事件顺序、停止传播、prevent default、pointer capture、焦点切换和 IME 路由。
-- [ ] 跑通 10/100/1,000 节点的 initial build、idle、single state update、keyed reorder 基准；idle 无动画时不得持续调度工作。
-- [ ] 用 headless 示例展示 Button 状态更新和事件传播，并记录阶段结果到架构计划。
+- [x] 测试 keyed reorder 后 `ElementId`、State、焦点和订阅保持正确；旧 generation 永不重新指向新节点。
+- [x] 测试事务合并、派生依赖、卸载清理、后台过期消息和重入保护。
+- [x] 测试事件顺序、停止传播、prevent default、pointer capture、焦点切换和 IME 路由。
+- [x] 跑通 10/100/1,000 节点的 initial build、idle、single state update、keyed reorder 基准；idle 无动画时不得持续调度工作。
+- [x] 用 headless 示例展示 Button 状态更新和事件传播，并记录阶段结果到架构计划。
 
 ---
 

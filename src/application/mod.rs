@@ -1,15 +1,21 @@
 //! Application, window, revision, and atomic CPU-snapshot contracts.
 //!
-//! The P0 application is headless and supports multiple generational windows,
-//! while exposing a convenient first/main window. All mutation methods assert
-//! the creating UI thread through [`crate::state::UiThread`].
+//! The headless application supports multiple generational windows, retained
+//! reactive views, and transactional event dispatch while exposing a
+//! convenient first/main window. All mutation methods assert the creating UI
+//! thread through [`crate::state::UiThread`].
 
 use crate::accessibility::SemanticSnapshot;
-use crate::core::{DenseArena, DpiScale, Error, Result, RevisionSet, Size, WindowId};
+use crate::core::{
+    DenseArena, DpiScale, ElementId, Error, GenerationStamp, Result, RevisionSet, Size, WindowId,
+};
+use crate::event::{CommittedHitTarget, DispatchOutcome, EventDispatcher, UiEvent};
 use crate::layout::LayoutSnapshot;
 use crate::media::ResourceSnapshot;
 use crate::render::SceneSnapshot;
-use crate::state::{UiDispatcher, UiInbox, UiThread};
+use crate::state::{TxnReceipt, UiCommand, UiDispatcher, UiInbox, UiThread, UpdateTxn};
+use crate::widget::element::ElementTree;
+use crate::widget::{ElementNodeDiagnostics, ElementTreeStats, ReconcileReport, View, WidgetNode};
 use std::fmt;
 use std::marker::PhantomData;
 use std::rc::Rc;
@@ -347,6 +353,33 @@ struct WindowState {
     spec: WindowSpec,
     snapshots: AtomicSnapshotStore,
     frame_requested: bool,
+    elements: ElementTree,
+    events: EventDispatcher,
+    view: Option<Rc<dyn View>>,
+}
+
+/// Result of one complete capture/target/bubble dispatch and transaction.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EventDispatchReceipt {
+    pub outcome: DispatchOutcome,
+    pub transaction: TxnReceipt,
+    pub reconciliation: Option<ReconcileReport>,
+}
+
+/// Application work completed after one transaction was atomically published.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ApplicationTxnReceipt {
+    pub transaction: TxnReceipt,
+    pub reconciliations: Vec<(WindowId, ReconcileReport)>,
+}
+
+/// Result of draining generation/revision-stamped worker messages.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BackgroundDispatchReceipt {
+    pub accepted: usize,
+    pub stale: usize,
+    /// `None` when every drained message was stale (or the inbox was empty).
+    pub application: Option<ApplicationTxnReceipt>,
 }
 
 /// Headless application runtime and window scheduler.
@@ -389,6 +422,9 @@ impl Application {
             spec,
             snapshots: AtomicSnapshotStore::default(),
             frame_requested: false,
+            elements: ElementTree::new(),
+            events: EventDispatcher::new(),
+            view: None,
         });
         if self.main_window.is_none() {
             self.main_window = Some(id);
@@ -434,6 +470,340 @@ impl Application {
         })?;
         state.frame_requested = true;
         Ok(())
+    }
+
+    /// Installs a retained view builder and performs its initial reactive build.
+    pub fn set_view<V>(&mut self, id: WindowId, view: V) -> Result<ReconcileReport>
+    where
+        V: View + 'static,
+    {
+        self.owner.assert_current()?;
+        let view: Rc<dyn View> = Rc::new(view);
+        let state = self.window_state_mut(id)?;
+        if !state.elements.is_empty() && !state.elements.has_view_root() {
+            return Err(Error::invalid_input(
+                Some("view".to_owned()),
+                "a direct widget root is already mounted",
+            ));
+        }
+        let report = state.elements.rebuild_view(view.as_ref())?;
+        state
+            .events
+            .elements_unmounted(report.removed_ids().iter().copied());
+        state.events.reconcile_owners(&state.elements);
+        state.view = Some(view);
+        state.frame_requested = true;
+        Ok(report)
+    }
+
+    /// Rebuilds the installed view while replacing its build dependencies.
+    pub fn rebuild_view(&mut self, id: WindowId) -> Result<ReconcileReport> {
+        self.owner.assert_current()?;
+        let state = self.window_state_mut(id)?;
+        let view = state.view.clone().ok_or_else(|| {
+            Error::invalid_input(Some("view".to_owned()), "the window has no installed view")
+        })?;
+        let report = state.elements.rebuild_view(view.as_ref())?;
+        state
+            .events
+            .elements_unmounted(report.removed_ids().iter().copied());
+        state.events.reconcile_owners(&state.elements);
+        state.frame_requested = true;
+        Ok(report)
+    }
+
+    /// Mounts a static declaration without storing a reactive view builder.
+    pub fn mount_widget(&mut self, id: WindowId, widget: WidgetNode) -> Result<ReconcileReport> {
+        self.owner.assert_current()?;
+        let state = self.window_state_mut(id)?;
+        if state.view.is_some() {
+            return Err(Error::invalid_input(
+                Some("widget".to_owned()),
+                "the window already owns a reactive view",
+            ));
+        }
+        let report = state.elements.mount(widget)?;
+        state.events.reconcile_owners(&state.elements);
+        state.frame_requested = true;
+        Ok(report)
+    }
+
+    pub fn reconcile_widget(
+        &mut self,
+        id: WindowId,
+        widget: WidgetNode,
+    ) -> Result<ReconcileReport> {
+        self.owner.assert_current()?;
+        let state = self.window_state_mut(id)?;
+        if state.view.is_some() {
+            return Err(Error::invalid_input(
+                Some("widget".to_owned()),
+                "use rebuild_view for a window with an installed view",
+            ));
+        }
+        let report = state.elements.reconcile(widget)?;
+        state
+            .events
+            .elements_unmounted(report.removed_ids().iter().copied());
+        state.events.reconcile_owners(&state.elements);
+        state.frame_requested = true;
+        Ok(report)
+    }
+
+    pub fn widget_stats(&self, id: WindowId) -> Option<ElementTreeStats> {
+        self.windows.get(id).map(|state| state.elements.stats())
+    }
+
+    pub fn element_diagnostics(&self, id: WindowId) -> Option<Vec<ElementNodeDiagnostics>> {
+        self.windows
+            .get(id)
+            .map(|state| state.elements.diagnostics())
+    }
+
+    pub fn focused_element(&self, id: WindowId) -> Option<ElementId> {
+        self.windows.get(id)?.events.focused()
+    }
+
+    /// Routes one event using the previous committed hit result, commits its
+    /// shared transaction, and rebuilds an installed view when build state was
+    /// invalidated.
+    pub fn dispatch_event(
+        &mut self,
+        id: WindowId,
+        committed_hit: CommittedHitTarget,
+        event: &UiEvent,
+    ) -> Result<EventDispatchReceipt> {
+        self.owner.assert_current()?;
+        if committed_hit.window() != Some(id) {
+            return Err(Error::invalid_input(
+                Some("hit_test_window".to_owned()),
+                "event hit target belongs to a different window or is unscoped",
+            ));
+        }
+        if let UiEvent::AccessibilityAction(action) = event {
+            if action.window() != Some(id) {
+                return Err(Error::invalid_input(
+                    Some("accessibility_window".to_owned()),
+                    "accessibility action belongs to a different window or is unscoped",
+                ));
+            }
+        }
+        if let UiEvent::WindowResized(size) = event {
+            size.validate().map_err(Error::from)?;
+        }
+
+        let (outcome, events_before, mut pending) = {
+            let state = self.window_state_mut(id)?;
+            let committed_layout_revision = state
+                .snapshots
+                .committed()
+                .map(|snapshot| snapshot.layout().revision())
+                .unwrap_or(crate::core::LayoutRevision::ZERO);
+            if committed_hit.revision() != committed_layout_revision {
+                return Err(Error::invalid_input(
+                    Some("hit_test_revision".to_owned()),
+                    "event hit target does not come from the latest committed layout",
+                ));
+            }
+            let mut pending = UpdateTxn::<UiCommand>::new();
+            let events_before = state.events.clone();
+            let outcome =
+                state
+                    .events
+                    .dispatch(&state.elements, committed_hit, event, &mut pending)?;
+            (outcome, events_before, pending)
+        };
+
+        if matches!(event, UiEvent::WindowCloseRequested) && !outcome.default_prevented {
+            pending.push(UiCommand::CloseWindow(id))?;
+        }
+
+        let (transaction, commands) = match self.commit_update_txn(pending) {
+            Ok(committed) => committed,
+            Err(error) => {
+                if let Some(state) = self.windows.get_mut(id) {
+                    state.events = events_before;
+                }
+                return Err(error);
+            }
+        };
+
+        if let Some(state) = self.windows.get_mut(id) {
+            match event {
+                UiEvent::WindowResized(size) => state.spec.inner_size = *size,
+                UiEvent::WindowDpiChanged(scale) => state.spec.dpi_scale = *scale,
+                _ => {}
+            }
+        }
+
+        let reconciliations = self.route_committed_transaction(&transaction, commands)?;
+        let current_reconciliation = reconciliations
+            .into_iter()
+            .find_map(|(window, report)| (window == id).then_some(report));
+        Ok(EventDispatchReceipt {
+            outcome,
+            transaction,
+            reconciliation: current_reconciliation,
+        })
+    }
+
+    /// Atomically commits a UI transaction, then routes every resulting
+    /// invalidation and command through the application scheduler.
+    pub fn apply_transaction(
+        &mut self,
+        pending: UpdateTxn<UiCommand>,
+    ) -> Result<ApplicationTxnReceipt> {
+        self.owner.assert_current()?;
+        let (transaction, commands) = self.commit_update_txn(pending)?;
+        let reconciliations = self.route_committed_transaction(&transaction, commands)?;
+        Ok(ApplicationTxnReceipt {
+            transaction,
+            reconciliations,
+        })
+    }
+
+    /// Drains worker results for one live source generation.
+    ///
+    /// A result is accepted only when its target window still exists, its
+    /// source generation equals `current_source`, and every revision selected
+    /// by its [`crate::state::RevisionMask`] still matches that target's latest
+    /// committed snapshot. Accepted payloads are staged into one transaction;
+    /// stale payloads never reach `stage` and cannot modify application state.
+    pub fn consume_background_results<T>(
+        &mut self,
+        inbox: &UiInbox<T>,
+        current_source: GenerationStamp,
+        mut stage: impl FnMut(WindowId, T, &mut UpdateTxn<UiCommand>) -> Result<()>,
+    ) -> Result<BackgroundDispatchReceipt> {
+        self.owner.assert_current()?;
+        let messages = inbox.drain()?;
+        let mut pending = UpdateTxn::new();
+        let mut accepted = 0;
+        let mut stale = 0;
+
+        for message in messages {
+            let Some(state) = self.windows.get(message.target) else {
+                stale += 1;
+                continue;
+            };
+            let current_revisions = state
+                .snapshots
+                .committed()
+                .map(|snapshot| snapshot.revisions())
+                .unwrap_or(RevisionSet::ZERO);
+            if !current_source.is_well_formed()
+                || !message.is_current(message.target, current_source, current_revisions)
+            {
+                stale += 1;
+                continue;
+            }
+
+            stage(message.target, message.payload, &mut pending)?;
+            accepted += 1;
+        }
+
+        let application = if accepted == 0 {
+            None
+        } else {
+            Some(self.apply_transaction(pending)?)
+        };
+        Ok(BackgroundDispatchReceipt {
+            accepted,
+            stale,
+            application,
+        })
+    }
+
+    fn commit_update_txn(
+        &self,
+        pending: UpdateTxn<UiCommand>,
+    ) -> Result<(TxnReceipt, Vec<UiCommand>)> {
+        let live_windows = self.windows.ids().collect::<Vec<_>>();
+        let mut commands = Vec::new();
+        let transaction = pending.commit(|batch| {
+            for command in &batch {
+                let target = match command {
+                    UiCommand::RequestFrame(window) | UiCommand::CloseWindow(window) => *window,
+                };
+                if !live_windows.contains(&target) {
+                    return Err(Error::invalid_input(
+                        Some("command_window".to_owned()),
+                        "transaction command targets a stale or unknown window",
+                    ));
+                }
+            }
+            commands = batch;
+            Ok(())
+        })?;
+        Ok((transaction, commands))
+    }
+
+    fn route_committed_transaction(
+        &mut self,
+        transaction: &TxnReceipt,
+        commands: Vec<UiCommand>,
+    ) -> Result<Vec<(WindowId, ReconcileReport)>> {
+        let mut reconciliations = Vec::new();
+        let mut first_error = None;
+        for (window, state) in self.windows.iter_mut() {
+            let owner = state.elements.dependency_owner();
+            let mut affected = false;
+            let mut rebuild = false;
+            for invalidation in transaction.invalidations() {
+                if invalidation.owner() == owner && state.elements.contains(invalidation.element())
+                {
+                    affected = true;
+                    rebuild |= invalidation.phase() == crate::state::DependencyPhase::Build;
+                }
+            }
+            if !affected {
+                continue;
+            }
+            state.frame_requested = true;
+            if rebuild {
+                if let Some(view) = state.view.clone() {
+                    match state.elements.rebuild_view(view.as_ref()) {
+                        Ok(report) => {
+                            state
+                                .events
+                                .elements_unmounted(report.removed_ids().iter().copied());
+                            state.events.reconcile_owners(&state.elements);
+                            reconciliations.push((window, report));
+                        }
+                        Err(error) => {
+                            if first_error.is_none() {
+                                first_error = Some(error);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        let mut close_windows = Vec::new();
+        for command in commands {
+            match command {
+                UiCommand::RequestFrame(window) => {
+                    if let Err(error) = self.request_frame(window) {
+                        if first_error.is_none() {
+                            first_error = Some(error);
+                        }
+                    }
+                }
+                UiCommand::CloseWindow(window) => close_windows.push(window),
+            }
+        }
+        for window in close_windows {
+            if let Err(error) = self.destroy_window(window) {
+                if first_error.is_none() {
+                    first_error = Some(error);
+                }
+            }
+        }
+        if let Some(error) = first_error {
+            return Err(error);
+        }
+        Ok(reconciliations)
     }
 
     pub fn take_frame_requests(&mut self) -> Result<Vec<WindowId>> {
@@ -506,6 +876,15 @@ impl Application {
     pub fn empty_snapshot(&self) -> CpuSnapshot {
         CpuSnapshot::empty(RevisionSet::ZERO)
     }
+
+    fn window_state_mut(&mut self, id: WindowId) -> Result<&mut WindowState> {
+        self.windows.get_mut(id).ok_or_else(|| {
+            Error::invalid_input(
+                Some("window_id".to_owned()),
+                "window ID is stale or unknown",
+            )
+        })
+    }
 }
 
 impl Default for Application {
@@ -520,7 +899,18 @@ pub type SnapshotStore = AtomicSnapshotStore;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::{RevisionChanges, SceneRevision};
+    use crate::core::{
+        LayoutRevision, Point, ResourceRevision, RevisionChanges, SceneRevision, SemanticRevision,
+        WidgetKey,
+    };
+    use crate::event::{
+        AccessibilityAction, AccessibilityActionEvent, EventHandler, EventPhase, PointerEvent,
+        PointerId, PointerKind,
+    };
+    use crate::state::{RevisionMask, State};
+    use crate::widget::{BuildContext, Widget};
+    use crate::widgets::{Button, Container};
+    use std::cell::Cell;
 
     fn snapshot(revisions: RevisionSet, fingerprint: u64) -> CpuSnapshot {
         CpuSnapshot::new(
@@ -571,5 +961,536 @@ mod tests {
         revisions.advance(RevisionChanges::ALL).unwrap();
         assert_eq!(revisions.scene, SceneRevision::new(1));
         store.try_commit(snapshot(revisions, 2)).unwrap();
+    }
+
+    #[derive(Clone)]
+    struct ReorderView {
+        reversed: State<bool>,
+    }
+
+    impl View for ReorderView {
+        fn build_view(&self, context: &mut BuildContext) -> Result<WidgetNode> {
+            let reversed = context.read_state(&self.reversed)?;
+            let state = self.reversed.clone();
+            let toggle = EventHandler::new(1, move |event, context| {
+                if context.phase() == EventPhase::Target && matches!(event, UiEvent::PointerDown(_))
+                {
+                    state.update(context.transaction(), |value| *value = !*value)?;
+                }
+                Ok(())
+            });
+            let a = Button::new("a").with_key("a").build(context)?;
+            let b = Button::new("b")
+                .with_key("b")
+                .with_event_handler(toggle)
+                .build(context)?;
+            let children = if reversed { vec![b, a] } else { vec![a, b] };
+            Container::new().with_children(children).build(context)
+        }
+    }
+
+    #[test]
+    fn event_state_commit_rebuilds_view_and_preserves_keyed_focus() {
+        let reversed = State::new(false);
+        let mut application = Application::new();
+        let window = application.create_window(WindowSpec::new("P1")).unwrap();
+        application
+            .set_view(
+                window,
+                ReorderView {
+                    reversed: reversed.clone(),
+                },
+            )
+            .unwrap();
+        let button_key = WidgetKey::from("b");
+        let before = application
+            .element_diagnostics(window)
+            .unwrap()
+            .into_iter()
+            .find(|element| element.key.as_ref() == Some(&button_key))
+            .unwrap()
+            .id;
+
+        let pointer = UiEvent::PointerDown(PointerEvent::new(
+            PointerId::MOUSE,
+            PointerKind::Mouse,
+            Point::new(10.0, 10.0),
+        ));
+        let receipt = application
+            .dispatch_event(
+                window,
+                CommittedHitTarget::for_window(
+                    window,
+                    crate::core::LayoutRevision::ZERO,
+                    Some(before),
+                ),
+                &pointer,
+            )
+            .unwrap();
+        assert_eq!(receipt.transaction.changed_state_count, 1);
+        assert!(receipt.reconciliation.is_some());
+        assert!(reversed.get().unwrap());
+
+        let after = application
+            .element_diagnostics(window)
+            .unwrap()
+            .into_iter()
+            .find(|element| element.key.as_ref() == Some(&button_key))
+            .unwrap()
+            .id;
+        assert_eq!(after, before);
+        assert_eq!(application.focused_element(window), Some(before));
+
+        // The rebuild replaced, rather than accumulated, its dependency set.
+        // A second event through the same stable ID still invalidates/rebuilds.
+        let second = application
+            .dispatch_event(
+                window,
+                CommittedHitTarget::for_window(
+                    window,
+                    crate::core::LayoutRevision::ZERO,
+                    Some(before),
+                ),
+                &pointer,
+            )
+            .unwrap();
+        assert_eq!(second.transaction.invalidations().len(), 1);
+        assert!(!reversed.get().unwrap());
+        assert_eq!(application.focused_element(window), Some(before));
+    }
+
+    #[test]
+    fn close_request_is_a_preventable_transactional_default() {
+        struct Root;
+        let prevent = EventHandler::new(1, |event, context| {
+            if matches!(event, UiEvent::WindowCloseRequested) {
+                context.prevent_default();
+            }
+            Ok(())
+        });
+        let mut application = Application::new();
+        let window = application.create_window(WindowSpec::new("close")).unwrap();
+        application
+            .mount_widget(
+                window,
+                WidgetNode::new::<Root>().with_event_handler(prevent),
+            )
+            .unwrap();
+        let committed =
+            CommittedHitTarget::miss_for_window(window, crate::core::LayoutRevision::ZERO);
+        let prevented = application
+            .dispatch_event(window, committed, &UiEvent::WindowCloseRequested)
+            .unwrap();
+        assert!(prevented.outcome.default_prevented);
+        assert!(application.window_info(window).is_some());
+
+        application
+            .reconcile_widget(window, WidgetNode::new::<Root>())
+            .unwrap();
+        application
+            .dispatch_event(window, committed, &UiEvent::WindowCloseRequested)
+            .unwrap();
+        assert!(application.window_info(window).is_none());
+    }
+
+    #[derive(Clone)]
+    struct SharedView {
+        value: State<u32>,
+        builds: Rc<Cell<usize>>,
+    }
+
+    impl View for SharedView {
+        fn build_view(&self, context: &mut BuildContext) -> Result<WidgetNode> {
+            self.builds.set(self.builds.get() + 1);
+            let value = context.read_state(&self.value)?;
+            let state = self.value.clone();
+            Button::new(format!("value {value}"))
+                .with_key("shared")
+                .with_event_handler(EventHandler::new(1, move |event, context| {
+                    if context.phase() == EventPhase::Target
+                        && matches!(event, UiEvent::PointerDown(_))
+                    {
+                        state.update(context.transaction(), |value| *value += 1)?;
+                    }
+                    Ok(())
+                }))
+                .build(context)
+        }
+    }
+
+    #[test]
+    fn shared_state_invalidations_are_namespaced_and_rebuild_every_window() {
+        let value = State::new(0_u32);
+        let first_builds = Rc::new(Cell::new(0));
+        let second_builds = Rc::new(Cell::new(0));
+        let mut application = Application::new();
+        let first = application.create_window(WindowSpec::new("first")).unwrap();
+        let second = application
+            .create_window(WindowSpec::new("second"))
+            .unwrap();
+        application
+            .set_view(
+                first,
+                SharedView {
+                    value: value.clone(),
+                    builds: first_builds.clone(),
+                },
+            )
+            .unwrap();
+        application
+            .set_view(
+                second,
+                SharedView {
+                    value: value.clone(),
+                    builds: second_builds.clone(),
+                },
+            )
+            .unwrap();
+        application.take_frame_requests().unwrap();
+
+        let key = WidgetKey::from("shared");
+        let button = application
+            .element_diagnostics(first)
+            .unwrap()
+            .into_iter()
+            .find(|element| element.key.as_ref() == Some(&key))
+            .unwrap()
+            .id;
+        let event = UiEvent::PointerDown(PointerEvent::new(
+            PointerId::MOUSE,
+            PointerKind::Mouse,
+            Point::ZERO,
+        ));
+
+        let wrong_window =
+            CommittedHitTarget::for_window(second, crate::core::LayoutRevision::ZERO, Some(button));
+        assert!(
+            application
+                .dispatch_event(first, wrong_window, &event)
+                .is_err()
+        );
+        assert_eq!(value.get().unwrap(), 0);
+
+        let receipt = application
+            .dispatch_event(
+                first,
+                CommittedHitTarget::for_window(
+                    first,
+                    crate::core::LayoutRevision::ZERO,
+                    Some(button),
+                ),
+                &event,
+            )
+            .unwrap();
+        assert_eq!(receipt.transaction.invalidations().len(), 2);
+        assert_eq!(first_builds.get(), 2);
+        assert_eq!(second_builds.get(), 2);
+        let mut frames = application.take_frame_requests().unwrap();
+        frames.sort_by_key(|window| (window.slot(), window.generation()));
+        let mut expected = vec![first, second];
+        expected.sort_by_key(|window| (window.slot(), window.generation()));
+        assert_eq!(frames, expected);
+    }
+
+    #[test]
+    fn rejected_event_commands_roll_back_state_and_input_ownership() {
+        struct Root;
+        let value = State::new(0_u32);
+        let handler_state = value.clone();
+        let handler = EventHandler::new(1, move |event, context| {
+            if context.phase() == EventPhase::Target && matches!(event, UiEvent::PointerDown(_)) {
+                handler_state.set(context.transaction(), 1)?;
+                context.command(UiCommand::RequestFrame(WindowId::from_parts(999, 1)))?;
+            }
+            Ok(())
+        });
+        let mut application = Application::new();
+        let window = application
+            .create_window(WindowSpec::new("atomic"))
+            .unwrap();
+        application
+            .mount_widget(
+                window,
+                WidgetNode::new::<Root>()
+                    .with_focusable(true)
+                    .with_event_handler(handler),
+            )
+            .unwrap();
+        let root = application.element_diagnostics(window).unwrap()[0].id;
+        let event = UiEvent::PointerDown(PointerEvent::new(
+            PointerId::MOUSE,
+            PointerKind::Mouse,
+            Point::ZERO,
+        ));
+        let result = application.dispatch_event(
+            window,
+            CommittedHitTarget::for_window(window, crate::core::LayoutRevision::ZERO, Some(root)),
+            &event,
+        );
+        assert!(result.is_err());
+        assert_eq!(value.get().unwrap(), 0);
+        assert_eq!(application.focused_element(window), None);
+    }
+
+    #[test]
+    fn worker_results_validate_stamps_and_rebuild_every_subscribed_window() {
+        let value = State::new(0_u32);
+        let first_builds = Rc::new(Cell::new(0));
+        let second_builds = Rc::new(Cell::new(0));
+        let mut application = Application::new();
+        let first = application.create_window(WindowSpec::new("first")).unwrap();
+        let second = application
+            .create_window(WindowSpec::new("second"))
+            .unwrap();
+        let stale_target = application.create_window(WindowSpec::new("stale")).unwrap();
+        application
+            .set_view(
+                first,
+                SharedView {
+                    value: value.clone(),
+                    builds: first_builds.clone(),
+                },
+            )
+            .unwrap();
+        application
+            .set_view(
+                second,
+                SharedView {
+                    value: value.clone(),
+                    builds: second_builds.clone(),
+                },
+            )
+            .unwrap();
+        application.destroy_window(stale_target).unwrap();
+        application.take_frame_requests().unwrap();
+
+        let source = GenerationStamp::new(17, 3);
+        let old_source = GenerationStamp::new(17, 2);
+        let irrelevant_layout = RevisionSet::new(
+            LayoutRevision::new(99),
+            SceneRevision::ZERO,
+            ResourceRevision::ZERO,
+            SemanticRevision::ZERO,
+        );
+        let stale_resource = RevisionSet::new(
+            LayoutRevision::ZERO,
+            SceneRevision::ZERO,
+            ResourceRevision::new(1),
+            SemanticRevision::ZERO,
+        );
+        let (dispatcher, inbox) = application.dispatcher::<u32>();
+        dispatcher
+            .dispatch_with_mask(first, source, irrelevant_layout, RevisionMask::RESOURCE, 7)
+            .unwrap();
+        dispatcher
+            .dispatch_with_mask(
+                first,
+                old_source,
+                RevisionSet::ZERO,
+                RevisionMask::NONE,
+                101,
+            )
+            .unwrap();
+        dispatcher
+            .dispatch_with_mask(first, source, stale_resource, RevisionMask::RESOURCE, 102)
+            .unwrap();
+        dispatcher
+            .dispatch(stale_target, source, RevisionSet::ZERO, 103)
+            .unwrap();
+
+        let stage_calls = Cell::new(0);
+        let state = value.clone();
+        let receipt = application
+            .consume_background_results(&inbox, source, |target, payload, transaction| {
+                assert_eq!(target, first);
+                stage_calls.set(stage_calls.get() + 1);
+                state.set(transaction, payload)
+            })
+            .unwrap();
+
+        assert_eq!(receipt.accepted, 1);
+        assert_eq!(receipt.stale, 3);
+        assert_eq!(stage_calls.get(), 1);
+        assert_eq!(value.get().unwrap(), 7);
+        let committed = receipt.application.unwrap();
+        assert_eq!(committed.transaction.changed_state_count, 1);
+        assert_eq!(committed.transaction.invalidations().len(), 2);
+        assert_eq!(committed.reconciliations.len(), 2);
+        assert_eq!(first_builds.get(), 2);
+        assert_eq!(second_builds.get(), 2);
+
+        let mut frames = application.take_frame_requests().unwrap();
+        frames.sort_by_key(|window| (window.slot(), window.generation()));
+        let mut expected = vec![first, second];
+        expected.sort_by_key(|window| (window.slot(), window.generation()));
+        assert_eq!(frames, expected);
+    }
+
+    #[derive(Clone)]
+    struct OwnershipView {
+        mode: State<u8>,
+    }
+
+    struct OwnershipNode;
+
+    impl View for OwnershipView {
+        fn build_view(&self, context: &mut BuildContext) -> Result<WidgetNode> {
+            let mode = context.read_state(&self.mode)?;
+            Ok(WidgetNode::new::<OwnershipNode>()
+                .with_key("owner")
+                .with_focusable(mode != 1)
+                .with_enabled(mode != 2)
+                .with_event_handler(EventHandler::new(1, |event, context| {
+                    if context.phase() == EventPhase::Target
+                        && matches!(event, UiEvent::PointerDown(_))
+                    {
+                        context.capture_pointer(PointerId::MOUSE);
+                    }
+                    Ok(())
+                })))
+        }
+    }
+
+    #[test]
+    fn reconciliation_revalidates_retained_focus_and_pointer_capture() {
+        let mode = State::new(0_u8);
+        let mut application = Application::new();
+        let window = application
+            .create_window(WindowSpec::new("ownership"))
+            .unwrap();
+        application
+            .set_view(window, OwnershipView { mode: mode.clone() })
+            .unwrap();
+        let key = WidgetKey::from("owner");
+        let owner = application
+            .element_diagnostics(window)
+            .unwrap()
+            .into_iter()
+            .find(|element| element.key.as_ref() == Some(&key))
+            .unwrap()
+            .id;
+        let pointer_down = UiEvent::PointerDown(PointerEvent::new(
+            PointerId::MOUSE,
+            PointerKind::Mouse,
+            Point::ZERO,
+        ));
+        let hit =
+            CommittedHitTarget::for_window(window, crate::core::LayoutRevision::ZERO, Some(owner));
+        application
+            .dispatch_event(window, hit, &pointer_down)
+            .unwrap();
+        assert_eq!(application.focused_element(window), Some(owner));
+        assert_eq!(
+            application
+                .windows
+                .get(window)
+                .unwrap()
+                .events
+                .pointer_capture(PointerId::MOUSE),
+            Some(owner)
+        );
+
+        let mut non_focusable = UpdateTxn::new();
+        mode.set(&mut non_focusable, 1).unwrap();
+        application.apply_transaction(non_focusable).unwrap();
+        assert_eq!(application.focused_element(window), None);
+        assert_eq!(
+            application
+                .windows
+                .get(window)
+                .unwrap()
+                .events
+                .pointer_capture(PointerId::MOUSE),
+            Some(owner)
+        );
+
+        let mut enabled = UpdateTxn::new();
+        mode.set(&mut enabled, 0).unwrap();
+        application.apply_transaction(enabled).unwrap();
+        application
+            .dispatch_event(window, hit, &pointer_down)
+            .unwrap();
+        assert_eq!(application.focused_element(window), Some(owner));
+
+        let mut disabled = UpdateTxn::new();
+        mode.set(&mut disabled, 2).unwrap();
+        application.apply_transaction(disabled).unwrap();
+        assert_eq!(application.focused_element(window), None);
+        assert_eq!(
+            application
+                .windows
+                .get(window)
+                .unwrap()
+                .events
+                .pointer_capture(PointerId::MOUSE),
+            None
+        );
+        let retained = application
+            .element_diagnostics(window)
+            .unwrap()
+            .into_iter()
+            .find(|element| element.key.as_ref() == Some(&key))
+            .unwrap()
+            .id;
+        assert_eq!(retained, owner);
+    }
+
+    #[test]
+    fn accessibility_actions_are_rejected_across_application_windows() {
+        struct Root;
+        let invocations = Rc::new(Cell::new(0));
+        let handler_invocations = invocations.clone();
+        let handler = EventHandler::new(1, move |event, context| {
+            if context.phase() == EventPhase::Target
+                && matches!(event, UiEvent::AccessibilityAction(_))
+            {
+                handler_invocations.set(handler_invocations.get() + 1);
+            }
+            Ok(())
+        });
+        let mut application = Application::new();
+        let first = application.create_window(WindowSpec::new("first")).unwrap();
+        let second = application
+            .create_window(WindowSpec::new("second"))
+            .unwrap();
+        application
+            .mount_widget(first, WidgetNode::new::<Root>().with_event_handler(handler))
+            .unwrap();
+        application
+            .mount_widget(second, WidgetNode::new::<Root>())
+            .unwrap();
+        let first_root = application.element_diagnostics(first).unwrap()[0].id;
+        let second_root = application.element_diagnostics(second).unwrap()[0].id;
+        assert_eq!(first_root, second_root);
+        let hit = CommittedHitTarget::for_window(
+            first,
+            crate::core::LayoutRevision::ZERO,
+            Some(first_root),
+        );
+
+        let wrong_window = UiEvent::AccessibilityAction(AccessibilityActionEvent::for_window(
+            second,
+            first_root,
+            AccessibilityAction::Activate,
+        ));
+        assert!(
+            application
+                .dispatch_event(first, hit, &wrong_window)
+                .is_err()
+        );
+        let unscoped = UiEvent::AccessibilityAction(AccessibilityActionEvent::new(
+            first_root,
+            AccessibilityAction::Activate,
+        ));
+        assert!(application.dispatch_event(first, hit, &unscoped).is_err());
+        assert_eq!(invocations.get(), 0);
+
+        let scoped = UiEvent::AccessibilityAction(AccessibilityActionEvent::for_window(
+            first,
+            first_root,
+            AccessibilityAction::Activate,
+        ));
+        application.dispatch_event(first, hit, &scoped).unwrap();
+        assert_eq!(invocations.get(), 1);
     }
 }

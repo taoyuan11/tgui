@@ -603,3 +603,36 @@ webview = ["dep:wry"]
 - `cargo bench --bench p0_arena --no-default-features`：10/100/1,000 节点 harness 可运行；本轮连续 value 区保留容量分别约为 320/3,200/32,000 bytes。计时只作为 harness smoke baseline，不作为跨机器性能承诺。
 
 三平台检查和 Rust 1.85 检查已写入 `.github/workflows/ci.yml`；本地结果只代表上述 macOS 主机。统一入口为 `scripts/ci.sh`。
+
+## P1 实施记录（2026-08-17—18）
+
+### 实际取舍
+
+- `WidgetNode` 是只读声明值；`Widget`/`View` 只通过 `BuildContext` 读取 State/Signal。`WidgetType` 使用不可由字符串碰撞的 Rust `TypeId` 作为运行时身份，类型名只用于诊断。属性按 `PropertyId` 排序去重；callback equality 使用 `(closure TypeId, explicit revision)`，callback 永不参与 Element 身份。
+- Element 使用 `DenseArena<ElementNode, ElementId>`，拓扑只保存 `parent`、`first_child`、`next_sibling`。Sibling reconciliation 中 keyed 节点只按 `WidgetKey + WidgetType` 跨位置复用；keyless 节点只按 keyless 相对位置和类型复用。同 key 异类型替换；重复 key 记录诊断并整段重建冲突 sibling，绝不猜测旧身份。
+- 生命周期事件在结构变更完成后按 mount/update parent-first、unmount child-first 发布。直接 drop tree 也执行卸载清理；reconciliation/lifecycle/teardown 期间用 State write guard 拒绝重入发布。每个 Element 保存本地 state slot、按 phase 原子替换的 RAII dependency set、通用订阅 token 和卸载 cleanup。Measure/Layout/Paint/Semantics 共用 element-scoped capture-and-replace 接缝，真实 phase pipeline 在后续阶段接入。
+- `State<T>`/`Signal<T>` 首期要求写入值可 `Clone + PartialEq + 'static`。同一 `UpdateTxn` 对同一 State 保序合并；所有 updater 先基于同一个提交前快照计算 staged value，命令校验成功后才统一发布，不提供跨 State read-your-writes。commit 全程禁止嵌套 State 发布，失败预检、命令拒绝和旧值析构都不会暴露半提交状态。
+- 派生 Signal 懒求值并缓存，动态重算会原子替换依赖；每次 source 变化都沿 derived source 向下传播，单事务用 visited set 去重。即使上次求值失败后 Signal 已经 dirty，后续源变化仍会重新失效订阅 Element。cycle、derived reentrant write 和 RefCell reentry 返回诊断错误；派生值重算后即使相等，P1 仍保守失效订阅者，优先保证不漏更新。
+- State invalidation 的内部身份是 `(DependencyOwner, ElementId, phase)`。每个窗口 ElementTree 有独立 owner，避免多个 arena 都从 `slot 0 / generation 1` 开始时错误合并；共享 State 会让所有订阅窗口分别重建/调度。
+- Worker message 保留 target window、source generation 和请求时 revision，并增加 `RevisionMask`；`Application::consume_background_results` 只比较任务声明相关的 revision，拒绝 stale window/generation/revision，accepted payload 进入同一个 `UpdateTxn`，随后复用跨窗口失效、rebuild 和 frame 调度管线。
+- `UiEvent` 统一覆盖 pointer/touch/pen、wheel、drag、key/shortcut、focus、text/IME、window 和 Accessibility action。每次 dispatch 先冻结 root-to-target `EventPath`，再执行 capture -> target -> bubble；disabled Element 不执行 handler，focus、pointer capture 和 default action 在传播完成后应用，`dispatch_to` 与普通 dispatch 保持相同的输入默认语义。
+- `CommittedHitTarget` 同时携带 WindowId、LayoutRevision 和完整 generation target。Accessibility action 另外携带语义目标的 WindowId；`Application` 拒绝跨窗口、无作用域或非最新 revision 的输入目标。传播中不读取 mutable layout，也不会按复用 slot 重定向 stale ID。
+- 每个 WindowState 组合 ElementTree、EventDispatcher 和可选 retained View。`Application::apply_transaction` 是事件、后台消息和直接事务共享的提交/路由入口；Build dependency 失效后统一重建所有受影响窗口。reconciliation 后立即重新验证 retained focus/capture owner，节点即使保留 ID 但变为 disabled/non-focusable 也不会留下过期输入所有权。窗口关闭是可 `prevent_default` 的事务 default action。
+- `Container`、P1 placeholder `Text` 和 `Button` 都只生成统一 WidgetNode；Button 的 enabled/focus/event 元数据进入 Element/Event 管线，不使用 Native Host。`WidgetHarness` 仅暴露声明操作和只读 Element 诊断，不能绕过 UpdateTxn 改内部 state slot。
+- P1 benchmark 固定 10/100/1,000 个 retained nodes，覆盖 initial build、10,000 次 idle poll、single State update + dependent rebuild 和 reverse keyed reorder。计时只作 smoke baseline；无动画 idle 必须硬断言为零工作，reorder 必须硬断言全部 keyed ElementId 保留。
+
+P1 暂不把 dependency phase 映射成 DirtyFlags，也不生成真实布局命中几何；这两个接缝分别留给 P2 Dirty Tree 与 LayoutSnapshot。P1 的 committed hit wrapper 已先固定窗口、revision 和 generation 契约。事务对返回 `Result::Err` 保证原子，但不承诺从用户 `Clone`、`PartialEq`、updater、command callback 或 `Drop` 的 panic 中恢复；这些回调不得 unwind 穿过 UI 事务边界。
+
+### P1 基线结果
+
+在 `aarch64-apple-darwin` 开发机上完成以下验证：
+
+- `cargo fmt --all -- --check`：通过。
+- `cargo clippy --all-targets --no-default-features -- -D warnings` 与 all-features：通过。
+- `cargo test --no-default-features` 与默认 feature：79 个 P0/P1 单元测试、4 个公共契约测试和 doc tests 全部通过。
+- `scripts/check-features.sh`：minimal、default、desktop、render、text、image、svg、accessibility、webview、all-features 全部通过。
+- `cargo run --example p1_headless --no-default-features`：稳定输出 capture/target/bubble trace，Button State 从 0 更新为 1，View 自动 rebuild，焦点保持，随后 idle 无重复 frame request。
+- `cargo bench --bench p1_widget --no-default-features`：10/100/1,000 节点四类场景均可运行；10,000 次 idle poll 的 `idle_work=0`，keyed reorder 的 ID 保留断言通过。计时不作为跨机器性能承诺。
+- Rust 1.85 MSRV 构建门禁：通过；P1 未使用 1.85 之后才稳定的 let-chain 语法。
+
+统一 CI 入口继续为 `scripts/ci.sh`，并同时运行 P0/P1 headless 示例。
