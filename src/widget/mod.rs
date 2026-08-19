@@ -9,7 +9,10 @@ mod declaration;
 pub(crate) mod element;
 
 pub use declaration::{
-    BuildContext, LifecycleCallback, LifecycleEvent, PropertyValue, View, Widget, WidgetNode,
-    WidgetType,
+    BuildContext, LifecycleCallback, LifecycleEvent, PropertyImpact, PropertyValue, View, Widget,
+    WidgetNode, WidgetType,
 };
-pub use element::{ElementNodeDiagnostics, ElementTreeStats, ReconcileDiagnostic, ReconcileReport};
+pub use element::{
+    ElementInvalidation, ElementNodeDiagnostics, ElementTreeStats, ReconcileDiagnostic,
+    ReconcileReport,
+};

@@ -9,3 +9,4 @@ cargo test --no-default-features
 cargo test
 cargo run --example p0_headless --no-default-features
 cargo run --example p1_headless --no-default-features
+cargo run --example p2_layout --no-default-features

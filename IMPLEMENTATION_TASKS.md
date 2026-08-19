@@ -121,35 +121,35 @@ P0 契约与骨架
 
 ### P2.1 Layout 契约与快照
 
-- [ ] 接入 Taffy，封装 `LayoutStyle`、Flex/Grid/绝对定位/滚动所需的最小公开样式接口。
-- [ ] 定义统一 `Measure` 回调；Text、Image、VirtualList、NativeHost 均通过该接口提供固有尺寸。
-- [ ] 实现逻辑像素布局，DPI 只在物理渲染和字形 atlas 阶段转换。
-- [ ] 实现测量缓存；key 至少包含可用宽高、样式、内容代际、字体代际和缩放比例。
-- [ ] 定义 `LayoutSnapshot`，保存矩形、基线、裁剪、滚动偏移、命中信息和 `LayoutRevision`。
-- [ ] 实现布局边界、滚动几何和从 Element 到 Taffy 节点的增量同步/安全重建。
+- [x] 接入 Taffy，封装 `LayoutStyle`、Flex/Grid/绝对定位/滚动所需的最小公开样式接口。
+- [x] 定义统一 `Measure` 回调；Text、Image、VirtualList、NativeHost 均通过该接口提供固有尺寸。
+- [x] 实现逻辑像素布局，DPI 只在物理渲染和字形 atlas 阶段转换。
+- [x] 实现测量缓存；key 至少包含可用宽高、样式、内容代际、字体代际和缩放比例。
+- [x] 定义 `LayoutSnapshot`，保存矩形、基线、裁剪、滚动偏移、命中信息和 `LayoutRevision`。
+- [x] 实现布局边界、滚动几何和从 Element 到 Taffy 节点的增量同步/安全重建。
 
 ### P2.2 Dirty Tree
 
-- [ ] 定义 `DirtyFlags`：`STRUCTURE`、`LAYOUT`、`PAINT`、`HIT_TEST`、`SEMANTICS`、`RESOURCE`。
-- [ ] 为每个节点保存 `self_flags` 与 `subtree_flags`；子树失效不能错误升级为父节点自身 paint/layout。
-- [ ] 实现 Dirty Root 队列去重、提交 epoch、可重复消费和合并；同一 epoch 重复标记不得重复入队。
-- [ ] 实现结构、布局、绘制、命中、语义、资源失效传播及最近 Layout/Render/Hit/Semantics Boundary 选择。
-- [ ] `RESOURCE` 至少触发绘制；固有尺寸改变时额外触发布局。
-- [ ] 无法精确识别属性依赖时安全退化为整个 Element 失效；不得漏更新。
+- [x] 定义 `DirtyFlags`：`STRUCTURE`、`LAYOUT`、`PAINT`、`HIT_TEST`、`SEMANTICS`、`RESOURCE`。
+- [x] 为每个节点保存 `self_flags` 与 `subtree_flags`；子树失效不能错误升级为父节点自身 paint/layout。
+- [x] 实现 Dirty Root 队列去重、提交 epoch、可重复消费和合并；同一 epoch 重复标记不得重复入队。
+- [x] 实现结构、布局、绘制、命中、语义、资源失效传播及最近 Layout/Render/Hit/Semantics Boundary 选择。
+- [x] `RESOURCE` 至少触发绘制；固有尺寸改变时额外触发布局。
+- [x] 无法精确识别属性依赖时安全退化为整个 Element 失效；不得漏更新。
 
 ### P2.3 增量提交与等价性
 
-- [ ] 将 State、Event、Layout、资源完成统一接入 Dirty Tree，并计算最小工作根。
-- [ ] 实现“增量布局结果等价于整树重建”的 headless 比较器，比较几何、裁剪、命中和 revision。
-- [ ] 覆盖结构变更、局部 layout、叶子 paint、hit-test、semantics、resource 及 full-layout fallback 的传播矩阵。
-- [ ] 记录 dirty element 数、各类 root 数、增量/全量重建次数和阶段耗时到 `FrameMetrics`。
+- [x] 将 State、Event、Layout、资源完成统一接入 Dirty Tree，并计算最小工作根。
+- [x] 实现“增量布局结果等价于整树重建”的 headless 比较器，比较几何、裁剪、命中和 revision。
+- [x] 覆盖结构变更、局部 layout、叶子 paint、hit-test、semantics、resource 及 full-layout fallback 的传播矩阵。
+- [x] 记录 dirty element 数、各类 root 数、增量/全量重建次数和阶段耗时到 `FrameMetrics`。
 
 ### P2.4 P2 退出条件
 
-- [ ] Taffy Flex、Grid、绝对定位、滚动和自定义 Measure 有最小测试集。
-- [ ] Dirty Tree 的所有传播规则有单元测试和至少一组整树/增量快照测试。
-- [ ] 叶子 PAINT 更新不会重建无关布局；结构/未知依赖能安全回退。
-- [ ] `LayoutRevision` 单调且只在布局快照可观察变化时递增。
+- [x] Taffy Flex、Grid、绝对定位、滚动和自定义 Measure 有最小测试集。
+- [x] Dirty Tree 的所有传播规则有单元测试和至少一组整树/增量快照测试。
+- [x] 叶子 PAINT 更新不会重建无关布局；结构/未知依赖能安全回退。
+- [x] `LayoutRevision` 单调且只在布局快照可观察变化时递增。
 
 ---
 

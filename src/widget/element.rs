@@ -1,10 +1,12 @@
 use super::{
-    BuildContext, LifecycleCallback, LifecycleEvent, PropertyValue, View, WidgetNode, WidgetType,
+    BuildContext, LifecycleCallback, LifecycleEvent, PropertyImpact, PropertyValue, View,
+    WidgetNode, WidgetType,
 };
 use crate::core::{
     ArenaStats, DenseArena, ElementId, Error, PropertyId, Result, TreeLinks, WidgetKey,
 };
 use crate::event::{EventHandler, EventTargetTree};
+use crate::layout::{LayoutBoundaries, LayoutNodeInput, LayoutStyle, MeasureSpec};
 use crate::state::{
     DependencyOwner, DependencyPhase, DependencySet, StateWriteGuard, UiCommand, UiThread,
     capture_dependencies,
@@ -24,10 +26,16 @@ pub(crate) struct ElementNode {
     pub(crate) widget_type: WidgetType,
     pub(crate) key: Option<WidgetKey>,
     pub(crate) properties: Vec<(PropertyId, PropertyValue)>,
+    pub(crate) property_impacts: Vec<(PropertyId, PropertyImpact)>,
     lifecycle: Option<LifecycleCallback>,
     event_handler: Option<EventHandler>,
     focusable: bool,
     enabled: bool,
+    layout_style: LayoutStyle,
+    measure: Option<MeasureSpec>,
+    scroll_offset: crate::core::Point,
+    hit_test: bool,
+    boundaries: LayoutBoundaries,
     state_slots: Vec<StateSlot>,
     dependencies: BTreeMap<DependencyPhase, DependencySet>,
     subscriptions: Vec<Box<dyn Any>>,
@@ -61,16 +69,24 @@ impl ElementNode {
         let mut links = TreeLinks::new();
         links.set_parent(parent);
         let properties = widget.properties.clone();
-        let allocation_count = u64::from(!properties.is_empty());
+        let property_impacts = widget.property_impacts.clone();
+        let allocation_count =
+            u64::from(!properties.is_empty()) + u64::from(!property_impacts.is_empty());
         Self {
             links,
             widget_type: widget.widget_type.clone(),
             key: widget.key.clone(),
             properties,
+            property_impacts,
             lifecycle: widget.lifecycle.clone(),
             event_handler: widget.event_handler.clone(),
             focusable: widget.focusable,
             enabled: widget.enabled,
+            layout_style: widget.layout_style.clone(),
+            measure: widget.measure.clone(),
+            scroll_offset: widget.scroll_offset,
+            hit_test: widget.hit_test,
+            boundaries: widget.boundaries,
             state_slots: Vec::new(),
             dependencies: BTreeMap::new(),
             subscriptions: Vec::new(),
@@ -83,6 +99,11 @@ impl ElementNode {
         self.properties
             .capacity()
             .saturating_mul(size_of::<(PropertyId, PropertyValue)>())
+            .saturating_add(
+                self.property_impacts
+                    .capacity()
+                    .saturating_mul(size_of::<(PropertyId, PropertyImpact)>()),
+            )
             .saturating_add(
                 self.state_slots
                     .capacity()
@@ -134,7 +155,30 @@ pub struct ReconcileReport {
     pub unmounted: usize,
     pub diagnostics: Vec<ReconcileDiagnostic>,
     removed_ids: Vec<ElementId>,
+    invalidations: BTreeMap<ElementId, ElementInvalidation>,
     lifecycle_events: Vec<(LifecycleCallback, LifecycleEvent)>,
+}
+
+/// Observable invalidation caused by reconciliation of one retained Element.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ElementInvalidation {
+    element: ElementId,
+    structure: bool,
+    impact: PropertyImpact,
+}
+
+impl ElementInvalidation {
+    pub const fn element(self) -> ElementId {
+        self.element
+    }
+
+    pub const fn structure_changed(self) -> bool {
+        self.structure
+    }
+
+    pub const fn property_impact(self) -> PropertyImpact {
+        self.impact
+    }
 }
 
 impl ReconcileReport {
@@ -148,6 +192,24 @@ impl ReconcileReport {
             .any(|item| matches!(item, ReconcileDiagnostic::RebuiltAmbiguousChildren { .. }))
     }
 
+    pub fn invalidations(&self) -> impl Iterator<Item = ElementInvalidation> + '_ {
+        self.invalidations.values().copied()
+    }
+
+    fn record_invalidation(&mut self, element: ElementId, structure: bool, impact: PropertyImpact) {
+        self.invalidations
+            .entry(element)
+            .and_modify(|invalidation| {
+                invalidation.structure |= structure;
+                invalidation.impact = invalidation.impact.union(impact);
+            })
+            .or_insert(ElementInvalidation {
+                element,
+                structure,
+                impact,
+            });
+    }
+
     fn absorb(&mut self, mut other: Self) {
         self.mounted += other.mounted;
         self.updated += other.updated;
@@ -156,6 +218,13 @@ impl ReconcileReport {
         self.unmounted += other.unmounted;
         self.diagnostics.append(&mut other.diagnostics);
         self.removed_ids.append(&mut other.removed_ids);
+        for invalidation in other.invalidations.into_values() {
+            self.record_invalidation(
+                invalidation.element,
+                invalidation.structure,
+                invalidation.impact,
+            );
+        }
         self.lifecycle_events.append(&mut other.lifecycle_events);
     }
 }
@@ -286,6 +355,10 @@ impl ElementTree {
         Some(&node.properties[index].1)
     }
 
+    pub(crate) fn layout_boundaries(&self, id: ElementId) -> Option<LayoutBoundaries> {
+        self.arena.get(id).map(|node| node.boundaries)
+    }
+
     pub(crate) fn mount(&mut self, widget: WidgetNode) -> Result<ReconcileReport> {
         self.owner.assert_current()?;
         let _state_guard = StateWriteGuard::enter("element reconciliation");
@@ -298,6 +371,7 @@ impl ElementTree {
         let mut report = ReconcileReport::default();
         let root = self.mount_subtree(None, widget, &mut report);
         self.root = Some(root);
+        report.record_invalidation(root, true, PropertyImpact::ALL);
         self.publish_lifecycle(&mut report);
         Ok(report)
     }
@@ -316,6 +390,7 @@ impl ElementTree {
             report.replaced += 1;
             let new_root = self.mount_subtree(None, widget, &mut report);
             self.root = Some(new_root);
+            report.record_invalidation(new_root, true, PropertyImpact::ALL);
         }
         self.publish_lifecycle(&mut report);
         Ok(report)
@@ -379,6 +454,46 @@ impl ElementTree {
         Ok(output)
     }
 
+    pub(crate) fn layout_inputs(&self) -> Result<Vec<LayoutNodeInput>> {
+        self.owner.assert_current()?;
+        let Some(root) = self.root else {
+            return Ok(Vec::new());
+        };
+        let mut result = Vec::with_capacity(self.len());
+        let mut stack = vec![root];
+        let mut seen = BTreeSet::new();
+        while let Some(id) = stack.pop() {
+            if !seen.insert(id) {
+                return Err(Error::compile(
+                    "layout_sync",
+                    "Element topology contains a cycle",
+                ));
+            }
+            let node = self.arena.get(id).ok_or_else(|| {
+                Error::compile("layout_sync", "Element topology contains a stale ID")
+            })?;
+            let children = self.children(id);
+            stack.extend(children.iter().rev().copied());
+            result.push(LayoutNodeInput {
+                id,
+                parent: node.links.parent(),
+                children,
+                style: node.layout_style.clone(),
+                measure: node.measure.clone(),
+                scroll_offset: node.scroll_offset,
+                hit_test: node.hit_test,
+                boundaries: node.boundaries,
+            });
+        }
+        if result.len() != self.len() {
+            return Err(Error::compile(
+                "layout_sync",
+                "Element topology is disconnected",
+            ));
+        }
+        Ok(result)
+    }
+
     fn matches_widget(&self, id: ElementId, widget: &WidgetNode) -> bool {
         self.arena.get(id).is_some_and(|element| {
             element.key == widget.key && element.widget_type == widget.widget_type
@@ -436,22 +551,60 @@ impl ElementTree {
             .map(|child| (child.key.clone(), child.widget_type.clone()))
             .collect::<Vec<_>>();
         let lifecycle = widget.lifecycle.clone();
-        let children = widget.children;
+        let children = widget.children.clone();
+        let (
+            property_impact,
+            layout_changed,
+            input_behavior_changed,
+            hit_test_changed,
+            boundary_changed,
+            changed,
+        ) = {
+            let node = self
+                .arena
+                .get(id)
+                .ok_or_else(|| Error::compile("reconcile", "matched element became stale"))?;
+            let (property_impact, property_changed) = changed_property_impact(node, &widget);
+            let layout_changed = node.layout_style != widget.layout_style
+                || node.measure != widget.measure
+                || node.scroll_offset != widget.scroll_offset;
+            let input_behavior_changed = node.event_handler != widget.event_handler
+                || node.focusable != widget.focusable
+                || node.enabled != widget.enabled;
+            let hit_test_changed = node.hit_test != widget.hit_test;
+            let boundary_changed = node.boundaries != widget.boundaries;
+            let changed = property_changed
+                || !property_impact.is_empty()
+                || layout_changed
+                || input_behavior_changed
+                || hit_test_changed
+                || boundary_changed
+                || node.lifecycle != lifecycle
+                || old_child_identity != new_child_identity;
+            (
+                property_impact,
+                layout_changed,
+                input_behavior_changed,
+                hit_test_changed,
+                boundary_changed,
+                changed,
+            )
+        };
         let node = self
             .arena
             .get_mut(id)
             .ok_or_else(|| Error::compile("reconcile", "matched element became stale"))?;
-        let changed = node.properties != widget.properties
-            || node.lifecycle != lifecycle
-            || node.event_handler != widget.event_handler
-            || node.focusable != widget.focusable
-            || node.enabled != widget.enabled
-            || old_child_identity != new_child_identity;
         node.properties = widget.properties;
+        node.property_impacts = widget.property_impacts;
         node.lifecycle = lifecycle.clone();
         node.event_handler = widget.event_handler;
         node.focusable = widget.focusable;
         node.enabled = widget.enabled;
+        node.layout_style = widget.layout_style;
+        node.measure = widget.measure;
+        node.scroll_offset = widget.scroll_offset;
+        node.hit_test = widget.hit_test;
+        node.boundaries = widget.boundaries;
         if changed {
             report.updated += 1;
             if let Some(lifecycle) = lifecycle {
@@ -459,6 +612,29 @@ impl ElementTree {
                     .lifecycle_events
                     .push((lifecycle, LifecycleEvent::Updated(id)));
             }
+        }
+        let mut impact = property_impact;
+        if layout_changed {
+            impact = impact.union(PropertyImpact::LAYOUT);
+        }
+        if input_behavior_changed {
+            impact = impact.union(
+                PropertyImpact::PAINT
+                    .union(PropertyImpact::HIT_TEST)
+                    .union(PropertyImpact::SEMANTICS),
+            );
+        }
+        if hit_test_changed {
+            impact = impact.union(PropertyImpact::HIT_TEST);
+        }
+        if boundary_changed {
+            impact = PropertyImpact::ALL;
+        }
+        if old_child_identity != new_child_identity {
+            report.record_invalidation(id, true, PropertyImpact::ALL);
+        }
+        if !impact.is_empty() {
+            report.record_invalidation(id, false, impact);
         }
         self.reconcile_children(id, children, report)
     }
@@ -486,6 +662,7 @@ impl ElementTree {
             report
                 .diagnostics
                 .push(ReconcileDiagnostic::RebuiltAmbiguousChildren { parent });
+            report.record_invalidation(parent, true, PropertyImpact::ALL);
             for child in old {
                 self.unmount_subtree(child, report)?;
             }
@@ -839,6 +1016,38 @@ fn duplicate_widget_keys(widgets: &[WidgetNode]) -> Vec<WidgetKey> {
     duplicates.into_iter().collect()
 }
 
+fn changed_property_impact(node: &ElementNode, widget: &WidgetNode) -> (PropertyImpact, bool) {
+    let mut ids = BTreeSet::new();
+    ids.extend(node.properties.iter().map(|(id, _)| *id));
+    ids.extend(widget.properties.iter().map(|(id, _)| *id));
+    let mut impact = PropertyImpact::NONE;
+    let mut property_changed = false;
+    for id in ids {
+        let old = node
+            .properties
+            .binary_search_by_key(&id, |(property, _)| *property)
+            .ok()
+            .map(|index| &node.properties[index].1);
+        let new = widget
+            .properties
+            .binary_search_by_key(&id, |(property, _)| *property)
+            .ok()
+            .map(|index| &widget.properties[index].1);
+        let old_impact = old.map_or(PropertyImpact::NONE, |_| {
+            node.property_impacts
+                .binary_search_by_key(&id, |(property, _)| *property)
+                .ok()
+                .map_or(PropertyImpact::ALL, |index| node.property_impacts[index].1)
+        });
+        let new_impact = new.map_or(PropertyImpact::NONE, |_| widget.property_impact(id));
+        if old != new || old_impact != new_impact {
+            property_changed = true;
+            impact = impact.union(old_impact).union(new_impact);
+        }
+    }
+    (impact, property_changed)
+}
+
 fn duplicate_element_keys(
     arena: &DenseArena<ElementNode, ElementId>,
     elements: &[ElementId],
@@ -1041,6 +1250,32 @@ mod tests {
         let report = tree.reconcile(declaration).unwrap();
         assert_eq!(report.updated, 0);
         assert!(events.borrow().is_empty());
+    }
+
+    #[test]
+    fn none_impact_property_changes_still_publish_updates_without_dirty_work() {
+        let events = Rc::new(RefCell::new(Vec::new()));
+        let events_copy = events.clone();
+        let lifecycle = LifecycleCallback::new(1, move |event| {
+            events_copy.borrow_mut().push(event);
+        });
+        let declaration = |value| {
+            WidgetNode::new::<Root>()
+                .with_property(PropertyId::new(7), value)
+                .with_property_impact(PropertyId::new(7), PropertyImpact::NONE)
+                .with_lifecycle(lifecycle.clone())
+        };
+
+        let mut tree = ElementTree::new();
+        tree.mount(declaration(1_u64)).unwrap();
+        let root = tree.root().unwrap();
+        events.borrow_mut().clear();
+
+        let report = tree.reconcile(declaration(2_u64)).unwrap();
+
+        assert_eq!(report.updated, 1);
+        assert_eq!(report.invalidations().count(), 0);
+        assert_eq!(events.borrow().as_slice(), &[LifecycleEvent::Updated(root)]);
     }
 
     #[test]

@@ -636,3 +636,56 @@ P1 暂不把 dependency phase 映射成 DirtyFlags，也不生成真实布局命
 - Rust 1.85 MSRV 构建门禁：通过；P1 未使用 1.85 之后才稳定的 let-chain 语法。
 
 统一 CI 入口继续为 `scripts/ci.sh`，并同时运行 P0/P1 headless 示例。
+
+## P2 实施记录（2026-08-18）
+
+### 实际取舍
+
+- 使用 `taffy 0.13` 的 `std + taffy_tree + flexbox + grid + block_layout +
+  content_size` 子集。`LayoutStyle` 自己拥有显示、尺寸、盒模型、Flex/Grid、
+  absolute、overflow/scroll 和边界字段，Taffy 类型不会泄漏到应用 API；Taffy
+  NodeId 只存在于 UI 线程的 `LayoutEngine` 映射中。
+- `Measure` 是统一的逻辑像素回调，`MeasureHandle` 以稳定 provider ID、显式
+  revision 和 `MeasureKind`（Text/Image/VirtualList/NativeHost/Custom）标识
+  内容来源。缓存 key 包含已知尺寸、available width/height、style fingerprint、
+  content/font generation、DPI scale、provider ID/revision。缓存命中不会重复执行
+  shaping/测量回调；缓存采用 4,096 项硬上限的 LRU 淘汰并报告容量/淘汰数；
+  测量失败不会替换已提交快照，Dirty epoch 保留以便重试。
+- `LayoutSnapshot` 现在保存每个 `ElementId` 的逻辑矩形、baseline、有效 clip、
+  clamped scroll offset/extent、hit bounds 和全局 preorder paint/hit order；
+  `hit_test` 只读这份 immutable snapshot。DPI 不乘布局矩形，只进入 intrinsic
+  cache，物理转换留给 P3 renderer/atlas。
+- Taffy 0.13 的公开 `compute_layout_with_measure` 回调只能返回 `Size`，不能把
+  `MeasureOutput::baseline` 传入 Taffy 的 baseline alignment 算法。实现仍将 provider
+  baseline 保存在测量记录和 `LayoutSnapshot` 中，但 `AlignItems::Baseline` 使用 Taffy
+  自身可见的信息；这不宣称完整的自定义 baseline 对齐，待升级到支持该回调的布局 API
+  后再补齐。
+- Dirty Tree 使用 `self_flags` 与 descendant-only `subtree_flags`，以
+  Layout/Render/Hit/Semantics boundary 选择最小 root；`batch()` 不清除 epoch，
+  只有 CPU snapshot 成功提交后 `finish_epoch()` 才清除。结构歧义和 stale topology
+  走安全 full-layout fallback；未标注属性默认以 `PropertyImpact::ALL` 失效整个
+  Element。
+- Reconciliation 报告带有精确 Element/property impact。State 的 Measure/Layout/
+  Paint/Semantics 依赖、窗口 resize/DPI/focus、以及 UI 线程接收的 resource
+  completion 都调用同一 Dirty Tree。`Application::layout_window` 复用 scene、
+  resource、semantic 组件，布局通过 `AtomicSnapshotStore` 原子提交；失败时恢复
+  LayoutEngine 的上一份 committed snapshot。
+- headless `LayoutHarness` 同时运行 incremental 和强制 full Taffy rebuild，并用
+  几何、baseline、clip、scroll、hit、fingerprint 与 revision 做等价比较。P2 示例为
+  `examples/p2_layout.rs`，基准入口为 `benches/p2_layout.rs`。
+
+### P2 基线结果
+
+本机 `aarch64-apple-darwin`、Rust stable 1.96.1 下：
+
+- `cargo fmt --all -- --check`、`cargo clippy --all-targets --no-default-features
+  -- -D warnings` 和 `cargo test --no-default-features` 通过；核心/默认测试共
+  107 个单元测试、6 个公共契约测试。
+- Taffy Flex、Grid、absolute、scroll、custom Measure/cache/DPI、Dirty propagation
+  matrix、paint-only State invalidation、hit-only snapshot refresh、resource intrinsic
+  invalidation、原子失败重试和 incremental/full snapshot equivalence 均有 headless
+  测试。
+- `cargo run --example p2_layout --no-default-features` 输出
+  `layout_revision=1 nodes=2 dirty_layout_roots=1 ... equivalent=true`。
+- P2 benchmark 固定覆盖 10/100/1,000 个节点；计时只作为可复现 smoke baseline，
+  不宣称跨机器性能结论。

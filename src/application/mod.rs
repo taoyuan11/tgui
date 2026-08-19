@@ -9,17 +9,22 @@ use crate::accessibility::SemanticSnapshot;
 use crate::core::{
     DenseArena, DpiScale, ElementId, Error, GenerationStamp, Result, RevisionSet, Size, WindowId,
 };
+use crate::diagnostics::{DirtyRootMetrics, FrameMetrics};
+use crate::dirty::{DirtyBatch, DirtyFlags, DirtyNodeSpec, DirtyTree};
 use crate::event::{CommittedHitTarget, DispatchOutcome, EventDispatcher, UiEvent};
-use crate::layout::LayoutSnapshot;
+use crate::layout::{LayoutEngine, LayoutPassReport, LayoutSnapshot};
 use crate::media::ResourceSnapshot;
 use crate::render::SceneSnapshot;
 use crate::state::{TxnReceipt, UiCommand, UiDispatcher, UiInbox, UiThread, UpdateTxn};
 use crate::widget::element::ElementTree;
-use crate::widget::{ElementNodeDiagnostics, ElementTreeStats, ReconcileReport, View, WidgetNode};
+use crate::widget::{
+    ElementNodeDiagnostics, ElementTreeStats, PropertyImpact, ReconcileReport, View, WidgetNode,
+};
 use std::fmt;
 use std::marker::PhantomData;
 use std::rc::Rc;
 use std::sync::Arc;
+use std::time::Instant;
 
 /// Window creation/configuration contract independent of a native window type.
 #[derive(Clone, Debug, PartialEq)]
@@ -354,8 +359,23 @@ struct WindowState {
     snapshots: AtomicSnapshotStore,
     frame_requested: bool,
     elements: ElementTree,
+    dirty: DirtyTree,
+    layout: LayoutEngine,
     events: EventDispatcher,
     view: Option<Rc<dyn View>>,
+    frame_index: u64,
+    frame_metrics: FrameMetrics,
+}
+
+/// Result of processing one P2 dirty epoch and atomically committing its
+/// logical layout output.
+#[derive(Clone, Debug, PartialEq)]
+pub struct LayoutFrameReceipt {
+    pub snapshot: LayoutSnapshot,
+    pub layout_performed: bool,
+    pub layout: LayoutPassReport,
+    pub dirty_epoch: u64,
+    pub metrics: FrameMetrics,
 }
 
 /// Result of one complete capture/target/bubble dispatch and transaction.
@@ -423,8 +443,12 @@ impl Application {
             snapshots: AtomicSnapshotStore::default(),
             frame_requested: false,
             elements: ElementTree::new(),
+            dirty: DirtyTree::new(),
+            layout: LayoutEngine::new(),
             events: EventDispatcher::new(),
             view: None,
+            frame_index: 0,
+            frame_metrics: FrameMetrics::default(),
         });
         if self.main_window.is_none() {
             self.main_window = Some(id);
@@ -491,6 +515,7 @@ impl Application {
             .events
             .elements_unmounted(report.removed_ids().iter().copied());
         state.events.reconcile_owners(&state.elements);
+        apply_reconcile_dirty(state, &report)?;
         state.view = Some(view);
         state.frame_requested = true;
         Ok(report)
@@ -508,6 +533,7 @@ impl Application {
             .events
             .elements_unmounted(report.removed_ids().iter().copied());
         state.events.reconcile_owners(&state.elements);
+        apply_reconcile_dirty(state, &report)?;
         state.frame_requested = true;
         Ok(report)
     }
@@ -524,6 +550,7 @@ impl Application {
         }
         let report = state.elements.mount(widget)?;
         state.events.reconcile_owners(&state.elements);
+        apply_reconcile_dirty(state, &report)?;
         state.frame_requested = true;
         Ok(report)
     }
@@ -546,6 +573,7 @@ impl Application {
             .events
             .elements_unmounted(report.removed_ids().iter().copied());
         state.events.reconcile_owners(&state.elements);
+        apply_reconcile_dirty(state, &report)?;
         state.frame_requested = true;
         Ok(report)
     }
@@ -640,6 +668,32 @@ impl Application {
         let current_reconciliation = reconciliations
             .into_iter()
             .find_map(|(window, report)| (window == id).then_some(report));
+        if let Some(state) = self.windows.get_mut(id) {
+            match event {
+                UiEvent::WindowResized(_) | UiEvent::WindowDpiChanged(_) => {
+                    if let Some(root) = state.elements.root() {
+                        state.dirty.mark(root, DirtyFlags::LAYOUT, false)?;
+                    }
+                }
+                UiEvent::WindowActivated(_) => {
+                    if let Some(root) = state.elements.root() {
+                        state.dirty.mark(root, DirtyFlags::SEMANTICS, false)?;
+                    }
+                }
+                _ => {}
+            }
+            if let Some(change) = outcome.focus_change {
+                for element in [change.previous, change.current].into_iter().flatten() {
+                    if state.elements.contains(element) {
+                        state.dirty.mark(
+                            element,
+                            DirtyFlags::PAINT | DirtyFlags::SEMANTICS,
+                            false,
+                        )?;
+                    }
+                }
+            }
+        }
         Ok(EventDispatchReceipt {
             outcome,
             transaction,
@@ -747,19 +801,45 @@ impl Application {
         let mut first_error = None;
         for (window, state) in self.windows.iter_mut() {
             let owner = state.elements.dependency_owner();
-            let mut affected = false;
             let mut rebuild = false;
-            for invalidation in transaction.invalidations() {
-                if invalidation.owner() == owner && state.elements.contains(invalidation.element())
-                {
-                    affected = true;
-                    rebuild |= invalidation.phase() == crate::state::DependencyPhase::Build;
-                }
-            }
-            if !affected {
+            let relevant = transaction
+                .invalidations()
+                .iter()
+                .copied()
+                .filter(|invalidation| {
+                    invalidation.owner() == owner && state.elements.contains(invalidation.element())
+                })
+                .collect::<Vec<_>>();
+            if relevant.is_empty() {
                 continue;
             }
             state.frame_requested = true;
+            for invalidation in &relevant {
+                if invalidation.phase() == crate::state::DependencyPhase::Build {
+                    rebuild = true;
+                    continue;
+                }
+                let dirty = dirty_flags_for_phase(invalidation.phase());
+                let invalidate_result = match invalidation.phase() {
+                    crate::state::DependencyPhase::Measure => {
+                        state.layout.invalidate_measure(invalidation.element())
+                    }
+                    crate::state::DependencyPhase::Layout => {
+                        state.layout.invalidate(invalidation.element())
+                    }
+                    _ => Ok(()),
+                };
+                if let Err(error) = invalidate_result {
+                    if first_error.is_none() {
+                        first_error = Some(error);
+                    }
+                }
+                if let Err(error) = state.dirty.mark(invalidation.element(), dirty, false) {
+                    if first_error.is_none() {
+                        first_error = Some(error);
+                    }
+                }
+            }
             if rebuild {
                 if let Some(view) = state.view.clone() {
                     match state.elements.rebuild_view(view.as_ref()) {
@@ -768,6 +848,11 @@ impl Application {
                                 .events
                                 .elements_unmounted(report.removed_ids().iter().copied());
                             state.events.reconcile_owners(&state.elements);
+                            if let Err(error) = apply_reconcile_dirty(state, &report) {
+                                if first_error.is_none() {
+                                    first_error = Some(error);
+                                }
+                            }
                             reconciliations.push((window, report));
                         }
                         Err(error) => {
@@ -818,6 +903,173 @@ impl Application {
         Ok(requested)
     }
 
+    /// Routes an asynchronously completed resource through the same Dirty Tree
+    /// used by State and Event work. Intrinsic-size changes additionally clear
+    /// the element's measurement cache and schedule layout.
+    pub fn invalidate_resource(
+        &mut self,
+        id: WindowId,
+        element: ElementId,
+        intrinsic_size_changed: bool,
+    ) -> Result<()> {
+        self.owner.assert_current()?;
+        let state = self.window_state_mut(id)?;
+        if !state.elements.contains(element) {
+            return Err(Error::invalid_input(
+                Some("element".to_owned()),
+                "resource completion targets a stale Element generation",
+            ));
+        }
+        sync_dirty_topology(state);
+        if intrinsic_size_changed {
+            state.layout.invalidate_measure(element)?;
+        }
+        state
+            .dirty
+            .mark(element, DirtyFlags::RESOURCE, intrinsic_size_changed)?;
+        state.frame_requested = true;
+        Ok(())
+    }
+
+    /// Computes any pending logical layout work and atomically replaces the
+    /// window's CPU snapshot. A failed measurement or snapshot validation keeps
+    /// both the previous committed snapshot and the dirty epoch retryable.
+    pub fn layout_window(&mut self, id: WindowId) -> Result<LayoutFrameReceipt> {
+        self.owner.assert_current()?;
+        let state = self.window_state_mut(id)?;
+        sync_dirty_topology(state);
+        let batch = state.dirty.batch();
+        let _next_dirty_epoch = batch
+            .epoch
+            .checked_add(1)
+            .ok_or_else(|| Error::compile("dirty_epoch", "dirty submission epoch exhausted"))?;
+        let next_frame_index = state
+            .frame_index
+            .checked_add(1)
+            .ok_or_else(|| Error::compile("frame_metrics", "frame index exhausted"))?;
+        let viewport = state.spec.inner_size;
+        let scale = state.spec.dpi_scale;
+        let needs_layout = batch.has_layout_work()
+            // Hit participation is part of the immutable LayoutSnapshot even
+            // when the underlying Taffy geometry is unchanged. Refresh the
+            // snapshot for a hit-only invalidation so committed hit tests do
+            // not observe stale participation bits.
+            || !batch.hit_test_roots.is_empty()
+            || state.layout.committed().viewport() != viewport
+            || state.layout.committed().node_count() != state.elements.len();
+        let previous_layout = state.layout.committed().clone();
+        let started = Instant::now();
+        let (layout_snapshot, layout_report) = if needs_layout {
+            for node in &batch.nodes {
+                if node.self_flags.contains(DirtyFlags::LAYOUT) {
+                    state.layout.invalidate(node.id)?;
+                }
+            }
+            let inputs = state.elements.layout_inputs()?;
+            let root = state.elements.root();
+            let elements = &mut state.elements;
+            let layout = &mut state.layout;
+            layout.compute(
+                inputs,
+                root,
+                viewport,
+                scale,
+                batch.full_layout_fallback,
+                |element, handle, input| {
+                    elements.capture_phase_dependencies(
+                        element,
+                        crate::state::DependencyPhase::Measure,
+                        || handle.measure(input),
+                    )
+                },
+            )?
+        } else {
+            (
+                state.layout.committed().clone(),
+                LayoutPassReport::default(),
+            )
+        };
+        let layout_duration = started.elapsed();
+
+        let base = state
+            .snapshots
+            .committed()
+            .unwrap_or_else(|| Arc::new(CpuSnapshot::empty(RevisionSet::ZERO)));
+        let candidate = match CpuSnapshot::new(
+            layout_snapshot.clone(),
+            base.scene().clone(),
+            base.resources().clone(),
+            base.semantics().clone(),
+        ) {
+            Ok(candidate) => candidate,
+            Err(error) => {
+                state.layout.adopt_committed(previous_layout);
+                return Err(error);
+            }
+        };
+        if let Err(error) = state.snapshots.try_commit(candidate) {
+            state.layout.adopt_committed(previous_layout);
+            return Err(error);
+        }
+
+        state.dirty.finish_epoch()?;
+        state.frame_index = next_frame_index;
+        let revisions = state
+            .snapshots
+            .committed()
+            .expect("layout candidate was committed")
+            .revisions();
+        let mut metrics = FrameMetrics::empty(state.frame_index, revisions);
+        metrics.phases.layout = layout_duration;
+        metrics.dirty_elements = u64::try_from(batch.nodes.len()).unwrap_or(u64::MAX);
+        metrics.dirty_roots = dirty_root_metrics(&batch);
+        metrics.full_rebuilds = u64::from(needs_layout && layout_report.full_rebuild);
+        metrics.incremental_rebuilds = u64::from(needs_layout && !layout_report.full_rebuild);
+        metrics.arena = state.elements.stats().arena;
+        state.frame_metrics = metrics.clone();
+        Ok(LayoutFrameReceipt {
+            snapshot: layout_snapshot,
+            layout_performed: needs_layout,
+            layout: layout_report,
+            dirty_epoch: batch.epoch,
+            metrics,
+        })
+    }
+
+    pub fn frame_metrics(&self, id: WindowId) -> Option<&FrameMetrics> {
+        self.windows.get(id).map(|state| &state.frame_metrics)
+    }
+
+    pub fn layout_snapshot(&self, id: WindowId) -> Option<LayoutSnapshot> {
+        self.windows
+            .get(id)
+            .and_then(|state| state.snapshots.committed())
+            .map(|snapshot| snapshot.layout().clone())
+    }
+
+    /// Hit-tests only the latest committed layout and returns a window-scoped
+    /// generation/revision target suitable for [`Self::dispatch_event`].
+    pub fn hit_test(&self, id: WindowId, point: crate::core::Point) -> Result<CommittedHitTarget> {
+        point.validate().map_err(Error::from)?;
+        let state = self.windows.get(id).ok_or_else(|| {
+            Error::invalid_input(
+                Some("window_id".to_owned()),
+                "window ID is stale or unknown",
+            )
+        })?;
+        let Some(snapshot) = state.snapshots.committed() else {
+            return Ok(CommittedHitTarget::miss_for_window(
+                id,
+                crate::core::LayoutRevision::ZERO,
+            ));
+        };
+        Ok(CommittedHitTarget::for_window(
+            id,
+            snapshot.layout().revision(),
+            snapshot.layout().hit_test(point),
+        ))
+    }
+
     pub fn committed_snapshot(&self, id: WindowId) -> Option<Arc<CpuSnapshot>> {
         self.windows.get(id)?.snapshots.committed()
     }
@@ -834,7 +1086,10 @@ impl Application {
                 "window ID is stale or unknown",
             )
         })?;
-        state.snapshots.try_commit(snapshot)
+        let layout = snapshot.layout().clone();
+        let receipt = state.snapshots.try_commit(snapshot)?;
+        state.layout.adopt_committed(layout);
+        Ok(receipt)
     }
 
     pub fn compile_and_commit(
@@ -849,7 +1104,15 @@ impl Application {
                 "window ID is stale or unknown",
             )
         })?;
-        state.snapshots.compile_and_commit(compile)
+        let receipt = state.snapshots.compile_and_commit(compile)?;
+        let layout = state
+            .snapshots
+            .committed()
+            .expect("compile_and_commit returned success")
+            .layout()
+            .clone();
+        state.layout.adopt_committed(layout);
+        Ok(receipt)
     }
 
     pub fn rejected_snapshot_count(&self, id: WindowId) -> Option<u64> {
@@ -887,6 +1150,91 @@ impl Application {
     }
 }
 
+fn sync_dirty_topology(state: &mut WindowState) {
+    let specs = state
+        .elements
+        .ids()
+        .map(|id| DirtyNodeSpec {
+            id,
+            parent: state.elements.parent(id),
+            boundaries: state
+                .elements
+                .layout_boundaries(id)
+                .unwrap_or(crate::layout::LayoutBoundaries::NONE),
+        })
+        .collect::<Vec<_>>();
+    state.dirty.sync(specs);
+}
+
+fn apply_reconcile_dirty(state: &mut WindowState, report: &ReconcileReport) -> Result<()> {
+    sync_dirty_topology(state);
+    let mut marked = false;
+    for invalidation in report.invalidations() {
+        if !state.elements.contains(invalidation.element()) {
+            continue;
+        }
+        let mut flags = dirty_flags_for_property(invalidation.property_impact());
+        if invalidation.structure_changed() {
+            flags |= DirtyFlags::STRUCTURE;
+        }
+        if !flags.is_empty() {
+            state.dirty.mark(invalidation.element(), flags, false)?;
+            marked = true;
+        }
+    }
+    let structural_work =
+        report.mounted != 0 || report.moved != 0 || report.replaced != 0 || report.unmounted != 0;
+    if structural_work && !marked {
+        if let Some(root) = state.elements.root() {
+            state.dirty.mark(root, DirtyFlags::STRUCTURE, false)?;
+        } else {
+            state.dirty.mark_full_layout_fallback();
+        }
+    }
+    if report.used_safe_fallback() {
+        state.dirty.mark_full_layout_fallback();
+    }
+    Ok(())
+}
+
+fn dirty_flags_for_property(impact: PropertyImpact) -> DirtyFlags {
+    let mut flags = DirtyFlags::NONE;
+    for (property, dirty) in [
+        (PropertyImpact::LAYOUT, DirtyFlags::LAYOUT),
+        (PropertyImpact::PAINT, DirtyFlags::PAINT),
+        (PropertyImpact::HIT_TEST, DirtyFlags::HIT_TEST),
+        (PropertyImpact::SEMANTICS, DirtyFlags::SEMANTICS),
+        (PropertyImpact::RESOURCE, DirtyFlags::RESOURCE),
+    ] {
+        if impact.contains(property) {
+            flags |= dirty;
+        }
+    }
+    flags
+}
+
+fn dirty_flags_for_phase(phase: crate::state::DependencyPhase) -> DirtyFlags {
+    match phase {
+        crate::state::DependencyPhase::Build => DirtyFlags::all_non_structure(),
+        crate::state::DependencyPhase::Measure | crate::state::DependencyPhase::Layout => {
+            DirtyFlags::LAYOUT
+        }
+        crate::state::DependencyPhase::Paint => DirtyFlags::PAINT,
+        crate::state::DependencyPhase::Semantics => DirtyFlags::SEMANTICS,
+    }
+}
+
+fn dirty_root_metrics(batch: &DirtyBatch) -> DirtyRootMetrics {
+    DirtyRootMetrics {
+        structure: u64::try_from(batch.counts.structure).unwrap_or(u64::MAX),
+        layout: u64::try_from(batch.counts.layout).unwrap_or(u64::MAX),
+        paint: u64::try_from(batch.counts.paint).unwrap_or(u64::MAX),
+        hit_test: u64::try_from(batch.counts.hit_test).unwrap_or(u64::MAX),
+        semantics: u64::try_from(batch.counts.semantics).unwrap_or(u64::MAX),
+        resource: u64::try_from(batch.counts.resource).unwrap_or(u64::MAX),
+    }
+}
+
 impl Default for Application {
     fn default() -> Self {
         Self::new()
@@ -900,12 +1248,15 @@ pub type SnapshotStore = AtomicSnapshotStore;
 mod tests {
     use super::*;
     use crate::core::{
-        LayoutRevision, Point, ResourceRevision, RevisionChanges, SceneRevision, SemanticRevision,
-        WidgetKey,
+        LayoutRevision, Point, PropertyId, ResourceRevision, RevisionChanges, SceneRevision,
+        SemanticRevision, WidgetKey,
     };
     use crate::event::{
         AccessibilityAction, AccessibilityActionEvent, EventHandler, EventPhase, PointerEvent,
         PointerId, PointerKind,
+    };
+    use crate::layout::{
+        Dimension, LayoutStyle, MeasureHandle, MeasureInput, MeasureOutput, MeasureSpec,
     };
     use crate::state::{RevisionMask, State};
     use crate::widget::{BuildContext, Widget};
@@ -1492,5 +1843,277 @@ mod tests {
         ));
         application.dispatch_event(first, hit, &scoped).unwrap();
         assert_eq!(invocations.get(), 1);
+    }
+
+    #[test]
+    fn layout_window_commits_taffy_output_and_skips_layout_for_paint_only_changes() {
+        struct Root;
+        let style =
+            LayoutStyle::default().with_size(Dimension::Length(120.0), Dimension::Length(60.0));
+        let initial = WidgetNode::new::<Root>()
+            .with_key("root")
+            .with_layout_style(style.clone())
+            .with_property(PropertyId::new(99), 1_u64)
+            .with_property_impact(PropertyId::new(99), PropertyImpact::PAINT);
+        let mut application = Application::new();
+        let window = application
+            .create_window(WindowSpec::new("layout"))
+            .unwrap();
+        application.mount_widget(window, initial).unwrap();
+        let element = application.element_diagnostics(window).unwrap()[0].id;
+
+        let first = application.layout_window(window).unwrap();
+        assert!(first.layout_performed);
+        assert!(first.layout.full_rebuild);
+        assert_eq!(
+            first.snapshot.node(element).unwrap().rect().size,
+            Size::new(120.0, 60.0)
+        );
+        assert_eq!(first.snapshot.revision(), LayoutRevision::new(1));
+        assert_eq!(
+            application
+                .hit_test(window, Point::new(10.0, 10.0))
+                .unwrap()
+                .target(),
+            Some(element)
+        );
+
+        let idle = application.layout_window(window).unwrap();
+        assert!(!idle.layout_performed);
+        assert_eq!(idle.snapshot.revision(), first.snapshot.revision());
+
+        let paint_state = State::new(1_u32);
+        application
+            .windows
+            .get_mut(window)
+            .unwrap()
+            .elements
+            .capture_phase_dependencies(element, crate::state::DependencyPhase::Paint, || {
+                paint_state.get()
+            })
+            .unwrap();
+        let mut paint_transaction = UpdateTxn::new();
+        paint_state.set(&mut paint_transaction, 2).unwrap();
+        application.apply_transaction(paint_transaction).unwrap();
+        let state_paint_frame = application.layout_window(window).unwrap();
+        assert!(!state_paint_frame.layout_performed);
+        assert_eq!(state_paint_frame.metrics.dirty_roots.layout, 0);
+        assert_eq!(state_paint_frame.metrics.dirty_roots.paint, 1);
+
+        let paint_only = WidgetNode::new::<Root>()
+            .with_key("root")
+            .with_layout_style(style)
+            .with_property(PropertyId::new(99), 2_u64)
+            .with_property_impact(PropertyId::new(99), PropertyImpact::PAINT);
+        application.reconcile_widget(window, paint_only).unwrap();
+        let paint_frame = application.layout_window(window).unwrap();
+        assert!(!paint_frame.layout_performed);
+        assert_eq!(paint_frame.metrics.dirty_roots.layout, 0);
+        assert_eq!(paint_frame.metrics.dirty_roots.paint, 1);
+        assert_eq!(paint_frame.snapshot.revision(), first.snapshot.revision());
+
+        // A property without dependency metadata safely invalidates the whole
+        // Element. Taffy may reuse its geometry, so the revision remains stable.
+        let unknown = WidgetNode::new::<Root>()
+            .with_key("root")
+            .with_layout_style(
+                LayoutStyle::default().with_size(Dimension::Length(120.0), Dimension::Length(60.0)),
+            )
+            .with_property(PropertyId::new(99), 2_u64)
+            .with_property_impact(PropertyId::new(99), PropertyImpact::PAINT)
+            .with_property(PropertyId::new(100), true);
+        application.reconcile_widget(window, unknown).unwrap();
+        let fallback = application.layout_window(window).unwrap();
+        assert!(fallback.layout_performed);
+        assert_eq!(fallback.metrics.dirty_roots.layout, 1);
+        assert_eq!(fallback.snapshot.revision(), first.snapshot.revision());
+
+        let committed_hit = application
+            .hit_test(window, Point::new(10.0, 10.0))
+            .unwrap();
+        application
+            .dispatch_event(
+                window,
+                committed_hit,
+                &UiEvent::WindowResized(Size::new(640.0, 480.0)),
+            )
+            .unwrap();
+        let resized = application.layout_window(window).unwrap();
+        assert_eq!(resized.snapshot.viewport(), Size::new(640.0, 480.0));
+        assert_eq!(resized.snapshot.revision(), LayoutRevision::new(2));
+    }
+
+    #[test]
+    fn measured_state_and_resource_completion_share_incremental_dirty_layout() {
+        struct Measured;
+        let width = State::new(20.0_f32);
+        let measured_width = width.clone();
+        let measure = MeasureHandle::text(move |_input: MeasureInput| {
+            Ok(MeasureOutput::new(Size::new(measured_width.get()?, 10.0)))
+        });
+        let node = WidgetNode::new::<Measured>()
+            .with_measure(MeasureSpec::new(measure))
+            .with_key("measured");
+        let mut application = Application::new();
+        let window = application
+            .create_window(WindowSpec::new("measure"))
+            .unwrap();
+        application.mount_widget(window, node).unwrap();
+        let element = application.element_diagnostics(window).unwrap()[0].id;
+        let first = application.layout_window(window).unwrap();
+        assert_eq!(
+            first.snapshot.node(element).unwrap().rect().size.width,
+            20.0
+        );
+
+        let mut transaction = UpdateTxn::new();
+        width.set(&mut transaction, 35.0).unwrap();
+        let applied = application.apply_transaction(transaction).unwrap();
+        assert_eq!(applied.transaction.invalidations().len(), 1);
+        assert_eq!(
+            applied.transaction.invalidations()[0].phase(),
+            crate::state::DependencyPhase::Measure
+        );
+        let second = application.layout_window(window).unwrap();
+        assert!(!second.layout.full_rebuild);
+        assert_eq!(
+            second.snapshot.node(element).unwrap().rect().size.width,
+            35.0
+        );
+        assert_eq!(second.snapshot.revision(), LayoutRevision::new(2));
+
+        application
+            .invalidate_resource(window, element, false)
+            .unwrap();
+        let paint_only = application.layout_window(window).unwrap();
+        assert!(!paint_only.layout_performed);
+        assert_eq!(paint_only.metrics.dirty_roots.resource, 1);
+
+        application
+            .invalidate_resource(window, element, true)
+            .unwrap();
+        let intrinsic = application.layout_window(window).unwrap();
+        assert!(intrinsic.layout_performed);
+        assert_eq!(intrinsic.metrics.dirty_roots.layout, 1);
+        // The measured output is unchanged, so LayoutRevision must not advance.
+        assert_eq!(intrinsic.snapshot.revision(), second.snapshot.revision());
+    }
+
+    #[test]
+    fn hit_test_only_reconciliation_refreshes_the_committed_layout_snapshot() {
+        struct HitTarget;
+        let style =
+            LayoutStyle::default().with_size(Dimension::Length(40.0), Dimension::Length(30.0));
+        let mut application = Application::new();
+        let window = application
+            .create_window(WindowSpec::new("hit-only"))
+            .unwrap();
+        application
+            .mount_widget(
+                window,
+                WidgetNode::new::<HitTarget>()
+                    .with_layout_style(style.clone())
+                    .with_hit_test(true),
+            )
+            .unwrap();
+        let element = application.element_diagnostics(window).unwrap()[0].id;
+        let first = application.layout_window(window).unwrap();
+        assert_eq!(
+            application
+                .hit_test(window, Point::new(10.0, 10.0))
+                .unwrap()
+                .target(),
+            Some(element)
+        );
+
+        application
+            .reconcile_widget(
+                window,
+                WidgetNode::new::<HitTarget>()
+                    .with_layout_style(style.clone())
+                    .with_hit_test(false),
+            )
+            .unwrap();
+        let hidden = application.layout_window(window).unwrap();
+        assert!(hidden.layout_performed);
+        assert_eq!(hidden.metrics.dirty_roots.layout, 0);
+        assert_eq!(hidden.metrics.dirty_roots.hit_test, 1);
+        assert_eq!(hidden.metrics.dirty_roots.paint, 0);
+        assert_eq!(hidden.metrics.dirty_roots.semantics, 0);
+        assert_eq!(
+            application
+                .hit_test(window, Point::new(10.0, 10.0))
+                .unwrap()
+                .target(),
+            None
+        );
+        assert_eq!(
+            hidden.snapshot.revision(),
+            LayoutRevision::new(first.snapshot.revision().get() + 1)
+        );
+
+        application
+            .reconcile_widget(
+                window,
+                WidgetNode::new::<HitTarget>()
+                    .with_layout_style(style)
+                    .with_hit_test(true),
+            )
+            .unwrap();
+        let shown = application.layout_window(window).unwrap();
+        assert_eq!(shown.metrics.dirty_roots.layout, 0);
+        assert_eq!(shown.metrics.dirty_roots.hit_test, 1);
+        assert_eq!(shown.metrics.dirty_roots.paint, 0);
+        assert_eq!(shown.metrics.dirty_roots.semantics, 0);
+        assert_eq!(
+            application
+                .hit_test(window, Point::new(10.0, 10.0))
+                .unwrap()
+                .target(),
+            Some(element)
+        );
+        assert_eq!(
+            shown.snapshot.revision(),
+            LayoutRevision::new(hidden.snapshot.revision().get() + 1)
+        );
+    }
+
+    #[test]
+    fn failed_measurement_preserves_snapshot_and_dirty_epoch_for_retry() {
+        struct Measured;
+        let fail = Rc::new(Cell::new(false));
+        let fail_measure = fail.clone();
+        let measure = MeasureHandle::new(
+            crate::layout::MeasureKind::Custom,
+            move |_input: MeasureInput| {
+                if fail_measure.get() {
+                    Err(Error::compile("test_measure", "deliberate failure"))
+                } else {
+                    Ok(MeasureOutput::new(Size::new(25.0, 10.0)))
+                }
+            },
+        );
+        let mut application = Application::new();
+        let window = application.create_window(WindowSpec::new("retry")).unwrap();
+        application
+            .mount_widget(
+                window,
+                WidgetNode::new::<Measured>().with_measure(MeasureSpec::new(measure)),
+            )
+            .unwrap();
+        let element = application.element_diagnostics(window).unwrap()[0].id;
+        let committed = application.layout_window(window).unwrap().snapshot;
+
+        fail.set(true);
+        application
+            .invalidate_resource(window, element, true)
+            .unwrap();
+        assert!(application.layout_window(window).is_err());
+        assert_eq!(application.layout_snapshot(window).unwrap(), committed);
+
+        fail.set(false);
+        let retry = application.layout_window(window).unwrap();
+        assert_eq!(retry.dirty_epoch, 2);
+        assert_eq!(retry.snapshot, committed);
     }
 }

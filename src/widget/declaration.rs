@@ -1,9 +1,57 @@
-use crate::core::{Color, ElementId, PropertyId, Result, WidgetKey};
+use crate::core::{Color, ElementId, Point, PropertyId, Result, WidgetKey};
 use crate::event::EventHandler;
+use crate::layout::{LayoutBoundaries, LayoutStyle, MeasureSpec};
 use crate::state::{Signal, State};
 use std::any::TypeId;
 use std::fmt;
 use std::sync::Arc;
+
+/// Observable subsystem impact declared for one Widget property.
+///
+/// Missing metadata uses [`PropertyImpact::ALL`] as the safe fallback. Layout
+/// implies paint, hit-test, and semantics when translated into Dirty flags.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PropertyImpact(u8);
+
+impl PropertyImpact {
+    const LAYOUT_BIT: u8 = 1 << 0;
+    const PAINT_BIT: u8 = 1 << 1;
+    const HIT_TEST_BIT: u8 = 1 << 2;
+    const SEMANTICS_BIT: u8 = 1 << 3;
+    const RESOURCE_BIT: u8 = 1 << 4;
+
+    pub const NONE: Self = Self(0);
+    pub const LAYOUT: Self = Self(Self::LAYOUT_BIT);
+    pub const PAINT: Self = Self(Self::PAINT_BIT);
+    pub const HIT_TEST: Self = Self(Self::HIT_TEST_BIT);
+    pub const SEMANTICS: Self = Self(Self::SEMANTICS_BIT);
+    pub const RESOURCE: Self = Self(Self::RESOURCE_BIT);
+    pub const ALL: Self = Self(
+        Self::LAYOUT_BIT
+            | Self::PAINT_BIT
+            | Self::HIT_TEST_BIT
+            | Self::SEMANTICS_BIT
+            | Self::RESOURCE_BIT,
+    );
+
+    pub const fn contains(self, other: Self) -> bool {
+        self.0 & other.0 == other.0
+    }
+
+    pub const fn union(self, other: Self) -> Self {
+        Self(self.0 | other.0)
+    }
+
+    pub const fn is_empty(self) -> bool {
+        self.0 == 0
+    }
+}
+
+impl Default for PropertyImpact {
+    fn default() -> Self {
+        Self::ALL
+    }
+}
 
 /// Stable widget implementation identity.
 ///
@@ -169,11 +217,17 @@ pub struct WidgetNode {
     pub(crate) widget_type: WidgetType,
     pub(crate) key: Option<WidgetKey>,
     pub(crate) properties: Vec<(PropertyId, PropertyValue)>,
+    pub(crate) property_impacts: Vec<(PropertyId, PropertyImpact)>,
     pub(crate) children: Vec<WidgetNode>,
     pub(crate) lifecycle: Option<LifecycleCallback>,
     pub(crate) event_handler: Option<EventHandler>,
     pub(crate) focusable: bool,
     pub(crate) enabled: bool,
+    pub(crate) layout_style: LayoutStyle,
+    pub(crate) measure: Option<MeasureSpec>,
+    pub(crate) scroll_offset: Point,
+    pub(crate) hit_test: bool,
+    pub(crate) boundaries: LayoutBoundaries,
 }
 
 impl WidgetNode {
@@ -186,11 +240,17 @@ impl WidgetNode {
             widget_type,
             key: None,
             properties: Vec::new(),
+            property_impacts: Vec::new(),
             children: Vec::new(),
             lifecycle: None,
             event_handler: None,
             focusable: false,
             enabled: true,
+            layout_style: LayoutStyle::default(),
+            measure: None,
+            scroll_offset: Point::ZERO,
+            hit_test: true,
+            boundaries: LayoutBoundaries::NONE,
         }
     }
 
@@ -213,6 +273,13 @@ impl WidgetNode {
             .map(|index| &self.properties[index].1)
     }
 
+    pub fn property_impact(&self, id: PropertyId) -> PropertyImpact {
+        self.property_impacts
+            .binary_search_by_key(&id, |(property, _)| *property)
+            .ok()
+            .map_or(PropertyImpact::ALL, |index| self.property_impacts[index].1)
+    }
+
     pub fn children(&self) -> &[WidgetNode] {
         &self.children
     }
@@ -233,6 +300,26 @@ impl WidgetNode {
         self.enabled
     }
 
+    pub const fn layout_style(&self) -> &LayoutStyle {
+        &self.layout_style
+    }
+
+    pub const fn measure_spec(&self) -> Option<&MeasureSpec> {
+        self.measure.as_ref()
+    }
+
+    pub const fn scroll_offset(&self) -> Point {
+        self.scroll_offset
+    }
+
+    pub const fn participates_in_hit_test(&self) -> bool {
+        self.hit_test
+    }
+
+    pub const fn layout_boundaries(&self) -> LayoutBoundaries {
+        self.boundaries
+    }
+
     pub fn with_key(mut self, key: impl Into<WidgetKey>) -> Self {
         self.key = Some(key.into());
         self
@@ -251,6 +338,19 @@ impl WidgetNode {
         {
             Ok(index) => self.properties[index].1 = value,
             Err(index) => self.properties.insert(index, (id, value)),
+        }
+        self
+    }
+
+    /// Associates precise invalidation metadata with a property. The property
+    /// value can be set before or after this call.
+    pub fn with_property_impact(mut self, id: PropertyId, impact: PropertyImpact) -> Self {
+        match self
+            .property_impacts
+            .binary_search_by_key(&id, |(property, _)| *property)
+        {
+            Ok(index) => self.property_impacts[index].1 = impact,
+            Err(index) => self.property_impacts.insert(index, (id, impact)),
         }
         self
     }
@@ -285,16 +385,52 @@ impl WidgetNode {
         self
     }
 
+    pub fn with_layout_style(mut self, style: LayoutStyle) -> Self {
+        self.layout_style = style;
+        self
+    }
+
+    pub fn with_measure(mut self, measure: MeasureSpec) -> Self {
+        self.measure = Some(measure);
+        self
+    }
+
+    pub fn without_measure(mut self) -> Self {
+        self.measure = None;
+        self
+    }
+
+    pub const fn with_scroll_offset(mut self, offset: Point) -> Self {
+        self.scroll_offset = offset;
+        self
+    }
+
+    pub const fn with_hit_test(mut self, hit_test: bool) -> Self {
+        self.hit_test = hit_test;
+        self
+    }
+
+    pub const fn with_layout_boundaries(mut self, boundaries: LayoutBoundaries) -> Self {
+        self.boundaries = boundaries;
+        self
+    }
+
     pub fn same_identity(&self, other: &Self) -> bool {
         self.key == other.key && self.widget_type == other.widget_type
     }
 
     pub fn same_properties(&self, other: &Self) -> bool {
         self.properties == other.properties
+            && self.property_impacts == other.property_impacts
             && self.lifecycle == other.lifecycle
             && self.event_handler == other.event_handler
             && self.focusable == other.focusable
             && self.enabled == other.enabled
+            && self.layout_style == other.layout_style
+            && self.measure == other.measure
+            && self.scroll_offset == other.scroll_offset
+            && self.hit_test == other.hit_test
+            && self.boundaries == other.boundaries
     }
 }
 

@@ -594,12 +594,24 @@ pub struct FrameAllocationMetrics {
     pub allocated_bytes: u64,
 }
 
+/// Deduplicated scheduler roots selected from one Dirty Tree epoch.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct DirtyRootMetrics {
+    pub structure: u64,
+    pub layout: u64,
+    pub paint: u64,
+    pub hit_test: u64,
+    pub semantics: u64,
+    pub resource: u64,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FrameMetrics {
     pub frame_index: u64,
     pub revisions: RevisionReport,
     pub phases: PhaseMetrics,
     pub dirty_elements: u64,
+    pub dirty_roots: DirtyRootMetrics,
     pub full_rebuilds: u64,
     pub incremental_rebuilds: u64,
     pub scene: SceneCostReport,
@@ -618,6 +630,7 @@ impl FrameMetrics {
             revisions: revisions.into(),
             phases: PhaseMetrics::default(),
             dirty_elements: 0,
+            dirty_roots: DirtyRootMetrics::default(),
             full_rebuilds: 0,
             incremental_rebuilds: 0,
             scene: SceneCostReport::default(),

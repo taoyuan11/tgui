@@ -21,6 +21,14 @@ accessibility = []
 webview = ["desktop"]
 
 [dependencies]
+taffy = { version = "0.13.0", default-features = false, features = [
+    "std",
+    "taffy_tree",
+    "flexbox",
+    "grid",
+    "block_layout",
+    "content_size",
+] }
 
 [[bench]]
 name = "p0_arena"
@@ -28,6 +36,10 @@ harness = false
 
 [[bench]]
 name = "p1_widget"
+harness = false
+
+[[bench]]
+name = "p2_layout"
 harness = false
 
 [lints.rust]

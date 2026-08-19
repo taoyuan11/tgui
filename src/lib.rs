@@ -1,9 +1,9 @@
 //! Transactional, data-oriented GUI foundations.
 //!
-//! P1 provides immutable widget declarations, a retained generational Element
-//! tree, reactive State/Signal transactions, and backend-neutral event routing.
-//! The minimal core remains headless and dependency-free with
-//! `--no-default-features`.
+//! P2 provides immutable widget declarations, a retained generational Element
+//! tree, reactive transactions and events, logical-pixel Taffy layout, and a
+//! boundary-aware Dirty Tree. The minimal `--no-default-features` build remains
+//! fully headless and has no platform, GPU, text-shaping, or media backend.
 
 #![forbid(unsafe_code)]
 
@@ -28,7 +28,7 @@ pub mod widgets;
 
 pub use application::{
     Application, ApplicationTxnReceipt, AtomicSnapshotStore, BackgroundDispatchReceipt,
-    CpuSnapshot, EventDispatchReceipt, WindowContext, WindowSpec,
+    CpuSnapshot, EventDispatchReceipt, LayoutFrameReceipt, WindowContext, WindowSpec,
 };
 pub use core::{
     Color, DpiScale, ElementId, Error, Point, Rect, RenderNodeId, Result, Size, WindowId,

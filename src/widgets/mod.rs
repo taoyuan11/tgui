@@ -6,7 +6,7 @@
 use crate::core::{PropertyId, Result, WidgetKey};
 use crate::event::EventHandler;
 use crate::state::UiCommand;
-use crate::widget::{BuildContext, Widget, WidgetNode, WidgetType};
+use crate::widget::{BuildContext, PropertyImpact, Widget, WidgetNode, WidgetType};
 use std::sync::Arc;
 
 pub const TEXT_CONTENT: PropertyId = PropertyId::new(1);
@@ -92,7 +92,8 @@ impl Widget for Text {
     fn build(&self, _context: &mut BuildContext) -> Result<WidgetNode> {
         Ok(WidgetNode::from_type(text_type())
             .with_optional_key(self.key.clone())
-            .with_property(TEXT_CONTENT, self.content.clone()))
+            .with_property(TEXT_CONTENT, self.content.clone())
+            .with_property_impact(TEXT_CONTENT, PropertyImpact::LAYOUT))
     }
 }
 
@@ -140,6 +141,12 @@ impl Widget for Button {
         let mut node = WidgetNode::from_type(button_type())
             .with_optional_key(self.key.clone())
             .with_property(BUTTON_ENABLED, self.enabled)
+            .with_property_impact(
+                BUTTON_ENABLED,
+                PropertyImpact::PAINT
+                    .union(PropertyImpact::HIT_TEST)
+                    .union(PropertyImpact::SEMANTICS),
+            )
             .with_focusable(true)
             .with_enabled(self.enabled)
             .with_child(label);

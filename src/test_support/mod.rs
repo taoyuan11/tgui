@@ -4,9 +4,10 @@
 //! expose enough stable output to compare incremental work with a full rebuild.
 
 use crate::animation::FrameClock;
-use crate::core::{Color, ElementId, Error, Rect, Result};
+use crate::core::{Color, DpiScale, ElementId, Error, Rect, Result, Size};
 use crate::core::{PropertyId, WidgetKey};
 use crate::diagnostics::{BudgetDomain, FixedBudgetResourceManager};
+use crate::layout::{LayoutEngine, LayoutPassReport, LayoutSnapshot, compare_layout_snapshots};
 use crate::render::{PaintCommand, SceneSnapshot};
 use crate::widget::element::ElementTree;
 use crate::widget::{
@@ -131,6 +132,122 @@ impl WidgetHarness {
 }
 
 impl Default for WidgetHarness {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Headless Element + Taffy harness used to compare incremental synchronization
+/// with a fresh full-tree rebuild without a platform window or GPU.
+pub struct LayoutHarness {
+    tree: ElementTree,
+    engine: LayoutEngine,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct LayoutComparison {
+    pub incremental: LayoutSnapshot,
+    pub rebuilt: LayoutSnapshot,
+    pub incremental_report: LayoutPassReport,
+    pub rebuilt_report: LayoutPassReport,
+}
+
+impl LayoutHarness {
+    pub fn new() -> Self {
+        Self {
+            tree: ElementTree::new(),
+            engine: LayoutEngine::new(),
+        }
+    }
+
+    pub fn mount(&mut self, widget: WidgetNode) -> Result<ReconcileReport> {
+        self.tree.mount(widget)
+    }
+
+    pub fn reconcile(&mut self, widget: WidgetNode) -> Result<ReconcileReport> {
+        self.tree.reconcile(widget)
+    }
+
+    pub fn layout(
+        &mut self,
+        viewport: Size,
+        scale: DpiScale,
+    ) -> Result<(LayoutSnapshot, LayoutPassReport)> {
+        let inputs = self.tree.layout_inputs()?;
+        let root = self.tree.root();
+        let tree = &mut self.tree;
+        self.engine.compute(
+            inputs,
+            root,
+            viewport,
+            scale,
+            false,
+            |element, handle, input| {
+                tree.capture_phase_dependencies(
+                    element,
+                    crate::state::DependencyPhase::Measure,
+                    || handle.measure(input),
+                )
+            },
+        )
+    }
+
+    /// Computes the current tree through both the retained incremental engine
+    /// and a new forced-full engine seeded with the same previous snapshot.
+    pub fn layout_and_compare(
+        &mut self,
+        viewport: Size,
+        scale: DpiScale,
+    ) -> Result<LayoutComparison> {
+        let previous = self.engine.committed().clone();
+        let inputs = self.tree.layout_inputs()?;
+        let root = self.tree.root();
+        let tree = &mut self.tree;
+        let (incremental, incremental_report) = self.engine.compute(
+            inputs.clone(),
+            root,
+            viewport,
+            scale,
+            false,
+            |element, handle, input| {
+                tree.capture_phase_dependencies(
+                    element,
+                    crate::state::DependencyPhase::Measure,
+                    || handle.measure(input),
+                )
+            },
+        )?;
+        let mut rebuilt_engine = LayoutEngine::new();
+        rebuilt_engine.adopt_committed(previous);
+        let (rebuilt, rebuilt_report) = rebuilt_engine.compute(
+            inputs,
+            root,
+            viewport,
+            scale,
+            true,
+            |element, handle, input| {
+                tree.capture_phase_dependencies(
+                    element,
+                    crate::state::DependencyPhase::Measure,
+                    || handle.measure(input),
+                )
+            },
+        )?;
+        compare_layout_snapshots(&incremental, &rebuilt)?;
+        Ok(LayoutComparison {
+            incremental,
+            rebuilt,
+            incremental_report,
+            rebuilt_report,
+        })
+    }
+
+    pub fn root(&self) -> Option<ElementId> {
+        self.tree.root()
+    }
+}
+
+impl Default for LayoutHarness {
     fn default() -> Self {
         Self::new()
     }
@@ -453,6 +570,7 @@ impl fmt::Display for CommandSnapshot {
 mod tests {
     use super::*;
     use crate::core::{Clip, RevisionSet};
+    use crate::layout::{Dimension, LayoutStyle};
 
     #[test]
     fn command_snapshot_is_stable_and_stack_checked() {
@@ -500,5 +618,43 @@ mod tests {
                 .all(|result| result.peak_live == result.node_count)
         );
         let _ = RevisionSet::ZERO;
+    }
+
+    #[test]
+    fn layout_harness_compares_incremental_and_full_snapshots() {
+        struct Root;
+        struct Child;
+        let root_style =
+            LayoutStyle::default().with_size(Dimension::Length(100.0), Dimension::Length(50.0));
+        let child = |width| {
+            WidgetNode::new::<Child>().with_layout_style(
+                LayoutStyle::default().with_size(Dimension::Length(width), Dimension::Length(10.0)),
+            )
+        };
+        let mut harness = LayoutHarness::new();
+        harness
+            .mount(
+                WidgetNode::new::<Root>()
+                    .with_layout_style(root_style.clone())
+                    .with_child(child(10.0)),
+            )
+            .unwrap();
+        harness
+            .layout(Size::new(100.0, 50.0), DpiScale::ONE)
+            .unwrap();
+        harness
+            .reconcile(
+                WidgetNode::new::<Root>()
+                    .with_layout_style(root_style)
+                    .with_child(child(25.0))
+                    .with_child(child(15.0)),
+            )
+            .unwrap();
+        let comparison = harness
+            .layout_and_compare(Size::new(100.0, 50.0), DpiScale::ONE)
+            .unwrap();
+        assert_eq!(comparison.incremental, comparison.rebuilt);
+        assert!(!comparison.incremental_report.full_rebuild);
+        assert!(comparison.rebuilt_report.full_rebuild);
     }
 }
