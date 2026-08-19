@@ -3,8 +3,10 @@
 //! Standard controls must flow through Widget → Element → Layout → Render and
 //! may never be backed by [`crate::native`] hosts.
 
-use crate::core::{PropertyId, Result, WidgetKey};
+use crate::accessibility::{ActionKind, Role, Semantics};
+use crate::core::{ImageHandle, PropertyId, Result, Size, WidgetKey};
 use crate::event::EventHandler;
+use crate::layout::LayoutStyle;
 use crate::state::UiCommand;
 use crate::widget::{
     BuildContext, LAYOUT_HEIGHT, LAYOUT_WIDTH, OPACITY, PropertyImpact, Widget, WidgetNode,
@@ -14,6 +16,9 @@ use std::sync::Arc;
 
 pub const TEXT_CONTENT: PropertyId = PropertyId::new(1);
 pub const BUTTON_ENABLED: PropertyId = PropertyId::new(1);
+pub const IMAGE_RESOURCE_SLOT: PropertyId = PropertyId::new(2);
+pub const IMAGE_RESOURCE_GENERATION: PropertyId = PropertyId::new(3);
+pub const IMAGE_ALT_TEXT: PropertyId = PropertyId::new(4);
 
 pub fn container_type() -> WidgetType {
     WidgetType::of::<Container>()
@@ -25,6 +30,10 @@ pub fn text_type() -> WidgetType {
 
 pub fn button_type() -> WidgetType {
     WidgetType::of::<Button>()
+}
+
+pub fn image_type() -> WidgetType {
+    WidgetType::of::<Image>()
 }
 
 /// Layout-neutral grouping declaration used by every backend.
@@ -63,6 +72,7 @@ impl Widget for Container {
         Ok(
             with_layout_animation_properties(WidgetNode::from_type(container_type()))
                 .with_optional_key(self.key.clone())
+                .with_semantics(Semantics::new(Role::Group))
                 .with_children(self.children.clone()),
         )
     }
@@ -99,8 +109,81 @@ impl Widget for Text {
             with_presentation_properties(WidgetNode::from_type(text_type()))
                 .with_optional_key(self.key.clone())
                 .with_property(TEXT_CONTENT, self.content.clone())
-                .with_property_impact(TEXT_CONTENT, PropertyImpact::LAYOUT),
+                .with_property_impact(TEXT_CONTENT, PropertyImpact::LAYOUT)
+                // Accessibility reads logical text, never glyph-atlas output.
+                .with_semantics(Semantics::text(self.content.clone())),
         )
+    }
+}
+
+/// Backend-neutral image declaration. The handle is generation stamped and is
+/// resolved by the media/resource pipeline when the scene is submitted.
+#[derive(Clone, Debug)]
+pub struct Image {
+    key: Option<WidgetKey>,
+    handle: ImageHandle,
+    alt_text: Arc<str>,
+    size: Size,
+}
+
+impl Image {
+    pub fn new(handle: ImageHandle) -> Self {
+        Self {
+            key: None,
+            handle,
+            alt_text: Arc::from("Image"),
+            size: Size::new(64.0, 64.0),
+        }
+    }
+
+    pub fn with_key(mut self, key: impl Into<WidgetKey>) -> Self {
+        self.key = Some(key.into());
+        self
+    }
+
+    pub fn with_alt_text(mut self, alt_text: impl Into<Arc<str>>) -> Self {
+        self.alt_text = alt_text.into();
+        self
+    }
+
+    pub const fn with_size(mut self, size: Size) -> Self {
+        self.size = size;
+        self
+    }
+}
+
+impl Widget for Image {
+    fn build(&self, _context: &mut BuildContext) -> Result<WidgetNode> {
+        let mut node = with_presentation_properties(WidgetNode::from_type(image_type()))
+            .with_optional_key(self.key.clone())
+            .with_layout_style(LayoutStyle::default().with_size(
+                crate::layout::Dimension::Length(self.size.width),
+                crate::layout::Dimension::Length(self.size.height),
+            ))
+            .with_property(IMAGE_RESOURCE_SLOT, u64::from(self.handle.slot()))
+            .with_property(
+                IMAGE_RESOURCE_GENERATION,
+                u64::from(self.handle.generation()),
+            )
+            .with_property(IMAGE_ALT_TEXT, self.alt_text.clone())
+            .with_property_impact(
+                IMAGE_RESOURCE_SLOT,
+                PropertyImpact::RESOURCE.union(PropertyImpact::PAINT),
+            )
+            .with_property_impact(
+                IMAGE_RESOURCE_GENERATION,
+                PropertyImpact::RESOURCE.union(PropertyImpact::PAINT),
+            )
+            .with_property_impact(IMAGE_ALT_TEXT, PropertyImpact::SEMANTICS)
+            .with_semantics(
+                Semantics::new(Role::Image)
+                    .with_name(self.alt_text.clone())
+                    .with_enabled(true),
+            );
+        if self.handle.generation() == 0 {
+            node = node.with_enabled(false);
+        }
+        Ok(node)
     }
 }
 
@@ -156,6 +239,13 @@ impl Widget for Button {
             )
             .with_focusable(true)
             .with_enabled(self.enabled)
+            .with_semantics(
+                Semantics::new(Role::Button)
+                    .with_name(self.label.clone())
+                    .with_enabled(self.enabled)
+                    .with_focusable(true)
+                    .with_actions([ActionKind::Activate, ActionKind::Focus]),
+            )
             .with_child(label);
         if let Some(handler) = self.handler.clone() {
             node = node.with_event_handler(handler);
@@ -184,6 +274,10 @@ mod tests {
         let mut context = BuildContext::new();
         let text = Text::new("hello").build(&mut context).unwrap();
         let button = Button::new("press").build(&mut context).unwrap();
+        let image = Image::new(ImageHandle::from_parts(1, 1))
+            .with_alt_text("preview")
+            .build(&mut context)
+            .unwrap();
         let container = Container::new()
             .with_child(text.clone())
             .with_child(button.clone())
@@ -193,6 +287,8 @@ mod tests {
         assert_eq!(text.widget_type(), &text_type());
         assert_eq!(button.widget_type(), &button_type());
         assert_eq!(button.children()[0].widget_type(), &text_type());
+        assert_eq!(image.widget_type(), &image_type());
+        assert_eq!(image.semantics().name(), Some("preview"));
         assert_eq!(container.children(), [text, button]);
     }
 }

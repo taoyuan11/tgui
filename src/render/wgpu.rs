@@ -98,6 +98,8 @@ pub struct WgpuRenderer<'window> {
     dpi_scale: DpiScale,
     submission: u64,
     deferred: DeferredResourceQueue,
+    prefer_transparent_surface: bool,
+    device_lost: bool,
 }
 
 impl<'window> WgpuRenderer<'window> {
@@ -134,7 +136,7 @@ impl<'window> WgpuRenderer<'window> {
             .request_adapter(&wgpu::RequestAdapterOptions {
                 power_preference: wgpu::PowerPreference::LowPower,
                 compatible_surface: surface.as_ref(),
-                force_fallback_adapter: true,
+                force_fallback_adapter: surface.is_none(),
             })
             .await
             .map_err(|error| Error::platform("request_adapter", error.to_string(), true))?;
@@ -169,6 +171,8 @@ impl<'window> WgpuRenderer<'window> {
             dpi_scale,
             submission: 0,
             deferred: DeferredResourceQueue::default(),
+            prefer_transparent_surface: false,
+            device_lost: false,
         };
         renderer.resize(logical_size, dpi_scale)?;
         Ok(renderer)
@@ -193,6 +197,15 @@ impl<'window> WgpuRenderer<'window> {
     }
     pub fn deferred_resources(&self) -> &DeferredResourceQueue {
         &self.deferred
+    }
+
+    /// Deterministic device-loss injection used by platform recovery tests.
+    pub fn inject_device_loss(&mut self) {
+        self.device_lost = true;
+    }
+
+    pub const fn is_device_lost(&self) -> bool {
+        self.device_lost
     }
 
     pub fn resize(&mut self, logical_size: Size, dpi_scale: DpiScale) -> Result<()> {
@@ -221,6 +234,10 @@ impl<'window> WgpuRenderer<'window> {
     }
 
     pub fn configure_surface(&mut self) -> Result<()> {
+        self.configure_surface_with_alpha(false)
+    }
+
+    pub fn configure_surface_with_alpha(&mut self, prefer_transparent: bool) -> Result<()> {
         let Some(surface) = &self.surface else {
             return Err(Error::platform(
                 "configure_surface",
@@ -242,11 +259,26 @@ impl<'window> WgpuRenderer<'window> {
                 .first()
                 .copied()
                 .unwrap_or(wgpu::PresentMode::Fifo),
-            alpha_mode: capabilities
-                .alpha_modes
-                .first()
-                .copied()
-                .unwrap_or(wgpu::CompositeAlphaMode::Auto),
+            alpha_mode: if prefer_transparent {
+                capabilities
+                    .alpha_modes
+                    .iter()
+                    .copied()
+                    .find(|mode| {
+                        matches!(
+                            mode,
+                            wgpu::CompositeAlphaMode::PreMultiplied
+                                | wgpu::CompositeAlphaMode::PostMultiplied
+                        )
+                    })
+                    .unwrap_or(wgpu::CompositeAlphaMode::Auto)
+            } else {
+                capabilities
+                    .alpha_modes
+                    .first()
+                    .copied()
+                    .unwrap_or(wgpu::CompositeAlphaMode::Auto)
+            },
             view_formats: vec![],
             desired_maximum_frame_latency: 2,
         };
@@ -258,6 +290,7 @@ impl<'window> WgpuRenderer<'window> {
         self.viewport_buffer = viewport_buffer;
         surface.configure(&self.device, &config);
         self.config = Some(config);
+        self.prefer_transparent_surface = prefer_transparent;
         Ok(())
     }
 
@@ -266,6 +299,7 @@ impl<'window> WgpuRenderer<'window> {
         scene: &CompiledScene,
         view: &wgpu::TextureView,
     ) -> Result<wgpu::SubmissionIndex> {
+        self.ensure_device_available()?;
         self.queue.write_buffer(
             &self.viewport_buffer,
             0,
@@ -389,6 +423,7 @@ impl<'window> WgpuRenderer<'window> {
     }
 
     pub fn render_surface(&mut self, scene: &CompiledScene) -> Result<()> {
+        self.ensure_device_available()?;
         let surface = self
             .surface
             .as_ref()
@@ -411,6 +446,7 @@ impl<'window> WgpuRenderer<'window> {
         height: u32,
         bytes: &[u8],
     ) -> Result<TextureUpload> {
+        self.ensure_device_available()?;
         let texture = Arc::new(self.create_rgba8_texture(width, height, bytes)?);
         Ok(TextureUpload {
             handle,
@@ -430,6 +466,7 @@ impl<'window> WgpuRenderer<'window> {
         height: u32,
         bytes: &[u8],
     ) -> Result<wgpu::Texture> {
+        self.ensure_device_available()?;
         let expected = u64::from(width)
             .saturating_mul(u64::from(height))
             .saturating_mul(4);
@@ -504,7 +541,7 @@ impl<'window> WgpuRenderer<'window> {
             .request_adapter(&wgpu::RequestAdapterOptions {
                 power_preference: wgpu::PowerPreference::LowPower,
                 compatible_surface: self.surface.as_ref(),
-                force_fallback_adapter: true,
+                force_fallback_adapter: self.surface.is_none(),
             })
             .await
             .map_err(|error| Error::platform("recover_adapter", error.to_string(), true))?;
@@ -533,9 +570,22 @@ impl<'window> WgpuRenderer<'window> {
         self.viewport_buffer = viewport_buffer;
         if self.surface.is_some() {
             self.config = None;
-            self.configure_surface()?;
+            self.configure_surface_with_alpha(self.prefer_transparent_surface)?;
         }
+        self.device_lost = false;
         Ok(())
+    }
+
+    fn ensure_device_available(&self) -> Result<()> {
+        if self.device_lost {
+            Err(Error::platform(
+                "device_lost",
+                "GPU device is lost and must be recreated before submission",
+                true,
+            ))
+        } else {
+            Ok(())
+        }
     }
 }
 
@@ -738,6 +788,26 @@ mod tests {
         });
         let view = target.create_view(&wgpu::TextureViewDescriptor::default());
         renderer.render_to_view(&scene, &view).unwrap();
+        renderer.inject_device_loss();
+        assert!(renderer.is_device_lost());
+        assert!(renderer.render_to_view(&scene, &view).is_err());
         pollster::block_on(renderer.recover_device()).unwrap();
+        assert!(!renderer.is_device_lost());
+        let recovered_target = renderer.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("tgui recovered test target"),
+            size: wgpu::Extent3d {
+                width: 30,
+                height: 15,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[],
+        });
+        let recovered_view = recovered_target.create_view(&wgpu::TextureViewDescriptor::default());
+        renderer.render_to_view(&scene, &recovered_view).unwrap();
     }
 }

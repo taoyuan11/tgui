@@ -741,7 +741,7 @@ P1 暂不把 dependency phase 映射成 DirtyFlags，也不生成真实布局命
   超预算和 Application 原子 SceneRevision。
 - all-feature 真实 Metal headless device 测试覆盖 resize、1.5 DPI、半透明 quad、indexed
   path、scissor clip、RGBA texture upload、command submission、设备重建和 submission
-  延迟回收；测试机没有创建真实 OS 窗口，surface configure/present 由通用 SurfaceTarget
+  延迟回收；在 P3 基线阶段测试机没有创建真实 OS 窗口，surface configure/present 由通用 SurfaceTarget
   路径和构建检查覆盖。
 - `cargo run --example p3_headless --no-default-features` 稳定输出 Render Node/Chunk、Paint
   Command、Compiled pass/batch/instance 数和 fingerprint。所有数字是功能 smoke baseline，
@@ -830,3 +830,82 @@ presentation opacity、列表物化数量和场景 fingerprint；P5 基准运行
 50,000/100,000 item 滚动，均断言物化数量保持在 viewport/overscan 上限内。
 `scripts/ci.sh`（最小/全 feature Clippy、feature matrix、最小/默认配置测试和全部 headless
 示例）、Rust 1.85 MSRV 检查、两项 P5 基准、rustfmt 与 diff 检查均通过。
+
+## P6 实施记录（2026-08-19）
+
+### 实际取舍
+
+- `NativeHost` 是明确的能力边界，不是普通控件的替代实现。`HostHandle` 和
+  `NativeHostMessage` 都携带 slot/generation 以及 Window/Element scope；
+  `NativeHostManager` 在 UI 线程独占 host，负责 create/mount/layout/focus/input/
+  composition/unmount/destroy 和可诊断错误状态。host 只能返回事件或
+  `UiCommand` 输出，不能修改 Widget/Element Tree。
+- `NativeHostCapabilities` 描述独立 surface、offscreen、transform、alpha、clip、
+  输入转发和 batch 能力；`NativeHostCost` 描述 pass/surface/texture/同步点成本。
+  Scheduler 在 NativeSurface 边界切分 pass；offscreen 组合使用隔离的
+  PushTransform/PushClip/BeginLayer/DrawImage 命令序列。需要隔离的多命令序列必须
+  通过 `paint_commands` 提交，避免把不完整的栈状态交给 compiler。
+- `NativeHostWidget` 接入 Widget -> Element -> Layout -> Paint IR。可选 `webview`
+  feature 提供 external-surface/WebView contract factory，真实平台 WebView 只需
+  替换该 factory，不把 WebView 依赖带入核心。Mock host 覆盖生命周期、z-order、焦点、
+  输入和失败回退。
+- Accessibility 的内部真相是 `AccessibilityTree`/`SemanticSnapshot`。NodeId
+  无损携带 Element slot/generation；语义 revision 只在语义、焦点、布局边界或可访问
+  滚动输出变化时递增。提交与 Layout/Scene/Resource 组成同一 CPU snapshot；AccessKit
+  适配器和 Windows UIA、macOS NSAccessibility、Linux AT-SPI 依赖均按 feature/target
+  cfg 隔离。Native host 支持 opaque 或 subtree bridge，VirtualList 只发布集合及已
+  物化 item 的位置/数量/current/selected 元数据。
+
+### P6 基线结果
+
+本机 `aarch64-apple-darwin`、Rust stable 1.96.1 下：
+
+- `tests/p6_native_contract.rs` 和 `tests/p6_accessibility_contract.rs` 在
+  `cargo test --no-default-features` 下通过。前者覆盖 4 个 lifecycle/capability/
+  pipeline/generation 场景；后者覆盖语义提交、NodeId keyed reorder、action/focus 和
+  VirtualList 语义；`accessibility`/all-feature 运行再覆盖 AccessKit 转换场景。
+- `scripts/check-features.sh` 及 CI 矩阵保留 `accessibility`、`webview`、`desktop` 和
+  all-feature 组合；关闭这些 feature 时最小核心仍可构建。三平台真实无障碍服务并未在
+  此 macOS 工作区启动，平台 adapter 证据以目标 CI/主机编译为准。
+
+## P7 实施记录（2026-08-19）
+
+### 实际取舍
+
+- `examples/p7_headless.rs` 把状态更新、事件 capture/target/bubble、逻辑文本、图片
+  replacement/revision、FakeClock 动画、100,000 项 VirtualList、Accessibility 和
+  Native Host 放入同一 Application/Window。VirtualList 物化声明通过 State 进入 retained
+  View，Native Host composition 也通过 UpdateTxn 进入 View，因而两者都走正式
+  Widget -> Element -> Layout -> Render -> Compiler 路径。
+- `tests/p7_contract.rs` 固定每帧顺序和四类 revision 的原子提交，比较增量/新树输出，
+  并注入 compiler error、资源未就绪/过期结果、预算超限、resize 和 device-loss；失败
+  时保留上一份 CPU/compiled 快照，或使用明确 placeholder/恢复路径。
+- `examples/p7_desktop.rs` 与 `platform::WinitSurface` 是可选真实窗口适配：使用 winit
+  创建透明窗口，处理 resize/ScaleFactorChanged/close/redraw，按逻辑像素配置 wgpu
+  surface，并公开设备重建。平台句柄只留在 adapter，不进入 retained trees。普通控件
+  的完整 Widget -> Element -> Layout -> Render Tree -> Paint IR -> Compiler 路径由
+  P6/P7 contracts 审计。
+- 基准分为 `p7_matrix`（10/100/1,000/5,000/10,000/50,000 节点、7 个 retained-tree
+  场景）与 `p7_stress`（VirtualList、10k animation、text/DPI、image/glyph、layer/
+  backdrop/native stress）。脚本写入提交/平台/设备元数据和 p50/p95/p99；p95 回归门槛
+  默认为 20%。单机计时仅作为回归报警，不是 FPS/RAM 承诺。
+
+### P7 基线结果与限制
+
+- `cargo run --example p7_headless --no-default-features` 已成功运行，输出状态/事件阶段、
+  文本、图片资源 revision、动画 opacity、100,000 item 列表、语义节点、Native Host 和
+  四类 revision。`scripts/desktop-smoke.sh` 已在 macOS/aarch64 完成透明窗口、resize/DPI、
+  surface 提交和注入 device-loss 恢复。
+- P7 contract 的 headless fault matrix、ordinary-widget pipeline、semantic equivalence、
+  resource/预算回退和可用 adapter 的 wgpu recovery 均有测试；`scripts/release-check.sh
+  --quick`、最小/all-feature Clippy、P7 no-default/all-feature contract、六种节点规模的
+  七场景主矩阵和六场景 stress 均已通过。release/benchmark 脚本和 CI workflow 继续提供
+  all-feature、MSRV 1.85、跨平台编译、文档/打包和完整矩阵入口。
+- 完整 50k 矩阵和 `scripts/release-check.sh --full` 产物大小/依赖报告已在当前工作区执行，
+  结果位于 `target/p7-benchmarks/` 和 `target/p7-release-report/`。这些数据绑定
+  macOS/aarch64、Rust 1.96.1 和当前提交，换主机或工具链必须重新采样。headless
+  `FrameMetrics` 尚未连接 GPU time、driver VRAM 或全局 heap allocator；基准 CSV 将这些
+  字段标为 `na`，不填零。
+- 由于 Native Host、Accessibility、Application、Render 和 platform adapter 仍共享
+  revision/snapshot 合同，P7 暂不拆分 crate；待平台 adapter 和公开 API 稳定后再评估
+  `core`、`rendering`、`platform`、`media` 拆分。

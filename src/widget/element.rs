@@ -2,11 +2,12 @@ use super::{
     BuildContext, LifecycleCallback, LifecycleEvent, PropertyImpact, PropertyValue, View,
     WidgetNode, WidgetType,
 };
+use crate::accessibility::{SemanticNodeInput, Semantics};
 use crate::core::{
     ArenaStats, DenseArena, ElementId, Error, PropertyId, Result, TreeLinks, WidgetKey,
 };
 use crate::event::{EventHandler, EventTargetTree};
-use crate::layout::{LayoutBoundaries, LayoutNodeInput, LayoutStyle, MeasureSpec};
+use crate::layout::{LayoutBoundaries, LayoutNodeInput, LayoutSnapshot, LayoutStyle, MeasureSpec};
 use crate::state::{
     DependencyOwner, DependencyPhase, DependencySet, StateWriteGuard, UiCommand, UiThread,
     capture_dependencies,
@@ -36,6 +37,7 @@ pub(crate) struct ElementNode {
     scroll_offset: crate::core::Point,
     hit_test: bool,
     boundaries: LayoutBoundaries,
+    semantics: Semantics,
     state_slots: Vec<StateSlot>,
     dependencies: BTreeMap<DependencyPhase, DependencySet>,
     subscriptions: Vec<Box<dyn Any>>,
@@ -87,6 +89,7 @@ impl ElementNode {
             scroll_offset: widget.scroll_offset,
             hit_test: widget.hit_test,
             boundaries: widget.boundaries,
+            semantics: widget.semantics.clone(),
             state_slots: Vec::new(),
             dependencies: BTreeMap::new(),
             subscriptions: Vec::new(),
@@ -372,6 +375,28 @@ impl ElementTree {
         self.arena.get(id).map(|node| node.boundaries)
     }
 
+    pub(crate) fn semantic_inputs(&self, layout: &LayoutSnapshot) -> Vec<SemanticNodeInput> {
+        let Some(root) = self.root else {
+            return Vec::new();
+        };
+        let mut result = Vec::with_capacity(self.len());
+        let mut stack = vec![root];
+        while let Some(id) = stack.pop() {
+            let Some(node) = self.arena.get(id) else {
+                continue;
+            };
+            result.push(SemanticNodeInput {
+                element: id,
+                parent: node.links.parent(),
+                bounds: layout.node(id).map(|layout| layout.rect()),
+                semantics: node.semantics.clone(),
+            });
+            let children = self.children(id);
+            stack.extend(children.into_iter().rev());
+        }
+        result
+    }
+
     pub(crate) fn mount(&mut self, widget: WidgetNode) -> Result<ReconcileReport> {
         self.owner.assert_current()?;
         let _state_guard = StateWriteGuard::enter("element reconciliation");
@@ -585,6 +610,7 @@ impl ElementTree {
             input_behavior_changed,
             hit_test_changed,
             boundary_changed,
+            semantics_changed,
             changed,
         ) = {
             let node = self
@@ -600,12 +626,14 @@ impl ElementTree {
                 || node.enabled != widget.enabled;
             let hit_test_changed = node.hit_test != widget.hit_test;
             let boundary_changed = node.boundaries != widget.boundaries;
+            let semantics_changed = node.semantics != widget.semantics;
             let changed = property_changed
                 || !property_impact.is_empty()
                 || layout_changed
                 || input_behavior_changed
                 || hit_test_changed
                 || boundary_changed
+                || semantics_changed
                 || node.lifecycle != lifecycle
                 || old_child_identity != new_child_identity;
             (
@@ -614,6 +642,7 @@ impl ElementTree {
                 input_behavior_changed,
                 hit_test_changed,
                 boundary_changed,
+                semantics_changed,
                 changed,
             )
         };
@@ -632,6 +661,7 @@ impl ElementTree {
         node.scroll_offset = widget.scroll_offset;
         node.hit_test = widget.hit_test;
         node.boundaries = widget.boundaries;
+        node.semantics = widget.semantics;
         if changed {
             report.updated += 1;
             if let Some(lifecycle) = lifecycle {
@@ -656,6 +686,9 @@ impl ElementTree {
         }
         if boundary_changed {
             impact = PropertyImpact::ALL;
+        }
+        if semantics_changed {
+            impact = impact.union(PropertyImpact::SEMANTICS);
         }
         if old_child_identity != new_child_identity {
             report.record_invalidation(id, true, PropertyImpact::ALL);

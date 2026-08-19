@@ -1,6 +1,6 @@
 //! Transactional, data-oriented GUI foundations.
 //!
-//! P5 provides immutable widget declarations, retained generational Element and
+//! P7 provides immutable widget declarations, retained generational Element and
 //! Render trees, reactive transactions and events, logical-pixel Taffy layout,
 //! typed Paint IR, Unicode text shaping, paged glyph/image resources, unified
 //! animation timelines, bounded VirtualList materialization, bounded caches,
@@ -35,7 +35,8 @@ pub use application::{
     WindowContext, WindowSpec,
 };
 pub use core::{
-    Color, DpiScale, ElementId, Error, Point, Rect, RenderNodeId, Result, Size, WindowId,
+    Color, DpiScale, ElementId, Error, HostHandle, Point, Rect, RenderNodeId, Result, Size,
+    WindowId,
 };
 pub use state::{
     BackgroundMessage, DependencyPhase, RevisionMask, Signal, State, StateInvalidation, TxnReceipt,

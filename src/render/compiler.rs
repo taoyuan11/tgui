@@ -639,6 +639,7 @@ fn compile_command(
                     "NativeSurface requires an explicit renderer capability",
                 ));
             }
+            flush_with_reason(output, state, BatchBoundaryReason::NativeSurface);
             add_binding(
                 output,
                 state,
@@ -648,7 +649,11 @@ fn compile_command(
                 1.0,
                 index,
                 context,
-            )
+            );
+            if let Some(batch) = state.current_batch.as_mut() {
+                batch.reason = Some(BatchBoundaryReason::NativeSurface);
+            }
+            flush_batch(output, state);
         }
     }
     Ok(())

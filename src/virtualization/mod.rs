@@ -4,6 +4,7 @@
 //! Estimated and measured heights are stored in a Fenwick tree, so offset
 //! lookup and height replacement are logarithmic in the data-source length.
 
+use crate::accessibility::{ActionKind, CollectionInfo, CollectionItemInfo, Role, Semantics};
 use crate::core::{Error, ItemKey, Result, WidgetKey};
 use crate::event::NamedKey;
 use crate::state::UiThread;
@@ -135,6 +136,17 @@ pub struct CollectionSemantics {
     pub selected_count: usize,
 }
 
+impl CollectionSemantics {
+    pub fn accessibility(&self) -> Semantics {
+        Semantics::new(Role::List)
+            .with_collection(CollectionInfo {
+                item_count: self.item_count,
+                selected_count: self.selected_count,
+            })
+            .with_action(ActionKind::ScrollIntoView)
+    }
+}
+
 /// Positional accessibility information for one item.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ItemSemantics {
@@ -147,6 +159,21 @@ pub struct ItemSemantics {
     pub focused: bool,
     pub current: bool,
     pub materialized: bool,
+}
+
+impl ItemSemantics {
+    pub fn accessibility(&self) -> Semantics {
+        Semantics::new(Role::ListItem)
+            .with_selected(self.selected)
+            .with_focused(self.focused)
+            .with_focusable(true)
+            .with_collection_item(CollectionItemInfo {
+                position_in_set: self.position_in_set,
+                set_size: self.set_size,
+                current: self.current,
+            })
+            .with_actions([ActionKind::Focus, ActionKind::ScrollIntoView])
+    }
 }
 
 /// Generation-stamped request suitable for returning an asynchronous item

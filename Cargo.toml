@@ -12,12 +12,17 @@ license = "MIT OR Apache-2.0"
 # boundaries buildable without pulling backend dependencies into the core.
 default = ["desktop", "text", "image"]
 desktop = ["window", "render"]
-window = []
+window = ["dep:winit"]
 render = ["dep:wgpu", "dep:bytemuck"]
 text = ["dep:cosmic-text"]
 image = ["dep:image"]
 svg = ["image", "dep:resvg"]
-accessibility = []
+accessibility = [
+    "dep:accesskit",
+    "dep:accesskit_windows",
+    "dep:accesskit_macos",
+    "dep:accesskit_unix",
+]
 webview = ["desktop"]
 
 [dependencies]
@@ -49,6 +54,17 @@ image = { version = "0.25.6", default-features = false, features = [
     "webp",
 ], optional = true }
 resvg = { version = "0.45.1", default-features = false, optional = true }
+accesskit = { version = "0.24.1", optional = true }
+winit = { version = "0.30.12", optional = true }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+accesskit_windows = { version = "0.34.0", optional = true }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+accesskit_macos = { version = "0.26.3", optional = true }
+
+[target.'cfg(any(target_os = "linux", target_os = "dragonfly", target_os = "freebsd", target_os = "netbsd", target_os = "openbsd"))'.dependencies]
+accesskit_unix = { version = "0.22.1", optional = true }
 
 [dev-dependencies]
 pollster = "0.4.0"
@@ -73,6 +89,14 @@ harness = false
 name = "p5_virtual_list"
 harness = false
 
+[[bench]]
+name = "p7_matrix"
+harness = false
+
+[[bench]]
+name = "p7_stress"
+harness = false
+
 [lints.rust]
 unsafe_code = "forbid"
 
@@ -80,3 +104,8 @@ unsafe_code = "forbid"
 dbg_macro = "deny"
 todo = "deny"
 undocumented_unsafe_blocks = "deny"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "symbols"

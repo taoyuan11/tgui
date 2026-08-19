@@ -6,3 +6,9 @@
 pub const DESKTOP_ENABLED: bool = cfg!(feature = "desktop");
 pub const WINDOW_ENABLED: bool = cfg!(feature = "window");
 pub const RENDER_ENABLED: bool = cfg!(feature = "render");
+
+#[cfg(all(feature = "window", feature = "render"))]
+mod winit;
+
+#[cfg(all(feature = "window", feature = "render"))]
+pub use winit::{WinitSurface, WinitSurfaceEvent};

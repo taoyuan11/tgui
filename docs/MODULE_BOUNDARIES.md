@@ -80,3 +80,47 @@ Presentation overlays are read by the retained layout/render collectors. Virtual
 state, selection, focus, and cleanup are keyed by stable `ItemKey`, so scrolling can drop
 Element declarations without dropping logical state; only viewport plus overscan is
 materialized. Data-source and measurement revisions are validated before UI publication.
+
+P6 keeps `Semantics`, `AccessibilityTree`, stable accessibility `NodeId`, and immutable
+semantic snapshots in the headless core. A NodeId losslessly packs its Element slot and
+generation within a window-local tree, so keyed reorder retains identity and slot reuse
+cannot alias a stale action. `Application::layout_window` builds semantics from retained
+Element declarations plus committed logical layout bounds only for semantics, focus,
+layout-boundary, or accessible-scroll work, then atomically commits Layout/Scene/Resource/
+Semantics together. Text widgets expose logical text rather than glyph-atlas state.
+
+The optional `accessibility` feature converts committed snapshots to AccessKit and maps
+validated AccessKit requests back into the normal window-scoped `UiEvent` transaction path.
+Target-specific `accesskit_windows`, `accesskit_macos`, and `accesskit_unix` dependencies stay
+behind target cfgs. Native hosts may expose one opaque node or graft an AccessKit subtree;
+VirtualList converts its logical collection and materialized-item metadata without expanding
+all items into the Element tree.
+
+Native Host ownership is confined to `native::NativeHostManager` on the UI thread.
+`NativeHostFactory` creates a host with a window and Element generation; the manager
+owns lifecycle, layout, focus, input/IME forwarding, composition, error status, and
+destruction. A host can only return `NativeHostOutput` values, which are wrapped in
+generation- and window-scoped `NativeHostMessage` values and consumed by
+`Application::consume_native_host_message`; it cannot mutate Widget or Element
+storage. `NativeHostCapabilities` and `NativeHostCost` are inputs to
+`NativeHostScheduler`, which emits explicit isolated-surface/offscreen boundaries
+and costs. `NativeHostWidget` is the only retained-tree bridge and emits either a
+`NativeSurface` command or an offscreen `DrawImage` reference. Ordinary built-in
+controls are tested to contain neither form.
+
+P7 keeps the orchestration boundary in `application`: one frame drains UI
+transactions, reconciles and merges dirty state, builds pending Layout/Scene/
+Resource/Semantics outputs, validates/compiles them, and atomically replaces the
+CPU snapshot before asking a renderer to submit. `render::wgpu` owns device,
+surface, resize/DPI, upload and delayed reclamation details; it never owns Widget
+or Element state. `platform::winit` is optional and owns the real OS window/event
+loop adapter, translating resize, scale-factor, close, and redraw events into
+platform-neutral results. `WinitSurface` keeps the `Arc<Window>` and renderer
+handles outside retained trees and exposes explicit device recovery.
+
+`examples/p7_headless.rs` uses only the core/mock boundaries and is therefore the
+deterministic acceptance path. `examples/p7_desktop.rs` enables `desktop` for a
+real-window smoke path; `webview` and target-specific AccessKit adapters remain
+optional feature/target dependencies. The benchmark and release scripts write
+machine-specific reports under `target/`; they do not turn unavailable GPU time,
+driver VRAM, or global heap allocation values into zeroes.

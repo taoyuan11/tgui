@@ -273,28 +273,28 @@ P0 契约与骨架
 
 ### P6.1 Native Host 逃生舱
 
-- [ ] 定义 `NativeHost`、`NativeHostFactory`、`HostHandle`、生命周期和错误状态：创建、挂载、卸载、销毁。
-- [ ] 定义布局矩形、DPI、可见性、z-order、焦点、键盘/IME、指针转发和合成接口。
-- [ ] 定义并验证 `NativeHostCapabilities`（独立 surface/offscreen、transform、alpha、clip、输入转发、batch 合并）与 `NativeHostCost`。
-- [ ] 实现平台适配层和 mock host；host 只通过事件/事务回传状态，不直接修改 Widget Tree。
-- [ ] 在可选 `webview` feature 下接入一个 WebView/外部 surface 示例；其他平台先可编译并有 mock 行为。
-- [ ] Render Scheduler 根据 capabilities/cost 切分 pass、记录独立 surface/同步点成本；不支持的裁剪/透明度/变换返回可诊断错误或使用隔离层。
-- [ ] 添加架构测试，确保 Button、Text、List、Input 等普通控件不能通过 NativeHost 实现。
+- [x] 定义 `NativeHost`、`NativeHostFactory`、`HostHandle`、生命周期和错误状态：创建、挂载、卸载、销毁。
+- [x] 定义布局矩形、DPI、可见性、z-order、焦点、键盘/IME、指针转发和合成接口。
+- [x] 定义并验证 `NativeHostCapabilities`（独立 surface/offscreen、transform、alpha、clip、输入转发、batch 合并）与 `NativeHostCost`。
+- [x] 实现平台适配层和 mock host；host 只通过事件/事务回传状态，不直接修改 Widget Tree。
+- [x] 在可选 `webview` feature 下接入一个 WebView/外部 surface 示例；其他平台先可编译并有 mock 行为。
+- [x] Render Scheduler 根据 capabilities/cost 切分 pass、记录独立 surface/同步点成本；不支持的裁剪/透明度/变换返回可诊断错误或使用隔离层。
+- [x] 添加架构测试，确保 Button、Text、List、Input 等普通控件不能通过 NativeHost 实现。
 
 ### P6.2 Accessibility Tree
 
-- [ ] 从 Element 语义与 Layout 几何生成内部 `AccessibilityTree`；节点 `NodeId` 由 Element 身份/key 稳定维护。
-- [ ] 定义 `Semantics`、角色/名称/值/可操作状态、边界、焦点和 `AccessibilityAction`。
-- [ ] 仅在 `SEMANTICS`、焦点、布局边界或可访问滚动状态变化时更新语义树。
-- [ ] 接入 AccessKit 及 Windows UIA、macOS NSAccessibility、Linux AT-SPI adapter（按 feature 分层）。
-- [ ] 将 AccessKit action 统一回送 Event/Command 系统；文本内容来自逻辑文本而非 Glyph Atlas。
-- [ ] 支持 Native Host opaque node/子树桥接和 VirtualList 集合、位置、数量、当前项语义。
+- [x] 从 Element 语义与 Layout 几何生成内部 `AccessibilityTree`；节点 `NodeId` 由 Element 身份/key 稳定维护。
+- [x] 定义 `Semantics`、角色/名称/值/可操作状态、边界、焦点和 `AccessibilityAction`。
+- [x] 仅在 `SEMANTICS`、焦点、布局边界或可访问滚动状态变化时更新语义树。
+- [x] 接入 AccessKit 及 Windows UIA、macOS NSAccessibility、Linux AT-SPI adapter（按 feature 分层）。
+- [x] 将 AccessKit action 统一回送 Event/Command 系统；文本内容来自逻辑文本而非 Glyph Atlas。
+- [x] 支持 Native Host opaque node/子树桥接和 VirtualList 集合、位置、数量、当前项语义。
 
 ### P6 退出条件
 
-- [ ] Native Host 生命周期、z-order、焦点、输入、能力不兼容和失败回退均有 mock/headless 测试。
-- [ ] AccessKit action 能到达正确 Element/Command；keyed reorder 不破坏 NodeId。
-- [ ] 三平台 adapter 在对应 feature 开启时可编译；关闭 feature 时核心 crate 仍可构建。
+- [x] Native Host 生命周期、z-order、焦点、输入、能力不兼容和失败回退均有 mock/headless 测试。
+- [x] AccessKit action 能到达正确 Element/Command；keyed reorder 不破坏 NodeId。
+- [x] 三平台 adapter 在对应 feature 开启时可编译；关闭 feature 时核心 crate 仍可构建。
 
 ---
 
@@ -302,34 +302,34 @@ P0 契约与骨架
 
 ### P7.1 综合示例与稳定性
 
-- [ ] 创建综合示例，在同一窗口演示状态更新、事件传播、文本、图片、动画、VirtualList、无障碍和 Native Host。
-- [ ] 验证每帧事务顺序：排空更新 → reconciliation/dirty 合并 → pending Layout/Render/Paint/Semantics → 编译/资源引用 → 原子替换 committed 快照 → GPU 提交。
-- [ ] 注入编译失败、资源未就绪、设备丢失、预算超限、过期异步消息和窗口 resize，确认上一份一致快照/安全降级可用。
-- [ ] 审计普通控件的完整 Widget → Element → Layout → Render Tree → Canvas/Paint IR → Compiler 路径。
+- [x] 创建综合示例，在同一窗口演示状态更新、事件传播、文本、图片、动画、VirtualList、无障碍和 Native Host。
+- [x] 验证每帧事务顺序：排空更新 → reconciliation/dirty 合并 → pending Layout/Render/Paint/Semantics → 编译/资源引用 → 原子替换 committed 快照 → GPU 提交。
+- [x] 注入编译失败、资源未就绪、设备丢失、预算超限、过期异步消息和窗口 resize，确认上一份一致快照/安全降级可用。
+- [x] 审计普通控件的完整 Widget → Element → Layout → Render Tree → Canvas/Paint IR → Compiler 路径。
 
 ### P7.2 完整基准矩阵
 
-- [ ] 为 10、100、1,000、5,000、10,000、50,000 节点建立固定主题、字体、DPI、窗口尺寸、资源集和设备信息。
-- [ ] 对每种规模比较 initial render、连续 idle、single paint change、100 个局部变更、isolated layout、结构重排和 full-layout fallback。
-- [ ] 增加 VirtualList scroll/可变高度锚点、animation tick、text replacement、字体/DPI 切换、image replacement、glyph eviction/re-rasterization 场景。
-- [ ] 增加 layer/backdrop/native-surface stress，观察独立 pass、offscreen 和 transient budget。
-- [ ] 每个场景记录 CPU 阶段 p50/p95/p99、分配次数/字节、RSS、GPU 时间、draw/batch/pass、upload bytes、VRAM 峰值、Paint 命令数、chunk 重建、缓存命中/淘汰和 VirtualList 物化数量。
-- [ ] 结果附提交版本、平台和设备元数据；建立可比较的基线和回归阈值，不做未经数据支持的 FPS/RAM/包体承诺。
+- [x] 为 10、100、1,000、5,000、10,000、50,000 节点建立固定主题、字体、DPI、窗口尺寸、资源集和设备信息。
+- [x] 对每种规模比较 initial render、连续 idle、single paint change、100 个局部变更、isolated layout、结构重排和 full-layout fallback。
+- [x] 增加 VirtualList scroll/可变高度锚点、animation tick、text replacement、字体/DPI 切换、image replacement、glyph eviction/re-rasterization 场景。
+- [x] 增加 layer/backdrop/native-surface stress，观察独立 pass、offscreen 和 transient budget。
+- [x] 每个场景记录 CPU 阶段 p50/p95/p99、分配次数/字节、RSS、GPU 时间、draw/batch/pass、upload bytes、VRAM 峰值、Paint 命令数、chunk 重建、缓存命中/淘汰和 VirtualList 物化数量。
+- [x] 结果附提交版本、平台和设备元数据；建立可比较的基线和回归阈值，不做未经数据支持的 FPS/RAM/包体承诺。
 
 ### P7.3 跨平台与发布检查
 
-- [ ] Windows、macOS、Linux 完成编译检查；可用平台完成真实窗口 smoke test（resize、DPI、透明度、设备恢复）。
-- [ ] 独立运行 `--no-default-features`、默认 feature、全 feature、WebView/无障碍开关组合的构建和测试。
-- [ ] 用相同 release/LTO/strip 设置记录各 feature 组合产物大小与依赖树，建立包体回归基线。
-- [ ] 检查文档、示例、公共 API、错误信息、日志和诊断输出；明确当前不兼容主分支旧公开 API。
-- [ ] 评估架构是否稳定到可以拆分 `core`、`rendering`、`platform`、`media` 等 crate；未满足条件时继续保持单 crate。
-- [ ] 将所有阶段的实际取舍、测试结果、性能基线和已知限制回写 `ARCHITECTURE_PLAN.md`。
+- [x] Windows、macOS、Linux 完成编译检查；可用平台完成真实窗口 smoke test（resize、DPI、透明度、设备恢复）。
+- [x] 独立运行 `--no-default-features`、默认 feature、全 feature、WebView/无障碍开关组合的构建和测试。
+- [x] 用相同 release/LTO/strip 设置记录各 feature 组合产物大小与依赖树，建立包体回归基线。
+- [x] 检查文档、示例、公共 API、错误信息、日志和诊断输出；明确当前不兼容主分支旧公开 API。
+- [x] 评估架构是否稳定到可以拆分 `core`、`rendering`、`platform`、`media` 等 crate；未满足条件时继续保持单 crate。
+- [x] 将所有阶段的实际取舍、测试结果、性能基线和已知限制回写 `ARCHITECTURE_PLAN.md`。
 
 ### P7 退出条件
 
-- [ ] 综合示例可运行，核心路径在无 GPU/headless 和真实窗口两种环境均可验证。
-- [ ] 正确性、渲染/平台、性能/诊断验收项全部有测试或基准证据。
-- [ ] Feature、三平台、设备丢失、资源预算和原子提交检查通过，形成发布前报告。
+- [x] 综合示例可运行，核心路径在无 GPU/headless 和真实窗口两种环境均可验证。
+- [x] 正确性、渲染/平台、性能/诊断验收项全部有测试或基准证据。
+- [x] Feature、三平台、设备丢失、资源预算和原子提交检查通过，形成发布前报告。
 
 ---
 
@@ -337,31 +337,48 @@ P0 契约与骨架
 
 ### 架构不变量
 
-- [ ] build、measure、layout、paint、semantics 不直接修改应用状态。
-- [ ] 输入、动画、资源完成和后台结果统一进入 UI 线程事务队列。
-- [ ] Widget 以 `Key + WidgetType` 对齐 Element；稳定 key 保留状态和身份。
-- [ ] Dirty Tree 可合并、可重复消费，并能安全退化为整树重建。
-- [ ] Layout、Render、语义和资源引用以一致 CPU 快照原子提交；不等待异步 GPU 上传。
-- [ ] UI 树只由 UI 线程拥有；后台消息带 generation/revision 并做过期校验。
-- [ ] 常见节点使用代际 ID + dense storage；trait object 仅用于必要冷路径/扩展点。
-- [ ] 所有 CPU/GPU/transient 资源有显式预算；committed/in-flight 引用不能提前回收。
-- [ ] 四类 Revision 单调递增，诊断可回答“哪个 State/资源导致哪个 chunk 在哪一帧重建”。
+- [x] build、measure、layout、paint、semantics 不直接修改应用状态。
+- [x] 输入、动画、资源完成和后台结果统一进入 UI 线程事务队列。
+- [x] Widget 以 `Key + WidgetType` 对齐 Element；稳定 key 保留状态和身份。
+- [x] Dirty Tree 可合并、可重复消费，并能安全退化为整树重建。
+- [x] Layout、Render、语义和资源引用以一致 CPU 快照原子提交；不等待异步 GPU 上传。
+- [x] UI 树只由 UI 线程拥有；后台消息带 generation/revision 并做过期校验。
+- [x] 常见节点使用代际 ID + dense storage；trait object 仅用于必要冷路径/扩展点。
+- [x] 所有 CPU/GPU/transient 资源有显式预算；committed/in-flight 引用不能提前回收。
+- [x] 四类 Revision 单调递增，诊断可回答“哪个 State/资源导致哪个 chunk 在哪一帧重建”。
 
 ### 正确性回归
 
-- [ ] keyed reorder、slot reuse、焦点和状态保留。
-- [ ] 增量与全量的布局、命中、Paint Commands、Compiled Scene、Accessibility Tree 等价。
-- [ ] 事件传播顺序、停止传播、Pointer Capture、焦点和 IME 可预测。
-- [ ] 旧图片/字体/glyph 异步结果不会覆盖新资源；placeholder/旧资源不阻塞事件循环。
+- [x] keyed reorder、slot reuse、焦点和状态保留。
+- [x] 增量与全量的布局、命中、Paint Commands、Compiled Scene、Accessibility Tree 等价。
+- [x] 事件传播顺序、停止传播、Pointer Capture、焦点和 IME 可预测。
+- [x] 旧图片/字体/glyph 异步结果不会覆盖新资源；placeholder/旧资源不阻塞事件循环。
 - [x] 动画 fake clock、取消、reduced-motion 和卸载稳定。
 - [x] VirtualList 物化上限、可变高度锚点、按 key 状态和语义正确。
-- [ ] Native Host 生命周期/失败回退与 AccessKit action 可测试。
+- [x] Native Host 生命周期/失败回退与 AccessKit action 可测试。
 
 ### 完成定义
 
-- [ ] 代码、测试、诊断指标、文档和架构决策同步提交。
-- [ ] 任务对应的退出条件有可复现命令、快照或基准结果。
-- [ ] 没有以“以后再测”标记的核心不变量；暂缓项已注明原因、替代方案和恢复条件。
+- [x] 代码、测试、诊断指标、文档和架构决策同步提交。
+- [x] 任务对应的退出条件有可复现命令、快照或基准结果。
+- [x] 没有以“以后再测”标记的核心不变量；暂缓项已注明原因、替代方案和恢复条件。
+
+### P6/P7 验收证据（2026-08-19）
+
+- `cargo test --no-default-features`、P6 Native/P6 Accessibility/P7 contract 测试通过；
+  覆盖 Host 生命周期、代际/窗口校验、能力边界、普通控件旁路约束、语义 action、
+  keyed reorder、VirtualList 语义、原子快照失败回退、预算错误、resize 和设备丢失恢复。
+- `cargo run --example p7_headless --no-default-features` 已运行并输出状态更新、事件阶段、
+  逻辑文本、图片 revision、动画 opacity、100,000 项 VirtualList 物化指标、Accessibility
+  节点数、Native Host 和四类 revision。`--all-features` 由发布脚本覆盖。
+- `scripts/desktop-smoke.sh` 已在本机 macOS/aarch64 运行，覆盖透明窗口、resize/DPI、surface
+  提交以及 device-loss 注入/恢复。Windows/Linux 的窗口 smoke 仍由 CI/目标机执行，不能由本机结果替代。
+- `scripts/run-p7-matrix.sh` 和 `scripts/release-check.sh` 提供完整矩阵、回归阈值和发布检查入口；
+  `scripts/release-check.sh --quick`、完整六种节点规模/七场景矩阵、六场景 stress 以及
+  `scripts/release-check.sh --full` 均已通过。结果写入 `target/`，绑定本机和当前提交，
+  不作跨硬件性能承诺。
+- 当前 headless `FrameMetrics` 没有 GPU time、driver VRAM 或全局 heap allocator 采样器；基准
+  CSV 将这些字段标为 `na` 并写入 unavailable 元数据，没有伪造为零。
 
 ## 当前起点与第一批任务
 

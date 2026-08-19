@@ -1,3 +1,4 @@
+use crate::accessibility::Semantics;
 use crate::core::{Color, ElementId, Point, PropertyId, Result, WidgetKey};
 use crate::event::EventHandler;
 use crate::layout::{LayoutBoundaries, LayoutStyle, MeasureSpec};
@@ -235,6 +236,7 @@ pub struct WidgetNode {
     pub(crate) scroll_offset: Point,
     pub(crate) hit_test: bool,
     pub(crate) boundaries: LayoutBoundaries,
+    pub(crate) semantics: Semantics,
 }
 
 impl WidgetNode {
@@ -258,6 +260,7 @@ impl WidgetNode {
             scroll_offset: Point::ZERO,
             hit_test: true,
             boundaries: LayoutBoundaries::NONE,
+            semantics: Semantics::default(),
         }
     }
 
@@ -325,6 +328,10 @@ impl WidgetNode {
 
     pub const fn layout_boundaries(&self) -> LayoutBoundaries {
         self.boundaries
+    }
+
+    pub const fn semantics(&self) -> &Semantics {
+        &self.semantics
     }
 
     pub fn with_key(mut self, key: impl Into<WidgetKey>) -> Self {
@@ -422,6 +429,11 @@ impl WidgetNode {
         self
     }
 
+    pub fn with_semantics(mut self, semantics: Semantics) -> Self {
+        self.semantics = semantics;
+        self
+    }
+
     pub fn same_identity(&self, other: &Self) -> bool {
         self.key == other.key && self.widget_type == other.widget_type
     }
@@ -438,6 +450,7 @@ impl WidgetNode {
             && self.scroll_offset == other.scroll_offset
             && self.hit_test == other.hit_test
             && self.boundaries == other.boundaries
+            && self.semantics == other.semantics
     }
 }
 

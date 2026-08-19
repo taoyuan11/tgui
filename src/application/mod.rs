@@ -5,7 +5,9 @@
 //! convenient first/main window. All mutation methods assert the creating UI
 //! thread through [`crate::state::UiThread`].
 
-use crate::accessibility::SemanticSnapshot;
+use crate::accessibility::{
+    AccessibilityTree, SemanticSnapshot, SemanticUpdate, SemanticUpdateReasons,
+};
 use crate::animation::{
     Animated, AnimationFrame, AnimationHandle, AnimationImpact, AnimationKey, AnimationSpec,
     FrameClock, Interpolate, SystemClock, Timeline,
@@ -15,8 +17,9 @@ use crate::core::{
     RevisionSet, Size, WindowId,
 };
 use crate::diagnostics::{
-    AnimationMetrics, BudgetDomain, CacheBudgetSnapshot, DirtyRootMetrics, FrameMetrics,
-    ResourceBudgetConfig, ResourceBudgetSnapshots, ResourceBudgets, VirtualizationMetrics,
+    AnimationMetrics, BudgetDomain, CacheBudgetSnapshot, DirtyRootMetrics, FrameAllocationMetrics,
+    FrameMetrics, ResourceBudgetConfig, ResourceBudgetSnapshots, ResourceBudgets,
+    VirtualizationMetrics,
 };
 use crate::dirty::{DirtyBatch, DirtyFlags, DirtyNodeSpec, DirtyTree};
 use crate::event::{CommittedHitTarget, DispatchOutcome, EventDispatcher, UiEvent};
@@ -46,6 +49,8 @@ pub struct WindowSpec {
     min_inner_size: Option<Size>,
     max_inner_size: Option<Size>,
     resizable: bool,
+    transparent: bool,
+    native_surface_support: bool,
     dpi_scale: DpiScale,
     resource_budgets: ResourceBudgetConfig,
 }
@@ -78,6 +83,14 @@ impl WindowSpec {
         self.resizable
     }
 
+    pub const fn transparent(&self) -> bool {
+        self.transparent
+    }
+
+    pub const fn native_surface_support(&self) -> bool {
+        self.native_surface_support
+    }
+
     pub const fn dpi_scale(&self) -> DpiScale {
         self.dpi_scale
     }
@@ -103,6 +116,16 @@ impl WindowSpec {
 
     pub fn with_resizable(mut self, resizable: bool) -> Self {
         self.resizable = resizable;
+        self
+    }
+
+    pub const fn with_transparent(mut self, transparent: bool) -> Self {
+        self.transparent = transparent;
+        self
+    }
+
+    pub const fn with_native_surface_support(mut self, enabled: bool) -> Self {
+        self.native_surface_support = enabled;
         self
     }
 
@@ -168,6 +191,8 @@ impl Default for WindowSpec {
             min_inner_size: None,
             max_inner_size: None,
             resizable: true,
+            transparent: false,
+            native_surface_support: false,
             dpi_scale: DpiScale::ONE,
             resource_budgets: ResourceBudgetConfig::default(),
         }
@@ -469,6 +494,7 @@ pub struct ResourceCompletionReceipt {
 #[derive(Clone, Debug, PartialEq)]
 pub struct LayoutFrameReceipt {
     pub snapshot: LayoutSnapshot,
+    pub semantics: SemanticUpdate,
     pub layout_performed: bool,
     pub layout: LayoutPassReport,
     pub dirty_epoch: u64,
@@ -989,6 +1015,50 @@ impl Application {
         })
     }
 
+    /// Accepts a generation-stamped Native Host result and routes it through
+    /// the normal event or command transaction path. Stale host/Element pairs
+    /// are ignored, so a reused slot cannot retarget platform output.
+    pub fn consume_native_host_message(
+        &mut self,
+        hosts: &crate::native::NativeHostManager,
+        message: crate::native::NativeHostMessage,
+    ) -> Result<Option<ApplicationTxnReceipt>> {
+        self.owner.assert_current()?;
+        let Some(state) = self.windows.get(message.window) else {
+            return Ok(None);
+        };
+        if !hosts.matches_target(message.host, message.window, message.target)
+            || !state.elements.contains(message.target)
+        {
+            return Ok(None);
+        }
+        match message.output {
+            crate::native::NativeHostOutput::Event(event) => {
+                let revision = state
+                    .snapshots
+                    .committed()
+                    .map(|snapshot| snapshot.layout().revision())
+                    .unwrap_or(crate::core::LayoutRevision::ZERO);
+                let target =
+                    CommittedHitTarget::for_window(message.window, revision, Some(message.target));
+                let receipt = self.dispatch_event(message.window, target, &event)?;
+                Ok(Some(ApplicationTxnReceipt {
+                    transaction: receipt.transaction,
+                    reconciliations: receipt
+                        .reconciliation
+                        .into_iter()
+                        .map(|report| (message.window, report))
+                        .collect(),
+                }))
+            }
+            crate::native::NativeHostOutput::Command(command) => {
+                let mut transaction = UpdateTxn::new();
+                transaction.push(command)?;
+                self.apply_transaction(transaction).map(Some)
+            }
+        }
+    }
+
     /// Drains worker results for one live source generation.
     ///
     /// A result is accepted only when its target window still exists, its
@@ -1432,13 +1502,41 @@ impl Application {
             .snapshots
             .committed()
             .unwrap_or_else(|| Arc::new(CpuSnapshot::empty(RevisionSet::ZERO)));
+        let mut semantic_reasons = SemanticUpdateReasons::NONE;
+        if !batch.semantics_roots.is_empty()
+            || base.semantics().node_count() != state.elements.len()
+            || base.semantics().nodes().len() != state.elements.len()
+        {
+            semantic_reasons = semantic_reasons.union(SemanticUpdateReasons::SEMANTICS);
+        }
+        if !layout_snapshot.observable_eq(base.layout()) {
+            semantic_reasons = semantic_reasons.union(SemanticUpdateReasons::LAYOUT_BOUNDS);
+        }
+        let mut accessibility = AccessibilityTree::from_snapshot(base.semantics().clone());
+        let semantic_update = match accessibility.update(
+            state.elements.semantic_inputs(&layout_snapshot),
+            state.events.focused(),
+            semantic_reasons,
+        ) {
+            Ok(update) => update,
+            Err(error) => {
+                state.layout.adopt_committed(previous_layout);
+                return Err(error);
+            }
+        };
         let resource_snapshot =
-            resource_snapshot_for_bindings(&state.resource_bindings, base.resources())?;
+            match resource_snapshot_for_bindings(&state.resource_bindings, base.resources()) {
+                Ok(snapshot) => snapshot,
+                Err(error) => {
+                    state.layout.adopt_committed(previous_layout);
+                    return Err(error);
+                }
+            };
         let candidate = match CpuSnapshot::new(
             layout_snapshot.clone(),
             base.scene().clone(),
             resource_snapshot,
-            base.semantics().clone(),
+            semantic_update.snapshot.clone(),
         ) {
             Ok(candidate) => candidate,
             Err(error) => {
@@ -1467,10 +1565,25 @@ impl Application {
         metrics.dirty_roots = dirty_root_metrics(&batch);
         metrics.full_rebuilds = u64::from(needs_layout && layout_report.full_rebuild);
         metrics.incremental_rebuilds = u64::from(needs_layout && !layout_report.full_rebuild);
-        metrics.arena = state.elements.stats().arena;
+        let arena = state.elements.stats().arena;
+        let previous_arena = state.frame_metrics.arena;
+        metrics.allocations = FrameAllocationMetrics {
+            arena_allocations: arena
+                .fresh_slot_allocations
+                .saturating_add(arena.slot_reuses)
+                .saturating_sub(
+                    previous_arena
+                        .fresh_slot_allocations
+                        .saturating_add(previous_arena.slot_reuses),
+                ),
+            arena_releases: arena.releases.saturating_sub(previous_arena.releases),
+            ..FrameAllocationMetrics::default()
+        };
+        metrics.arena = arena;
         state.frame_metrics = metrics.clone();
         Ok(LayoutFrameReceipt {
             snapshot: layout_snapshot,
+            semantics: semantic_update,
             layout_performed: needs_layout,
             layout: layout_report,
             dirty_epoch: batch.epoch,
@@ -1585,7 +1698,10 @@ impl Application {
                 candidate_scene.with_revision(old_scene.revision())
             };
             let context = crate::render::CompileContext::new(
-                crate::render::RendererCapabilities::default(),
+                crate::render::RendererCapabilities {
+                    supports_native_surface: state.spec.native_surface_support,
+                    ..crate::render::RendererCapabilities::default()
+                },
                 scale,
             )
             .with_scene_revision(scene.revision())
@@ -1679,6 +1795,52 @@ impl Application {
             .get(id)
             .and_then(|state| state.snapshots.committed())
             .map(|snapshot| snapshot.layout().clone())
+    }
+
+    /// Routes an action resolved from the latest committed accessibility tree
+    /// through the same capture/target/bubble transaction path as user input.
+    pub fn dispatch_accessibility_action(
+        &mut self,
+        id: WindowId,
+        node: crate::accessibility::NodeId,
+        action: crate::event::AccessibilityAction,
+    ) -> Result<Option<EventDispatchReceipt>> {
+        self.owner.assert_current()?;
+        let snapshot = self.committed_snapshot(id).ok_or_else(|| {
+            Error::invalid_input(
+                Some("window_id".to_owned()),
+                "window has no committed CPU snapshot",
+            )
+        })?;
+        let Some(event) = snapshot.semantics().action_event(id, node, action) else {
+            return Ok(None);
+        };
+        let committed = CommittedHitTarget::miss_for_window(id, snapshot.layout().revision());
+        self.dispatch_event(id, committed, &event).map(Some)
+    }
+
+    /// Converts and routes a platform AccessKit request when the adapter
+    /// feature is enabled.
+    #[cfg(feature = "accessibility")]
+    pub fn dispatch_accesskit_action(
+        &mut self,
+        id: WindowId,
+        request: &accesskit::ActionRequest,
+    ) -> Result<Option<EventDispatchReceipt>> {
+        self.owner.assert_current()?;
+        let snapshot = self.committed_snapshot(id).ok_or_else(|| {
+            Error::invalid_input(
+                Some("window_id".to_owned()),
+                "window has no committed CPU snapshot",
+            )
+        })?;
+        let Some(event) =
+            crate::accessibility::accesskit_action_event(id, snapshot.semantics(), request)?
+        else {
+            return Ok(None);
+        };
+        let committed = CommittedHitTarget::miss_for_window(id, snapshot.layout().revision());
+        self.dispatch_event(id, committed, &event).map(Some)
     }
 
     /// Hit-tests only the latest committed layout and returns a window-scoped

@@ -21,8 +21,8 @@ pub use geometry::{
     Clip, Color, CornerRadii, DpiScale, GeometryError, Point, Rect, Size, Transform2D,
 };
 pub use id::{
-    AnimationId, ElementId, FontHandle, GenerationStamp, GenerationalId, GlyphPageId, ImageHandle,
-    RenderNodeId, ResourceId, WindowHandle, WindowId,
+    AnimationId, ElementId, FontHandle, GenerationStamp, GenerationalId, GlyphPageId, HostHandle,
+    ImageHandle, RenderNodeId, ResourceId, WindowHandle, WindowId,
 };
 pub use invariants::{ARCHITECTURE_INVARIANTS, ArchitectureInvariant};
 pub use key::{ItemKey, NodeKey, PropertyId, WidgetKey};

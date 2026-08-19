@@ -327,12 +327,20 @@ impl RenderTree {
                 .unwrap_or(1.0);
             descriptor.parent = elements.parent(element);
             descriptor.clip = node.clip().map(Clip::Rect);
-            descriptor.z_order = i32::try_from(node.order()).unwrap_or(i32::MAX);
+            descriptor.z_order = match elements.property(element, crate::native::HOST_Z_ORDER) {
+                Some(PropertyValue::I64(value)) => {
+                    i32::try_from(*value).unwrap_or(if *value < 0 { i32::MIN } else { i32::MAX })
+                }
+                _ => i32::try_from(node.order()).unwrap_or(i32::MAX),
+            };
             descriptor.boundary = elements
                 .layout_boundaries(element)
                 .is_some_and(|boundaries| boundaries.render);
             descriptors.push(descriptor);
         }
+        // Native hosts and custom retained nodes may override layout order.
+        // Stable sorting preserves document order for equal z values.
+        descriptors.sort_by_key(|descriptor| descriptor.z_order);
         self.collect_with_invalidations(
             &descriptors,
             revisions,
@@ -701,6 +709,74 @@ fn paint_for_element(
             rect: bounds,
             radii: crate::core::CornerRadii::all(4.0),
             paint: super::paint::Paint::solid(color).with_opacity(opacity),
+        }]);
+    }
+    if *widget_type == WidgetType::of::<crate::widgets::Image>() {
+        let slot = match elements.property(element, crate::widgets::IMAGE_RESOURCE_SLOT) {
+            Some(PropertyValue::U64(value)) => u32::try_from(*value).ok(),
+            _ => None,
+        };
+        let generation = match elements.property(element, crate::widgets::IMAGE_RESOURCE_GENERATION)
+        {
+            Some(PropertyValue::U64(value)) => u32::try_from(*value).ok(),
+            _ => None,
+        };
+        let (Some(slot), Some(generation)) = (slot, generation) else {
+            return Ok(Vec::new());
+        };
+        if generation == 0 {
+            return Err(crate::core::Error::compile(
+                "image_collect",
+                "Image contains a malformed resource generation",
+            ));
+        }
+        return Ok(vec![PaintCommand::DrawImage {
+            rect: bounds,
+            image: crate::core::ImageHandle::from_parts(slot, generation),
+            sampling: super::paint::ImageSampling::Linear,
+            opacity: effective_opacity(elements, element, presentation),
+        }]);
+    }
+    if *widget_type == WidgetType::of::<crate::native::NativeHostWidget>() {
+        let slot = match elements.property(element, crate::native::HOST_SURFACE_SLOT) {
+            Some(PropertyValue::U64(value)) => u32::try_from(*value).ok(),
+            _ => None,
+        };
+        let generation = match elements.property(element, crate::native::HOST_SURFACE_GENERATION) {
+            Some(PropertyValue::U64(value)) => u32::try_from(*value).ok(),
+            _ => None,
+        };
+        let (Some(slot), Some(generation)) = (slot, generation) else {
+            return Ok(Vec::new());
+        };
+        if generation == 0 {
+            return Err(crate::core::Error::compile(
+                "native_host_collect",
+                "NativeHostWidget contains a malformed surface generation",
+            ));
+        }
+        let surface = ResourceId::from_parts(slot, generation);
+        let offscreen = matches!(
+            elements.property(element, crate::native::HOST_OFFSCREEN),
+            Some(PropertyValue::Bool(true))
+        );
+        let opaque = matches!(
+            elements.property(element, crate::native::HOST_OPAQUE),
+            Some(PropertyValue::Bool(true))
+        );
+        return Ok(vec![if offscreen {
+            PaintCommand::DrawImage {
+                rect: bounds,
+                image: crate::core::ImageHandle::from_parts(slot, generation),
+                sampling: super::paint::ImageSampling::Linear,
+                opacity: effective_opacity(elements, element, presentation),
+            }
+        } else {
+            PaintCommand::NativeSurface {
+                rect: bounds,
+                surface,
+                opaque,
+            }
         }]);
     }
     if *widget_type == WidgetType::of::<crate::widgets::Container>() {

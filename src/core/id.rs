@@ -96,6 +96,7 @@ generational_id!(FontHandle);
 generational_id!(GlyphPageId);
 generational_id!(WindowId);
 generational_id!(AnimationId);
+generational_id!(HostHandle);
 
 /// Application-facing name for a window's generational handle.
 pub type WindowHandle = WindowId;
