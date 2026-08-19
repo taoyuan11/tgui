@@ -19,6 +19,7 @@ use crate::widget::{
 };
 use std::cell::Cell;
 use std::fmt;
+use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 /// Public headless façade over the crate-private retained element tree.
@@ -468,13 +469,13 @@ impl TestRenderer {
 /// Deterministic, manually advanced frame clock.
 #[derive(Clone, Debug, Default)]
 pub struct FakeClock {
-    now: Cell<Duration>,
+    now: Rc<Cell<Duration>>,
 }
 
 impl FakeClock {
-    pub const fn new() -> Self {
+    pub fn new() -> Self {
         Self {
-            now: Cell::new(Duration::ZERO),
+            now: Rc::new(Cell::new(Duration::ZERO)),
         }
     }
 
@@ -601,11 +602,14 @@ mod tests {
     #[test]
     fn fake_clock_is_deterministic() {
         let clock = FakeClock::new();
+        let shared = clock.clone();
         assert_eq!(clock.now(), Duration::ZERO);
         clock.advance(Duration::from_millis(16)).unwrap();
         assert_eq!(clock.now(), Duration::from_millis(16));
+        assert_eq!(shared.now(), Duration::from_millis(16));
         clock.set(Duration::from_secs(2));
         assert_eq!(clock.now(), Duration::from_secs(2));
+        assert_eq!(shared.now(), Duration::from_secs(2));
     }
 
     #[test]

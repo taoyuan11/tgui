@@ -170,13 +170,13 @@ impl TextStyle {
                 "line height must be finite and positive",
             ));
         }
-        if let FontFamily::Named(name) = &self.family
-            && name.trim().is_empty()
-        {
-            return Err(Error::invalid_input(
-                Some("text.family".to_owned()),
-                "named font family must not be empty",
-            ));
+        if let FontFamily::Named(name) = &self.family {
+            if name.trim().is_empty() {
+                return Err(Error::invalid_input(
+                    Some("text.family".to_owned()),
+                    "named font family must not be empty",
+                ));
+            }
         }
         if self
             .language
@@ -319,13 +319,13 @@ impl TextRequest {
 
     fn validate(&self) -> Result<()> {
         self.style.validate()?;
-        if let Some(width) = self.width
-            && (!width.is_finite() || width < 0.0)
-        {
-            return Err(Error::invalid_input(
-                Some("text.width".to_owned()),
-                "width must be finite and non-negative",
-            ));
+        if let Some(width) = self.width {
+            if !width.is_finite() || width < 0.0 {
+                return Err(Error::invalid_input(
+                    Some("text.width".to_owned()),
+                    "width must be finite and non-negative",
+                ));
+            }
         }
         let physical_size = f64::from(self.style.font_size) * self.dpi.get();
         if !physical_size.is_finite() || physical_size > f64::from(f32::MAX) {
@@ -808,12 +808,11 @@ impl TextLayout {
             intervals
                 .sort_by(|left, right| left.0.partial_cmp(&right.0).unwrap_or(Ordering::Equal));
             for (start, end) in intervals {
-                if let Some(last) = output.last_mut()
-                    && last.origin.y == line.top
-                    && start <= last.max_x() + 0.01
-                {
-                    last.size.width = last.size.width.max(end - last.origin.x);
-                    continue;
+                if let Some(last) = output.last_mut() {
+                    if last.origin.y == line.top && start <= last.max_x() + 0.01 {
+                        last.size.width = last.size.width.max(end - last.origin.x);
+                        continue;
+                    }
                 }
                 output.push(Rect::from_xywh(
                     start,
@@ -1074,15 +1073,16 @@ impl TextSystem {
             )?);
             self.next_layout_id = self.next_layout_id.saturating_add(1);
             self.shapings = self.shapings.saturating_add(1);
-            if self.cache.len() >= self.cache_capacity
-                && let Some(oldest) = self
+            if self.cache.len() >= self.cache_capacity {
+                if let Some(oldest) = self
                     .cache
                     .iter()
                     .min_by_key(|(_, entry)| entry.last_used)
                     .map(|(key, _)| key.clone())
-            {
-                self.cache.remove(&oldest);
-                self.evictions = self.evictions.saturating_add(1);
+                {
+                    self.cache.remove(&oldest);
+                    self.evictions = self.evictions.saturating_add(1);
+                }
             }
             self.cache.insert(
                 layout.key.clone(),

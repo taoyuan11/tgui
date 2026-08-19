@@ -6,6 +6,13 @@ use std::any::TypeId;
 use std::fmt;
 use std::sync::Arc;
 
+/// Well-known presentation property applied to every retained render node.
+pub const OPACITY: PropertyId = PropertyId::new(u64::MAX);
+/// Well-known logical-pixel width override consumed by animated layout.
+pub const LAYOUT_WIDTH: PropertyId = PropertyId::new(u64::MAX - 1);
+/// Well-known logical-pixel height override consumed by animated layout.
+pub const LAYOUT_HEIGHT: PropertyId = PropertyId::new(u64::MAX - 2);
+
 /// Observable subsystem impact declared for one Widget property.
 ///
 /// Missing metadata uses [`PropertyImpact::ALL`] as the safe fallback. Layout

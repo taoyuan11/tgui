@@ -18,6 +18,9 @@ Every change must keep these checks answerable with “yes”:
 - [ ] Resource invalidation always reaches paint and reaches layout when intrinsic size changes.
 - [ ] Failed layout/measurement keeps both the committed CPU snapshot and dirty epoch retryable.
 - [ ] Incremental and forced-full layout produce identical geometry, clip, scroll, hit, and revision output.
+- [ ] Animation uses one UI-thread FrameClock/Timeline, never writes base State, and marks only its target property dirty.
+- [ ] An idle timeline requests no further frames; reduced-motion and cancellation complete deterministically.
+- [ ] VirtualList materialization is bounded to viewport plus overscan; item state, focus, and selection follow ItemKey.
 
 P0–P2 unit tests cover the mechanically enforceable items. Later phases must
 attach tests to the remaining phase-specific checks before checking their task

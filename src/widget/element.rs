@@ -355,6 +355,19 @@ impl ElementTree {
         Some(&node.properties[index].1)
     }
 
+    pub(crate) fn property_impact(
+        &self,
+        id: ElementId,
+        property: PropertyId,
+    ) -> Option<PropertyImpact> {
+        let node = self.arena.get(id)?;
+        let index = node
+            .property_impacts
+            .binary_search_by_key(&property, |(candidate, _)| *candidate)
+            .ok()?;
+        Some(node.property_impacts[index].1)
+    }
+
     pub(crate) fn layout_boundaries(&self, id: ElementId) -> Option<LayoutBoundaries> {
         self.arena.get(id).map(|node| node.boundaries)
     }
@@ -455,6 +468,13 @@ impl ElementTree {
     }
 
     pub(crate) fn layout_inputs(&self) -> Result<Vec<LayoutNodeInput>> {
+        self.layout_inputs_with_overrides(|_, _| None)
+    }
+
+    pub(crate) fn layout_inputs_with_overrides(
+        &self,
+        mut presentation: impl FnMut(ElementId, PropertyId) -> Option<f32>,
+    ) -> Result<Vec<LayoutNodeInput>> {
         self.owner.assert_current()?;
         let Some(root) = self.root else {
             return Ok(Vec::new());
@@ -474,11 +494,18 @@ impl ElementTree {
             })?;
             let children = self.children(id);
             stack.extend(children.iter().rev().copied());
+            let mut style = node.layout_style.clone();
+            if let Some(width) = presentation(id, super::LAYOUT_WIDTH) {
+                style.size.width = crate::layout::Dimension::Length(width);
+            }
+            if let Some(height) = presentation(id, super::LAYOUT_HEIGHT) {
+                style.size.height = crate::layout::Dimension::Length(height);
+            }
             result.push(LayoutNodeInput {
                 id,
                 parent: node.links.parent(),
                 children,
-                style: node.layout_style.clone(),
+                style,
                 measure: node.measure.clone(),
                 scroll_offset: node.scroll_offset,
                 hit_test: node.hit_test,

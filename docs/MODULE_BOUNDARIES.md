@@ -72,3 +72,11 @@ completion all enter this index. Unknown property dependencies use
 full-layout rebuild. `Application::layout_window` commits the resulting layout
 together with the previously reusable scene/resource/semantic components and
 records phase/root/rebuild metrics.
+
+P5 keeps `Timeline` and `VirtualList` UI-thread-owned. A window owns its timeline while
+the application supplies one shared `FrameClock`; animation messages never write State
+directly and only mark the animated `(ElementId, PropertyId)` as Paint or Layout dirty.
+Presentation overlays are read by the retained layout/render collectors. VirtualList item
+state, selection, focus, and cleanup are keyed by stable `ItemKey`, so scrolling can drop
+Element declarations without dropping logical state; only viewport plus overscan is
+materialized. Data-source and measurement revisions are validated before UI publication.

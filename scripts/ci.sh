@@ -11,3 +11,4 @@ cargo run --example p0_headless --no-default-features
 cargo run --example p1_headless --no-default-features
 cargo run --example p2_layout --no-default-features
 cargo run --example p3_headless --no-default-features
+cargo run --example p5_headless --no-default-features

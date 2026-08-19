@@ -355,13 +355,13 @@ impl ImageRegistry {
     }
 
     pub fn request(&mut self, key: ImageRequestKey) -> ImageRequest {
-        if let Some(handle) = self.requests.get(&key).copied()
-            && self.records.contains(handle)
-        {
-            return ImageRequest {
-                handle,
-                needs_decode: false,
-            };
+        if let Some(handle) = self.requests.get(&key).copied() {
+            if self.records.contains(handle) {
+                return ImageRequest {
+                    handle,
+                    needs_decode: false,
+                };
+            }
         }
         let handle = self.records.insert(ImageRecord {
             key: key.clone(),
@@ -389,13 +389,13 @@ impl ImageRegistry {
     pub fn replace(&mut self, handle: ImageHandle, key: ImageRequestKey) -> Option<ImageRequest> {
         let old = self.records.remove(handle)?;
         self.requests.remove(&old.key);
-        if let Some(existing) = self.requests.get(&key).copied()
-            && self.records.contains(existing)
-        {
-            return Some(ImageRequest {
-                handle: existing,
-                needs_decode: false,
-            });
+        if let Some(existing) = self.requests.get(&key).copied() {
+            if self.records.contains(existing) {
+                return Some(ImageRequest {
+                    handle: existing,
+                    needs_decode: false,
+                });
+            }
         }
         let fallback = (old.state == ImageState::Ready).then_some(handle);
         let next = self.records.insert(ImageRecord {

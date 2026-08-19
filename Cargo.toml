@@ -65,6 +65,14 @@ harness = false
 name = "p2_layout"
 harness = false
 
+[[bench]]
+name = "p5_animation"
+harness = false
+
+[[bench]]
+name = "p5_virtual_list"
+harness = false
+
 [lints.rust]
 unsafe_code = "forbid"
 

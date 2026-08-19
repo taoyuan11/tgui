@@ -1,7 +1,7 @@
 use super::paint::{PaintCommand, validate_commands};
 use crate::core::{
-    Clip, ElementId, FontHandle, GlyphPageId, LayoutRevision, Rect, RenderNodeId, ResourceId,
-    ResourceRevision, Result, SceneRevision, Transform2D,
+    Clip, ElementId, FontHandle, GlyphPageId, LayoutRevision, PropertyId, Rect, RenderNodeId,
+    ResourceId, ResourceRevision, Result, SceneRevision, Transform2D,
 };
 use crate::layout::LayoutSnapshot;
 use crate::widget::element::ElementTree;
@@ -280,6 +280,28 @@ impl RenderTree {
         invalidations: &BTreeMap<ElementId, ChunkInvalidationReason>,
         force_full: bool,
     ) -> Result<(SceneSnapshot, RenderTreeReport)> {
+        self.collect_elements_with_presentation(
+            elements,
+            layout,
+            revisions,
+            prerequisites,
+            invalidations,
+            force_full,
+            |_, _| None,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn collect_elements_with_presentation(
+        &mut self,
+        elements: &ElementTree,
+        layout: &LayoutSnapshot,
+        revisions: ChunkRevisionTuple,
+        prerequisites: ChunkPrerequisites,
+        invalidations: &BTreeMap<ElementId, ChunkInvalidationReason>,
+        force_full: bool,
+        presentation: impl Fn(ElementId, PropertyId) -> Option<f32>,
+    ) -> Result<(SceneSnapshot, RenderTreeReport)> {
         let mut descriptors = Vec::with_capacity(layout.nodes().len());
         for node in layout.nodes() {
             if !elements.contains(node.element()) {
@@ -292,8 +314,17 @@ impl RenderTree {
             let widget_type = elements.widget_type(element).ok_or_else(|| {
                 crate::core::Error::compile("render_collect", "element type is stale")
             })?;
-            let commands = paint_for_element(elements, element, widget_type, node.rect())?;
+            let commands =
+                paint_for_element(elements, element, widget_type, node.rect(), &presentation)?;
             let mut descriptor = RenderNodeDescriptor::new(element, node.rect(), commands)?;
+            descriptor.opacity = presentation(element, crate::widget::OPACITY)
+                .or_else(
+                    || match elements.property(element, crate::widget::OPACITY) {
+                        Some(PropertyValue::F32(value)) => Some(*value),
+                        _ => None,
+                    },
+                )
+                .unwrap_or(1.0);
             descriptor.parent = elements.parent(element);
             descriptor.clip = node.clip().map(Clip::Rect);
             descriptor.z_order = i32::try_from(node.order()).unwrap_or(i32::MAX);
@@ -633,6 +664,7 @@ fn paint_for_element(
     element: ElementId,
     widget_type: &WidgetType,
     bounds: Rect,
+    presentation: &impl Fn(ElementId, PropertyId) -> Option<f32>,
 ) -> Result<Vec<PaintCommand>> {
     if *widget_type == WidgetType::of::<crate::widgets::Text>() {
         let content = match elements.property(element, crate::widgets::TEXT_CONTENT) {
@@ -642,12 +674,13 @@ fn paint_for_element(
         let content_revision = content.bytes().fold(0xcbf29ce484222325_u64, |hash, byte| {
             (hash ^ u64::from(byte)).wrapping_mul(0x100000001b3)
         });
+        let opacity = effective_opacity(elements, element, presentation);
         let run = super::paint::TextRun {
             layout: ResourceId::from_parts(element.slot(), element.generation()),
             font: FontHandle::from_parts(0, 1),
             glyph_page: Some(GlyphPageId::from_parts(0, 1)),
             bounds,
-            color: crate::core::Color::BLACK,
+            color: crate::core::Color::rgba8(0, 0, 0, (opacity * 255.0).round() as u8),
             glyph_count: u32::try_from(content.chars().count()).unwrap_or(u32::MAX),
             content_revision,
         };
@@ -663,16 +696,32 @@ fn paint_for_element(
         } else {
             crate::core::Color::rgb8(140, 140, 140)
         };
+        let opacity = effective_opacity(elements, element, presentation);
         return Ok(vec![PaintCommand::DrawRoundedRect {
             rect: bounds,
             radii: crate::core::CornerRadii::all(4.0),
-            paint: super::paint::Paint::solid(color),
+            paint: super::paint::Paint::solid(color).with_opacity(opacity),
         }]);
     }
     if *widget_type == WidgetType::of::<crate::widgets::Container>() {
         return Ok(Vec::new());
     }
     Ok(vec![PaintCommand::Marker(Arc::from(widget_type.name()))])
+}
+
+fn effective_opacity(
+    elements: &ElementTree,
+    element: ElementId,
+    presentation: &impl Fn(ElementId, PropertyId) -> Option<f32>,
+) -> f32 {
+    presentation(element, crate::widget::OPACITY)
+        .or_else(
+            || match elements.property(element, crate::widget::OPACITY) {
+                Some(PropertyValue::F32(value)) => Some(*value),
+                _ => None,
+            },
+        )
+        .unwrap_or(1.0)
 }
 
 #[cfg(test)]

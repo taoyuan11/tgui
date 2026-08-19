@@ -853,6 +853,24 @@ pub struct DirtyRootMetrics {
     pub resource: u64,
 }
 
+/// Work performed by the window-owned animation timeline for one frame.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct AnimationMetrics {
+    pub active: u64,
+    pub sampled: u64,
+    pub completed: u64,
+    pub cancelled: u64,
+    pub tick_time: Duration,
+}
+
+/// Materialization cost reported by a virtualized collection.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct VirtualizationMetrics {
+    pub total_items: u64,
+    pub materialized_items: u64,
+    pub peak_materialized_items: u64,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FrameMetrics {
     pub frame_index: u64,
@@ -869,6 +887,8 @@ pub struct FrameMetrics {
     pub cpu_budget: Option<CacheBudgetSnapshot>,
     pub gpu_budget: Option<CacheBudgetSnapshot>,
     pub transient_budget: Option<CacheBudgetSnapshot>,
+    pub animation: AnimationMetrics,
+    pub virtualization: VirtualizationMetrics,
 }
 
 impl FrameMetrics {
@@ -888,6 +908,8 @@ impl FrameMetrics {
             cpu_budget: None,
             gpu_budget: None,
             transient_budget: None,
+            animation: AnimationMetrics::default(),
+            virtualization: VirtualizationMetrics::default(),
         }
     }
 
@@ -1060,6 +1082,8 @@ mod tests {
         let metrics = FrameMetrics::empty(7, RevisionSet::ZERO);
         assert_eq!(metrics.frame_index, 7);
         assert_eq!(metrics.scene.paint_commands, 0);
+        assert_eq!(metrics.animation.active, 0);
+        assert_eq!(metrics.virtualization.materialized_items, 0);
         assert!(metrics.cpu_budget.is_none());
     }
 }

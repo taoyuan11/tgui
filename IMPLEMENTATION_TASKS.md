@@ -246,26 +246,26 @@ P0 契约与骨架
 
 ### P5.1 Animation System
 
-- [ ] 实现统一 `FrameClock`、`Timeline`、`AnimationHandle` 和 `Animated<T>` 派生值；组件不得创建独立定时器。
-- [ ] 动画 key 使用 `(ElementId, PropertyId)`；明确新动画替换、衔接、取消旧动画的策略。
-- [ ] 每帧只标记受影响属性的 `PAINT` 或 `LAYOUT`；动画不直接覆盖基础 State。
-- [ ] 支持暂停、取消、完成回调、fake clock 和 reduced-motion；无活动动画时事件循环回到等待。
-- [ ] 添加动画取消、重建、卸载和 keyed reorder 后身份保持测试。
+- [x] 实现统一 `FrameClock`、`Timeline`、`AnimationHandle` 和 `Animated<T>` 派生值；组件不得创建独立定时器。
+- [x] 动画 key 使用 `(ElementId, PropertyId)`；明确新动画替换、衔接、取消旧动画的策略。
+- [x] 每帧只标记受影响属性的 `PAINT` 或 `LAYOUT`；动画不直接覆盖基础 State。
+- [x] 支持暂停、取消、完成回调、fake clock 和 reduced-motion；无活动动画时事件循环回到等待。
+- [x] 添加动画取消、重建、卸载和 keyed reorder 后身份保持测试。
 
 ### P5.2 VirtualList
 
-- [ ] 定义数据源长度、稳定 `ItemKey` 和 item builder 接口。
-- [ ] 只物化可见范围加 overscan；使用前缀和结构（优先 Fenwick Tree）维护估算/实测高度并支持按偏移定位。
-- [ ] 高度变化时保持滚动锚点，避免内容跳动；状态按 ItemKey 复用而非按可见索引复用。
-- [ ] 支持键盘焦点、选择、滚动到 key、异步测量和 item 销毁/重用清理。
-- [ ] 输出集合、位置、数量和当前项语义；聚焦未物化 item 时先物化并滚动到目标。
-- [ ] 用 fake clock、50,000/100,000 item 数据源和大列表滚动基准验证物化上限。
+- [x] 定义数据源长度、稳定 `ItemKey` 和 item builder 接口。
+- [x] 只物化可见范围加 overscan；使用前缀和结构（优先 Fenwick Tree）维护估算/实测高度并支持按偏移定位。
+- [x] 高度变化时保持滚动锚点，避免内容跳动；状态按 ItemKey 复用而非按可见索引复用。
+- [x] 支持键盘焦点、选择、滚动到 key、异步测量和 item 销毁/重用清理。
+- [x] 输出集合、位置、数量和当前项语义；聚焦未物化 item 时先物化并滚动到目标。
+- [x] 用 fake clock、50,000/100,000 item 数据源和大列表滚动基准验证物化上限。
 
 ### P5 退出条件
 
-- [ ] 动画 fake clock 完全确定，reduced-motion、取消和完成回调稳定。
-- [ ] VirtualList 只创建可见区/overscan Element，item 状态、焦点、锚点和语义在滚动/变高后正确保留。
-- [ ] `PAINT`/`LAYOUT` 失效范围与动画属性和 item 高度变化一致。
+- [x] 动画 fake clock 完全确定，reduced-motion、取消和完成回调稳定。
+- [x] VirtualList 只创建可见区/overscan Element，item 状态、焦点、锚点和语义在滚动/变高后正确保留。
+- [x] `PAINT`/`LAYOUT` 失效范围与动画属性和 item 高度变化一致。
 
 ---
 
@@ -353,8 +353,8 @@ P0 契约与骨架
 - [ ] 增量与全量的布局、命中、Paint Commands、Compiled Scene、Accessibility Tree 等价。
 - [ ] 事件传播顺序、停止传播、Pointer Capture、焦点和 IME 可预测。
 - [ ] 旧图片/字体/glyph 异步结果不会覆盖新资源；placeholder/旧资源不阻塞事件循环。
-- [ ] 动画 fake clock、取消、reduced-motion 和卸载稳定。
-- [ ] VirtualList 物化上限、可变高度锚点、按 key 状态和语义正确。
+- [x] 动画 fake clock、取消、reduced-motion 和卸载稳定。
+- [x] VirtualList 物化上限、可变高度锚点、按 key 状态和语义正确。
 - [ ] Native Host 生命周期/失败回退与 AccessKit action 可测试。
 
 ### 完成定义

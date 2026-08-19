@@ -795,3 +795,38 @@ P1 暂不把 dependency phase 映射成 DirtyFlags，也不生成真实布局命
   后台 generation/revision 丢弃、CPU/GPU 淘汰、上传所有权、窗口预算和原子 revision。
 - GPU 不可用时，Text 使用 `--no-default-features --features text` 完成全部逻辑布局测试；
   Image registry、placeholder、CPU/GPU cache 合同使用 fake uploader/headless 路径验证。
+
+## P5 实施记录（2026-08-19）
+
+### 实际取舍
+
+- `Timeline` 是 UI 线程拥有的唯一动画调度器，窗口各自持有 timeline，但共享一个
+  `FrameClock`。动画身份严格使用 `(ElementId, PropertyId)`；新请求支持 Replace、
+  Continue（从旧 presentation 采样衔接）和 Cancel 三种冲突策略。`AnimationHandle`
+  携带代际 ID，旧 handle 不能取消同 key 的新请求。
+- `Animated<T>` 是 presentation overlay，不写基础 State。tick 只产生目标属性的
+  `PAINT`/`LAYOUT` invalidation；完成回调先排队，宿主在帧提交后显式排出。自然完成的
+  presentation 终值保留到显式 clear、替换或 Element 卸载，避免下一帧跳回基础值。
+  `OPACITY`、`LAYOUT_WIDTH`、`LAYOUT_HEIGHT` 是首批贯通 Render/Paint/Taffy 的标准 overlay。
+- `FakeClock` 使用共享的 `Rc<Cell<Duration>>`，clone 后推进同一时钟。reduced-motion
+  在确定性采样点跳至终值且只回调一次；暂停期间 wall clock 不推进动画，idle timeline
+  不请求下一帧。卸载和 keyed reorder 分别取消旧 generation、保留稳定 Element 身份。
+- `VirtualList` 的数据源提供 `len`、稳定且唯一的 `ItemKey` 和 item builder。Fenwick
+  树以 `f64` 累加高度，支持 O(log n) 更新和偏移定位；仅物化 viewport 加像素 overscan，
+  未物化内容由高度总和表示，不把 50,000/100,000 项放进 Element Tree。
+- item 状态、selection、逻辑焦点和清理回调按 `ItemKey` 保存；高度变化按
+  `(anchor ItemKey, intra-item offset)` 修正滚动锚点。异步测量同时校验 data revision 与
+  materialization generation。集合语义提供 set size、1-based position、current、selected
+  和 materialized 信息；聚焦未物化 key 会先滚动并物化。
+- `FrameMetrics` 增加 animation 与 virtualization 工作量；P5 headless 示例和基准固定
+  覆盖 fake clock、reduced-motion、滚动、可变高度锚点及 50,000/100,000 数据源。核心
+  路径保持 `--no-default-features` 可构建。
+
+### P5 基线结果
+
+本机 `aarch64-apple-darwin`、Rust stable 1.96.1 下，P5 合同覆盖动画六项和 VirtualList
+六项；模块单测覆盖 Fenwick 边界与物化上限。`p5_headless` 可在无 GPU 下输出动画采样、
+presentation opacity、列表物化数量和场景 fingerprint；P5 基准运行 10,000 条动画以及
+50,000/100,000 item 滚动，均断言物化数量保持在 viewport/overscan 上限内。
+`scripts/ci.sh`（最小/全 feature Clippy、feature matrix、最小/默认配置测试和全部 headless
+示例）、Rust 1.85 MSRV 检查、两项 P5 基准、rustfmt 与 diff 检查均通过。

@@ -6,13 +6,17 @@
 //! thread through [`crate::state::UiThread`].
 
 use crate::accessibility::SemanticSnapshot;
+use crate::animation::{
+    Animated, AnimationFrame, AnimationHandle, AnimationImpact, AnimationKey, AnimationSpec,
+    FrameClock, Interpolate, SystemClock, Timeline,
+};
 use crate::core::{
     DenseArena, DpiScale, ElementId, Error, GenerationStamp, ResourceId, ResourceRevision, Result,
     RevisionSet, Size, WindowId,
 };
 use crate::diagnostics::{
-    BudgetDomain, CacheBudgetSnapshot, DirtyRootMetrics, FrameMetrics, ResourceBudgetConfig,
-    ResourceBudgetSnapshots, ResourceBudgets,
+    AnimationMetrics, BudgetDomain, CacheBudgetSnapshot, DirtyRootMetrics, FrameMetrics,
+    ResourceBudgetConfig, ResourceBudgetSnapshots, ResourceBudgets, VirtualizationMetrics,
 };
 use crate::dirty::{DirtyBatch, DirtyFlags, DirtyNodeSpec, DirtyTree};
 use crate::event::{CommittedHitTarget, DispatchOutcome, EventDispatcher, UiEvent};
@@ -397,6 +401,7 @@ struct WindowState {
     resource_request_serial: u64,
     active_resource_requests: BTreeMap<ElementId, ResourceRequestTicket>,
     resource_bindings: BTreeMap<ElementId, ResourceBinding>,
+    timeline: Timeline,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -479,6 +484,13 @@ pub struct RenderFrameReceipt {
     pub tree: RenderTreeReport,
 }
 
+/// Result of one deterministic animation sample and its Dirty Tree effects.
+#[derive(Clone, Debug)]
+pub struct AnimationFrameReceipt {
+    pub frame: AnimationFrame,
+    pub metrics: AnimationMetrics,
+}
+
 /// Result of one complete capture/target/bubble dispatch and transaction.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct EventDispatchReceipt {
@@ -508,6 +520,7 @@ pub struct Application {
     owner: UiThread,
     windows: DenseArena<WindowState, WindowId>,
     main_window: Option<WindowId>,
+    clock: Rc<dyn FrameClock>,
     // Keep the public type explicitly non-Send even if internal fields change.
     _not_send: PhantomData<Rc<()>>,
 }
@@ -524,10 +537,16 @@ impl fmt::Debug for Application {
 
 impl Application {
     pub fn new() -> Self {
+        Self::with_frame_clock(SystemClock::new())
+    }
+
+    /// Creates an application with one shared UI frame clock.
+    pub fn with_frame_clock(clock: impl FrameClock + 'static) -> Self {
         Self {
             owner: UiThread::current(),
             windows: DenseArena::new(),
             main_window: None,
+            clock: Rc::new(clock),
             _not_send: PhantomData,
         }
     }
@@ -559,6 +578,7 @@ impl Application {
             resource_request_serial: 0,
             active_resource_requests: BTreeMap::new(),
             resource_bindings: BTreeMap::new(),
+            timeline: Timeline::new(self.clock.clone()),
         });
         if self.main_window.is_none() {
             self.main_window = Some(id);
@@ -604,6 +624,149 @@ impl Application {
         })?;
         state.frame_requested = true;
         Ok(())
+    }
+
+    /// Returns the read-only timeline diagnostics and presentation values for a window.
+    pub fn animation_timeline(&self, id: WindowId) -> Option<&Timeline> {
+        self.windows.get(id).map(|state| &state.timeline)
+    }
+
+    pub fn animate<T: Interpolate>(
+        &mut self,
+        id: WindowId,
+        key: impl Into<AnimationKey>,
+        value: &Animated<T>,
+        to: T,
+        spec: AnimationSpec,
+    ) -> Result<AnimationHandle> {
+        self.owner.assert_current()?;
+        let state = self.window_state_mut(id)?;
+        let key = key.into();
+        validate_animation_key(state, key, spec.impact())?;
+        let handle = state.timeline.animate(key, value, to, spec);
+        state.frame_requested = true;
+        Ok(handle)
+    }
+
+    pub fn animate_between<T: Interpolate>(
+        &mut self,
+        id: WindowId,
+        key: impl Into<AnimationKey>,
+        value: &Animated<T>,
+        from: T,
+        to: T,
+        spec: AnimationSpec,
+    ) -> Result<AnimationHandle> {
+        self.owner.assert_current()?;
+        let state = self.window_state_mut(id)?;
+        let key = key.into();
+        validate_animation_key(state, key, spec.impact())?;
+        let handle = state.timeline.animate_between(key, value, from, to, spec);
+        state.frame_requested = true;
+        Ok(handle)
+    }
+
+    pub fn animate_with_completion<T: Interpolate>(
+        &mut self,
+        id: WindowId,
+        key: impl Into<AnimationKey>,
+        value: &Animated<T>,
+        to: T,
+        spec: AnimationSpec,
+        completion: impl FnOnce() + 'static,
+    ) -> Result<AnimationHandle> {
+        self.owner.assert_current()?;
+        let state = self.window_state_mut(id)?;
+        let key = key.into();
+        validate_animation_key(state, key, spec.impact())?;
+        let handle = state
+            .timeline
+            .animate_with_completion(key, value, to, spec, completion);
+        state.frame_requested = true;
+        Ok(handle)
+    }
+
+    pub fn set_reduced_motion(&mut self, id: WindowId, enabled: bool) -> Result<()> {
+        let state = self.window_state_mut(id)?;
+        state.timeline.set_reduced_motion(enabled);
+        state.frame_requested |= !state.timeline.is_idle();
+        Ok(())
+    }
+
+    pub fn pause_animation(&mut self, id: WindowId, handle: &AnimationHandle) -> Result<bool> {
+        self.owner.assert_current()?;
+        let state = self.window_state_mut(id)?;
+        let changed = state.timeline.pause(handle);
+        state.frame_requested |= !state.timeline.is_idle();
+        Ok(changed)
+    }
+
+    pub fn resume_animation(&mut self, id: WindowId, handle: &AnimationHandle) -> Result<bool> {
+        self.owner.assert_current()?;
+        let state = self.window_state_mut(id)?;
+        let changed = state.timeline.resume(handle);
+        state.frame_requested |= changed;
+        Ok(changed)
+    }
+
+    pub fn cancel_animation(&mut self, id: WindowId, handle: &AnimationHandle) -> Result<bool> {
+        self.owner.assert_current()?;
+        let state = self.window_state_mut(id)?;
+        let changed = state.timeline.cancel(handle);
+        state.frame_requested |= changed;
+        Ok(changed)
+    }
+
+    pub fn clear_animation_presentation(
+        &mut self,
+        id: WindowId,
+        key: impl Into<AnimationKey>,
+    ) -> Result<bool> {
+        self.owner.assert_current()?;
+        let state = self.window_state_mut(id)?;
+        let changed = state.timeline.clear_presentation(key);
+        state.frame_requested |= changed;
+        Ok(changed)
+    }
+
+    /// Samples all active tracks and routes only their target properties into
+    /// the existing Dirty Tree. No State is modified by this method.
+    pub fn tick_animations(&mut self, id: WindowId) -> Result<AnimationFrameReceipt> {
+        self.owner.assert_current()?;
+        let state = self.window_state_mut(id)?;
+        sync_dirty_topology(state);
+        let started = Instant::now();
+        let frame = state.timeline.tick();
+        for invalidation in frame.invalidations() {
+            if !state.elements.contains(invalidation.element()) {
+                continue;
+            }
+            let flags = match invalidation.impact() {
+                AnimationImpact::Paint => DirtyFlags::PAINT,
+                AnimationImpact::Layout => DirtyFlags::LAYOUT,
+            };
+            state.dirty.mark(invalidation.element(), flags, false)?;
+        }
+        state.frame_requested |= frame.needs_next_frame() || !frame.invalidations().is_empty();
+        let metrics = AnimationMetrics {
+            active: u64::try_from(frame.active()).unwrap_or(u64::MAX),
+            sampled: u64::try_from(frame.sampled()).unwrap_or(u64::MAX),
+            completed: u64::try_from(frame.completed().len()).unwrap_or(u64::MAX),
+            cancelled: u64::try_from(frame.cancelled().len()).unwrap_or(u64::MAX),
+            tick_time: started.elapsed(),
+        };
+        state.frame_metrics.animation = metrics;
+        Ok(AnimationFrameReceipt { frame, metrics })
+    }
+
+    /// Runs callbacks that were queued by a completed animation. Call this
+    /// after the frame's layout/render transaction has been committed.
+    pub fn dispatch_animation_completions(&mut self, id: WindowId) -> Result<usize> {
+        self.owner.assert_current()?;
+        Ok(self
+            .window_state_mut(id)?
+            .timeline
+            .dispatch_completion_callbacks())
     }
 
     /// Installs a retained view builder and performs its initial reactive build.
@@ -1234,7 +1397,12 @@ impl Application {
                     state.layout.invalidate(node.id)?;
                 }
             }
-            let inputs = state.elements.layout_inputs()?;
+            let timeline = &state.timeline;
+            let inputs = state
+                .elements
+                .layout_inputs_with_overrides(|element, property| {
+                    timeline.presentation::<f32>((element, property))
+                })?;
             let root = state.elements.root();
             let elements = &mut state.elements;
             let layout = &mut state.layout;
@@ -1292,6 +1460,8 @@ impl Application {
             .revisions();
         let mut metrics = FrameMetrics::empty(state.frame_index, revisions)
             .with_resource_budgets(&state.resource_budgets);
+        metrics.animation = state.frame_metrics.animation;
+        metrics.virtualization = state.frame_metrics.virtualization;
         metrics.phases.layout = layout_duration;
         metrics.dirty_elements = u64::try_from(batch.nodes.len()).unwrap_or(u64::MAX);
         metrics.dirty_roots = dirty_root_metrics(&batch);
@@ -1310,6 +1480,16 @@ impl Application {
 
     pub fn frame_metrics(&self, id: WindowId) -> Option<&FrameMetrics> {
         self.windows.get(id).map(|state| &state.frame_metrics)
+    }
+
+    pub fn record_virtualization_metrics(
+        &mut self,
+        id: WindowId,
+        metrics: VirtualizationMetrics,
+    ) -> Result<()> {
+        self.owner.assert_current()?;
+        self.window_state_mut(id)?.frame_metrics.virtualization = metrics;
+        Ok(())
     }
 
     /// Builds and compiles the retained Render Tree for the latest committed
@@ -1381,17 +1561,20 @@ impl Application {
             };
             let scale = state.spec.dpi_scale;
             let paint_started = Instant::now();
-            let (candidate_scene, tree_report) = state.render_tree.collect_elements(
-                &state.elements,
-                &layout_receipt.snapshot,
-                revisions,
-                ChunkPrerequisites {
-                    dpi_scale_bits: scale.get().to_bits(),
-                    ..ChunkPrerequisites::default()
-                },
-                &invalidations,
-                false,
-            )?;
+            let timeline = &state.timeline;
+            let (candidate_scene, tree_report) =
+                state.render_tree.collect_elements_with_presentation(
+                    &state.elements,
+                    &layout_receipt.snapshot,
+                    revisions,
+                    ChunkPrerequisites {
+                        dpi_scale_bits: scale.get().to_bits(),
+                        ..ChunkPrerequisites::default()
+                    },
+                    &invalidations,
+                    false,
+                    |element, property| timeline.presentation::<f32>((element, property)),
+                )?;
             let paint_duration = paint_started.elapsed();
             let scene_changed = candidate_scene.command_count() != old_scene.command_count()
                 || candidate_scene.chunk_count() != old_scene.chunk_count()
@@ -1574,6 +1757,10 @@ impl Application {
 
     pub fn destroy_window(&mut self, id: WindowId) -> Result<bool> {
         self.owner.assert_current()?;
+        if let Some(state) = self.windows.get_mut(id) {
+            let elements = state.elements.ids().collect::<Vec<_>>();
+            state.timeline.cancel_elements(elements);
+        }
         let existed = self.windows.remove(id).is_some();
         if existed && self.main_window == Some(id) {
             self.main_window = self.windows.ids().next();
@@ -1623,6 +1810,46 @@ fn sync_dirty_topology(state: &mut WindowState) {
     state.dirty.sync(specs);
 }
 
+fn validate_animation_key(
+    state: &WindowState,
+    key: AnimationKey,
+    impact: AnimationImpact,
+) -> Result<()> {
+    if !state.elements.contains(key.element()) {
+        return Err(Error::invalid_input(
+            Some("animation.element".to_owned()),
+            "animation targets a stale or unmounted Element generation",
+        ));
+    }
+    let declared = state
+        .elements
+        .property_impact(key.element(), key.property())
+        .ok_or_else(|| {
+            Error::invalid_input(
+                Some("animation.property".to_owned()),
+                "animation property has no declared invalidation impact",
+            )
+        })?;
+    let supported = match impact {
+        AnimationImpact::Paint => {
+            key.property() == crate::widget::OPACITY && declared.contains(PropertyImpact::PAINT)
+        }
+        AnimationImpact::Layout => {
+            matches!(
+                key.property(),
+                crate::widget::LAYOUT_WIDTH | crate::widget::LAYOUT_HEIGHT
+            ) && declared.contains(PropertyImpact::LAYOUT)
+        }
+    };
+    if !supported {
+        return Err(Error::invalid_input(
+            Some("animation.impact".to_owned()),
+            "property is not supported by the requested presentation pipeline",
+        ));
+    }
+    Ok(())
+}
+
 fn resource_snapshot_for_bindings(
     bindings: &BTreeMap<ElementId, ResourceBinding>,
     previous: &ResourceSnapshot,
@@ -1665,6 +1892,9 @@ fn resource_snapshot_for_bindings(
 }
 
 fn apply_reconcile_dirty(state: &mut WindowState, report: &ReconcileReport) -> Result<()> {
+    state
+        .timeline
+        .cancel_elements(report.removed_ids().iter().copied());
     sync_dirty_topology(state);
     let mut marked = false;
     for invalidation in report.invalidations() {

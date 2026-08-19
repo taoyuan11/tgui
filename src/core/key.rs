@@ -78,6 +78,18 @@ stable_key!(NodeKey);
 stable_key!(WidgetKey);
 stable_key!(ItemKey);
 
+impl From<ItemKey> for WidgetKey {
+    fn from(value: ItemKey) -> Self {
+        Self(value.0)
+    }
+}
+
+impl From<&ItemKey> for WidgetKey {
+    fn from(value: &ItemKey) -> Self {
+        Self(value.0.clone())
+    }
+}
+
 /// Stable identity of an animatable or invalidatable property.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct PropertyId(u64);
@@ -121,5 +133,14 @@ mod tests {
         assert_eq!(numeric.as_numeric(), Some(7));
         assert_eq!(text.as_str(), Some("7"));
         assert_eq!(format!("{text:?}"), "WidgetKey(\"7\")");
+    }
+
+    #[test]
+    fn item_keys_convert_to_widget_keys_without_changing_identity() {
+        let numeric = ItemKey::numeric(7);
+        let text = ItemKey::text("item-7");
+
+        assert_eq!(WidgetKey::from(&numeric).as_numeric(), Some(7));
+        assert_eq!(WidgetKey::from(text).as_str(), Some("item-7"));
     }
 }

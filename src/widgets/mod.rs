@@ -6,7 +6,10 @@
 use crate::core::{PropertyId, Result, WidgetKey};
 use crate::event::EventHandler;
 use crate::state::UiCommand;
-use crate::widget::{BuildContext, PropertyImpact, Widget, WidgetNode, WidgetType};
+use crate::widget::{
+    BuildContext, LAYOUT_HEIGHT, LAYOUT_WIDTH, OPACITY, PropertyImpact, Widget, WidgetNode,
+    WidgetType,
+};
 use std::sync::Arc;
 
 pub const TEXT_CONTENT: PropertyId = PropertyId::new(1);
@@ -57,9 +60,11 @@ impl Container {
 
 impl Widget for Container {
     fn build(&self, _context: &mut BuildContext) -> Result<WidgetNode> {
-        Ok(WidgetNode::from_type(container_type())
-            .with_optional_key(self.key.clone())
-            .with_children(self.children.clone()))
+        Ok(
+            with_layout_animation_properties(WidgetNode::from_type(container_type()))
+                .with_optional_key(self.key.clone())
+                .with_children(self.children.clone()),
+        )
     }
 }
 
@@ -90,10 +95,12 @@ impl Text {
 
 impl Widget for Text {
     fn build(&self, _context: &mut BuildContext) -> Result<WidgetNode> {
-        Ok(WidgetNode::from_type(text_type())
-            .with_optional_key(self.key.clone())
-            .with_property(TEXT_CONTENT, self.content.clone())
-            .with_property_impact(TEXT_CONTENT, PropertyImpact::LAYOUT))
+        Ok(
+            with_presentation_properties(WidgetNode::from_type(text_type()))
+                .with_optional_key(self.key.clone())
+                .with_property(TEXT_CONTENT, self.content.clone())
+                .with_property_impact(TEXT_CONTENT, PropertyImpact::LAYOUT),
+        )
     }
 }
 
@@ -138,7 +145,7 @@ impl Button {
 impl Widget for Button {
     fn build(&self, context: &mut BuildContext) -> Result<WidgetNode> {
         let label = Text::new(self.label.clone()).build(context)?;
-        let mut node = WidgetNode::from_type(button_type())
+        let mut node = with_presentation_properties(WidgetNode::from_type(button_type()))
             .with_optional_key(self.key.clone())
             .with_property(BUTTON_ENABLED, self.enabled)
             .with_property_impact(
@@ -155,6 +162,17 @@ impl Widget for Button {
         }
         Ok(node)
     }
+}
+
+fn with_presentation_properties(node: WidgetNode) -> WidgetNode {
+    with_layout_animation_properties(node)
+        .with_property(OPACITY, 1.0_f32)
+        .with_property_impact(OPACITY, PropertyImpact::PAINT)
+}
+
+fn with_layout_animation_properties(node: WidgetNode) -> WidgetNode {
+    node.with_property_impact(LAYOUT_WIDTH, PropertyImpact::LAYOUT)
+        .with_property_impact(LAYOUT_HEIGHT, PropertyImpact::LAYOUT)
 }
 
 #[cfg(test)]
