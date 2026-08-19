@@ -7,6 +7,7 @@
 
 use super::{BatchKind, CompiledScene, QuadInstance, RendererCapabilities};
 use crate::core::{DpiScale, Error, ImageHandle, Result, Size};
+use crate::media::{DecodedImage, ImageTextureUploader};
 use std::collections::VecDeque;
 use std::sync::Arc;
 
@@ -35,6 +36,8 @@ pub struct TextureUpload {
     pub width: u32,
     pub height: u32,
     pub bytes: u64,
+    /// The uploaded object remains alive until this receipt is dropped.
+    pub texture: Arc<wgpu::Texture>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -408,9 +411,43 @@ impl<'window> WgpuRenderer<'window> {
         height: u32,
         bytes: &[u8],
     ) -> Result<TextureUpload> {
+        let texture = Arc::new(self.create_rgba8_texture(width, height, bytes)?);
+        Ok(TextureUpload {
+            handle,
+            width,
+            height,
+            bytes: u64::from(width)
+                .saturating_mul(u64::from(height))
+                .saturating_mul(4),
+            texture,
+        })
+    }
+
+    /// Creates an uploaded texture for ownership by a `GpuTextureCache`.
+    pub fn create_rgba8_texture(
+        &self,
+        width: u32,
+        height: u32,
+        bytes: &[u8],
+    ) -> Result<wgpu::Texture> {
         let expected = u64::from(width)
             .saturating_mul(u64::from(height))
             .saturating_mul(4);
+        if width == 0 || height == 0 {
+            return Err(Error::resource(
+                None,
+                "RGBA upload dimensions must be non-zero",
+                true,
+            ));
+        }
+        let max_dimension = self.device.limits().max_texture_dimension_2d;
+        if width > max_dimension || height > max_dimension {
+            return Err(Error::resource(
+                None,
+                "RGBA upload exceeds the renderer's maximum texture dimension",
+                true,
+            ));
+        }
         if u64::try_from(bytes.len()).unwrap_or(u64::MAX) != expected {
             return Err(Error::resource(
                 None,
@@ -451,13 +488,7 @@ impl<'window> WgpuRenderer<'window> {
                 depth_or_array_layers: 1,
             },
         );
-        drop(texture);
-        Ok(TextureUpload {
-            handle,
-            width,
-            height,
-            bytes: expected,
-        })
+        Ok(texture)
     }
 
     pub fn defer_resource(&mut self, bytes: u64, label: impl Into<Arc<str>>) {
@@ -505,6 +536,19 @@ impl<'window> WgpuRenderer<'window> {
             self.configure_surface()?;
         }
         Ok(())
+    }
+}
+
+impl ImageTextureUploader for WgpuRenderer<'_> {
+    type Texture = wgpu::Texture;
+
+    fn upload_image(
+        &mut self,
+        _handle: ImageHandle,
+        image: &DecodedImage,
+    ) -> Result<Self::Texture> {
+        let size = image.size();
+        self.create_rgba8_texture(size.width, size.height, image.rgba8())
     }
 }
 

@@ -18,6 +18,71 @@ pub enum BudgetDomain {
     TransientGpu,
 }
 
+/// Soft and hard byte limits for one cache domain.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CacheBudgetLimits {
+    pub soft_limit_bytes: u64,
+    pub hard_limit_bytes: u64,
+}
+
+impl CacheBudgetLimits {
+    pub const fn new(soft_limit_bytes: u64, hard_limit_bytes: u64) -> Self {
+        Self {
+            soft_limit_bytes,
+            hard_limit_bytes,
+        }
+    }
+
+    pub fn validate(self) -> Result<Self, BudgetError> {
+        CacheBudget::new(
+            BudgetDomain::CpuCache,
+            self.soft_limit_bytes,
+            self.hard_limit_bytes,
+        )?;
+        Ok(self)
+    }
+}
+
+/// Default resource limits, optionally replaced on an individual window.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ResourceBudgetConfig {
+    pub cpu_cache: CacheBudgetLimits,
+    pub gpu_cache: CacheBudgetLimits,
+    pub transient_gpu: CacheBudgetLimits,
+}
+
+impl ResourceBudgetConfig {
+    pub const fn new(
+        cpu_cache: CacheBudgetLimits,
+        gpu_cache: CacheBudgetLimits,
+        transient_gpu: CacheBudgetLimits,
+    ) -> Self {
+        Self {
+            cpu_cache,
+            gpu_cache,
+            transient_gpu,
+        }
+    }
+
+    pub fn validate(self) -> Result<Self, BudgetError> {
+        self.cpu_cache.validate()?;
+        self.gpu_cache.validate()?;
+        self.transient_gpu.validate()?;
+        Ok(self)
+    }
+}
+
+impl Default for ResourceBudgetConfig {
+    fn default() -> Self {
+        const MIB: u64 = 1024 * 1024;
+        Self::new(
+            CacheBudgetLimits::new(64 * MIB, 96 * MIB),
+            CacheBudgetLimits::new(128 * MIB, 192 * MIB),
+            CacheBudgetLimits::new(64 * MIB, 128 * MIB),
+        )
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum BudgetFailureReason {
     InvalidLimits,
@@ -188,6 +253,53 @@ impl CacheBudget {
         }
     }
 
+    /// Reserves resident or transient bytes. Cache owners should evict their
+    /// own unpinned entries before retrying a failed reservation.
+    pub fn try_reserve(&mut self, bytes: u64) -> Result<(), BudgetError> {
+        let Some(projected) = self.current_bytes.checked_add(bytes) else {
+            self.failure(BudgetFailureReason::ArithmeticOverflow);
+            return Err(BudgetError {
+                reason: BudgetFailureReason::ArithmeticOverflow,
+                requested_bytes: bytes,
+                current_bytes: self.current_bytes,
+                hard_limit_bytes: self.hard_limit_bytes,
+            });
+        };
+        if projected > self.hard_limit_bytes {
+            self.failure(BudgetFailureReason::HardLimitExceeded);
+            return Err(BudgetError {
+                reason: BudgetFailureReason::HardLimitExceeded,
+                requested_bytes: bytes,
+                current_bytes: self.current_bytes,
+                hard_limit_bytes: self.hard_limit_bytes,
+            });
+        }
+        self.set_current(projected);
+        Ok(())
+    }
+
+    pub fn release(&mut self, bytes: u64) {
+        self.set_current(self.current_bytes.saturating_sub(bytes));
+    }
+
+    pub fn record_hit(&mut self) {
+        self.hits = self.hits.saturating_add(1);
+    }
+
+    pub fn record_miss(&mut self) {
+        self.misses = self.misses.saturating_add(1);
+    }
+
+    pub fn record_upload(&mut self, bytes: u64) {
+        self.upload_bytes = self.upload_bytes.saturating_add(bytes);
+    }
+
+    pub fn record_eviction(&mut self, bytes: u64) {
+        self.evictions = self.evictions.saturating_add(1);
+        self.evicted_bytes = self.evicted_bytes.saturating_add(bytes);
+        self.release(bytes);
+    }
+
     fn failure(&mut self, reason: BudgetFailureReason) {
         *self.failures.entry(reason).or_default() += 1;
     }
@@ -198,6 +310,79 @@ impl CacheBudget {
     }
 }
 
+/// Window-owned aggregate accounting for the three resource budget domains.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ResourceBudgets {
+    cpu_cache: CacheBudget,
+    gpu_cache: CacheBudget,
+    transient_gpu: CacheBudget,
+}
+
+impl ResourceBudgets {
+    pub fn new(config: ResourceBudgetConfig) -> Result<Self, BudgetError> {
+        config.validate()?;
+        Ok(Self {
+            cpu_cache: CacheBudget::new(
+                BudgetDomain::CpuCache,
+                config.cpu_cache.soft_limit_bytes,
+                config.cpu_cache.hard_limit_bytes,
+            )?,
+            gpu_cache: CacheBudget::new(
+                BudgetDomain::GpuCache,
+                config.gpu_cache.soft_limit_bytes,
+                config.gpu_cache.hard_limit_bytes,
+            )?,
+            transient_gpu: CacheBudget::new(
+                BudgetDomain::TransientGpu,
+                config.transient_gpu.soft_limit_bytes,
+                config.transient_gpu.hard_limit_bytes,
+            )?,
+        })
+    }
+
+    pub fn get(&self, domain: BudgetDomain) -> &CacheBudget {
+        match domain {
+            BudgetDomain::CpuCache => &self.cpu_cache,
+            BudgetDomain::GpuCache => &self.gpu_cache,
+            BudgetDomain::TransientGpu => &self.transient_gpu,
+        }
+    }
+
+    pub fn get_mut(&mut self, domain: BudgetDomain) -> &mut CacheBudget {
+        match domain {
+            BudgetDomain::CpuCache => &mut self.cpu_cache,
+            BudgetDomain::GpuCache => &mut self.gpu_cache,
+            BudgetDomain::TransientGpu => &mut self.transient_gpu,
+        }
+    }
+
+    pub fn snapshots(&self) -> ResourceBudgetSnapshots {
+        ResourceBudgetSnapshots {
+            cpu_cache: self.cpu_cache.snapshot(),
+            gpu_cache: self.gpu_cache.snapshot(),
+            transient_gpu: self.transient_gpu.snapshot(),
+        }
+    }
+}
+
+impl Default for ResourceBudgets {
+    fn default() -> Self {
+        Self::new(ResourceBudgetConfig::default()).expect("default resource budgets are valid")
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ResourceBudgetSnapshots {
+    pub cpu_cache: CacheBudgetSnapshot,
+    pub gpu_cache: CacheBudgetSnapshot,
+    pub transient_gpu: CacheBudgetSnapshot,
+}
+
+/// Domain-specific names used by public resource APIs.
+pub type CpuCacheBudget = CacheBudget;
+pub type GpuCacheBudget = CacheBudget;
+pub type TransientGpuBudget = CacheBudget;
+
 struct ResourceEntry<V> {
     value: V,
     bytes: u64,
@@ -205,6 +390,26 @@ struct ResourceEntry<V> {
     insertion_order: u64,
     committed_refs: u32,
     in_flight_refs: u32,
+    priority: CacheResourcePriority,
+}
+
+/// Eviction hints supplied by a cache owner. References remain authoritative:
+/// committed and in-flight entries are never eviction candidates.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct CacheResourcePriority {
+    /// Relative work needed to recreate the entry. Lower cost evicts first.
+    pub rebuild_cost: u32,
+    /// Visible entries are retained ahead of otherwise equivalent hidden ones.
+    pub visible: bool,
+}
+
+impl CacheResourcePriority {
+    pub const fn new(rebuild_cost: u32, visible: bool) -> Self {
+        Self {
+            rebuild_cost,
+            visible,
+        }
+    }
 }
 
 impl<V> ResourceEntry<V> {
@@ -290,6 +495,23 @@ where
         bytes: u64,
         upload_bytes: u64,
     ) -> Result<(), BudgetError> {
+        self.insert_with_priority(
+            key,
+            value,
+            bytes,
+            upload_bytes,
+            CacheResourcePriority::default(),
+        )
+    }
+
+    pub fn insert_with_priority(
+        &mut self,
+        key: K,
+        value: V,
+        bytes: u64,
+        upload_bytes: u64,
+        priority: CacheResourcePriority,
+    ) -> Result<(), BudgetError> {
         if self.entries.get(&key).is_some_and(ResourceEntry::pinned) {
             self.budget
                 .failure(BudgetFailureReason::NoEvictableResource);
@@ -337,16 +559,24 @@ where
                     candidate.clone(),
                     entry.last_used,
                     entry.insertion_order,
+                    entry.priority,
                     entry.bytes,
                 )
             })
             .collect::<Vec<_>>();
-        candidates.sort_by_key(|(_, last_used, insertion_order, _)| (*last_used, *insertion_order));
+        candidates.sort_by_key(|(_, last_used, insertion_order, priority, _)| {
+            (
+                priority.visible,
+                priority.rebuild_cost,
+                *last_used,
+                *insertion_order,
+            )
+        });
 
         let mut after = projected;
         let mut plan = Vec::new();
         if after > self.budget.hard_limit_bytes {
-            for (candidate, _, _, candidate_bytes) in &candidates {
+            for (candidate, _, _, _, candidate_bytes) in &candidates {
                 after = after.saturating_sub(*candidate_bytes);
                 plan.push(candidate.clone());
                 if after <= self.budget.hard_limit_bytes {
@@ -364,7 +594,7 @@ where
                 });
             }
         } else if after > self.budget.soft_limit_bytes {
-            for (candidate, _, _, candidate_bytes) in &candidates {
+            for (candidate, _, _, _, candidate_bytes) in &candidates {
                 if after <= self.budget.soft_limit_bytes {
                     break;
                 }
@@ -393,6 +623,7 @@ where
                 insertion_order: self.insertion_counter,
                 committed_refs: 0,
                 in_flight_refs: 0,
+                priority,
             },
         );
         self.budget
@@ -476,6 +707,14 @@ where
         true
     }
 
+    pub fn set_priority(&mut self, key: &K, priority: CacheResourcePriority) -> bool {
+        let Some(entry) = self.entries.get_mut(key) else {
+            return false;
+        };
+        entry.priority = priority;
+        true
+    }
+
     pub fn evict_to_soft_limit(&mut self) -> usize {
         let mut removed = 0;
         while self.budget.current_bytes > self.budget.soft_limit_bytes {
@@ -501,7 +740,14 @@ where
         self.entries
             .iter()
             .filter(|(_, entry)| !entry.pinned())
-            .min_by_key(|(_, entry)| (entry.last_used, entry.insertion_order))
+            .min_by_key(|(_, entry)| {
+                (
+                    entry.priority.visible,
+                    entry.priority.rebuild_cost,
+                    entry.last_used,
+                    entry.insertion_order,
+                )
+            })
             .map(|(key, _)| key.clone())
     }
 
@@ -654,6 +900,45 @@ impl FrameMetrics {
         self
     }
 
+    pub fn with_resource_budgets(mut self, budgets: &ResourceBudgets) -> Self {
+        self.cpu_budget = Some(budgets.cpu_cache.snapshot());
+        self.gpu_budget = Some(budgets.gpu_cache.snapshot());
+        self.transient_budget = Some(budgets.transient_gpu.snapshot());
+        self.resources = ResourceCostReport {
+            hits: budgets
+                .cpu_cache
+                .hits
+                .saturating_add(budgets.gpu_cache.hits),
+            misses: budgets
+                .cpu_cache
+                .misses
+                .saturating_add(budgets.gpu_cache.misses),
+            evictions: budgets
+                .cpu_cache
+                .evictions
+                .saturating_add(budgets.gpu_cache.evictions),
+            upload_bytes: budgets
+                .cpu_cache
+                .upload_bytes
+                .saturating_add(budgets.gpu_cache.upload_bytes)
+                .saturating_add(budgets.transient_gpu.upload_bytes),
+            failures: budgets
+                .cpu_cache
+                .failures
+                .values()
+                .chain(budgets.gpu_cache.failures.values())
+                .chain(budgets.transient_gpu.failures.values())
+                .copied()
+                .fold(0_u64, u64::saturating_add),
+            in_flight_references: budgets
+                .cpu_cache
+                .in_flight_references
+                .saturating_add(budgets.gpu_cache.in_flight_references)
+                .saturating_add(budgets.transient_gpu.in_flight_references),
+        };
+        self
+    }
+
     pub fn record_arena(&mut self, stats: ArenaStats) {
         self.arena = stats;
     }
@@ -714,6 +999,60 @@ mod tests {
         assert!(cache.mark_in_flight(&1));
         assert!(cache.insert(1, 30, 4).is_err());
         assert_eq!(cache.peek(&1), Some(&10));
+    }
+
+    #[test]
+    fn eviction_combines_visibility_rebuild_cost_and_references() {
+        let mut cache =
+            FixedBudgetResourceManager::<u32, &str>::new(BudgetDomain::GpuCache, 8, 8).unwrap();
+        cache
+            .insert_with_priority(
+                1,
+                "visible cheap",
+                4,
+                0,
+                CacheResourcePriority::new(1, true),
+            )
+            .unwrap();
+        cache
+            .insert_with_priority(
+                2,
+                "hidden expensive",
+                4,
+                0,
+                CacheResourcePriority::new(100, false),
+            )
+            .unwrap();
+        assert!(cache.mark_in_flight(&2));
+        cache
+            .insert_with_priority(3, "new", 4, 0, CacheResourcePriority::default())
+            .unwrap();
+
+        assert!(!cache.contains_key(&1));
+        assert!(cache.contains_key(&2));
+        assert!(cache.contains_key(&3));
+        assert_eq!(cache.budget().snapshot().in_flight_bytes, 4);
+    }
+
+    #[test]
+    fn aggregate_resource_budgets_preserve_domain_snapshots() {
+        let config = ResourceBudgetConfig::new(
+            CacheBudgetLimits::new(4, 8),
+            CacheBudgetLimits::new(8, 16),
+            CacheBudgetLimits::new(2, 4),
+        );
+        let mut budgets = ResourceBudgets::new(config).unwrap();
+        budgets
+            .get_mut(BudgetDomain::CpuCache)
+            .try_reserve(6)
+            .unwrap();
+        budgets.get_mut(BudgetDomain::GpuCache).record_upload(32);
+        let frame = FrameMetrics::default().with_resource_budgets(&budgets);
+
+        assert_eq!(frame.cpu_budget.unwrap().current_bytes, 6);
+        assert_eq!(frame.gpu_budget.unwrap().upload_bytes, 32);
+        assert_eq!(frame.resources.upload_bytes, 32);
+        assert_eq!(frame.transient_budget.unwrap().hard_limit_bytes, 4);
     }
 
     #[test]

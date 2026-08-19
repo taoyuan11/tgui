@@ -7,9 +7,13 @@
 
 use crate::accessibility::SemanticSnapshot;
 use crate::core::{
-    DenseArena, DpiScale, ElementId, Error, GenerationStamp, Result, RevisionSet, Size, WindowId,
+    DenseArena, DpiScale, ElementId, Error, GenerationStamp, ResourceId, ResourceRevision, Result,
+    RevisionSet, Size, WindowId,
 };
-use crate::diagnostics::{DirtyRootMetrics, FrameMetrics};
+use crate::diagnostics::{
+    BudgetDomain, CacheBudgetSnapshot, DirtyRootMetrics, FrameMetrics, ResourceBudgetConfig,
+    ResourceBudgetSnapshots, ResourceBudgets,
+};
 use crate::dirty::{DirtyBatch, DirtyFlags, DirtyNodeSpec, DirtyTree};
 use crate::event::{CommittedHitTarget, DispatchOutcome, EventDispatcher, UiEvent};
 use crate::layout::{LayoutEngine, LayoutPassReport, LayoutSnapshot};
@@ -23,6 +27,7 @@ use crate::widget::element::ElementTree;
 use crate::widget::{
     ElementNodeDiagnostics, ElementTreeStats, PropertyImpact, ReconcileReport, View, WidgetNode,
 };
+use std::collections::BTreeMap;
 use std::fmt;
 use std::marker::PhantomData;
 use std::rc::Rc;
@@ -38,6 +43,7 @@ pub struct WindowSpec {
     max_inner_size: Option<Size>,
     resizable: bool,
     dpi_scale: DpiScale,
+    resource_budgets: ResourceBudgetConfig,
 }
 
 impl WindowSpec {
@@ -72,6 +78,10 @@ impl WindowSpec {
         self.dpi_scale
     }
 
+    pub const fn resource_budgets(&self) -> ResourceBudgetConfig {
+        self.resource_budgets
+    }
+
     pub fn with_inner_size(mut self, size: Size) -> Self {
         self.inner_size = size;
         self
@@ -94,6 +104,11 @@ impl WindowSpec {
 
     pub fn with_dpi_scale(mut self, dpi_scale: DpiScale) -> Self {
         self.dpi_scale = dpi_scale;
+        self
+    }
+
+    pub fn with_resource_budgets(mut self, resource_budgets: ResourceBudgetConfig) -> Self {
+        self.resource_budgets = resource_budgets;
         self
     }
 
@@ -134,6 +149,9 @@ impl WindowSpec {
         // DpiScale can only be constructed through its validator; this call
         // documents the invariant without exposing its representation.
         DpiScale::new(self.dpi_scale.get()).map_err(Error::from)?;
+        self.resource_budgets.validate().map_err(|error| {
+            Error::invalid_input(Some("resource_budgets".to_owned()), error.to_string())
+        })?;
         Ok(())
     }
 }
@@ -147,6 +165,7 @@ impl Default for WindowSpec {
             max_inner_size: None,
             resizable: true,
             dpi_scale: DpiScale::ONE,
+            resource_budgets: ResourceBudgetConfig::default(),
         }
     }
 }
@@ -374,6 +393,70 @@ struct WindowState {
     view: Option<Rc<dyn View>>,
     frame_index: u64,
     frame_metrics: FrameMetrics,
+    resource_budgets: ResourceBudgets,
+    resource_request_serial: u64,
+    active_resource_requests: BTreeMap<ElementId, ResourceRequestTicket>,
+    resource_bindings: BTreeMap<ElementId, ResourceBinding>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ResourceBinding {
+    references: Vec<ResourceId>,
+    fingerprint: u64,
+}
+
+/// UI-thread ticket captured when an asynchronous resource request starts.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ResourceRequestTicket {
+    pub window: WindowId,
+    pub element: ElementId,
+    pub source: GenerationStamp,
+    pub requested_revision: ResourceRevision,
+    pub serial: u64,
+}
+
+/// Immutable worker/upload result applied only when its request ticket is current.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ResourceCompletion {
+    pub ticket: ResourceRequestTicket,
+    pub references: Vec<ResourceId>,
+    pub fingerprint: u64,
+    pub intrinsic_size_changed: bool,
+    pub upload_bytes: u64,
+}
+
+impl ResourceCompletion {
+    pub fn new(
+        ticket: ResourceRequestTicket,
+        references: impl IntoIterator<Item = ResourceId>,
+        fingerprint: u64,
+    ) -> Self {
+        Self {
+            ticket,
+            references: references.into_iter().collect(),
+            fingerprint,
+            intrinsic_size_changed: false,
+            upload_bytes: 0,
+        }
+    }
+
+    pub fn with_intrinsic_size_changed(mut self, changed: bool) -> Self {
+        self.intrinsic_size_changed = changed;
+        self
+    }
+
+    pub fn with_upload_bytes(mut self, upload_bytes: u64) -> Self {
+        self.upload_bytes = upload_bytes;
+        self
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ResourceCompletionReceipt {
+    pub accepted: bool,
+    pub stale: bool,
+    pub observable_changed: bool,
+    pub revision: ResourceRevision,
 }
 
 /// Result of processing one P2 dirty epoch and atomically committing its
@@ -456,6 +539,9 @@ impl Application {
     pub fn create_window(&mut self, spec: WindowSpec) -> Result<WindowId> {
         self.owner.assert_current()?;
         spec.validate()?;
+        let resource_budgets = ResourceBudgets::new(spec.resource_budgets).map_err(|error| {
+            Error::invalid_input(Some("resource_budgets".to_owned()), error.to_string())
+        })?;
         let id = self.windows.insert(WindowState {
             spec,
             snapshots: AtomicSnapshotStore::default(),
@@ -469,6 +555,10 @@ impl Application {
             view: None,
             frame_index: 0,
             frame_metrics: FrameMetrics::default(),
+            resource_budgets,
+            resource_request_serial: 0,
+            active_resource_requests: BTreeMap::new(),
+            resource_bindings: BTreeMap::new(),
         });
         if self.main_window.is_none() {
             self.main_window = Some(id);
@@ -951,6 +1041,165 @@ impl Application {
         Ok(())
     }
 
+    /// Captures the Element/source generations and resource revision used by a
+    /// worker request. Starting another request for the Element supersedes it.
+    pub fn begin_resource_request(
+        &mut self,
+        id: WindowId,
+        element: ElementId,
+        source: GenerationStamp,
+    ) -> Result<ResourceRequestTicket> {
+        self.owner.assert_current()?;
+        if !source.is_well_formed() {
+            return Err(Error::invalid_input(
+                Some("source".to_owned()),
+                "resource source generation must be non-zero",
+            ));
+        }
+        let state = self.window_state_mut(id)?;
+        if !state.elements.contains(element) {
+            return Err(Error::invalid_input(
+                Some("element".to_owned()),
+                "resource request targets a stale Element generation",
+            ));
+        }
+        state.resource_request_serial = state
+            .resource_request_serial
+            .checked_add(1)
+            .ok_or_else(|| Error::compile("resource_request", "request serial exhausted"))?;
+        let requested_revision = state
+            .snapshots
+            .committed()
+            .map(|snapshot| snapshot.resources().revision())
+            .unwrap_or(ResourceRevision::ZERO);
+        let ticket = ResourceRequestTicket {
+            window: id,
+            element,
+            source,
+            requested_revision,
+            serial: state.resource_request_serial,
+        };
+        state.active_resource_requests.insert(element, ticket);
+        Ok(ticket)
+    }
+
+    /// Applies a decoded/uploaded resource without allowing an old worker to
+    /// overwrite a rebound source. Accepted observable changes advance only
+    /// ResourceRevision and enter the normal RESOURCE/PAINT dirty path.
+    pub fn complete_resource_request(
+        &mut self,
+        completion: ResourceCompletion,
+    ) -> Result<ResourceCompletionReceipt> {
+        self.owner.assert_current()?;
+        let state = self.window_state_mut(completion.ticket.window)?;
+        let current_revision = state
+            .snapshots
+            .committed()
+            .map(|snapshot| snapshot.resources().revision())
+            .unwrap_or(ResourceRevision::ZERO);
+        let current = state
+            .active_resource_requests
+            .get(&completion.ticket.element)
+            .copied();
+        if current != Some(completion.ticket)
+            || !state.elements.contains(completion.ticket.element)
+            || completion.ticket.requested_revision > current_revision
+        {
+            return Ok(ResourceCompletionReceipt {
+                accepted: false,
+                stale: true,
+                observable_changed: false,
+                revision: current_revision,
+            });
+        }
+
+        let mut references = completion.references;
+        references.sort_unstable();
+        references.dedup();
+        let mut candidate_bindings = state.resource_bindings.clone();
+        candidate_bindings.insert(
+            completion.ticket.element,
+            ResourceBinding {
+                references,
+                fingerprint: completion.fingerprint,
+            },
+        );
+        let base = state
+            .snapshots
+            .committed()
+            .unwrap_or_else(|| Arc::new(CpuSnapshot::empty(RevisionSet::ZERO)));
+        let resources = resource_snapshot_for_bindings(&candidate_bindings, base.resources())?;
+        let observable_changed = !resources.observable_eq(base.resources());
+        if observable_changed {
+            let candidate = CpuSnapshot::new(
+                base.layout().clone(),
+                base.scene().clone(),
+                resources.clone(),
+                base.semantics().clone(),
+            )?;
+            state.snapshots.try_commit(candidate)?;
+        }
+        state.resource_bindings = candidate_bindings;
+        state
+            .active_resource_requests
+            .remove(&completion.ticket.element);
+        state
+            .resource_budgets
+            .get_mut(BudgetDomain::GpuCache)
+            .record_upload(completion.upload_bytes);
+
+        if observable_changed || completion.intrinsic_size_changed {
+            sync_dirty_topology(state);
+            if completion.intrinsic_size_changed {
+                state.layout.invalidate_measure(completion.ticket.element)?;
+            }
+            state.dirty.mark(
+                completion.ticket.element,
+                DirtyFlags::RESOURCE,
+                completion.intrinsic_size_changed,
+            )?;
+            state.frame_requested = true;
+        }
+        Ok(ResourceCompletionReceipt {
+            accepted: true,
+            stale: false,
+            observable_changed,
+            revision: resources.revision(),
+        })
+    }
+
+    pub fn resource_budget_snapshots(&self, id: WindowId) -> Option<ResourceBudgetSnapshots> {
+        self.windows
+            .get(id)
+            .map(|state| state.resource_budgets.snapshots())
+    }
+
+    pub fn reserve_resource_bytes(
+        &mut self,
+        id: WindowId,
+        domain: BudgetDomain,
+        bytes: u64,
+    ) -> Result<()> {
+        self.owner.assert_current()?;
+        self.window_state_mut(id)?
+            .resource_budgets
+            .get_mut(domain)
+            .try_reserve(bytes)
+            .map_err(|error| Error::resource(None, error.to_string(), true))
+    }
+
+    pub fn release_resource_bytes(
+        &mut self,
+        id: WindowId,
+        domain: BudgetDomain,
+        bytes: u64,
+    ) -> Result<CacheBudgetSnapshot> {
+        self.owner.assert_current()?;
+        let budget = self.window_state_mut(id)?.resource_budgets.get_mut(domain);
+        budget.release(bytes);
+        Ok(budget.snapshot())
+    }
+
     /// Computes any pending logical layout work and atomically replaces the
     /// window's CPU snapshot. A failed measurement or snapshot validation keeps
     /// both the previous committed snapshot and the dirty epoch retryable.
@@ -1015,10 +1264,12 @@ impl Application {
             .snapshots
             .committed()
             .unwrap_or_else(|| Arc::new(CpuSnapshot::empty(RevisionSet::ZERO)));
+        let resource_snapshot =
+            resource_snapshot_for_bindings(&state.resource_bindings, base.resources())?;
         let candidate = match CpuSnapshot::new(
             layout_snapshot.clone(),
             base.scene().clone(),
-            base.resources().clone(),
+            resource_snapshot,
             base.semantics().clone(),
         ) {
             Ok(candidate) => candidate,
@@ -1039,7 +1290,8 @@ impl Application {
             .committed()
             .expect("layout candidate was committed")
             .revisions();
-        let mut metrics = FrameMetrics::empty(state.frame_index, revisions);
+        let mut metrics = FrameMetrics::empty(state.frame_index, revisions)
+            .with_resource_budgets(&state.resource_budgets);
         metrics.phases.layout = layout_duration;
         metrics.dirty_elements = u64::try_from(batch.nodes.len()).unwrap_or(u64::MAX);
         metrics.dirty_roots = dirty_root_metrics(&batch);
@@ -1154,7 +1406,18 @@ impl Application {
                 scale,
             )
             .with_scene_revision(scene.revision())
-            .with_transient_budget(128 * 1024 * 1024);
+            .with_transient_budget(
+                state
+                    .resource_budgets
+                    .get(BudgetDomain::TransientGpu)
+                    .hard_limit_bytes()
+                    .saturating_sub(
+                        state
+                            .resource_budgets
+                            .get(BudgetDomain::TransientGpu)
+                            .current_bytes(),
+                    ),
+            );
             let compile_started = Instant::now();
             let compiled = state
                 .render_compiler
@@ -1193,6 +1456,17 @@ impl Application {
             metrics.scene.transient_vram_bytes = compiled.offscreen_cost.transient_vram_bytes;
             metrics.phases.paint = paint_duration;
             metrics.phases.compile = compile_duration;
+            let transient_bytes = compiled.offscreen_cost.transient_vram_bytes;
+            state
+                .resource_budgets
+                .get_mut(BudgetDomain::TransientGpu)
+                .try_reserve(transient_bytes)
+                .map_err(|error| Error::resource(None, error.to_string(), true))?;
+            metrics = metrics.with_resource_budgets(&state.resource_budgets);
+            state
+                .resource_budgets
+                .get_mut(BudgetDomain::TransientGpu)
+                .release(transient_bytes);
             state.frame_metrics = metrics;
             Ok(RenderFrameReceipt {
                 layout: layout_receipt,
@@ -1328,6 +1602,12 @@ impl Application {
 }
 
 fn sync_dirty_topology(state: &mut WindowState) {
+    state
+        .active_resource_requests
+        .retain(|element, _| state.elements.contains(*element));
+    state
+        .resource_bindings
+        .retain(|element, _| state.elements.contains(*element));
     let specs = state
         .elements
         .ids()
@@ -1341,6 +1621,47 @@ fn sync_dirty_topology(state: &mut WindowState) {
         })
         .collect::<Vec<_>>();
     state.dirty.sync(specs);
+}
+
+fn resource_snapshot_for_bindings(
+    bindings: &BTreeMap<ElementId, ResourceBinding>,
+    previous: &ResourceSnapshot,
+) -> Result<ResourceSnapshot> {
+    let mut references = Vec::new();
+    let mut fingerprint = if bindings.is_empty() {
+        0
+    } else {
+        0xcbf2_9ce4_8422_2325
+    };
+    let mix = |fingerprint: &mut u64, bytes: &[u8]| {
+        for byte in bytes {
+            *fingerprint ^= u64::from(*byte);
+            *fingerprint = fingerprint.wrapping_mul(0x0000_0100_0000_01b3);
+        }
+    };
+    for (element, binding) in bindings {
+        mix(&mut fingerprint, &element.slot().to_le_bytes());
+        mix(&mut fingerprint, &element.generation().to_le_bytes());
+        mix(&mut fingerprint, &binding.fingerprint.to_le_bytes());
+        for resource in &binding.references {
+            references.push(*resource);
+            mix(&mut fingerprint, &resource.slot().to_le_bytes());
+            mix(&mut fingerprint, &resource.generation().to_le_bytes());
+        }
+    }
+    let candidate = ResourceSnapshot::new(previous.revision(), references, fingerprint);
+    if candidate.observable_eq(previous) {
+        return Ok(previous.clone());
+    }
+    let revision = previous
+        .revision()
+        .checked_next()
+        .map_err(|error| Error::compile("resource_revision", error.to_string()))?;
+    Ok(ResourceSnapshot::new(
+        revision,
+        candidate.references().iter().copied(),
+        fingerprint,
+    ))
 }
 
 fn apply_reconcile_dirty(state: &mut WindowState, report: &ReconcileReport) -> Result<()> {

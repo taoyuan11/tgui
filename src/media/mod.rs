@@ -1,11 +1,20 @@
-//! Stable media/resource handles and immutable resource-reference snapshots.
-//!
-//! This module depends only on `core`. Decoders, SVG rasterizers, and GPU caches
-//! are optional later-phase adapters and never enter the P0 minimal path.
+//! Stable media handles, image decoding/cache contracts, and immutable
+//! resource-reference snapshots. Decoder crates remain feature-gated while
+//! source identity, generations, budgets, and headless caches stay available.
 
 use crate::core::ResourceRevision;
 pub use crate::core::{FontHandle, GlyphPageId, ImageHandle, ResourceId};
 use std::sync::Arc;
+
+mod image;
+
+pub use image::{
+    CpuImageCache, DecodedImage, GpuImageCacheError, GpuTexture, GpuTextureCache, ImageCacheStats,
+    ImageCompletion, ImageCompletionBatch, ImageDecodeRequest, ImageDecodeResult, ImageLoadError,
+    ImagePayload, ImagePresentation, ImageRegistry, ImageRequest, ImageRequestKey, ImageSize,
+    ImageSource, ImageSourceResolver, ImageState, ImageTextureUploader, LocalImageSourceResolver,
+    decode_image, spawn_image_decode,
+};
 
 /// Resource handles retained by a committed CPU frame.
 #[derive(Clone, Debug, PartialEq, Eq)]

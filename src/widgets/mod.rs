@@ -63,7 +63,7 @@ impl Widget for Container {
     }
 }
 
-/// Placeholder text declaration. Shaping and glyph resources arrive in P4.
+/// Backend-neutral text declaration shaped by [`crate::text::TextSystem`].
 #[derive(Clone, Debug)]
 pub struct Text {
     key: Option<WidgetKey>,

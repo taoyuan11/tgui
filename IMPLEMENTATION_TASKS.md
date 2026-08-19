@@ -207,38 +207,38 @@ P0 契约与骨架
 
 ### P4.1 Text System
 
-- [ ] 接入 `cosmic-text`，实现字体注册、字体 fallback、Unicode shaping、双向文本、换行和行布局。
-- [ ] 对外提供 TextLayout 测量、布局、命中测试、光标/选择几何和渲染 runs；逻辑文本与 Glyph Atlas 解耦。
-- [ ] 实现布局缓存，key 包含文本/span 代际、字体、字号、字重、语言、方向、宽度、换行策略和 DPI。
-- [ ] 处理 Latin、中文、RTL、emoji、字体切换和 DPI 切换；测试 shaping 不因 atlas 淘汰重复执行。
+- [x] 接入 `cosmic-text`，实现字体注册、字体 fallback、Unicode shaping、双向文本、换行和行布局。
+- [x] 对外提供 TextLayout 测量、布局、命中测试、光标/选择几何和渲染 runs；逻辑文本与 Glyph Atlas 解耦。
+- [x] 实现布局缓存，key 包含文本/span 代际、字体、字号、字重、语言、方向、宽度、换行策略和 DPI。
+- [x] 处理 Latin、中文、RTL、emoji、字体切换和 DPI 切换；测试 shaping 不因 atlas 淘汰重复执行。
 
 ### P4.2 Glyph Atlas
 
-- [ ] 按字体实例、物理字号、变体和颜色字形类型生成 atlas key，区分单色 mask 与彩色 glyph。
-- [ ] 实现分页 atlas 和空闲矩形分配器；每页有独立 generation。
-- [ ] 实现淘汰/重新栅格化；旧 page generation 不得继续渲染。
-- [ ] 资源完成只标记受影响 Text Run 的 `RESOURCE/PAINT`，不触发无关布局。
+- [x] 按字体实例、物理字号、变体和颜色字形类型生成 atlas key，区分单色 mask 与彩色 glyph。
+- [x] 实现分页 atlas 和空闲矩形分配器；每页有独立 generation。
+- [x] 实现淘汰/重新栅格化；旧 page generation 不得继续渲染。
+- [x] 资源完成只标记受影响 Text Run 的 `RESOURCE/PAINT`，不触发无关布局。
 
 ### P4.3 ImageSource 与 Image Cache
 
-- [ ] 定义支持路径、内存 bytes、URL、SVG 的 `ImageSource`、`ImageHandle` 和请求去重身份。
-- [ ] 实现 CPU 解码/栅格化缓存与 GPU Texture Cache；加载期间支持 placeholder 或兼容旧纹理。
-- [ ] 将图片/SVG 解码放入后台任务，回 UI 线程携带 source generation；过期结果必须丢弃。
-- [ ] 实现 LRU/clock 或等价有上限淘汰策略，统计命中、失败、占用、淘汰和上传。
+- [x] 定义支持路径、内存 bytes、URL、SVG 的 `ImageSource`、`ImageHandle` 和请求去重身份。
+- [x] 实现 CPU 解码/栅格化缓存与 GPU Texture Cache；加载期间支持 placeholder 或兼容旧纹理。
+- [x] 将图片/SVG 解码放入后台任务，回 UI 线程携带 source generation；过期结果必须丢弃。
+- [x] 实现 LRU/clock 或等价有上限淘汰策略，统计命中、失败、占用、淘汰和上传。
 
 ### P4.4 资源 Revision 与预算
 
-- [ ] 接入 `CpuCacheBudget`、`GpuCacheBudget`、`TransientGpuBudget`，支持软/硬上限、峰值、失败原因和默认/窗口覆盖配置。
-- [ ] 淘汰策略综合重建成本、可见性、最近使用和当前帧引用；in-flight 资源进入延迟回收队列。
-- [ ] 资源上传完成后做 generation/revision 校验，递增 `ResourceRevision` 并触发相关 `RESOURCE/PAINT`；固有尺寸变化额外触发 `LAYOUT`。
-- [ ] 将缓存/预算快照写入每帧 `FrameMetrics`，区分算法工作量、常驻占用和 transient 峰值。
+- [x] 接入 `CpuCacheBudget`、`GpuCacheBudget`、`TransientGpuBudget`，支持软/硬上限、峰值、失败原因和默认/窗口覆盖配置。
+- [x] 淘汰策略综合重建成本、可见性、最近使用和当前帧引用；in-flight 资源进入延迟回收队列。
+- [x] 资源上传完成后做 generation/revision 校验，递增 `ResourceRevision` 并触发相关 `RESOURCE/PAINT`；固有尺寸变化额外触发 `LAYOUT`。
+- [x] 将缓存/预算快照写入每帧 `FrameMetrics`，区分算法工作量、常驻占用和 transient 峰值。
 
 ### P4.5 P4 退出条件
 
-- [ ] 文本测量、命中、光标/选择、fallback 和多语言/DPI 测试通过。
-- [ ] glyph eviction 只导致受影响 glyph 重新栅格化；图片旧代际不能覆盖新绑定。
-- [ ] 超预算时有可诊断淘汰或降级，不会无限增长 RSS/VRAM；placeholder/旧资源可提交一致 CPU 快照。
-- [ ] GPU 不可用时 Text/Image 逻辑仍可用 headless 测试。
+- [x] 文本测量、命中、光标/选择、fallback 和多语言/DPI 测试通过。
+- [x] glyph eviction 只导致受影响 glyph 重新栅格化；图片旧代际不能覆盖新绑定。
+- [x] 超预算时有可诊断淘汰或降级，不会无限增长 RSS/VRAM；placeholder/旧资源可提交一致 CPU 快照。
+- [x] GPU 不可用时 Text/Image 逻辑仍可用 headless 测试。
 
 ---
 

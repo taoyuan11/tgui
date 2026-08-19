@@ -746,3 +746,52 @@ P1 暂不把 dependency phase 映射成 DirtyFlags，也不生成真实布局命
 - `cargo run --example p3_headless --no-default-features` 稳定输出 Render Node/Chunk、Paint
   Command、Compiled pass/batch/instance 数和 fingerprint。所有数字是功能 smoke baseline，
   不作跨设备性能承诺。
+
+## P4 实施记录（2026-08-19）
+
+### 实际取舍
+
+- `cosmic-text 0.17.0` 只负责字体数据库、fallback、Unicode/BiDi shaping、换行和行布局。
+  `TextLayout` 保存逻辑行、cluster、命中、caret/selection 和 render run；物理 raster key
+  带稳定 `FontHandle`，但不带 atlas page。布局缓存键覆盖文本/span 内容与代际、字体库
+  代际、family/size/weight/language/direction、宽度、wrap 和 DPI。atlas 淘汰不会清除或
+  重做 shaping；DPI 变化会选择新的物理 raster key，但逻辑几何仍使用逻辑像素。
+- Glyph Atlas 按字体实例、26.6 物理字号、变体和 Mask/Color 格式分组，使用分页 CPU
+  backing store 与空闲矩形分配器。每个 page slot 独立递增 generation；LRU 淘汰后旧
+  `GlyphPageId` 和 placement 立即失效。pending raster 请求按 glyph generation 去重，完成
+  或淘汰只返回实际依赖该 glyph/page 的 Text Run，并明确只失效 `RESOURCE/PAINT`。
+- 图片资源拆为稳定 `ImageSource`/`ImageRequestKey`、UI-owned generation registry、CPU
+  decoded cache 和 GPU texture cache。Path/Bytes 由本地 resolver 处理；URL 传输通过
+  `ImageSourceResolver` 注入，避免核心绑定 HTTP/TLS；SVG raster size 是请求身份的一部分。
+  后台 decode 结果经 `UiDispatcher` 同时校验 Window、source generation 和相关 revision。
+  replacement 在加载期间可继续引用旧纹理，失败或无旧资源时使用明确 placeholder。
+- `image` 和 `svg` 编解码分别保持 optional feature；`wgpu` 实现通用
+  `ImageTextureUploader`，上传 receipt 与 `GpuTextureCache` 持有真实 texture 所有权，
+  不会在 upload 返回前立即销毁对象。CPU/GPU cache 使用有界 LRU，并沿用 committed/
+  in-flight pin；通用淘汰器额外接受可见性和重建成本提示。
+- `ResourceBudgetConfig` 为 CPU cache、GPU cache 和 transient GPU 分别提供软/硬上限，
+  有全局默认值并可在 `WindowSpec` 覆盖。窗口持有三域累计统计，`FrameMetrics` 每帧记录
+  常驻 current/peak、hit/miss/evict/upload/failure/in-flight 与 transient 峰值；Render
+  Compiler 的 transient hard limit 直接来自该窗口剩余预算。
+- 异步资源通过 `ResourceRequestTicket` 捕获 Window/Element/source generation、请求 serial
+  和 `ResourceRevision`。只有仍为当前绑定的 completion 才能原子替换
+  `ResourceSnapshot`、递增 `ResourceRevision` 并进入 Dirty Tree；普通完成标记
+  `RESOURCE/PAINT`，固有尺寸变化同时清除 measure cache 并标记 `LAYOUT`。不同资源的并行
+  完成允许基于较旧但不回退的 revision 合并，旧 serial/generation 只能作为 stale 丢弃。
+
+### P4 基线结果
+
+本机 `aarch64-apple-darwin`、Rust stable 1.96.1 下：
+
+- `scripts/ci.sh` 全部通过，包括 rustfmt、最小/all-feature Clippy `-D warnings`、最小/默认/
+  desktop/render/text/image/svg/accessibility/webview/all feature 构建矩阵、最小与默认测试、
+  以及 P0-P3 四个 headless 示例。
+- 最小配置运行 120 个单元测试；默认配置运行 123 个单元测试。P4 公共合同覆盖 Text 5、
+  Glyph Atlas 5、Image 6、Resource/预算 2 个测试；`svg`/all-features 额外覆盖真实 SVG
+  rasterization。
+- Text 合同覆盖 Latin、中文、emoji、RTL/BiDi、wrap、styled span、测量、命中、caret、
+  selection、fallback、缓存身份与 DPI；Glyph 合同覆盖分页、Mask/Color 成本、请求去重、
+  page generation 和局部重新 raster；Image/Resource 合同覆盖请求去重、旧纹理 fallback、
+  后台 generation/revision 丢弃、CPU/GPU 淘汰、上传所有权、窗口预算和原子 revision。
+- GPU 不可用时，Text 使用 `--no-default-features --features text` 完成全部逻辑布局测试；
+  Image registry、placeholder、CPU/GPU cache 合同使用 fake uploader/headless 路径验证。

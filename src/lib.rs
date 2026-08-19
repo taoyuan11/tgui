@@ -1,9 +1,10 @@
 //! Transactional, data-oriented GUI foundations.
 //!
-//! P3 provides immutable widget declarations, a retained generational Element
-//! and Render Tree, reactive transactions and events, logical-pixel Taffy
-//! layout, typed Paint IR, chunk-cached scene compilation, and an optional wgpu
-//! executor. The minimal `--no-default-features` build remains fully headless.
+//! P4 provides immutable widget declarations, retained generational Element and
+//! Render trees, reactive transactions and events, logical-pixel Taffy layout,
+//! typed Paint IR, Unicode text shaping, paged glyph/image resources, bounded
+//! caches, and an optional wgpu executor. The minimal `--no-default-features`
+//! build remains fully headless.
 
 #![forbid(unsafe_code)]
 
@@ -28,8 +29,8 @@ pub mod widgets;
 
 pub use application::{
     Application, ApplicationTxnReceipt, AtomicSnapshotStore, BackgroundDispatchReceipt,
-    CpuSnapshot, EventDispatchReceipt, LayoutFrameReceipt, RenderFrameReceipt, WindowContext,
-    WindowSpec,
+    CpuSnapshot, EventDispatchReceipt, LayoutFrameReceipt, RenderFrameReceipt, ResourceCompletion,
+    ResourceCompletionReceipt, ResourceRequestTicket, WindowContext, WindowSpec,
 };
 pub use core::{
     Color, DpiScale, ElementId, Error, Point, Rect, RenderNodeId, Result, Size, WindowId,
