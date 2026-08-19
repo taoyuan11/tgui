@@ -157,49 +157,49 @@ P0 契约与骨架
 
 ### P3.1 保留式 Render Tree
 
-- [ ] 定义 `RenderNode`、`RenderNodeId`、边界/变换/裁剪/透明度/z-order 和命令区间。
-- [ ] 实现 Element 到 Render Tree 的收集、Render Boundary 和可缓存 Scene Chunk。
-- [ ] 为每个 chunk 记录 revision 元组、失效原因和前置条件；paint-only 更新只重录受影响 chunk。
-- [ ] 实现前置条件失效时的子树/整树重收集回退，禁止提交半成品。
-- [ ] 保证 Render Tree 不直接调用平台 GPU API。
+- [x] 定义 `RenderNode`、`RenderNodeId`、边界/变换/裁剪/透明度/z-order 和命令区间。
+- [x] 实现 Element 到 Render Tree 的收集、Render Boundary 和可缓存 Scene Chunk。
+- [x] 为每个 chunk 记录 revision 元组、失效原因和前置条件；paint-only 更新只重录受影响 chunk。
+- [x] 实现前置条件失效时的子树/整树重收集回退，禁止提交半成品。
+- [x] 保证 Render Tree 不直接调用平台 GPU API。
 
 ### P3.2 typed Paint IR 与 Canvas
 
-- [ ] 将 `Canvas` 实现为后端无关的命令记录/回放器，而不是 CPU 像素 buffer。
-- [ ] 定义语义化 `PaintCommand`：矩形、圆角矩形、路径、描边、颜色/渐变/阴影/透明度/变换、clip push/pop、Text Run、Image、Glyph Atlas、Layer/Backdrop、`NativeSurface` 占位。
-- [ ] 保持中等粒度；Path 内部线段由 Path 值聚合，禁止退化为大量 `SetColor`/`MoveTo`/`LineTo` 状态命令。
-- [ ] 为 Paint IR 提供稳定 debug/JSON 或二进制快照格式，并验证 clip/layer 栈平衡。
+- [x] 将 `Canvas` 实现为后端无关的命令记录/回放器，而不是 CPU 像素 buffer。
+- [x] 定义语义化 `PaintCommand`：矩形、圆角矩形、路径、描边、颜色/渐变/阴影/透明度/变换、clip push/pop、Text Run、Image、Glyph Atlas、Layer/Backdrop、`NativeSurface` 占位。
+- [x] 保持中等粒度；Path 内部线段由 Path 值聚合，禁止退化为大量 `SetColor`/`MoveTo`/`LineTo` 状态命令。
+- [x] 为 Paint IR 提供稳定 debug/JSON 或二进制快照格式，并验证 clip/layer 栈平衡。
 
 ### P3.3 Render Compiler 与 Compiled Scene
 
-- [ ] 定义 `RenderCompiler`、`CompiledScene`、render pass、batch、pipeline key、顶点/索引/instance 范围、纹理绑定、上传请求和资源代际。
-- [ ] 编译前验证 clip/layer 栈、变换、z-order、透明度和 Native Surface 边界，输出可诊断错误。
-- [ ] 将相邻兼容矩形编译为 instance buffer（多个 Paint Command 可对应一个 draw），Text/Image 编译为资源引用。
-- [ ] 按 chunk revision、Renderer capability、DPI、主题、字体、图片、glyph 和 Resource revision 生成缓存 key。
-- [ ] 复用未失效 chunk 的已编译结果；失败时保留上一份可提交场景或安全退化到子树/整树。
+- [x] 定义 `RenderCompiler`、`CompiledScene`、render pass、batch、pipeline key、顶点/索引/instance 范围、纹理绑定、上传请求和资源代际。
+- [x] 编译前验证 clip/layer 栈、变换、z-order、透明度和 Native Surface 边界，输出可诊断错误。
+- [x] 将相邻兼容矩形编译为 instance buffer（多个 Paint Command 可对应一个 draw），Text/Image 编译为资源引用。
+- [x] 按 chunk revision、Renderer capability、DPI、主题、字体、图片、glyph 和 Resource revision 生成缓存 key。
+- [x] 复用未失效 chunk 的已编译结果；失败时保留上一份可提交场景或安全退化到子树/整树。
 
 ### P3.4 Batch、Cache 与成本诊断
 
-- [ ] 实现 Scene Chunk、Compiled Scene、pipeline、顶点/索引/instance、纹理绑定的缓存接口。
-- [ ] 在裁剪、透明度、离屏层和 Native Surface 边界切分 batch，并记录原因。
-- [ ] 记录 Paint Command 数、batch/pass 数、缓存命中率、GPU 上传字节、chunk 重建数。
-- [ ] 为 Layer/Backdrop/透明度隔离记录 offscreen 尺寸、pass 数和 transient VRAM；超预算时返回错误或降级效果。
-- [ ] 首期明确不实现全局像素级脏矩形；保留稳定 Scene Chunk 后再评估。
+- [x] 实现 Scene Chunk、Compiled Scene、pipeline、顶点/索引/instance、纹理绑定的缓存接口。
+- [x] 在裁剪、透明度、离屏层和 Native Surface 边界切分 batch，并记录原因。
+- [x] 记录 Paint Command 数、batch/pass 数、缓存命中率、GPU 上传字节、chunk 重建数。
+- [x] 为 Layer/Backdrop/透明度隔离记录 offscreen 尺寸、pass 数和 transient VRAM；超预算时返回错误或降级效果。
+- [x] 首期明确不实现全局像素级脏矩形；保留稳定 Scene Chunk 后再评估。
 
 ### P3.5 wgpu 与 headless 后端
 
-- [ ] 实现 wgpu 初始化、窗口 surface、resize、DPI、交换链/提交和基础错误处理。
-- [ ] 实现矩形 instance batching、路径、clip、透明度和基础合成；普通 Button/Text/List 不得绕过该管线。
-- [ ] 实现 glyph/image 资源绑定接口、pipeline cache、设备重建和设备丢失恢复。
-- [ ] 实现基于 submission/fence 的延迟资源回收；committed/in-flight 引用的资源不得提前淘汰。
-- [ ] 提供无 GPU 的命令 renderer，稳定生成 Compiled Scene/Batch 快照。
+- [x] 实现 wgpu 初始化、窗口 surface、resize、DPI、交换链/提交和基础错误处理。
+- [x] 实现矩形 instance batching、路径、clip、透明度和基础合成；普通 Button/Text/List 不得绕过该管线。
+- [x] 实现 glyph/image 资源绑定接口、pipeline cache、设备重建和设备丢失恢复。
+- [x] 实现基于 submission/fence 的延迟资源回收；committed/in-flight 引用的资源不得提前淘汰。
+- [x] 提供无 GPU 的命令 renderer，稳定生成 Compiled Scene/Batch 快照。
 
 ### P3.6 P3 退出条件
 
-- [ ] Canvas、Paint IR、Render Compiler、Compiled Scene 和 GPU draw/batch 边界可分别快照和诊断。
-- [ ] 相邻五个 FillRect 能合并为一个包含五个 instance 的 QuadBatch。
-- [ ] clip/layer 栈错误、Native Surface 不兼容能力和 transient 超预算均可测试且不会提交半成品。
-- [ ] wgpu 后端至少通过 resize、DPI、透明度、纹理上传、设备丢失恢复测试；无 GPU 测试全数通过。
+- [x] Canvas、Paint IR、Render Compiler、Compiled Scene 和 GPU draw/batch 边界可分别快照和诊断。
+- [x] 相邻五个 FillRect 能合并为一个包含五个 instance 的 QuadBatch。
+- [x] clip/layer 栈错误、Native Surface 不兼容能力和 transient 超预算均可测试且不会提交半成品。
+- [x] wgpu 后端至少通过 resize、DPI、透明度、纹理上传、设备丢失恢复测试；无 GPU 测试全数通过。
 
 ---
 

@@ -8,7 +8,10 @@ use crate::core::{Color, DpiScale, ElementId, Error, Rect, Result, Size};
 use crate::core::{PropertyId, WidgetKey};
 use crate::diagnostics::{BudgetDomain, FixedBudgetResourceManager};
 use crate::layout::{LayoutEngine, LayoutPassReport, LayoutSnapshot, compare_layout_snapshots};
-use crate::render::{PaintCommand, SceneSnapshot};
+use crate::render::{
+    Canvas, ChunkPrerequisites, ChunkRevisionTuple, CompiledSceneSnapshot, PaintCommand,
+    RenderCompiler, RenderTree, RenderTreeReport, SceneSnapshot,
+};
 use crate::widget::element::ElementTree;
 use crate::widget::{
     ElementNodeDiagnostics, ElementTreeStats, PropertyValue, ReconcileReport, View, WidgetNode,
@@ -253,6 +256,106 @@ impl Default for LayoutHarness {
     }
 }
 
+/// GPU-free end-to-end Layout -> Render Tree -> Paint Compiler harness.
+/// It exposes immutable summaries rather than mutable renderer internals, so
+/// incremental scene tests can compare against a full rebuild deterministically.
+pub struct RenderHarness {
+    tree: ElementTree,
+    layout: LayoutEngine,
+    render_tree: RenderTree,
+    compiler: RenderCompiler,
+    frame: u64,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct RenderFrame {
+    pub layout: LayoutSnapshot,
+    pub scene: SceneSnapshot,
+    pub compiled: CompiledSceneSnapshot,
+    pub tree: RenderTreeReport,
+}
+
+impl RenderHarness {
+    pub fn new() -> Self {
+        Self {
+            tree: ElementTree::new(),
+            layout: LayoutEngine::new(),
+            render_tree: RenderTree::new(),
+            compiler: RenderCompiler::default(),
+            frame: 0,
+        }
+    }
+
+    pub fn mount(&mut self, widget: WidgetNode) -> Result<ReconcileReport> {
+        self.tree.mount(widget)
+    }
+    pub fn reconcile(&mut self, widget: WidgetNode) -> Result<ReconcileReport> {
+        self.tree.reconcile(widget)
+    }
+
+    pub fn render(&mut self, viewport: Size, scale: DpiScale) -> Result<RenderFrame> {
+        let inputs = self.tree.layout_inputs()?;
+        let root = self.tree.root();
+        let tree = &mut self.tree;
+        let (layout, _) = self.layout.compute(
+            inputs,
+            root,
+            viewport,
+            scale,
+            true,
+            |element, handle, input| {
+                tree.capture_phase_dependencies(
+                    element,
+                    crate::state::DependencyPhase::Measure,
+                    || handle.measure(input),
+                )
+            },
+        )?;
+        self.frame = self.frame.saturating_add(1);
+        let revisions = ChunkRevisionTuple {
+            layout: layout.revision(),
+            scene: crate::core::SceneRevision::new(self.frame),
+            resource: crate::core::ResourceRevision::ZERO,
+        };
+        let (scene, report) = self.render_tree.collect_elements(
+            &self.tree,
+            &layout,
+            revisions,
+            ChunkPrerequisites {
+                dpi_scale_bits: scale.get().to_bits(),
+                ..ChunkPrerequisites::default()
+            },
+            &std::collections::BTreeMap::new(),
+            true,
+        )?;
+        let context = crate::render::CompileContext::new(
+            crate::render::RendererCapabilities::default(),
+            scale,
+        )
+        .with_scene_revision(scene.revision());
+        let compiled = self
+            .compiler
+            .compile_tree(&self.render_tree, &context)?
+            .snapshot();
+        Ok(RenderFrame {
+            layout,
+            scene,
+            compiled,
+            tree: report,
+        })
+    }
+
+    pub fn render_tree(&self) -> &RenderTree {
+        &self.render_tree
+    }
+}
+
+impl Default for RenderHarness {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Stable textual representation of a recorded command stream.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CommandSnapshot {
@@ -282,9 +385,7 @@ impl CommandSnapshot {
 /// Backend-free command recorder with clip/transform stack validation.
 #[derive(Clone, Debug, Default)]
 pub struct TestRenderer {
-    commands: Vec<PaintCommand>,
-    clip_depth: usize,
-    transform_depth: usize,
+    canvas: Canvas,
 }
 
 impl TestRenderer {
@@ -293,29 +394,7 @@ impl TestRenderer {
     }
 
     pub fn record(&mut self, command: PaintCommand) -> Result<()> {
-        command.validate()?;
-        match &command {
-            PaintCommand::PushClip(_) => self.clip_depth += 1,
-            PaintCommand::PopClip => {
-                if self.clip_depth == 0 {
-                    return Err(Error::compile("headless_paint", "clip stack underflow"));
-                }
-                self.clip_depth -= 1;
-            }
-            PaintCommand::PushTransform(_) => self.transform_depth += 1,
-            PaintCommand::PopTransform => {
-                if self.transform_depth == 0 {
-                    return Err(Error::compile(
-                        "headless_paint",
-                        "transform stack underflow",
-                    ));
-                }
-                self.transform_depth -= 1;
-            }
-            _ => {}
-        }
-        self.commands.push(command);
-        Ok(())
+        self.canvas.record(command)
     }
 
     pub fn clear(&mut self, color: Color) -> Result<()> {
@@ -347,116 +426,43 @@ impl TestRenderer {
     }
 
     pub fn commands(&self) -> &[PaintCommand] {
-        &self.commands
+        self.canvas.commands()
     }
 
     pub fn snapshot(&self) -> Result<CommandSnapshot> {
-        if self.clip_depth != 0 || self.transform_depth != 0 {
-            return Err(Error::compile(
-                "headless_paint",
-                format!(
-                    "unbalanced stacks (clip {}, transform {})",
-                    self.clip_depth, self.transform_depth
-                ),
-            ));
-        }
-        Ok(make_snapshot(&self.commands))
+        let snapshot = self.canvas.snapshot()?;
+        Ok(CommandSnapshot {
+            text: snapshot.text().to_owned(),
+            command_count: snapshot.command_count(),
+            fingerprint: snapshot.fingerprint(),
+        })
     }
 
     pub fn finish(self) -> Result<CommandSnapshot> {
-        if self.clip_depth != 0 || self.transform_depth != 0 {
-            return Err(Error::compile(
-                "headless_paint",
-                "cannot finish a command stream with an unbalanced stack",
-            ));
-        }
-        Ok(make_snapshot(&self.commands))
+        let snapshot = self.canvas.snapshot()?;
+        Ok(CommandSnapshot {
+            text: snapshot.text().to_owned(),
+            command_count: snapshot.command_count(),
+            fingerprint: snapshot.fingerprint(),
+        })
     }
 
     pub fn render<I>(&mut self, commands: I) -> Result<CommandSnapshot>
     where
         I: IntoIterator<Item = PaintCommand>,
     {
-        let mut candidate = Self::new();
+        let mut candidate = self.canvas.clone();
         for command in commands {
             candidate.record(command)?;
         }
         let snapshot = candidate.snapshot()?;
-        *self = candidate;
-        Ok(snapshot)
+        self.canvas = candidate;
+        Ok(CommandSnapshot {
+            text: snapshot.text().to_owned(),
+            command_count: snapshot.command_count(),
+            fingerprint: snapshot.fingerprint(),
+        })
     }
-}
-
-fn make_snapshot(commands: &[PaintCommand]) -> CommandSnapshot {
-    let mut text = String::new();
-    let mut hash = 0xcbf29ce484222325_u64;
-    for (index, command) in commands.iter().enumerate() {
-        let line = format!("{index}:{}\n", format_command(command));
-        for byte in line.bytes() {
-            hash ^= u64::from(byte);
-            hash = hash.wrapping_mul(0x100000001b3);
-        }
-        text.push_str(&line);
-    }
-    CommandSnapshot {
-        text,
-        command_count: commands.len(),
-        fingerprint: hash,
-    }
-}
-
-fn format_command(command: &PaintCommand) -> String {
-    match command {
-        PaintCommand::Clear(color) => format!("clear {}", format_color(*color)),
-        PaintCommand::FillRect { rect, color } => {
-            format!("fill_rect {} {}", format_rect(*rect), format_color(*color))
-        }
-        PaintCommand::PushClip(clip) => match clip {
-            crate::core::Clip::Rect(rect) => format!("push_clip rect {}", format_rect(*rect)),
-            crate::core::Clip::RoundedRect { rect, radii } => format!(
-                "push_clip rounded_rect {} [{},{},{},{}]",
-                format_rect(*rect),
-                number(radii.top_left),
-                number(radii.top_right),
-                number(radii.bottom_right),
-                number(radii.bottom_left)
-            ),
-        },
-        PaintCommand::PopClip => "pop_clip".to_owned(),
-        PaintCommand::PushTransform(transform) => format!(
-            "push_transform [{},{},{},{},{},{}]",
-            number(transform.m11),
-            number(transform.m12),
-            number(transform.m21),
-            number(transform.m22),
-            number(transform.tx),
-            number(transform.ty)
-        ),
-        PaintCommand::PopTransform => "pop_transform".to_owned(),
-        PaintCommand::Marker(marker) => format!("marker {marker:?}"),
-    }
-}
-
-fn format_rect(rect: Rect) -> String {
-    format!(
-        "[{},{},{},{}]",
-        number(rect.origin.x),
-        number(rect.origin.y),
-        number(rect.size.width),
-        number(rect.size.height)
-    )
-}
-
-fn format_color(color: Color) -> String {
-    format!(
-        "#{:02X}{:02X}{:02X}{:02X}",
-        color.red, color.green, color.blue, color.alpha
-    )
-}
-
-fn number(value: f32) -> String {
-    let value = if value == 0.0 { 0.0 } else { value };
-    format!("{value:.6}")
 }
 
 /// Deterministic, manually advanced frame clock.

@@ -689,3 +689,60 @@ P1 暂不把 dependency phase 映射成 DirtyFlags，也不生成真实布局命
   `layout_revision=1 nodes=2 dirty_layout_roots=1 ... equivalent=true`。
 - P2 benchmark 固定覆盖 10/100/1,000 个节点；计时只作为可复现 smoke baseline，
   不宣称跨机器性能结论。
+
+## P3 实施记录（2026-08-19）
+
+### 实际取舍
+
+- `render` 拆为 `paint`、`scene`、`compiler`、`cache` 和 feature-gated `wgpu`
+  边界。Canvas、Paint IR、Render Tree、编译器、缓存和 headless renderer 在
+  `--no-default-features` 下可用；只有设备、surface 和 GPU object 进入 `render`
+  feature。Render Tree 和编译器不保存或调用任何平台 GPU API。
+- `Canvas` 是事务式命令记录器。单条 record 和整段 replay 先验证后发布；clip、
+  transform、layer 的 underflow/未闭合均拒绝。Paint IR 使用完整矩形/圆角矩形、
+  聚合 Path、stroke、gradient、shadow、TextRun、Image、GlyphAtlas、Layer/Backdrop
+  和 NativeSurface 语义命令，并输出稳定逐行 debug 快照与 FNV-1a fingerprint。
+- Render Node 使用现有 `RenderNodeId` 代际 arena，保留 Element 映射、父关系、
+  bounds、transform、clip、opacity、z-order 和 command range。根节点隐式形成 Render
+  Boundary，显式 boundary 形成独立 Scene Chunk；每个 chunk 保存 layout/scene/resource
+  revision、renderer/DPI/theme/font/image/glyph 前置条件、失效原因和 fingerprint。
+  descriptor 拓扑、代际、数值或命令验证失败时，候选树不会替换 committed tree。
+- `Application::render_window` 复用 P2 Dirty batch，按 Structure/Layout/Paint/Resource
+  原因重录受影响 chunk，再以同一个 `AtomicSnapshotStore` 提交 Layout/Scene/Resource/
+  Semantics。Scene 输出未变化时不提升 `SceneRevision`；收集、编译或快照校验失败时
+  同时恢复旧 CPU snapshot、LayoutEngine committed snapshot、Dirty epoch、frame metrics、
+  Render Tree 和 Compiled Scene，下一帧可以从同一批 invalidation 重试。
+- `RenderCompiler` 输出 pass、batch、pipeline key、quad instance、path vertex/index、
+  texture binding、upload request 和 offscreen cost。相邻兼容矩形进入同一 QuadBatch；
+  clip、transform、layer、pipeline 和 NativeSurface 形成可诊断 batch boundary。编译缓存
+  以 chunk revision、capability、DPI、theme、font、image、glyph、resource revision 为 key，
+  `compile_tree` 独立复用 chunk 后再合并范围；局部 paint 不重新编译未变 chunk。
+- Layer/Backdrop 先建立明确的 pass 与 transient VRAM 成本契约。超过硬预算时编译失败并
+  保留旧场景；backend capability 不支持 Backdrop/NativeSurface 时也返回可定位错误。
+  P3 不实现全局像素级 damage。P4 才提供真实 shaping、glyph atlas 填充和图片解码；
+  P3 已固定这些资源的代际引用、上传和纹理绑定接口。
+- `wgpu 26.0.1` 满足 Rust 1.85 MSRV，并按 DX12/Metal/Vulkan/GLES 开启平台 backend。
+  adapter 支持 headless device 或带窗口 `SurfaceTarget`，处理 surface configure、resize、
+  DPI、acquire/present、RGBA upload 和 recover_device。GPU executor 使用持久 pipeline、
+  instance quad、indexed path、scissor clip 和 source-over alpha；资源释放进入按 submission
+  编号收集的延迟队列。committed/in-flight cache pin 继续沿用 P0 预算管理器契约。
+- `RenderHarness` 提供无 GPU 的 Element -> Layout -> Render Tree -> Paint Compiler 端到端
+  路径；内建 Container/Button/Text 也走该路径。Text 当前产生资源引用命令而非 P4 shaping，
+  普通控件没有 Native Host 或平台绘制捷径。
+
+### P3 基线结果
+
+本机 `aarch64-apple-darwin`、Rust stable 1.96.1 下：
+
+- `cargo fmt --all -- --check`、最小/all-feature clippy、feature matrix、最小/默认/all-feature
+  测试和统一 `scripts/ci.sh` 入口通过。
+- 无 GPU 集覆盖 Paint 栈与快照、Render topology/chunk reuse、五个 FillRect 合并为一个
+  五 instance QuadBatch、chunk compiled-cache hit、NativeSurface capability、transient
+  超预算和 Application 原子 SceneRevision。
+- all-feature 真实 Metal headless device 测试覆盖 resize、1.5 DPI、半透明 quad、indexed
+  path、scissor clip、RGBA texture upload、command submission、设备重建和 submission
+  延迟回收；测试机没有创建真实 OS 窗口，surface configure/present 由通用 SurfaceTarget
+  路径和构建检查覆盖。
+- `cargo run --example p3_headless --no-default-features` 稳定输出 Render Node/Chunk、Paint
+  Command、Compiled pass/batch/instance 数和 fingerprint。所有数字是功能 smoke baseline，
+  不作跨设备性能承诺。

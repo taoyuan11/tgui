@@ -14,7 +14,10 @@ use crate::dirty::{DirtyBatch, DirtyFlags, DirtyNodeSpec, DirtyTree};
 use crate::event::{CommittedHitTarget, DispatchOutcome, EventDispatcher, UiEvent};
 use crate::layout::{LayoutEngine, LayoutPassReport, LayoutSnapshot};
 use crate::media::ResourceSnapshot;
-use crate::render::SceneSnapshot;
+use crate::render::{
+    ChunkPrerequisites, ChunkRevisionTuple, CompiledScene, CompiledSceneSnapshot, RenderCompiler,
+    RenderTree, RenderTreeReport, SceneSnapshot,
+};
 use crate::state::{TxnReceipt, UiCommand, UiDispatcher, UiInbox, UiThread, UpdateTxn};
 use crate::widget::element::ElementTree;
 use crate::widget::{
@@ -297,6 +300,10 @@ impl AtomicSnapshotStore {
         self.rejected_candidates
     }
 
+    pub(crate) fn restore_committed(&mut self, committed: Option<Arc<CpuSnapshot>>) {
+        self.committed = committed;
+    }
+
     pub fn try_commit(&mut self, candidate: CpuSnapshot) -> Result<CommitReceipt> {
         let result = self.commit_validated(candidate);
         if result.is_err() {
@@ -361,6 +368,8 @@ struct WindowState {
     elements: ElementTree,
     dirty: DirtyTree,
     layout: LayoutEngine,
+    render_tree: RenderTree,
+    render_compiler: RenderCompiler,
     events: EventDispatcher,
     view: Option<Rc<dyn View>>,
     frame_index: u64,
@@ -376,6 +385,15 @@ pub struct LayoutFrameReceipt {
     pub layout: LayoutPassReport,
     pub dirty_epoch: u64,
     pub metrics: FrameMetrics,
+}
+
+/// Result of one retained layout -> scene -> compile frame.
+#[derive(Clone, Debug, PartialEq)]
+pub struct RenderFrameReceipt {
+    pub layout: LayoutFrameReceipt,
+    pub scene: SceneSnapshot,
+    pub compiled: CompiledSceneSnapshot,
+    pub tree: RenderTreeReport,
 }
 
 /// Result of one complete capture/target/bubble dispatch and transaction.
@@ -445,6 +463,8 @@ impl Application {
             elements: ElementTree::new(),
             dirty: DirtyTree::new(),
             layout: LayoutEngine::new(),
+            render_tree: RenderTree::new(),
+            render_compiler: RenderCompiler::default(),
             events: EventDispatcher::new(),
             view: None,
             frame_index: 0,
@@ -1038,6 +1058,163 @@ impl Application {
 
     pub fn frame_metrics(&self, id: WindowId) -> Option<&FrameMetrics> {
         self.windows.get(id).map(|state| &state.frame_metrics)
+    }
+
+    /// Builds and compiles the retained Render Tree for the latest committed
+    /// logical layout. The prior tree and CPU snapshot remain intact if paint
+    /// collection, compilation, or atomic snapshot validation fails.
+    pub fn render_window(&mut self, id: WindowId) -> Result<RenderFrameReceipt> {
+        self.owner.assert_current()?;
+        let (
+            old_snapshot,
+            old_layout,
+            old_dirty,
+            old_frame_index,
+            old_frame_metrics,
+            old_tree,
+            old_compiled,
+            invalidations,
+        ) = {
+            let state = self.window_state_mut(id)?;
+            let old_dirty = state.dirty.clone();
+            let invalidations = old_dirty
+                .batch()
+                .nodes
+                .into_iter()
+                .map(|node| {
+                    let contains =
+                        |flag| node.self_flags.contains(flag) || node.subtree_flags.contains(flag);
+                    let reason = if contains(DirtyFlags::STRUCTURE) {
+                        crate::render::ChunkInvalidationReason::Structure
+                    } else if contains(DirtyFlags::LAYOUT) {
+                        crate::render::ChunkInvalidationReason::Layout
+                    } else if contains(DirtyFlags::RESOURCE) {
+                        crate::render::ChunkInvalidationReason::Resource
+                    } else {
+                        crate::render::ChunkInvalidationReason::Paint
+                    };
+                    (node.id, reason)
+                })
+                .collect::<std::collections::BTreeMap<_, _>>();
+            (
+                state.snapshots.committed(),
+                state.layout.committed().clone(),
+                old_dirty,
+                state.frame_index,
+                state.frame_metrics.clone(),
+                state.render_tree.clone(),
+                state.render_compiler.committed(),
+                invalidations,
+            )
+        };
+        let layout_receipt = self.layout_window(id)?;
+        let state = self.window_state_mut(id)?;
+        let old_scene = old_snapshot
+            .as_deref()
+            .map(|snapshot| snapshot.scene().clone())
+            .unwrap_or_else(|| SceneSnapshot::empty(crate::core::SceneRevision::ZERO));
+        let result = (|| {
+            let next_scene_revision = old_scene
+                .revision()
+                .checked_next()
+                .map_err(|error| Error::compile("scene_revision", error.to_string()))?;
+            let revisions = ChunkRevisionTuple {
+                layout: layout_receipt.snapshot.revision(),
+                scene: next_scene_revision,
+                resource: state
+                    .snapshots
+                    .committed()
+                    .map(|snapshot| snapshot.resources().revision())
+                    .unwrap_or(crate::core::ResourceRevision::ZERO),
+            };
+            let scale = state.spec.dpi_scale;
+            let paint_started = Instant::now();
+            let (candidate_scene, tree_report) = state.render_tree.collect_elements(
+                &state.elements,
+                &layout_receipt.snapshot,
+                revisions,
+                ChunkPrerequisites {
+                    dpi_scale_bits: scale.get().to_bits(),
+                    ..ChunkPrerequisites::default()
+                },
+                &invalidations,
+                false,
+            )?;
+            let paint_duration = paint_started.elapsed();
+            let scene_changed = candidate_scene.command_count() != old_scene.command_count()
+                || candidate_scene.chunk_count() != old_scene.chunk_count()
+                || candidate_scene.fingerprint() != old_scene.fingerprint();
+            let scene = if scene_changed {
+                candidate_scene
+            } else {
+                candidate_scene.with_revision(old_scene.revision())
+            };
+            let context = crate::render::CompileContext::new(
+                crate::render::RendererCapabilities::default(),
+                scale,
+            )
+            .with_scene_revision(scene.revision())
+            .with_transient_budget(128 * 1024 * 1024);
+            let compile_started = Instant::now();
+            let compiled = state
+                .render_compiler
+                .compile_tree(&state.render_tree, &context)?;
+            let compile_duration = compile_started.elapsed();
+            let base = state
+                .snapshots
+                .committed()
+                .unwrap_or_else(|| Arc::new(CpuSnapshot::empty(RevisionSet::ZERO)));
+            let candidate = CpuSnapshot::new(
+                layout_receipt.snapshot.clone(),
+                scene.clone(),
+                base.resources().clone(),
+                base.semantics().clone(),
+            )?;
+            state.snapshots.try_commit(candidate)?;
+            let mut metrics = layout_receipt.metrics.clone();
+            metrics.revisions = state
+                .snapshots
+                .committed()
+                .expect("render snapshot was committed")
+                .revisions()
+                .into();
+            metrics.scene.paint_commands =
+                u64::try_from(compiled.paint_command_count).unwrap_or(u64::MAX);
+            metrics.scene.render_chunks =
+                u64::try_from(tree_report.chunk_count).unwrap_or(u64::MAX);
+            metrics.scene.batches = u64::try_from(compiled.batch_count()).unwrap_or(u64::MAX);
+            metrics.scene.passes = u64::try_from(compiled.pass_count()).unwrap_or(u64::MAX);
+            metrics.scene.chunk_rebuilds =
+                u64::try_from(tree_report.chunks_rebuilt).unwrap_or(u64::MAX);
+            let cache = state.render_compiler.cache_stats();
+            metrics.scene.compiled_cache_hits = cache.hits;
+            metrics.scene.compiled_cache_misses = cache.misses;
+            metrics.scene.gpu_upload_bytes = compiled.upload_bytes();
+            metrics.scene.transient_vram_bytes = compiled.offscreen_cost.transient_vram_bytes;
+            metrics.phases.paint = paint_duration;
+            metrics.phases.compile = compile_duration;
+            state.frame_metrics = metrics;
+            Ok(RenderFrameReceipt {
+                layout: layout_receipt,
+                scene,
+                compiled: compiled.snapshot(),
+                tree: tree_report,
+            })
+        })();
+        if result.is_err() {
+            state.snapshots.restore_committed(old_snapshot);
+            state.layout.adopt_committed(old_layout);
+            state.dirty = old_dirty;
+            state.frame_index = old_frame_index;
+            state.frame_metrics = old_frame_metrics;
+            state.render_tree = old_tree;
+            state.render_compiler.restore_committed(old_compiled);
+        }
+        result
+    }
+
+    pub fn compiled_scene(&self, id: WindowId) -> Option<Arc<CompiledScene>> {
+        self.windows.get(id)?.render_compiler.committed()
     }
 
     pub fn layout_snapshot(&self, id: WindowId) -> Option<LayoutSnapshot> {
@@ -2115,5 +2292,78 @@ mod tests {
         let retry = application.layout_window(window).unwrap();
         assert_eq!(retry.dirty_epoch, 2);
         assert_eq!(retry.snapshot, committed);
+    }
+
+    #[test]
+    fn failed_render_rolls_back_layout_snapshot_dirty_epoch_and_metrics() {
+        struct Root;
+        let mut application = Application::new();
+        let window = application
+            .create_window(
+                WindowSpec::new("render rollback").with_inner_size(Size::new(100.0, 50.0)),
+            )
+            .unwrap();
+        application
+            .mount_widget(
+                window,
+                WidgetNode::new::<Root>().with_layout_style(
+                    LayoutStyle::default()
+                        .with_size(Dimension::Length(40.0), Dimension::Length(20.0)),
+                ),
+            )
+            .unwrap();
+        application.render_window(window).unwrap();
+
+        let (
+            before_snapshot,
+            before_layout,
+            before_dirty,
+            before_frame_index,
+            before_metrics,
+            before_tree,
+            before_compiled,
+        ) = {
+            let state = application.windows.get_mut(window).unwrap();
+            let committed = state.snapshots.committed().unwrap();
+            let saturated = CpuSnapshot::new(
+                committed.layout().clone(),
+                committed
+                    .scene()
+                    .clone()
+                    .with_revision(SceneRevision::new(u64::MAX)),
+                committed.resources().clone(),
+                committed.semantics().clone(),
+            )
+            .unwrap();
+            state.snapshots.restore_committed(Some(Arc::new(saturated)));
+            state.spec.inner_size = Size::new(200.0, 100.0);
+            let root = state.elements.root().unwrap();
+            state.dirty.mark(root, DirtyFlags::LAYOUT, false).unwrap();
+            (
+                state.snapshots.committed().unwrap(),
+                state.layout.committed().clone(),
+                state.dirty.batch(),
+                state.frame_index,
+                state.frame_metrics.clone(),
+                state.render_tree.snapshot(),
+                state.render_compiler.committed().unwrap().snapshot(),
+            )
+        };
+
+        assert!(application.render_window(window).is_err());
+        let state = application.windows.get(window).unwrap();
+        assert_eq!(
+            state.snapshots.committed().unwrap().as_ref(),
+            before_snapshot.as_ref()
+        );
+        assert_eq!(state.layout.committed(), &before_layout);
+        assert_eq!(state.dirty.batch(), before_dirty);
+        assert_eq!(state.frame_index, before_frame_index);
+        assert_eq!(state.frame_metrics, before_metrics);
+        assert_eq!(state.render_tree.snapshot(), before_tree);
+        assert_eq!(
+            state.render_compiler.committed().unwrap().snapshot(),
+            before_compiled
+        );
     }
 }

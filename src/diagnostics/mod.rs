@@ -570,6 +570,8 @@ pub struct SceneCostReport {
     pub batches: u64,
     pub passes: u64,
     pub chunk_rebuilds: u64,
+    pub compiled_cache_hits: u64,
+    pub compiled_cache_misses: u64,
     pub gpu_upload_bytes: u64,
     pub transient_vram_bytes: u64,
 }
