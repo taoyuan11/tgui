@@ -2,8 +2,10 @@ use super::cache::RenderCache;
 use super::paint::{BlendMode, Brush, Canvas, Paint, PaintCommand, Path, PathSegment, TextRun};
 use super::scene::RenderTree;
 use crate::core::{
-    Color, DpiScale, Error, Point, Rect, ResourceId, Result, SceneRevision, Transform2D,
+    Color, DpiScale, Error, GlyphPageId, Point, Rect, ResourceId, Result, SceneRevision,
+    Transform2D,
 };
+use crate::text::{GlyphContentType, GlyphPageSnapshot};
 use std::sync::Arc;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -35,6 +37,12 @@ pub struct CompileContext {
     pub font_revision: u64,
     pub image_revision: u64,
     pub glyph_revision: u64,
+    /// Glyph page snapshots that are available to the backend for this frame.
+    ///
+    /// The list is intentionally separate from `glyph_revision`: a page can
+    /// be unchanged while a different page is added, and the renderer needs
+    /// the page identity/content type in order to select the right texture.
+    pub glyph_page_uploads: Arc<[GlyphPageUpload]>,
     pub resource_revision: u64,
     pub scene_revision: SceneRevision,
     pub transient_budget_bytes: u64,
@@ -49,6 +57,7 @@ impl CompileContext {
             font_revision: 0,
             image_revision: 0,
             glyph_revision: 0,
+            glyph_page_uploads: Arc::from([]),
             resource_revision: 0,
             scene_revision: SceneRevision::ZERO,
             transient_budget_bytes: 128 * 1024 * 1024,
@@ -59,9 +68,56 @@ impl CompileContext {
         self.scene_revision = revision;
         self
     }
+    pub fn with_glyph_revision(mut self, revision: u64) -> Self {
+        self.glyph_revision = revision;
+        self
+    }
+    pub const fn with_font_revision(mut self, revision: u64) -> Self {
+        self.font_revision = revision;
+        self
+    }
     pub fn with_transient_budget(mut self, bytes: u64) -> Self {
         self.transient_budget_bytes = bytes;
         self
+    }
+
+    pub fn with_glyph_page_uploads(mut self, uploads: impl Into<Arc<[GlyphPageUpload]>>) -> Self {
+        self.glyph_page_uploads = uploads.into();
+        self
+    }
+}
+
+/// CPU-side contents of one glyph atlas page handed to the renderer.
+///
+/// A page revision changes whenever its texel contents change. The page ID
+/// includes the atlas slot generation, so a recycled slot cannot be confused
+/// with the page that previously occupied it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GlyphPageUpload {
+    pub page: GlyphPageId,
+    pub width: u32,
+    pub height: u32,
+    pub content_type: GlyphContentType,
+    pub revision: u64,
+    pub pixels: Arc<[u8]>,
+}
+
+impl GlyphPageUpload {
+    pub fn from_snapshot(snapshot: GlyphPageSnapshot) -> Self {
+        Self {
+            page: snapshot.descriptor.id,
+            width: snapshot.descriptor.width,
+            height: snapshot.descriptor.height,
+            content_type: snapshot.descriptor.key.content_type,
+            revision: snapshot.descriptor.revision,
+            pixels: snapshot.pixels,
+        }
+    }
+}
+
+impl From<GlyphPageSnapshot> for GlyphPageUpload {
+    fn from(snapshot: GlyphPageSnapshot) -> Self {
+        Self::from_snapshot(snapshot)
     }
 }
 
@@ -157,10 +213,14 @@ pub struct PathVertex {
     pub opacity: f32,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct TextureBinding {
     pub resource: ResourceId,
     pub generation: u32,
+    pub rect: [f32; 4],
+    pub uv: [f32; 4],
+    pub color: [f32; 4],
+    pub opacity: f32,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -207,6 +267,7 @@ pub struct CompiledScene {
     pub path_vertices: Vec<PathVertex>,
     pub path_indices: Vec<u32>,
     pub texture_bindings: Vec<TextureBinding>,
+    pub glyph_page_uploads: Vec<GlyphPageUpload>,
     pub uploads: Vec<UploadRequest>,
     pub paint_command_count: usize,
     pub fingerprint: u64,
@@ -263,6 +324,7 @@ struct CompileKey {
     font_revision: u64,
     image_revision: u64,
     glyph_revision: u64,
+    glyph_page_fingerprint: u64,
     resource_revision: u64,
 }
 
@@ -301,6 +363,8 @@ impl RenderCompiler {
         context: &CompileContext,
     ) -> Result<Arc<CompiledScene>> {
         let command_fingerprint = commands_fingerprint(commands);
+        let glyph_page_uploads =
+            referenced_glyph_page_uploads(commands, &context.glyph_page_uploads)?;
         let key = CompileKey {
             command_fingerprint,
             scene_revision: context.scene_revision.get(),
@@ -313,6 +377,7 @@ impl RenderCompiler {
             font_revision: context.font_revision,
             image_revision: context.image_revision,
             glyph_revision: context.glyph_revision,
+            glyph_page_fingerprint: glyph_uploads_fingerprint(&glyph_page_uploads),
             resource_revision: context.resource_revision,
         };
         if let Some(cached) = self.cache.get(&key).cloned() {
@@ -398,6 +463,10 @@ impl HeadlessRenderer {
 
 fn compile_commands(commands: &[PaintCommand], context: &CompileContext) -> Result<CompiledScene> {
     super::paint::validate_commands(commands)?;
+    let glyph_page_uploads = referenced_glyph_page_uploads(commands, &context.glyph_page_uploads)?;
+    for upload in &glyph_page_uploads {
+        validate_glyph_page_upload(upload, context.capabilities)?;
+    }
     let mut output = CompiledScene {
         scene_revision: context.scene_revision,
         passes: vec![RenderPass {
@@ -412,14 +481,38 @@ fn compile_commands(commands: &[PaintCommand], context: &CompileContext) -> Resu
         path_vertices: Vec::new(),
         path_indices: Vec::new(),
         texture_bindings: Vec::new(),
+        glyph_page_uploads,
         uploads: Vec::new(),
         paint_command_count: commands.len(),
         fingerprint: 0,
         offscreen_cost: OffscreenCost::default(),
     };
+    for page in &output.glyph_page_uploads {
+        output.uploads.push(UploadRequest {
+            kind: UploadKind::GlyphAtlas,
+            resource: Some(ResourceId::from_parts(
+                page.page.slot(),
+                page.page.generation(),
+            )),
+            bytes: u64::from(page.width)
+                .saturating_mul(u64::from(page.height))
+                .saturating_mul(u64::from(page.content_type.bytes_per_pixel())),
+            revision: page.revision,
+        });
+    }
     let mut state = CompileState::default();
+    let has_glyph_commands = commands
+        .iter()
+        .any(|command| matches!(command, PaintCommand::DrawGlyphAtlas { .. }));
     for (index, command) in commands.iter().enumerate() {
-        compile_command(&mut output, &mut state, command, index, context)?;
+        compile_command(
+            &mut output,
+            &mut state,
+            command,
+            index,
+            context,
+            has_glyph_commands,
+        )?;
     }
     flush_batch(&mut output, &mut state);
     output.batches = output
@@ -444,7 +537,6 @@ fn compile_commands(commands: &[PaintCommand], context: &CompileContext) -> Resu
     Ok(output)
 }
 
-#[derive(Default)]
 struct CompileState {
     clips: Vec<Option<Rect>>,
     transforms: Vec<Transform2D>,
@@ -456,6 +548,23 @@ struct CompileState {
     pass_stack: Vec<usize>,
     transient_bytes: u64,
     current_batch: Option<BatchBuilder>,
+}
+
+impl Default for CompileState {
+    fn default() -> Self {
+        Self {
+            clips: Vec::new(),
+            transforms: Vec::new(),
+            layers: Vec::new(),
+            current_clip: None,
+            current_transform: Transform2D::IDENTITY,
+            current_opacity: 1.0,
+            current_pass: 0,
+            pass_stack: Vec::new(),
+            transient_bytes: 0,
+            current_batch: None,
+        }
+    }
 }
 
 struct BatchBuilder {
@@ -478,6 +587,7 @@ fn compile_command(
     command: &PaintCommand,
     index: usize,
     context: &CompileContext,
+    has_glyph_commands: bool,
 ) -> Result<()> {
     match command {
         PaintCommand::Clear(_) | PaintCommand::Marker(_) => flush_batch(output, state),
@@ -606,7 +716,9 @@ fn compile_command(
             state.current_opacity = opacity;
             state.current_pass = state.pass_stack.pop().unwrap_or(0);
         }
-        PaintCommand::DrawTextRun(run) => add_text(output, state, run, index, context),
+        PaintCommand::DrawTextRun(run) => {
+            add_text(output, state, run, index, context, has_glyph_commands)
+        }
         PaintCommand::DrawImage {
             rect,
             image,
@@ -619,16 +731,24 @@ fn compile_command(
             *rect,
             ResourceId::from_parts(image.slot(), image.generation()),
             *opacity,
+            Color::rgb8(180, 180, 180),
             index,
             context,
         ),
-        PaintCommand::DrawGlyphAtlas { rect, page, .. } => add_binding(
+        PaintCommand::DrawGlyphAtlas {
+            rect,
+            uv,
+            page,
+            color,
+        } => add_binding_with_uv(
             output,
             state,
             PrimitiveKind::Glyph,
             *rect,
+            *uv,
             ResourceId::from_parts(page.slot(), page.generation()),
             1.0,
+            *color,
             index,
             context,
         ),
@@ -647,6 +767,7 @@ fn compile_command(
                 *rect,
                 *surface,
                 1.0,
+                Color::rgb8(80, 80, 80),
                 index,
                 context,
             );
@@ -781,21 +902,31 @@ fn add_path(
 
 fn add_text(
     output: &mut CompiledScene,
-    state: &mut CompileState,
+    _state: &mut CompileState,
     run: &TextRun,
     command: usize,
     context: &CompileContext,
+    has_glyph_commands: bool,
 ) {
-    add_binding(
-        output,
-        state,
-        PrimitiveKind::Text,
-        run.bounds,
-        run.layout,
-        1.0,
-        command,
-        context,
-    );
+    // DrawTextRun is retained metadata. Actual pixels are emitted by the
+    // following DrawGlyphAtlas commands, which carry page UVs and content
+    // type. Keeping this command out of texture batches avoids painting a
+    // fallback rectangle underneath every real glyph.
+    if run.glyph_page.is_none() || !has_glyph_commands {
+        // Preserve the deterministic degraded path when the text backend is
+        // disabled. A real atlas-backed run is metadata-only below.
+        add_binding(
+            output,
+            _state,
+            PrimitiveKind::Text,
+            run.bounds,
+            run.layout,
+            1.0,
+            run.color,
+            command,
+            context,
+        );
+    }
     output.uploads.push(UploadRequest {
         kind: UploadKind::TextRun,
         resource: Some(run.layout),
@@ -812,27 +943,66 @@ fn add_binding(
     rect: Rect,
     resource: ResourceId,
     opacity: f32,
+    fallback_color: Color,
+    command: usize,
+    context: &CompileContext,
+) {
+    add_binding_with_uv(
+        output,
+        state,
+        kind,
+        rect,
+        Rect::from_xywh(0.0, 0.0, 1.0, 1.0),
+        resource,
+        opacity,
+        fallback_color,
+        command,
+        context,
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+fn add_binding_with_uv(
+    output: &mut CompiledScene,
+    state: &mut CompileState,
+    kind: PrimitiveKind,
+    rect: Rect,
+    uv: Rect,
+    resource: ResourceId,
+    opacity: f32,
+    fallback_color: Color,
     command: usize,
     context: &CompileContext,
 ) {
     flush_with_reason(output, state, BatchBoundaryReason::Pipeline);
+    let rect = transformed_rect(rect, state.current_transform);
     let binding = output.texture_bindings.len();
     output.texture_bindings.push(TextureBinding {
         resource,
         generation: resource.generation(),
+        rect: [
+            rect.origin.x,
+            rect.origin.y,
+            rect.size.width,
+            rect.size.height,
+        ],
+        uv: [uv.origin.x, uv.origin.y, uv.size.width, uv.size.height],
+        color: color_parts(fallback_color),
+        opacity: state.current_opacity * opacity,
     });
-    output.uploads.push(UploadRequest {
-        kind: match kind {
-            PrimitiveKind::Image => UploadKind::Image,
-            PrimitiveKind::Glyph => UploadKind::GlyphAtlas,
-            _ => UploadKind::Vertex,
-        },
-        resource: Some(resource),
-        bytes: u64::from(rect.size.width.max(0.0) as u32)
-            .saturating_mul(u64::from(rect.size.height.max(0.0) as u32))
-            .saturating_mul(4),
-        revision: context.resource_revision,
-    });
+    if kind != PrimitiveKind::Glyph {
+        output.uploads.push(UploadRequest {
+            kind: match kind {
+                PrimitiveKind::Image => UploadKind::Image,
+                _ => UploadKind::Vertex,
+            },
+            resource: Some(resource),
+            bytes: u64::from(rect.size.width.max(0.0) as u32)
+                .saturating_mul(u64::from(rect.size.height.max(0.0) as u32))
+                .saturating_mul(4),
+            revision: context.resource_revision,
+        });
+    }
     state.current_batch = Some(BatchBuilder {
         kind,
         blend: BlendMode::SourceOver,
@@ -964,6 +1134,10 @@ fn color_rgba(color: ColorPaint) -> [f32; 4] {
     let color = match color {
         ColorPaint::Solid(color) | ColorPaint::Gradient(color) => color,
     };
+    color_parts(color)
+}
+
+fn color_parts(color: Color) -> [f32; 4] {
     [
         f32::from(color.red) / 255.0,
         f32::from(color.green) / 255.0,
@@ -989,12 +1163,154 @@ fn compiled_fingerprint(scene: &CompiledScene) -> u64 {
             hash = hash.wrapping_mul(0x100000001b3);
         }
     }
+    for upload in &scene.glyph_page_uploads {
+        hash_bytes(&mut hash, &upload.page.slot().to_le_bytes());
+        hash_bytes(&mut hash, &upload.page.generation().to_le_bytes());
+        hash_bytes(&mut hash, &upload.width.to_le_bytes());
+        hash_bytes(&mut hash, &upload.height.to_le_bytes());
+        hash_bytes(&mut hash, &upload.revision.to_le_bytes());
+        hash_bytes(&mut hash, &[content_type_tag(upload.content_type)]);
+        hash_bytes(&mut hash, &(upload.pixels.len() as u64).to_le_bytes());
+        hash_bytes(&mut hash, &upload.pixels);
+    }
+    for binding in &scene.texture_bindings {
+        hash_bytes(&mut hash, &binding.resource.slot().to_le_bytes());
+        hash_bytes(&mut hash, &binding.resource.generation().to_le_bytes());
+        for value in binding.rect {
+            hash_bytes(&mut hash, &value.to_bits().to_le_bytes());
+        }
+        for value in binding.uv {
+            hash_bytes(&mut hash, &value.to_bits().to_le_bytes());
+        }
+        for value in binding.color {
+            hash_bytes(&mut hash, &value.to_bits().to_le_bytes());
+        }
+        hash_bytes(&mut hash, &binding.opacity.to_bits().to_le_bytes());
+    }
     hash
 }
+
+fn hash_bytes(hash: &mut u64, bytes: &[u8]) {
+    for byte in bytes {
+        *hash ^= u64::from(*byte);
+        *hash = hash.wrapping_mul(0x100000001b3);
+    }
+}
+
+fn glyph_uploads_fingerprint(uploads: &[GlyphPageUpload]) -> u64 {
+    let mut hash = 0xcbf2_9ce4_8422_2325_u64;
+    for upload in uploads {
+        for value in [
+            u64::from(upload.page.slot()),
+            u64::from(upload.page.generation()),
+            u64::from(upload.width),
+            u64::from(upload.height),
+            upload.revision,
+            u64::from(content_type_tag(upload.content_type)),
+            upload.pixels.len() as u64,
+        ] {
+            hash ^= value;
+            hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+        }
+        hash_bytes(&mut hash, &upload.pixels);
+    }
+    hash
+}
+
+fn referenced_glyph_page_uploads(
+    commands: &[PaintCommand],
+    uploads: &[GlyphPageUpload],
+) -> Result<Vec<GlyphPageUpload>> {
+    let mut referenced = Vec::new();
+    for page in commands.iter().filter_map(|command| match command {
+        PaintCommand::DrawGlyphAtlas { page, .. } => Some(*page),
+        _ => None,
+    }) {
+        let Some(upload) = uploads
+            .iter()
+            .filter(|upload| upload.page == page)
+            .max_by_key(|upload| upload.revision)
+        else {
+            return Err(Error::compile(
+                "render_compiler",
+                format!(
+                    "glyph draw command references page {}:{} without an upload (available: {})",
+                    page.slot(),
+                    page.generation(),
+                    uploads
+                        .iter()
+                        .map(|upload| format!(
+                            "{}:{}",
+                            upload.page.slot(),
+                            upload.page.generation()
+                        ))
+                        .collect::<Vec<_>>()
+                        .join(",")
+                ),
+            ));
+        };
+        if referenced
+            .iter()
+            .any(|existing: &GlyphPageUpload| existing.page == page)
+        {
+            continue;
+        }
+        referenced.push(upload.clone());
+    }
+    Ok(referenced)
+}
+
+fn validate_glyph_page_upload(
+    upload: &GlyphPageUpload,
+    capabilities: RendererCapabilities,
+) -> Result<()> {
+    if !upload.page.is_well_formed() || upload.width == 0 || upload.height == 0 {
+        return Err(Error::compile(
+            "render_compiler",
+            "glyph page upload has an invalid identity or size",
+        ));
+    }
+    if upload.width > capabilities.max_texture_dimension_2d
+        || upload.height > capabilities.max_texture_dimension_2d
+    {
+        return Err(Error::compile(
+            "render_compiler",
+            "glyph page upload exceeds renderer texture limits",
+        ));
+    }
+    let expected = u64::from(upload.width)
+        .checked_mul(u64::from(upload.height))
+        .and_then(|pixels| pixels.checked_mul(u64::from(upload.content_type.bytes_per_pixel())))
+        .ok_or_else(|| Error::compile("render_compiler", "glyph page byte size overflow"))?;
+    if expected != upload.pixels.len() as u64 {
+        return Err(Error::compile(
+            "render_compiler",
+            "glyph page pixel data does not match its dimensions and format",
+        ));
+    }
+    Ok(())
+}
+
+const fn content_type_tag(content_type: GlyphContentType) -> u8 {
+    match content_type {
+        GlyphContentType::Mask => 0,
+        GlyphContentType::Color => 1,
+    }
+}
+
 fn estimate_scene_bytes(scene: &CompiledScene) -> u64 {
-    (scene.quad_instances.len() * std::mem::size_of::<QuadInstance>()
+    let geometry = (scene.quad_instances.len() * std::mem::size_of::<QuadInstance>()
         + scene.path_vertices.len() * std::mem::size_of::<PathVertex>()
-        + scene.path_indices.len() * std::mem::size_of::<u32>()) as u64
+        + scene.path_indices.len() * std::mem::size_of::<u32>()) as u64;
+    let bindings = (scene.texture_bindings.len() * std::mem::size_of::<TextureBinding>()) as u64;
+    let glyph_pages = scene
+        .glyph_page_uploads
+        .iter()
+        .map(|page| page.pixels.len() as u64)
+        .sum::<u64>();
+    geometry
+        .saturating_add(bindings)
+        .saturating_add(glyph_pages)
 }
 
 fn combine_scenes(
@@ -1016,6 +1332,7 @@ fn combine_scenes(
         path_vertices: Vec::new(),
         path_indices: Vec::new(),
         texture_bindings: Vec::new(),
+        glyph_page_uploads: Vec::new(),
         uploads: Vec::new(),
         paint_command_count,
         fingerprint: 0,
@@ -1042,7 +1359,20 @@ fn combine_scenes(
         combined
             .texture_bindings
             .extend_from_slice(&scene.texture_bindings);
-        combined.uploads.extend_from_slice(&scene.uploads);
+        merge_glyph_page_uploads(&mut combined.glyph_page_uploads, &scene.glyph_page_uploads);
+        for upload in &scene.uploads {
+            if upload.kind == UploadKind::GlyphAtlas {
+                if let Some(existing) = combined.uploads.iter_mut().find(|existing| {
+                    existing.kind == UploadKind::GlyphAtlas && existing.resource == upload.resource
+                }) {
+                    if existing.revision <= upload.revision {
+                        *existing = *upload;
+                    }
+                    continue;
+                }
+            }
+            combined.uploads.push(*upload);
+        }
         for pass in &scene.passes {
             let mut pass = pass.clone();
             for batch in &mut pass.batches {
@@ -1084,6 +1414,24 @@ fn combine_scenes(
             });
     combined.fingerprint = compiled_fingerprint(&combined);
     combined
+}
+
+fn merge_glyph_page_uploads(destination: &mut Vec<GlyphPageUpload>, uploads: &[GlyphPageUpload]) {
+    for upload in uploads {
+        if let Some(existing) = destination
+            .iter_mut()
+            .find(|existing| existing.page == upload.page)
+        {
+            // Chunks normally carry the same snapshot. Keeping the newest
+            // revision also handles a page that was updated between chunk
+            // compilation without emitting duplicate GPU uploads.
+            if existing.revision <= upload.revision {
+                *existing = upload.clone();
+            }
+        } else {
+            destination.push(upload.clone());
+        }
+    }
 }
 
 fn offset_batch(
@@ -1128,6 +1476,129 @@ mod tests {
         assert_eq!(scene.batch_count(), 1);
         assert_eq!(scene.quad_instance_count(), 5);
     }
+
+    #[test]
+    fn compiled_quads_default_to_fully_opaque() {
+        let commands = [PaintCommand::FillRect {
+            rect: Rect::from_xywh(0.0, 0.0, 4.0, 4.0),
+            color: Color::WHITE,
+        }];
+        let context = CompileContext::new(RendererCapabilities::default(), DpiScale::ONE);
+        let scene = RenderCompiler::default()
+            .compile(&commands, &context)
+            .unwrap();
+        assert_eq!(scene.quad_instances.len(), 1);
+        assert_eq!(scene.quad_instances[0].opacity, 1.0);
+    }
+
+    #[test]
+    fn glyph_binding_preserves_uv_and_page_upload() {
+        let page = GlyphPageId::from_parts(3, 2);
+        let upload = GlyphPageUpload {
+            page,
+            width: 4,
+            height: 4,
+            content_type: GlyphContentType::Mask,
+            revision: 7,
+            pixels: Arc::from([0_u8; 16]),
+        };
+        let command = PaintCommand::DrawGlyphAtlas {
+            rect: Rect::from_xywh(2.0, 3.0, 8.0, 10.0),
+            uv: Rect::from_xywh(0.25, 0.5, 0.25, 0.25),
+            page,
+            color: Color::WHITE,
+        };
+        let context = CompileContext::new(RendererCapabilities::default(), DpiScale::ONE)
+            .with_glyph_page_uploads(Arc::from([upload.clone()]));
+        let scene = RenderCompiler::default()
+            .compile(&[command], &context)
+            .unwrap();
+        assert_eq!(scene.glyph_page_uploads, vec![upload]);
+        assert_eq!(scene.texture_bindings.len(), 1);
+        assert_eq!(scene.texture_bindings[0].uv, [0.25, 0.5, 0.25, 0.25]);
+        assert_eq!(scene.uploads[0].kind, UploadKind::GlyphAtlas);
+        assert_eq!(scene.uploads[0].bytes, 16);
+    }
+
+    #[test]
+    fn unreferenced_glyph_pages_do_not_enter_chunk_uploads() {
+        let page = GlyphPageId::from_parts(1, 1);
+        let upload = GlyphPageUpload {
+            page,
+            width: 2,
+            height: 2,
+            content_type: GlyphContentType::Mask,
+            revision: 1,
+            pixels: Arc::from([0_u8; 4]),
+        };
+        let context = CompileContext::new(RendererCapabilities::default(), DpiScale::ONE)
+            .with_glyph_page_uploads(Arc::from([upload]));
+        let command = PaintCommand::FillRect {
+            rect: Rect::from_xywh(0.0, 0.0, 1.0, 1.0),
+            color: Color::WHITE,
+        };
+        let scene = RenderCompiler::default()
+            .compile(&[command], &context)
+            .unwrap();
+        assert!(scene.glyph_page_uploads.is_empty());
+        assert!(scene.uploads.is_empty());
+    }
+
+    #[test]
+    fn glyph_page_upload_is_required_for_glyph_commands() {
+        let page = GlyphPageId::from_parts(8, 1);
+        let command = PaintCommand::DrawGlyphAtlas {
+            rect: Rect::from_xywh(0.0, 0.0, 1.0, 1.0),
+            uv: Rect::from_xywh(0.0, 0.0, 1.0, 1.0),
+            page,
+            color: Color::WHITE,
+        };
+        let context = CompileContext::new(RendererCapabilities::default(), DpiScale::ONE);
+        let error = RenderCompiler::default()
+            .compile(&[command], &context)
+            .expect_err("missing glyph page upload must be diagnosed");
+        assert!(error.to_string().contains("without an upload"));
+    }
+
+    #[test]
+    fn glyph_page_pixels_participate_in_the_compile_cache_key() {
+        let page = GlyphPageId::from_parts(9, 1);
+        let command = PaintCommand::DrawGlyphAtlas {
+            rect: Rect::from_xywh(0.0, 0.0, 1.0, 1.0),
+            uv: Rect::from_xywh(0.0, 0.0, 1.0, 1.0),
+            page,
+            color: Color::WHITE,
+        };
+        let mut compiler = RenderCompiler::default();
+        let first = GlyphPageUpload {
+            page,
+            width: 2,
+            height: 2,
+            content_type: GlyphContentType::Mask,
+            revision: 1,
+            pixels: Arc::from([0_u8; 4]),
+        };
+        let second = GlyphPageUpload {
+            pixels: Arc::from([1_u8, 0, 0, 0]),
+            ..first.clone()
+        };
+        let first_scene = compiler
+            .compile(
+                std::slice::from_ref(&command),
+                &CompileContext::new(RendererCapabilities::default(), DpiScale::ONE)
+                    .with_glyph_page_uploads(Arc::from([first])),
+            )
+            .unwrap();
+        let second_scene = compiler
+            .compile(
+                &[command],
+                &CompileContext::new(RendererCapabilities::default(), DpiScale::ONE)
+                    .with_glyph_page_uploads(Arc::from([second])),
+            )
+            .unwrap();
+        assert_ne!(first_scene.fingerprint, second_scene.fingerprint);
+    }
+
     #[test]
     fn invalid_native_surface_does_not_replace_committed_scene() {
         let context = CompileContext::new(RendererCapabilities::default(), DpiScale::ONE);

@@ -6,7 +6,9 @@
 use crate::accessibility::{ActionKind, Role, Semantics};
 use crate::core::{ImageHandle, PropertyId, Result, Size, WidgetKey};
 use crate::event::EventHandler;
-use crate::layout::LayoutStyle;
+use crate::layout::{
+    AvailableDimension, LayoutStyle, MeasureHandle, MeasureInput, MeasureOutput, MeasureSpec,
+};
 use crate::state::UiCommand;
 use crate::widget::{
     BuildContext, LAYOUT_HEIGHT, LAYOUT_WIDTH, OPACITY, PropertyImpact, Widget, WidgetNode,
@@ -105,11 +107,60 @@ impl Text {
 
 impl Widget for Text {
     fn build(&self, _context: &mut BuildContext) -> Result<WidgetNode> {
+        let content = Arc::clone(&self.content);
+        let content_generation = content
+            .bytes()
+            .fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| {
+                (hash ^ u64::from(byte)).wrapping_mul(0x0000_0100_0000_01b3)
+            });
+        let measure_content = Arc::clone(&content);
+        let measure = MeasureHandle::text(move |input: MeasureInput| {
+            let style = crate::text::TextStyle::default();
+            #[cfg(feature = "text")]
+            {
+                let mut text_system = crate::text::TextSystem::new();
+                let mut request = crate::text::TextRequest::new(measure_content.clone(), style)
+                    .with_dpi(input.scale)
+                    .with_wrap(crate::text::WrapStrategy::WordOrGlyph);
+                if let AvailableDimension::Definite(width) = input.available_space.width {
+                    request = request.with_width(width.max(0.0));
+                }
+                let layout = text_system.layout(&request)?;
+                let metrics = layout.measure();
+                Ok(MeasureOutput::new(metrics.size)
+                    .with_baseline(metrics.first_baseline.unwrap_or(0.0)))
+            }
+            #[cfg(not(feature = "text"))]
+            {
+                let advance = style.font_size * 0.6;
+                let intrinsic_width = measure_content.chars().count() as f32 * advance;
+                let width = match input.available_space.width {
+                    AvailableDimension::Definite(value) if value.is_finite() => {
+                        intrinsic_width.min(value.max(0.0))
+                    }
+                    _ => intrinsic_width,
+                };
+                let lines = if width > 0.0 {
+                    (intrinsic_width / width.max(advance)).ceil().max(1.0)
+                } else {
+                    1.0
+                };
+                Ok(
+                    MeasureOutput::new(Size::new(width.max(0.0), style.line_height * lines))
+                        .with_baseline(style.font_size),
+                )
+            }
+        });
         Ok(
             with_presentation_properties(WidgetNode::from_type(text_type()))
                 .with_optional_key(self.key.clone())
                 .with_property(TEXT_CONTENT, self.content.clone())
                 .with_property_impact(TEXT_CONTENT, PropertyImpact::LAYOUT)
+                .with_measure(
+                    MeasureSpec::new(measure)
+                        .with_content_generation(content_generation)
+                        .with_font_generation(0),
+                )
                 // Accessibility reads logical text, never glyph-atlas output.
                 .with_semantics(Semantics::text(self.content.clone())),
         )

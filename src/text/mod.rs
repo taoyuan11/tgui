@@ -9,8 +9,8 @@ mod glyph_atlas;
 pub use glyph_atlas::{
     AtlasRect, GlyphAtlas, GlyphAtlasConfig, GlyphAtlasKey, GlyphAtlasStats,
     GlyphCompletionOutcome, GlyphContentType, GlyphInvalidation, GlyphInvalidationPhases, GlyphKey,
-    GlyphLookup, GlyphPageDescriptor, GlyphPlacement, GlyphRaster, GlyphRasterCompletion,
-    GlyphRasterRequest, GlyphVariant, PhysicalFontSize,
+    GlyphLookup, GlyphPageDescriptor, GlyphPageSnapshot, GlyphPlacement, GlyphRaster,
+    GlyphRasterCompletion, GlyphRasterRequest, GlyphVariant, PhysicalFontSize,
 };
 
 use crate::core::{DpiScale, Error, FontHandle, Point, Rect, Result, Size};
@@ -23,10 +23,14 @@ use std::sync::Arc;
 
 #[cfg(feature = "text")]
 use cosmic_text::{
-    Align as CosmicAlign, Attrs, Buffer, Family as CosmicFamily, FontSystem,
-    LineIter as CosmicLineIter, Metrics, Shaping, Style as CosmicStyle,
-    SubpixelBin as CosmicSubpixelBin, Weight as CosmicWeight, Wrap as CosmicWrap,
+    Align as CosmicAlign, Attrs, Buffer, CacheKey, CacheKeyFlags, Family as CosmicFamily,
+    FontSystem, LineIter as CosmicLineIter, Metrics, Shaping, Style as CosmicStyle,
+    SubpixelBin as CosmicSubpixelBin, SwashCache, SwashContent, Weight as CosmicWeight,
+    Wrap as CosmicWrap,
 };
+
+#[cfg(feature = "text")]
+use fontdb::ID as CosmicFontId;
 
 pub const BACKEND_ENABLED: bool = cfg!(feature = "text");
 
@@ -580,6 +584,16 @@ const fn subpixel_fingerprint(bin: SubpixelBin) -> u64 {
     }
 }
 
+#[cfg(feature = "text")]
+const fn cosmic_subpixel_bin(bin: SubpixelBin) -> CosmicSubpixelBin {
+    match bin {
+        SubpixelBin::Zero => CosmicSubpixelBin::Zero,
+        SubpixelBin::One => CosmicSubpixelBin::One,
+        SubpixelBin::Two => CosmicSubpixelBin::Two,
+        SubpixelBin::Three => CosmicSubpixelBin::Three,
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct LayoutGlyph {
     pub cluster: Range<usize>,
@@ -890,7 +904,11 @@ pub struct TextSystem {
     #[cfg(feature = "text")]
     font_system: FontSystem,
     #[cfg(feature = "text")]
+    swash_cache: SwashCache,
+    #[cfg(feature = "text")]
     font_handles: HashMap<FontFaceId, FontHandle>,
+    #[cfg(feature = "text")]
+    font_ids: HashMap<FontFaceId, CosmicFontId>,
     #[cfg(feature = "text")]
     next_font_slot: u32,
     cache: HashMap<TextLayoutKey, CacheEntry>,
@@ -916,29 +934,39 @@ impl TextSystem {
         #[cfg(not(feature = "text"))]
         let _ = capacity;
         #[cfg(feature = "text")]
-        let (font_system, font_handles, next_font_slot) = {
+        let (font_system, font_handles, font_ids, next_font_slot) = {
             let font_system = FontSystem::new();
-            let font_handles = font_system
+            let faces = font_system
                 .db()
                 .faces()
                 .enumerate()
-                .filter_map(|(index, face)| {
-                    u32::try_from(index).ok().map(|slot| {
-                        (
-                            FontFaceId(Arc::from(face.id.to_string())),
-                            FontHandle::from_parts(slot, 1),
-                        )
-                    })
+                .filter_map(|(index, face)| u32::try_from(index).ok().map(|slot| (slot, face.id)))
+                .collect::<Vec<_>>();
+            let font_handles = faces
+                .iter()
+                .map(|(slot, id)| {
+                    (
+                        FontFaceId(Arc::from(id.to_string())),
+                        FontHandle::from_parts(*slot, 1),
+                    )
                 })
                 .collect::<HashMap<_, _>>();
+            let font_ids = faces
+                .into_iter()
+                .map(|(_, id)| (FontFaceId(Arc::from(id.to_string())), id))
+                .collect::<HashMap<_, _>>();
             let next_font_slot = u32::try_from(font_handles.len()).unwrap_or(u32::MAX);
-            (font_system, font_handles, next_font_slot)
+            (font_system, font_handles, font_ids, next_font_slot)
         };
         Self {
             #[cfg(feature = "text")]
             font_system,
             #[cfg(feature = "text")]
+            swash_cache: SwashCache::new(),
+            #[cfg(feature = "text")]
             font_handles,
+            #[cfg(feature = "text")]
+            font_ids,
             #[cfg(feature = "text")]
             next_font_slot,
             cache: HashMap::new(),
@@ -992,6 +1020,7 @@ impl TextSystem {
                 .filter(|face| !previous.contains(&face.id.to_string()))
                 .map(|face| {
                     (
+                        face.id,
                         FontFaceId(Arc::from(face.id.to_string())),
                         face.families
                             .iter()
@@ -1012,9 +1041,10 @@ impl TextSystem {
             }
             let faces = faces
                 .into_iter()
-                .map(|(id, families, post_script_name, weight)| {
+                .map(|(font_id, id, families, post_script_name, weight)| {
                     let handle =
                         resolve_font_handle(&mut self.font_handles, &mut self.next_font_slot, &id)?;
+                    self.font_ids.insert(id.clone(), font_id);
                     Ok(RegisteredFontFace {
                         handle,
                         id,
@@ -1092,6 +1122,66 @@ impl TextSystem {
                 },
             );
             Ok(layout)
+        }
+    }
+
+    /// Rasterizes one shaped glyph without coupling logical layout cache state
+    /// to atlas residency. The returned format selects the compatible page type.
+    pub fn rasterize_glyph(
+        &mut self,
+        key: &GlyphRasterKey,
+    ) -> Result<Option<(GlyphContentType, GlyphRaster)>> {
+        #[cfg(not(feature = "text"))]
+        {
+            let _ = key;
+            Err(Error::degraded(
+                "glyph rasterization",
+                "disabled text feature",
+                "glyph rasterization requires the `text` feature",
+            ))
+        }
+        #[cfg(feature = "text")]
+        {
+            let font_id = self.font_ids.get(&key.font_face).copied().ok_or_else(|| {
+                Error::resource(None, "shaped glyph references an unknown font face", true)
+            })?;
+            let cache_key = CacheKey {
+                font_id,
+                glyph_id: key.glyph_id,
+                font_size_bits: key.physical_size_bits,
+                x_bin: cosmic_subpixel_bin(key.x_bin),
+                y_bin: cosmic_subpixel_bin(key.y_bin),
+                font_weight: CosmicWeight(key.weight.get()),
+                flags: CacheKeyFlags::from_bits_retain(key.flags),
+            };
+            let Some(image) = self
+                .swash_cache
+                .get_image(&mut self.font_system, cache_key)
+                .as_ref()
+                .cloned()
+            else {
+                return Ok(None);
+            };
+            if image.placement.width == 0 || image.placement.height == 0 {
+                return Ok(None);
+            }
+            let (content_type, pixels) = match image.content {
+                SwashContent::Mask => (GlyphContentType::Mask, image.data),
+                SwashContent::Color => (GlyphContentType::Color, image.data),
+                SwashContent::SubpixelMask => {
+                    let pixels = image
+                        .data
+                        .chunks_exact(4)
+                        .map(|pixel| *pixel.iter().max().unwrap_or(&0))
+                        .collect();
+                    (GlyphContentType::Mask, pixels)
+                }
+            };
+            Ok(Some((
+                content_type,
+                GlyphRaster::new(image.placement.width, image.placement.height, pixels)
+                    .with_offset(image.placement.left, image.placement.top),
+            )))
         }
     }
 

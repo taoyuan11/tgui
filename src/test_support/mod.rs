@@ -9,9 +9,10 @@ use crate::core::{PropertyId, WidgetKey};
 use crate::diagnostics::{BudgetDomain, FixedBudgetResourceManager};
 use crate::layout::{LayoutEngine, LayoutPassReport, LayoutSnapshot, compare_layout_snapshots};
 use crate::render::{
-    Canvas, ChunkPrerequisites, ChunkRevisionTuple, CompiledSceneSnapshot, PaintCommand,
-    RenderCompiler, RenderTree, RenderTreeReport, SceneSnapshot,
+    Canvas, ChunkPrerequisites, ChunkRevisionTuple, CompiledSceneSnapshot, GlyphPageUpload,
+    PaintCommand, RenderCompiler, RenderTree, RenderTreeReport, SceneSnapshot, TextPainter,
 };
+use crate::text::{GlyphAtlas, GlyphAtlasConfig, TextSystem};
 use crate::widget::element::ElementTree;
 use crate::widget::{
     ElementNodeDiagnostics, ElementTreeStats, PropertyValue, ReconcileReport, View, WidgetNode,
@@ -265,7 +266,10 @@ pub struct RenderHarness {
     layout: LayoutEngine,
     render_tree: RenderTree,
     compiler: RenderCompiler,
+    text_system: TextSystem,
+    glyph_atlas: GlyphAtlas,
     frame: u64,
+    resources_reset_pending: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -283,7 +287,10 @@ impl RenderHarness {
             layout: LayoutEngine::new(),
             render_tree: RenderTree::new(),
             compiler: RenderCompiler::default(),
+            text_system: TextSystem::new(),
+            glyph_atlas: GlyphAtlas::new(GlyphAtlasConfig::default()).expect("valid glyph atlas"),
             frame: 0,
+            resources_reset_pending: false,
         }
     }
 
@@ -291,10 +298,21 @@ impl RenderHarness {
         self.tree.mount(widget)
     }
     pub fn reconcile(&mut self, widget: WidgetNode) -> Result<ReconcileReport> {
-        self.tree.reconcile(widget)
+        let report = self.tree.reconcile(widget)?;
+        self.resources_reset_pending = true;
+        Ok(report)
     }
 
     pub fn render(&mut self, viewport: Size, scale: DpiScale) -> Result<RenderFrame> {
+        // Reset after reconciliation so a fresh and incrementally reconciled
+        // declaration have the same deterministic atlas placement. Idle
+        // renders keep the caches warm and exercise the real reuse path.
+        if self.resources_reset_pending {
+            self.text_system = TextSystem::new();
+            self.glyph_atlas = GlyphAtlas::new(GlyphAtlasConfig::default())
+                .map_err(|error| Error::compile("glyph_atlas", error.to_string()))?;
+            self.resources_reset_pending = false;
+        }
         let inputs = self.tree.layout_inputs()?;
         let root = self.tree.root();
         let tree = &mut self.tree;
@@ -318,22 +336,72 @@ impl RenderHarness {
             scene: crate::core::SceneRevision::new(self.frame),
             resource: crate::core::ResourceRevision::ZERO,
         };
-        let (scene, report) = self.render_tree.collect_elements(
-            &self.tree,
-            &layout,
-            revisions,
-            ChunkPrerequisites {
-                dpi_scale_bits: scale.get().to_bits(),
-                ..ChunkPrerequisites::default()
-            },
-            &std::collections::BTreeMap::new(),
-            true,
-        )?;
+        let dpi = scale;
+        let font_revision = self.text_system.font_generation();
+        let atlas_revision_before = self.glyph_atlas.resource_revision().get();
+        let (mut scene, mut report) = {
+            let text_system = &mut self.text_system;
+            let glyph_atlas = &mut self.glyph_atlas;
+            self.render_tree
+                .collect_elements_with_presentation_and_text(
+                    &self.tree,
+                    &layout,
+                    revisions,
+                    ChunkPrerequisites {
+                        dpi_scale_bits: scale.get().to_bits(),
+                        font_revision,
+                        glyph_revision: atlas_revision_before,
+                        ..ChunkPrerequisites::default()
+                    },
+                    &std::collections::BTreeMap::new(),
+                    true,
+                    |_, _| None,
+                    |element, bounds, content, opacity| {
+                        TextPainter::new(text_system, glyph_atlas, dpi)
+                            .paint(element, bounds, content, opacity)
+                    },
+                )?
+        };
+        let atlas_revision_after = self.glyph_atlas.resource_revision().get();
+        if atlas_revision_after != atlas_revision_before {
+            let text_system = &mut self.text_system;
+            let glyph_atlas = &mut self.glyph_atlas;
+            (scene, report) = self
+                .render_tree
+                .collect_elements_with_presentation_and_text(
+                    &self.tree,
+                    &layout,
+                    revisions,
+                    ChunkPrerequisites {
+                        dpi_scale_bits: scale.get().to_bits(),
+                        font_revision,
+                        glyph_revision: atlas_revision_after,
+                        ..ChunkPrerequisites::default()
+                    },
+                    &std::collections::BTreeMap::new(),
+                    true,
+                    |_, _| None,
+                    |element, bounds, content, opacity| {
+                        TextPainter::new(text_system, glyph_atlas, dpi)
+                            .paint(element, bounds, content, opacity)
+                    },
+                )?;
+        }
+        let glyph_page_uploads = self
+            .glyph_atlas
+            .page_descriptors()
+            .into_iter()
+            .filter_map(|descriptor| self.glyph_atlas.page_snapshot(descriptor.id))
+            .map(GlyphPageUpload::from)
+            .collect::<Vec<_>>();
         let context = crate::render::CompileContext::new(
             crate::render::RendererCapabilities::default(),
             scale,
         )
-        .with_scene_revision(scene.revision());
+        .with_scene_revision(scene.revision())
+        .with_font_revision(font_revision)
+        .with_glyph_revision(self.glyph_atlas.resource_revision().get())
+        .with_glyph_page_uploads(glyph_page_uploads);
         let compiled = self
             .compiler
             .compile_tree(&self.render_tree, &context)?

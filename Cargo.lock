@@ -2538,6 +2538,7 @@ dependencies = [
  "accesskit_windows",
  "bytemuck",
  "cosmic-text",
+ "fontdb",
  "image",
  "pollster",
  "resvg",

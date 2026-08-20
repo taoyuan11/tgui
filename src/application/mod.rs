@@ -26,10 +26,11 @@ use crate::event::{CommittedHitTarget, DispatchOutcome, EventDispatcher, UiEvent
 use crate::layout::{LayoutEngine, LayoutPassReport, LayoutSnapshot};
 use crate::media::ResourceSnapshot;
 use crate::render::{
-    ChunkPrerequisites, ChunkRevisionTuple, CompiledScene, CompiledSceneSnapshot, RenderCompiler,
-    RenderTree, RenderTreeReport, SceneSnapshot,
+    ChunkPrerequisites, ChunkRevisionTuple, CompiledScene, CompiledSceneSnapshot, GlyphPageUpload,
+    RenderCompiler, RenderTree, RenderTreeReport, SceneSnapshot, TextPainter,
 };
 use crate::state::{TxnReceipt, UiCommand, UiDispatcher, UiInbox, UiThread, UpdateTxn};
+use crate::text::{GlyphAtlas, GlyphAtlasConfig, TextSystem};
 use crate::widget::element::ElementTree;
 use crate::widget::{
     ElementNodeDiagnostics, ElementTreeStats, PropertyImpact, ReconcileReport, View, WidgetNode,
@@ -418,6 +419,8 @@ struct WindowState {
     layout: LayoutEngine,
     render_tree: RenderTree,
     render_compiler: RenderCompiler,
+    text_system: TextSystem,
+    glyph_atlas: GlyphAtlas,
     events: EventDispatcher,
     view: Option<Rc<dyn View>>,
     frame_index: u64,
@@ -596,6 +599,8 @@ impl Application {
             layout: LayoutEngine::new(),
             render_tree: RenderTree::new(),
             render_compiler: RenderCompiler::default(),
+            text_system: TextSystem::new(),
+            glyph_atlas: GlyphAtlas::new(GlyphAtlasConfig::default())?,
             events: EventDispatcher::new(),
             view: None,
             frame_index: 0,
@@ -1673,21 +1678,62 @@ impl Application {
                     .unwrap_or(crate::core::ResourceRevision::ZERO),
             };
             let scale = state.spec.dpi_scale;
+            let atlas_revision_before = state.glyph_atlas.resource_revision().get();
+            let font_revision = state.text_system.font_generation();
             let paint_started = Instant::now();
             let timeline = &state.timeline;
-            let (candidate_scene, tree_report) =
-                state.render_tree.collect_elements_with_presentation(
+            let dpi = state.spec.dpi_scale;
+            let text_system = &mut state.text_system;
+            let glyph_atlas = &mut state.glyph_atlas;
+            let (mut candidate_scene, mut tree_report) = state
+                .render_tree
+                .collect_elements_with_presentation_and_text(
                     &state.elements,
                     &layout_receipt.snapshot,
                     revisions,
                     ChunkPrerequisites {
                         dpi_scale_bits: scale.get().to_bits(),
+                        font_revision,
+                        glyph_revision: atlas_revision_before,
                         ..ChunkPrerequisites::default()
                     },
                     &invalidations,
                     false,
                     |element, property| timeline.presentation::<f32>((element, property)),
+                    |element, bounds, content, opacity| {
+                        TextPainter::new(text_system, glyph_atlas, dpi)
+                            .paint(element, bounds, content, opacity)
+                    },
                 )?;
+            // Synchronous first-use rasterization can advance the atlas while
+            // descriptors are being collected. Recollect once with the final
+            // revision so the retained chunk prerequisite matches its page
+            // snapshots and the next frame can reuse the chunk.
+            let atlas_revision_after = state.glyph_atlas.resource_revision().get();
+            if atlas_revision_after != atlas_revision_before {
+                let text_system = &mut state.text_system;
+                let glyph_atlas = &mut state.glyph_atlas;
+                (candidate_scene, tree_report) = state
+                    .render_tree
+                    .collect_elements_with_presentation_and_text(
+                        &state.elements,
+                        &layout_receipt.snapshot,
+                        revisions,
+                        ChunkPrerequisites {
+                            dpi_scale_bits: scale.get().to_bits(),
+                            font_revision,
+                            glyph_revision: atlas_revision_after,
+                            ..ChunkPrerequisites::default()
+                        },
+                        &invalidations,
+                        true,
+                        |element, property| timeline.presentation::<f32>((element, property)),
+                        |element, bounds, content, opacity| {
+                            TextPainter::new(text_system, glyph_atlas, dpi)
+                                .paint(element, bounds, content, opacity)
+                        },
+                    )?;
+            }
             let paint_duration = paint_started.elapsed();
             let scene_changed = candidate_scene.command_count() != old_scene.command_count()
                 || candidate_scene.chunk_count() != old_scene.chunk_count()
@@ -1697,6 +1743,14 @@ impl Application {
             } else {
                 candidate_scene.with_revision(old_scene.revision())
             };
+            let glyph_page_uploads = state
+                .glyph_atlas
+                .page_descriptors()
+                .into_iter()
+                .filter_map(|descriptor| state.glyph_atlas.page_snapshot(descriptor.id))
+                .map(GlyphPageUpload::from)
+                .collect::<Vec<_>>();
+            let glyph_revision = state.glyph_atlas.resource_revision().get();
             let context = crate::render::CompileContext::new(
                 crate::render::RendererCapabilities {
                     supports_native_surface: state.spec.native_surface_support,
@@ -1705,6 +1759,9 @@ impl Application {
                 scale,
             )
             .with_scene_revision(scene.revision())
+            .with_font_revision(font_revision)
+            .with_glyph_revision(glyph_revision)
+            .with_glyph_page_uploads(glyph_page_uploads)
             .with_transient_budget(
                 state
                     .resource_budgets
@@ -1951,6 +2008,14 @@ impl Application {
 }
 
 fn sync_dirty_topology(state: &mut WindowState) {
+    for (_, node) in state.render_tree.nodes() {
+        if !state.elements.contains(node.element()) {
+            state.glyph_atlas.detach_run(ResourceId::from_parts(
+                node.element().slot(),
+                node.element().generation(),
+            ));
+        }
+    }
     state
         .active_resource_requests
         .retain(|element, _| state.elements.contains(*element));

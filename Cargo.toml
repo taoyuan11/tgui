@@ -14,7 +14,7 @@ default = ["desktop", "text", "image"]
 desktop = ["window", "render"]
 window = ["dep:winit"]
 render = ["dep:wgpu", "dep:bytemuck"]
-text = ["dep:cosmic-text"]
+text = ["dep:cosmic-text", "dep:fontdb"]
 image = ["dep:image"]
 svg = ["image", "dep:resvg"]
 accessibility = [
@@ -46,7 +46,9 @@ bytemuck = { version = "1.25.2", features = ["derive"], optional = true }
 cosmic-text = { version = "0.17.0", default-features = false, features = [
     "std",
     "shape-run-cache",
+    "swash",
 ], optional = true }
+fontdb = { version = "0.23.0", default-features = false, features = ["std"], optional = true }
 image = { version = "0.25.6", default-features = false, features = [
     "gif",
     "jpeg",

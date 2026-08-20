@@ -5,10 +5,11 @@
 //! paths and resource commands remain represented in CompiledScene and can be
 //! added without changing the CPU contracts.
 
-use super::{BatchKind, CompiledScene, QuadInstance, RendererCapabilities};
-use crate::core::{DpiScale, Error, ImageHandle, Result, Size};
+use super::{BatchKind, CompiledScene, GlyphPageUpload, QuadInstance, RendererCapabilities};
+use crate::core::{DpiScale, Error, GlyphPageId, ImageHandle, Result, Size};
 use crate::media::{DecodedImage, ImageTextureUploader};
-use std::collections::VecDeque;
+use crate::text::GlyphContentType;
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 
 const QUAD_SHADER: &str = r#"
@@ -28,7 +29,35 @@ struct VertexOutput { @builtin(position) position: vec4<f32>, @location(2) color
     return VertexOutput(vec4(ndc, 0.0, 1.0), color, opacity);
 }
 @fragment fn path_fs(@location(2) color: vec4<f32>, @location(3) opacity: f32) -> @location(0) vec4<f32> { return vec4(color.rgb, color.a * opacity); }
+@group(1) @binding(0) var glyph_texture: texture_2d<f32>;
+@group(1) @binding(1) var glyph_sampler: sampler;
+struct GlyphOutput { @builtin(position) position: vec4<f32>, @location(2) color: vec4<f32>, @location(3) opacity: f32, @location(4) uv: vec2<f32> }
+@vertex fn glyph_vs(@builtin(vertex_index) vertex: u32, @location(0) rect: vec4<f32>, @location(1) uv_rect: vec4<f32>, @location(2) color: vec4<f32>, @location(3) opacity: f32) -> GlyphOutput {
+    let corners = array<vec2<f32>, 6>(vec2(0.0,0.0), vec2(1.0,0.0), vec2(1.0,1.0), vec2(0.0,0.0), vec2(1.0,1.0), vec2(0.0,1.0));
+    let corner = corners[vertex];
+    let p = rect.xy + corner * rect.zw;
+    let ndc = vec2(p.x / viewport.size.x * 2.0 - 1.0, 1.0 - p.y / viewport.size.y * 2.0);
+    return GlyphOutput(vec4(ndc, 0.0, 1.0), color, opacity, uv_rect.xy + corner * uv_rect.zw);
+}
+@fragment fn glyph_mask_fs(@location(2) color: vec4<f32>, @location(3) opacity: f32, @location(4) uv: vec2<f32>) -> @location(0) vec4<f32> {
+    let coverage = textureSample(glyph_texture, glyph_sampler, uv).r;
+    return vec4(color.rgb, color.a * coverage * opacity);
+}
+@fragment fn glyph_color_fs(@location(2) color: vec4<f32>, @location(3) opacity: f32, @location(4) uv: vec2<f32>) -> @location(0) vec4<f32> {
+    let sampled = textureSample(glyph_texture, glyph_sampler, uv);
+    return vec4(sampled.rgb * color.rgb, sampled.a * color.a * opacity);
+}
 "#;
+
+struct GlyphTexture {
+    // The texture is retained alongside its view so the view stays valid.
+    _texture: wgpu::Texture,
+    view: wgpu::TextureView,
+    width: u32,
+    height: u32,
+    revision: u64,
+    content_type: GlyphContentType,
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TextureUpload {
@@ -92,8 +121,13 @@ pub struct WgpuRenderer<'window> {
     config: Option<wgpu::SurfaceConfiguration>,
     pipeline: wgpu::RenderPipeline,
     path_pipeline: wgpu::RenderPipeline,
+    glyph_mask_pipeline: wgpu::RenderPipeline,
+    glyph_color_pipeline: wgpu::RenderPipeline,
     bind_group: wgpu::BindGroup,
+    glyph_bind_layout: wgpu::BindGroupLayout,
+    glyph_sampler: wgpu::Sampler,
     viewport_buffer: wgpu::Buffer,
+    glyph_textures: HashMap<GlyphPageId, GlyphTexture>,
     physical_size: (u32, u32),
     dpi_scale: DpiScale,
     submission: u64,
@@ -154,8 +188,16 @@ impl<'window> WgpuRenderer<'window> {
             .as_ref()
             .and_then(|surface| surface.get_capabilities(&adapter).formats.first().copied())
             .unwrap_or(wgpu::TextureFormat::Rgba8UnormSrgb);
-        let (pipeline, path_pipeline, bind_group, viewport_buffer) =
-            create_pipeline(&device, format);
+        let (
+            pipeline,
+            path_pipeline,
+            glyph_mask_pipeline,
+            glyph_color_pipeline,
+            bind_group,
+            glyph_bind_layout,
+            glyph_sampler,
+            viewport_buffer,
+        ) = create_pipeline(&device, format);
         let mut renderer = Self {
             instance,
             adapter,
@@ -165,8 +207,13 @@ impl<'window> WgpuRenderer<'window> {
             config: None,
             pipeline,
             path_pipeline,
+            glyph_mask_pipeline,
+            glyph_color_pipeline,
             bind_group,
+            glyph_bind_layout,
+            glyph_sampler,
             viewport_buffer,
+            glyph_textures: HashMap::new(),
             physical_size: (1, 1),
             dpi_scale,
             submission: 0,
@@ -282,15 +329,111 @@ impl<'window> WgpuRenderer<'window> {
             view_formats: vec![],
             desired_maximum_frame_latency: 2,
         };
-        let (pipeline, path_pipeline, bind_group, viewport_buffer) =
-            create_pipeline(&self.device, format);
+        let (
+            pipeline,
+            path_pipeline,
+            glyph_mask_pipeline,
+            glyph_color_pipeline,
+            bind_group,
+            glyph_bind_layout,
+            glyph_sampler,
+            viewport_buffer,
+        ) = create_pipeline(&self.device, format);
         self.pipeline = pipeline;
         self.path_pipeline = path_pipeline;
+        self.glyph_mask_pipeline = glyph_mask_pipeline;
+        self.glyph_color_pipeline = glyph_color_pipeline;
         self.bind_group = bind_group;
+        self.glyph_bind_layout = glyph_bind_layout;
+        self.glyph_sampler = glyph_sampler;
         self.viewport_buffer = viewport_buffer;
+        self.glyph_textures.clear();
         surface.configure(&self.device, &config);
         self.config = Some(config);
         self.prefer_transparent_surface = prefer_transparent;
+        Ok(())
+    }
+
+    fn prepare_glyph_pages(&mut self, pages: &[GlyphPageUpload]) -> Result<()> {
+        for page in pages {
+            let needs_upload = self.glyph_textures.get(&page.page).is_none_or(|texture| {
+                texture.revision != page.revision
+                    || texture.width != page.width
+                    || texture.height != page.height
+                    || texture.content_type != page.content_type
+            });
+            if !needs_upload {
+                continue;
+            }
+            let expected = u64::from(page.width)
+                .saturating_mul(u64::from(page.height))
+                .saturating_mul(u64::from(page.content_type.bytes_per_pixel()));
+            if expected != page.pixels.len() as u64 {
+                return Err(Error::resource(
+                    None,
+                    "glyph page byte count does not match dimensions",
+                    true,
+                ));
+            }
+            let format = match page.content_type {
+                GlyphContentType::Mask => wgpu::TextureFormat::R8Unorm,
+                GlyphContentType::Color => wgpu::TextureFormat::Rgba8UnormSrgb,
+            };
+            let texture = self.device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("tgui glyph page"),
+                size: wgpu::Extent3d {
+                    width: page.width,
+                    height: page.height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
+            });
+            let bpp = page.content_type.bytes_per_pixel() as usize;
+            let row_bytes = page.width as usize * bpp;
+            let aligned = (row_bytes + 255) & !255;
+            let mut padded = vec![0_u8; aligned * page.height as usize];
+            for row in 0..page.height as usize {
+                let src = row * row_bytes;
+                let dst = row * aligned;
+                padded[dst..dst + row_bytes].copy_from_slice(&page.pixels[src..src + row_bytes]);
+            }
+            self.queue.write_texture(
+                wgpu::TexelCopyTextureInfo {
+                    texture: &texture,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d::ZERO,
+                    aspect: wgpu::TextureAspect::All,
+                },
+                &padded,
+                wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(aligned as u32),
+                    rows_per_image: Some(page.height),
+                },
+                wgpu::Extent3d {
+                    width: page.width,
+                    height: page.height,
+                    depth_or_array_layers: 1,
+                },
+            );
+            let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+            self.glyph_textures.insert(
+                page.page,
+                GlyphTexture {
+                    _texture: texture,
+                    view,
+                    width: page.width,
+                    height: page.height,
+                    revision: page.revision,
+                    content_type: page.content_type,
+                },
+            );
+        }
         Ok(())
     }
 
@@ -300,6 +443,7 @@ impl<'window> WgpuRenderer<'window> {
         view: &wgpu::TextureView,
     ) -> Result<wgpu::SubmissionIndex> {
         self.ensure_device_available()?;
+        self.prepare_glyph_pages(&scene.glyph_page_uploads)?;
         self.queue.write_buffer(
             &self.viewport_buffer,
             0,
@@ -308,6 +452,16 @@ impl<'window> WgpuRenderer<'window> {
                 self.dpi_scale.physical_to_logical(self.physical_size.1),
             ]),
         );
+        let clear_color = if self.prefer_transparent_surface {
+            wgpu::Color::TRANSPARENT
+        } else {
+            wgpu::Color {
+                r: 1.0,
+                g: 1.0,
+                b: 1.0,
+                a: 1.0,
+            }
+        };
         let mut encoder = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -321,7 +475,7 @@ impl<'window> WgpuRenderer<'window> {
                     depth_slice: None,
                     resolve_target: None,
                     ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                        load: wgpu::LoadOp::Clear(clear_color),
                         store: wgpu::StoreOp::Store,
                     },
                 })],
@@ -412,7 +566,93 @@ impl<'window> WgpuRenderer<'window> {
                                 0..1,
                             );
                         }
-                        _ => {}
+                        BatchKind::Glyph { bindings } => {
+                            if bindings.count == 0 {
+                                continue;
+                            }
+                            for binding in &scene.texture_bindings[bindings.start..bindings.end()] {
+                                let page = GlyphPageId::from_parts(
+                                    binding.resource.slot(),
+                                    binding.resource.generation(),
+                                );
+                                let Some(texture) = self.glyph_textures.get(&page) else {
+                                    return Err(Error::resource(
+                                        None,
+                                        format!(
+                                            "glyph page {}:{} was not uploaded before drawing",
+                                            page.slot(),
+                                            page.generation()
+                                        ),
+                                        true,
+                                    ));
+                                };
+                                let bind_group =
+                                    self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                                        label: Some("tgui glyph bind group"),
+                                        layout: &self.glyph_bind_layout,
+                                        entries: &[
+                                            wgpu::BindGroupEntry {
+                                                binding: 0,
+                                                resource: wgpu::BindingResource::TextureView(
+                                                    &texture.view,
+                                                ),
+                                            },
+                                            wgpu::BindGroupEntry {
+                                                binding: 1,
+                                                resource: wgpu::BindingResource::Sampler(
+                                                    &self.glyph_sampler,
+                                                ),
+                                            },
+                                        ],
+                                    });
+                                let bytes = gpu_glyph_bytes(binding);
+                                let buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
+                                    label: Some("tgui glyph instance"),
+                                    size: bytes.len().max(1) as u64,
+                                    usage: wgpu::BufferUsages::VERTEX
+                                        | wgpu::BufferUsages::COPY_DST,
+                                    mapped_at_creation: false,
+                                });
+                                self.queue.write_buffer(&buffer, 0, &bytes);
+                                pass.set_pipeline(match texture.content_type {
+                                    GlyphContentType::Mask => &self.glyph_mask_pipeline,
+                                    GlyphContentType::Color => &self.glyph_color_pipeline,
+                                });
+                                pass.set_bind_group(1, &bind_group, &[]);
+                                pass.set_vertex_buffer(0, buffer.slice(..));
+                                pass.draw(0..6, 0..1);
+                            }
+                        }
+                        BatchKind::Text { bindings }
+                        | BatchKind::Image { bindings }
+                        | BatchKind::NativeSurface { bindings } => {
+                            if bindings.count == 0 {
+                                continue;
+                            }
+                            pass.set_pipeline(&self.pipeline);
+                            let instances = scene.texture_bindings[bindings.start..bindings.end()]
+                                .iter()
+                                .map(|binding| QuadInstance {
+                                    rect: binding.rect,
+                                    radii: [0.0; 4],
+                                    color: binding.color,
+                                    opacity: binding.opacity,
+                                })
+                                .collect::<Vec<_>>();
+                            let bytes = instances
+                                .iter()
+                                .flat_map(gpu_quad_bytes)
+                                .collect::<Vec<_>>();
+                            let buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
+                                label: Some("tgui texture fallback instances"),
+                                size: bytes.len().max(1) as u64,
+                                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                                mapped_at_creation: false,
+                            });
+                            self.queue.write_buffer(&buffer, 0, &bytes);
+                            pass.set_vertex_buffer(0, buffer.slice(..));
+                            pass.draw(0..6, 0..u32::try_from(instances.len()).unwrap_or(u32::MAX));
+                        }
                     }
                 }
             }
@@ -559,15 +799,28 @@ impl<'window> WgpuRenderer<'window> {
             .config
             .as_ref()
             .map_or(wgpu::TextureFormat::Rgba8UnormSrgb, |config| config.format);
-        let (pipeline, path_pipeline, bind_group, viewport_buffer) =
-            create_pipeline(&device, format);
+        let (
+            pipeline,
+            path_pipeline,
+            glyph_mask_pipeline,
+            glyph_color_pipeline,
+            bind_group,
+            glyph_bind_layout,
+            glyph_sampler,
+            viewport_buffer,
+        ) = create_pipeline(&device, format);
         self.adapter = adapter;
         self.device = device;
         self.queue = queue;
         self.pipeline = pipeline;
         self.path_pipeline = path_pipeline;
+        self.glyph_mask_pipeline = glyph_mask_pipeline;
+        self.glyph_color_pipeline = glyph_color_pipeline;
         self.bind_group = bind_group;
+        self.glyph_bind_layout = glyph_bind_layout;
+        self.glyph_sampler = glyph_sampler;
         self.viewport_buffer = viewport_buffer;
+        self.glyph_textures.clear();
         if self.surface.is_some() {
             self.config = None;
             self.configure_surface_with_alpha(self.prefer_transparent_surface)?;
@@ -612,7 +865,11 @@ fn create_pipeline(
 ) -> (
     wgpu::RenderPipeline,
     wgpu::RenderPipeline,
+    wgpu::RenderPipeline,
+    wgpu::RenderPipeline,
     wgpu::BindGroup,
+    wgpu::BindGroupLayout,
+    wgpu::Sampler,
     wgpu::Buffer,
 ) {
     let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -645,6 +902,37 @@ fn create_pipeline(
             binding: 0,
             resource: viewport_buffer.as_entire_binding(),
         }],
+    });
+    let glyph_bind_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        label: Some("tgui glyph texture"),
+        entries: &[
+            wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Texture {
+                    sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    view_dimension: wgpu::TextureViewDimension::D2,
+                    multisampled: false,
+                },
+                count: None,
+            },
+            wgpu::BindGroupLayoutEntry {
+                binding: 1,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                count: None,
+            },
+        ],
+    });
+    let glyph_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+        label: Some("tgui glyph sampler"),
+        address_mode_u: wgpu::AddressMode::ClampToEdge,
+        address_mode_v: wgpu::AddressMode::ClampToEdge,
+        address_mode_w: wgpu::AddressMode::ClampToEdge,
+        mag_filter: wgpu::FilterMode::Linear,
+        min_filter: wgpu::FilterMode::Linear,
+        mipmap_filter: wgpu::FilterMode::Nearest,
+        ..Default::default()
     });
     let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("tgui pipeline layout"),
@@ -681,7 +969,71 @@ fn create_pipeline(
         multiview: None,
         cache: None,
     });
-    (pipeline, path_pipeline, bind_group, viewport_buffer)
+    let glyph_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some("tgui glyph pipeline layout"),
+        bind_group_layouts: &[&bind_layout, &glyph_bind_layout],
+        push_constant_ranges: &[],
+    });
+    let glyph_vertex = wgpu::VertexState {
+        module: &shader,
+        entry_point: Some("glyph_vs"),
+        compilation_options: wgpu::PipelineCompilationOptions::default(),
+        buffers: &[wgpu::VertexBufferLayout {
+            array_stride: 52,
+            step_mode: wgpu::VertexStepMode::Instance,
+            attributes: &wgpu::vertex_attr_array![0 => Float32x4, 1 => Float32x4, 2 => Float32x4, 3 => Float32],
+        }],
+    };
+    let glyph_mask_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("tgui glyph mask pipeline"),
+        layout: Some(&glyph_pipeline_layout),
+        vertex: glyph_vertex.clone(),
+        fragment: Some(wgpu::FragmentState {
+            module: &shader,
+            entry_point: Some("glyph_mask_fs"),
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            targets: &[Some(wgpu::ColorTargetState {
+                format,
+                blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+        }),
+        primitive: wgpu::PrimitiveState::default(),
+        depth_stencil: None,
+        multisample: wgpu::MultisampleState::default(),
+        multiview: None,
+        cache: None,
+    });
+    let glyph_color_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("tgui glyph color pipeline"),
+        layout: Some(&glyph_pipeline_layout),
+        vertex: glyph_vertex,
+        fragment: Some(wgpu::FragmentState {
+            module: &shader,
+            entry_point: Some("glyph_color_fs"),
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            targets: &[Some(wgpu::ColorTargetState {
+                format,
+                blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+        }),
+        primitive: wgpu::PrimitiveState::default(),
+        depth_stencil: None,
+        multisample: wgpu::MultisampleState::default(),
+        multiview: None,
+        cache: None,
+    });
+    (
+        pipeline,
+        path_pipeline,
+        glyph_mask_pipeline,
+        glyph_color_pipeline,
+        bind_group,
+        glyph_bind_layout,
+        glyph_sampler,
+        viewport_buffer,
+    )
 }
 
 fn gpu_quad_bytes(instance: &QuadInstance) -> impl IntoIterator<Item = u8> {
@@ -693,6 +1045,21 @@ fn gpu_quad_bytes(instance: &QuadInstance) -> impl IntoIterator<Item = u8> {
         .chain(instance.color.iter())
         .copied()
         .chain([instance.opacity])
+    {
+        bytes.extend_from_slice(&value.to_le_bytes());
+    }
+    bytes
+}
+
+fn gpu_glyph_bytes(binding: &super::TextureBinding) -> Vec<u8> {
+    let mut bytes = Vec::with_capacity(52);
+    for value in binding
+        .rect
+        .iter()
+        .chain(binding.uv.iter())
+        .chain(binding.color.iter())
+        .copied()
+        .chain([binding.opacity])
     {
         bytes.extend_from_slice(&value.to_le_bytes());
     }
@@ -809,5 +1176,49 @@ mod tests {
         });
         let recovered_view = recovered_target.create_view(&wgpu::TextureViewDescriptor::default());
         renderer.render_to_view(&scene, &recovered_view).unwrap();
+    }
+
+    #[test]
+    fn headless_device_submits_mask_glyph_batches_when_available() {
+        let Ok(mut renderer) = pollster::block_on(WgpuRenderer::new_headless()) else {
+            return;
+        };
+        let page = GlyphPageId::from_parts(0, 1);
+        let upload = GlyphPageUpload {
+            page,
+            width: 4,
+            height: 4,
+            content_type: GlyphContentType::Mask,
+            revision: 1,
+            pixels: Arc::from([0_u8, 255, 0, 0, 255, 255, 255, 0, 0, 0, 255, 0, 0, 0, 0, 0]),
+        };
+        let command = PaintCommand::DrawGlyphAtlas {
+            rect: Rect::from_xywh(0.0, 0.0, 4.0, 4.0),
+            uv: Rect::from_xywh(0.0, 0.0, 1.0, 1.0),
+            page,
+            color: Color::WHITE,
+        };
+        let context = CompileContext::new(renderer.capabilities(), renderer.dpi_scale())
+            .with_scene_revision(SceneRevision::new(1))
+            .with_glyph_page_uploads(Arc::from([upload]));
+        let scene = RenderCompiler::default()
+            .compile(&[command], &context)
+            .unwrap();
+        let target = renderer.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("tgui glyph test target"),
+            size: wgpu::Extent3d {
+                width: 4,
+                height: 4,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[],
+        });
+        let view = target.create_view(&wgpu::TextureViewDescriptor::default());
+        renderer.render_to_view(&scene, &view).unwrap();
     }
 }

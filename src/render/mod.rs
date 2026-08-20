@@ -8,6 +8,7 @@ mod cache;
 mod compiler;
 mod paint;
 mod scene;
+mod text;
 
 #[cfg(feature = "render")]
 pub mod wgpu;
@@ -15,9 +16,9 @@ pub mod wgpu;
 pub use cache::{CacheEntryKind, RenderCache, RenderCacheStats};
 pub use compiler::{
     Batch, BatchBoundaryReason, BatchKind, BufferRange, CompileContext, CompiledScene,
-    CompiledSceneSnapshot, HeadlessRenderer, OffscreenCost, PipelineKey, PrimitiveKind,
-    QuadInstance, RenderCompiler, RenderPass, RendererCapabilities, TextureBinding, UploadKind,
-    UploadRequest,
+    CompiledSceneSnapshot, GlyphPageUpload, HeadlessRenderer, OffscreenCost, PipelineKey,
+    PrimitiveKind, QuadInstance, RenderCompiler, RenderPass, RendererCapabilities, TextureBinding,
+    UploadKind, UploadRequest,
 };
 pub use paint::{
     BackdropFilter, BlendMode, Brush, Canvas, FillRule, GradientStop, ImageSampling, LayerSpec,
@@ -28,3 +29,4 @@ pub use scene::{
     ChunkInvalidationReason, ChunkPrerequisites, ChunkRevisionTuple, RenderNode,
     RenderNodeDescriptor, RenderTree, RenderTreeReport, SceneChunk, SceneSnapshot,
 };
+pub use text::TextPainter;

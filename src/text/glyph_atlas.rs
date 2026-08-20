@@ -1,5 +1,6 @@
 use crate::core::{Error, FontHandle, GlyphPageId, Rect, ResourceId, ResourceRevision, Result};
 use std::collections::{BTreeSet, HashMap};
+use std::sync::Arc;
 
 /// Font size in physical 1/64-pixel units.
 ///
@@ -151,6 +152,10 @@ pub struct GlyphPlacement {
     pub pixels: AtlasRect,
     /// Normalized texture coordinates suitable for `DrawGlyphAtlas`.
     pub uv: Rect,
+    /// Horizontal bearing from the glyph origin to the first atlas pixel.
+    pub left: i32,
+    /// Distance from the glyph origin/baseline to the top atlas pixel.
+    pub top: i32,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -164,6 +169,10 @@ pub struct GlyphRaster {
     pub width: u32,
     pub height: u32,
     pub pixels: Vec<u8>,
+    /// Horizontal bearing from the glyph origin to the first raster pixel.
+    pub left: i32,
+    /// Distance from the glyph origin/baseline to the top raster pixel.
+    pub top: i32,
 }
 
 impl GlyphRaster {
@@ -172,7 +181,15 @@ impl GlyphRaster {
             width,
             height,
             pixels: pixels.into(),
+            left: 0,
+            top: 0,
         }
+    }
+
+    pub const fn with_offset(mut self, left: i32, top: i32) -> Self {
+        self.left = left;
+        self.top = top;
+        self
     }
 }
 
@@ -276,7 +293,7 @@ impl GlyphAtlasConfig {
 
 impl Default for GlyphAtlasConfig {
     fn default() -> Self {
-        Self::new(1024, 1024, 8).with_max_bytes(32 * 1024 * 1024)
+        Self::new(1024, 1024, 32).with_max_bytes(32 * 1024 * 1024)
     }
 }
 
@@ -304,6 +321,18 @@ pub struct GlyphPageDescriptor {
     pub height: u32,
     pub bytes: u64,
     pub glyphs: usize,
+    /// Monotonically increasing texel-content revision for this page.
+    pub revision: u64,
+}
+
+/// Immutable page data handed from the CPU text pipeline to a renderer.
+///
+/// Page pixels use copy-on-write storage in [`GlyphAtlas`], so a committed
+/// scene can safely retain a snapshot while the next frame adds glyphs.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GlyphPageSnapshot {
+    pub descriptor: GlyphPageDescriptor,
+    pub pixels: Arc<[u8]>,
 }
 
 enum GlyphState {
@@ -370,9 +399,10 @@ impl FreeRectAllocator {
 struct GlyphPage {
     key: GlyphAtlasKey,
     allocator: FreeRectAllocator,
-    pixels: Vec<u8>,
+    pixels: Arc<[u8]>,
     glyphs: BTreeSet<GlyphKey>,
     last_used: u64,
+    revision: u64,
 }
 
 struct PageSlot {
@@ -577,6 +607,8 @@ impl GlyphAtlas {
             page,
             pixels,
             uv,
+            left: raster.left,
+            top: raster.top,
         };
         let entry = self
             .glyphs
@@ -641,12 +673,44 @@ impl GlyphAtlas {
             height: self.config.page_height,
             bytes: self.page_bytes(data.key.content_type),
             glyphs: data.glyphs.len(),
+            revision: data.revision,
         })
+    }
+
+    pub fn page_descriptors(&self) -> Vec<GlyphPageDescriptor> {
+        self.pages
+            .iter()
+            .enumerate()
+            .filter_map(|(slot, page)| {
+                let generation = page.generation;
+                page.page.as_ref().map(|data| GlyphPageDescriptor {
+                    id: GlyphPageId::from_parts(slot as u32, generation),
+                    key: data.key,
+                    width: self.config.page_width,
+                    height: self.config.page_height,
+                    bytes: self.page_bytes(data.key.content_type),
+                    glyphs: data.glyphs.len(),
+                    revision: data.revision,
+                })
+            })
+            .collect()
     }
 
     pub fn page_pixels(&self, page: GlyphPageId) -> Option<&[u8]> {
         let slot = self.pages.get(page.slot() as usize)?;
-        (slot.generation == page.generation()).then_some(slot.page.as_ref()?.pixels.as_slice())
+        (slot.generation == page.generation()).then_some(slot.page.as_ref()?.pixels.as_ref())
+    }
+
+    pub fn page_snapshot(&self, page: GlyphPageId) -> Option<GlyphPageSnapshot> {
+        let descriptor = self.page_descriptor(page)?;
+        let pixels = self
+            .pages
+            .get(page.slot() as usize)?
+            .page
+            .as_ref()?
+            .pixels
+            .clone();
+        Some(GlyphPageSnapshot { descriptor, pixels })
     }
 
     /// Evicts the least recently used page and returns only runs that used it.
@@ -748,9 +812,10 @@ impl GlyphAtlas {
         let page = GlyphPage {
             key,
             allocator: FreeRectAllocator::new(self.config.page_width, self.config.page_height),
-            pixels: vec![0; byte_len],
+            pixels: vec![0; byte_len].into(),
             glyphs: BTreeSet::new(),
             last_used: self.clock,
+            revision: 0,
         };
         if let Some(slot_index) = self
             .pages
@@ -807,11 +872,11 @@ impl GlyphAtlas {
         let bytes_per_pixel = content_type.bytes_per_pixel() as usize;
         let page_width = self.config.page_width as usize;
         let row_bytes = rect.width as usize * bytes_per_pixel;
-        let target = &mut self.pages[page.slot() as usize]
+        let page_data = self.pages[page.slot() as usize]
             .page
             .as_mut()
-            .expect("allocation page remains resident")
-            .pixels;
+            .expect("allocation page remains resident");
+        let target = Arc::make_mut(&mut page_data.pixels);
         for row in 0..rect.height as usize {
             let source_start = row * row_bytes;
             let target_start =
@@ -819,6 +884,7 @@ impl GlyphAtlas {
             target[target_start..target_start + row_bytes]
                 .copy_from_slice(&source[source_start..source_start + row_bytes]);
         }
+        page_data.revision = page_data.revision.saturating_add(1);
     }
 
     fn page_bytes(&self, content_type: GlyphContentType) -> u64 {

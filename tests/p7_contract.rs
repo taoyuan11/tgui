@@ -130,6 +130,17 @@ fn integrated_frame_orders_updates_before_atomic_cpu_commit() {
         )
         .unwrap();
     application.render_window(window).unwrap();
+    #[cfg(feature = "text")]
+    {
+        let compiled = application.compiled_scene(window).unwrap();
+        assert!(!compiled.glyph_page_uploads.is_empty());
+        assert!(
+            compiled
+                .batches
+                .iter()
+                .any(|batch| matches!(&batch.kind, tgui::render::BatchKind::Glyph { .. }))
+        );
+    }
     let previous = application.committed_snapshot(window).unwrap();
     let button = element(&application, window, BUTTON_KEY);
     let semantic_id = previous
