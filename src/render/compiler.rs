@@ -1,11 +1,19 @@
 use super::cache::RenderCache;
-use super::paint::{BlendMode, Brush, Canvas, Paint, PaintCommand, Path, PathSegment, TextRun};
+use super::paint::{
+    BackdropFilter, BlendMode, Brush, Canvas, ImageSampling, Paint, PaintCommand, Path,
+    PathSegment, StrokeStyle, TextRun,
+};
 use super::scene::RenderTree;
 use crate::core::{
     Color, DpiScale, Error, GlyphPageId, Point, Rect, ResourceId, Result, SceneRevision,
     Transform2D,
 };
 use crate::text::{GlyphContentType, GlyphPageSnapshot};
+use lyon_path::math::{Point as LyonPoint, point as lyon_point};
+use lyon_tessellation::{
+    BuffersBuilder, FillOptions, FillRule as LyonFillRule, FillTessellator, FillVertex,
+    StrokeOptions, StrokeTessellator, StrokeVertex, VertexBuffers,
+};
 use std::sync::Arc;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -221,6 +229,7 @@ pub struct TextureBinding {
     pub uv: [f32; 4],
     pub color: [f32; 4],
     pub opacity: f32,
+    pub sampling: ImageSampling,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -254,6 +263,11 @@ pub struct RenderPass {
     pub index: usize,
     pub offscreen: bool,
     pub bounds: Option<Rect>,
+    pub parent: Option<usize>,
+    pub composite_command: Option<usize>,
+    pub opacity: f32,
+    pub blend_mode: BlendMode,
+    pub backdrop: Option<BackdropFilter>,
     pub batches: Vec<Batch>,
     pub cost: OffscreenCost,
 }
@@ -473,6 +487,11 @@ fn compile_commands(commands: &[PaintCommand], context: &CompileContext) -> Resu
             index: 0,
             offscreen: false,
             bounds: None,
+            parent: None,
+            composite_command: None,
+            opacity: 1.0,
+            blend_mode: BlendMode::SourceOver,
+            backdrop: None,
             batches: Vec::new(),
             cost: OffscreenCost::default(),
         }],
@@ -540,7 +559,7 @@ fn compile_commands(commands: &[PaintCommand], context: &CompileContext) -> Resu
 struct CompileState {
     clips: Vec<Option<Rect>>,
     transforms: Vec<Transform2D>,
-    layers: Vec<(f32, usize)>,
+    layers: Vec<usize>,
     current_clip: Option<Rect>,
     current_transform: Transform2D,
     current_opacity: f32,
@@ -633,10 +652,10 @@ fn compile_command(
             index,
         ),
         PaintCommand::FillPath { path, paint } => {
-            add_path(output, state, path, paint, index, context)?
+            add_path(output, state, path, None, paint, index, context)?
         }
-        PaintCommand::StrokePath { path, paint, .. } => {
-            add_path(output, state, path, paint, index, context)?
+        PaintCommand::StrokePath { path, style, paint } => {
+            add_path(output, state, path, Some(*style), paint, index, context)?
         }
         PaintCommand::PushClip(clip) => {
             flush_with_reason(output, state, BatchBoundaryReason::Clip);
@@ -693,6 +712,11 @@ fn compile_command(
                 index: pass,
                 offscreen: true,
                 bounds: Some(layer.bounds),
+                parent: Some(state.current_pass),
+                composite_command: None,
+                opacity: layer.opacity,
+                blend_mode: layer.blend_mode,
+                backdrop: layer.backdrop,
                 batches: Vec::new(),
                 cost: OffscreenCost {
                     width,
@@ -701,19 +725,18 @@ fn compile_command(
                     transient_vram_bytes: bytes,
                 },
             });
-            state.layers.push((state.current_opacity, pass));
+            state.layers.push(pass);
             state.pass_stack.push(state.current_pass);
             state.current_pass = pass;
             state.transient_bytes = projected;
-            state.current_opacity *= layer.opacity;
         }
         PaintCommand::EndLayer => {
             flush_with_reason(output, state, BatchBoundaryReason::Layer);
-            let (opacity, _) = state
+            let pass = state
                 .layers
                 .pop()
                 .ok_or_else(|| Error::compile("render_compiler", "layer stack underflow"))?;
-            state.current_opacity = opacity;
+            output.passes[pass].composite_command = Some(index);
             state.current_pass = state.pass_stack.pop().unwrap_or(0);
         }
         PaintCommand::DrawTextRun(run) => {
@@ -722,8 +745,8 @@ fn compile_command(
         PaintCommand::DrawImage {
             rect,
             image,
+            sampling,
             opacity,
-            ..
         } => add_binding(
             output,
             state,
@@ -731,7 +754,8 @@ fn compile_command(
             *rect,
             ResourceId::from_parts(image.slot(), image.generation()),
             *opacity,
-            Color::rgb8(180, 180, 180),
+            Color::WHITE,
+            *sampling,
             index,
             context,
         ),
@@ -749,6 +773,7 @@ fn compile_command(
             ResourceId::from_parts(page.slot(), page.generation()),
             1.0,
             *color,
+            ImageSampling::Linear,
             index,
             context,
         ),
@@ -768,6 +793,7 @@ fn compile_command(
                 *surface,
                 1.0,
                 Color::rgb8(80, 80, 80),
+                ImageSampling::Linear,
                 index,
                 context,
             );
@@ -855,6 +881,7 @@ fn add_path(
     output: &mut CompiledScene,
     state: &mut CompileState,
     path: &Path,
+    stroke: Option<StrokeStyle>,
     paint: &Paint,
     command: usize,
     context: &CompileContext,
@@ -868,22 +895,47 @@ fn add_path(
     flush_with_reason(output, state, BatchBoundaryReason::Pipeline);
     let start_vertex = output.path_vertices.len();
     let start_index = output.path_indices.len();
-    let points = flatten_path(path, state.current_transform);
-    let color = color_rgba(paint_color(paint));
-    for point in &points {
+    let lyon_path = build_lyon_path(path);
+    let mut geometry: VertexBuffers<LyonPoint, u32> = VertexBuffers::new();
+    match stroke {
+        Some(style) => StrokeTessellator::new()
+            .tessellate_path(
+                &lyon_path,
+                &StrokeOptions::default()
+                    .with_line_width(style.width)
+                    .with_miter_limit(style.miter_limit),
+                &mut BuffersBuilder::new(&mut geometry, |vertex: StrokeVertex<'_, '_>| {
+                    vertex.position()
+                }),
+            )
+            .map_err(|error| Error::compile("path_tessellation", error.to_string()))?,
+        None => FillTessellator::new()
+            .tessellate_path(
+                &lyon_path,
+                &FillOptions::default().with_fill_rule(match path.fill_rule() {
+                    super::FillRule::NonZero => LyonFillRule::NonZero,
+                    super::FillRule::EvenOdd => LyonFillRule::EvenOdd,
+                }),
+                &mut BuffersBuilder::new(&mut geometry, |vertex: FillVertex<'_>| vertex.position()),
+            )
+            .map_err(|error| Error::compile("path_tessellation", error.to_string()))?,
+    }
+    for point in geometry.vertices {
+        let point = state
+            .current_transform
+            .transform_point(Point::new(point.x, point.y));
         output.path_vertices.push(PathVertex {
             position: [point.x, point.y],
-            color,
+            color: color_rgba(paint_color(paint)),
             opacity: state.current_opacity * paint.opacity,
         });
     }
-    for index in 1..points.len().saturating_sub(1) {
-        output.path_indices.extend([
-            start_vertex as u32,
-            (start_vertex + index) as u32,
-            (start_vertex + index + 1) as u32,
-        ]);
-    }
+    output.path_indices.extend(
+        geometry
+            .indices
+            .into_iter()
+            .map(|index| index.saturating_add(start_vertex as u32)),
+    );
     state.current_batch = Some(BatchBuilder {
         kind: PrimitiveKind::Path,
         blend: paint.blend_mode,
@@ -923,6 +975,7 @@ fn add_text(
             run.layout,
             1.0,
             run.color,
+            ImageSampling::Linear,
             command,
             context,
         );
@@ -944,6 +997,7 @@ fn add_binding(
     resource: ResourceId,
     opacity: f32,
     fallback_color: Color,
+    sampling: ImageSampling,
     command: usize,
     context: &CompileContext,
 ) {
@@ -956,6 +1010,7 @@ fn add_binding(
         resource,
         opacity,
         fallback_color,
+        sampling,
         command,
         context,
     );
@@ -971,6 +1026,7 @@ fn add_binding_with_uv(
     resource: ResourceId,
     opacity: f32,
     fallback_color: Color,
+    sampling: ImageSampling,
     command: usize,
     context: &CompileContext,
 ) {
@@ -989,6 +1045,7 @@ fn add_binding_with_uv(
         uv: [uv.origin.x, uv.origin.y, uv.size.width, uv.size.height],
         color: color_parts(fallback_color),
         opacity: state.current_opacity * opacity,
+        sampling,
     });
     if kind != PrimitiveKind::Glyph {
         output.uploads.push(UploadRequest {
@@ -1082,20 +1139,46 @@ fn flush_batch(output: &mut CompiledScene, state: &mut CompileState) {
     }
 }
 
-fn flatten_path(path: &Path, transform: Transform2D) -> Vec<Point> {
-    let mut points = Vec::new();
+fn build_lyon_path(path: &Path) -> lyon_path::Path {
+    let mut builder = lyon_path::Path::builder();
+    let mut subpath_open = false;
     for segment in path.segments() {
         match *segment {
-            PathSegment::MoveTo(point) | PathSegment::LineTo(point) => {
-                points.push(transform.transform_point(point))
+            PathSegment::MoveTo(point) => {
+                if subpath_open {
+                    builder.end(false);
+                }
+                builder.begin(lyon_point(point.x, point.y));
+                subpath_open = true;
             }
-            PathSegment::QuadraticTo { to, .. } | PathSegment::CubicTo { to, .. } => {
-                points.push(transform.transform_point(to))
+            PathSegment::LineTo(point) => {
+                builder.line_to(lyon_point(point.x, point.y));
             }
-            PathSegment::Close => {}
+            PathSegment::QuadraticTo { control, to } => {
+                builder
+                    .quadratic_bezier_to(lyon_point(control.x, control.y), lyon_point(to.x, to.y));
+            }
+            PathSegment::CubicTo {
+                control1,
+                control2,
+                to,
+            } => {
+                builder.cubic_bezier_to(
+                    lyon_point(control1.x, control1.y),
+                    lyon_point(control2.x, control2.y),
+                    lyon_point(to.x, to.y),
+                );
+            }
+            PathSegment::Close => {
+                builder.end(true);
+                subpath_open = false;
+            }
         }
     }
-    points
+    if subpath_open {
+        builder.end(false);
+    }
+    builder.build()
 }
 
 fn transformed_rect(rect: Rect, transform: Transform2D) -> Rect {
@@ -1186,6 +1269,13 @@ fn compiled_fingerprint(scene: &CompiledScene) -> u64 {
             hash_bytes(&mut hash, &value.to_bits().to_le_bytes());
         }
         hash_bytes(&mut hash, &binding.opacity.to_bits().to_le_bytes());
+        hash_bytes(
+            &mut hash,
+            &[match binding.sampling {
+                ImageSampling::Nearest => 0,
+                ImageSampling::Linear => 1,
+            }],
+        );
     }
     hash
 }
@@ -1324,6 +1414,11 @@ fn combine_scenes(
             index: 0,
             offscreen: false,
             bounds: None,
+            parent: None,
+            composite_command: None,
+            opacity: 1.0,
+            blend_mode: BlendMode::SourceOver,
+            backdrop: None,
             batches: Vec::new(),
             cost: OffscreenCost::default(),
         }],
@@ -1373,6 +1468,15 @@ fn combine_scenes(
             }
             combined.uploads.push(*upload);
         }
+        let first_offscreen = combined.passes.len();
+        let mut pass_map = vec![0_usize; scene.passes.len()];
+        let mut next_offscreen = first_offscreen;
+        for pass in &scene.passes {
+            if pass.offscreen {
+                pass_map[pass.index] = next_offscreen;
+                next_offscreen += 1;
+            }
+        }
         for pass in &scene.passes {
             let mut pass = pass.clone();
             for batch in &mut pass.batches {
@@ -1386,7 +1490,11 @@ fn combine_scenes(
                 );
             }
             if pass.offscreen {
-                pass.index = combined.passes.len();
+                pass.index = pass_map[pass.index];
+                pass.parent = pass.parent.map(|parent| pass_map[parent]);
+                pass.composite_command = pass
+                    .composite_command
+                    .map(|command| command + command_offset);
                 combined.passes.push(pass);
             } else {
                 combined.passes[0].batches.extend(pass.batches);
@@ -1489,6 +1597,115 @@ mod tests {
             .unwrap();
         assert_eq!(scene.quad_instances.len(), 1);
         assert_eq!(scene.quad_instances[0].opacity, 1.0);
+    }
+
+    #[test]
+    fn image_binding_preserves_sampling_mode() {
+        let image = crate::core::ImageHandle::from_parts(5, 1);
+        let command = PaintCommand::DrawImage {
+            rect: Rect::from_xywh(0.0, 0.0, 2.0, 2.0),
+            image,
+            sampling: ImageSampling::Nearest,
+            opacity: 1.0,
+        };
+        let context = CompileContext::new(RendererCapabilities::default(), DpiScale::ONE);
+        let scene = RenderCompiler::default()
+            .compile(&[command], &context)
+            .unwrap();
+        assert_eq!(scene.texture_bindings[0].sampling, ImageSampling::Nearest);
+    }
+
+    #[test]
+    fn nested_layers_preserve_parent_and_composite_order() {
+        let outer =
+            super::super::LayerSpec::new(Rect::from_xywh(1.0, 2.0, 8.0, 8.0)).with_opacity(0.5);
+        let inner = super::super::LayerSpec::new(Rect::from_xywh(2.0, 3.0, 4.0, 4.0));
+        let commands = [
+            PaintCommand::BeginLayer(outer),
+            PaintCommand::BeginLayer(inner),
+            PaintCommand::FillRect {
+                rect: Rect::from_xywh(2.0, 3.0, 1.0, 1.0),
+                color: Color::WHITE,
+            },
+            PaintCommand::EndLayer,
+            PaintCommand::EndLayer,
+        ];
+        let context = CompileContext::new(RendererCapabilities::default(), DpiScale::ONE);
+        let scene = RenderCompiler::default()
+            .compile(&commands, &context)
+            .unwrap();
+        assert_eq!(scene.passes[1].parent, Some(0));
+        assert_eq!(scene.passes[1].composite_command, Some(4));
+        assert_eq!(scene.passes[1].opacity, 0.5);
+        assert_eq!(scene.passes[2].parent, Some(1));
+        assert_eq!(scene.passes[2].composite_command, Some(3));
+    }
+
+    #[test]
+    fn curves_and_strokes_are_tessellated_instead_of_discarding_style() {
+        let path = Path::new(
+            [
+                PathSegment::MoveTo(Point::new(0.0, 0.0)),
+                PathSegment::CubicTo {
+                    control1: Point::new(2.0, 8.0),
+                    control2: Point::new(8.0, 8.0),
+                    to: Point::new(10.0, 0.0),
+                },
+            ],
+            crate::render::FillRule::NonZero,
+        )
+        .unwrap();
+        let fill = PaintCommand::FillPath {
+            path: path.clone(),
+            paint: Paint::solid(Color::WHITE),
+        };
+        let stroke = PaintCommand::StrokePath {
+            path,
+            style: StrokeStyle::new(3.0),
+            paint: Paint::solid(Color::WHITE),
+        };
+        let context = CompileContext::new(RendererCapabilities::default(), DpiScale::ONE);
+        let fill_scene = RenderCompiler::default()
+            .compile(&[fill], &context)
+            .unwrap();
+        let stroke_scene = RenderCompiler::default()
+            .compile(&[stroke], &context)
+            .unwrap();
+        assert!(fill_scene.path_vertices.len() > 2);
+        assert!(stroke_scene.path_vertices.len() > fill_scene.path_vertices.len());
+        assert_ne!(stroke_scene.path_indices, fill_scene.path_indices);
+    }
+
+    #[test]
+    fn even_odd_fill_rule_changes_path_tessellation() {
+        let segments = [
+            PathSegment::MoveTo(Point::new(0.0, 0.0)),
+            PathSegment::LineTo(Point::new(10.0, 0.0)),
+            PathSegment::LineTo(Point::new(10.0, 10.0)),
+            PathSegment::LineTo(Point::new(0.0, 10.0)),
+            PathSegment::Close,
+            PathSegment::MoveTo(Point::new(2.0, 2.0)),
+            PathSegment::LineTo(Point::new(8.0, 2.0)),
+            PathSegment::LineTo(Point::new(8.0, 8.0)),
+            PathSegment::LineTo(Point::new(2.0, 8.0)),
+            PathSegment::Close,
+        ];
+        let context = CompileContext::new(RendererCapabilities::default(), DpiScale::ONE);
+        let compile = |rule| {
+            let path = Path::new(segments, rule).unwrap();
+            RenderCompiler::default()
+                .compile(
+                    &[PaintCommand::FillPath {
+                        path,
+                        paint: Paint::solid(Color::WHITE),
+                    }],
+                    &context,
+                )
+                .unwrap()
+        };
+        let non_zero = compile(crate::render::FillRule::NonZero);
+        let even_odd = compile(crate::render::FillRule::EvenOdd);
+        assert_ne!(non_zero.path_indices.len(), even_odd.path_indices.len());
     }
 
     #[test]

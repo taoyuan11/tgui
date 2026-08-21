@@ -1,11 +1,12 @@
 //! Optional wgpu executor for the compiled scene boundary.
 //!
 //! The adapter owns GPU objects and never appears in Element, Layout, or
-//! RenderTree code. It intentionally starts with a small WGSL quad pipeline;
-//! paths and resource commands remain represented in CompiledScene and can be
-//! added without changing the CPU contracts.
+//! RenderTree code. Primitive and image batches are submitted through small
+//! WGSL pipelines while the CPU-side scene contracts remain backend-neutral.
 
-use super::{BatchKind, CompiledScene, GlyphPageUpload, QuadInstance, RendererCapabilities};
+use super::{
+    BatchKind, CompiledScene, GlyphPageUpload, ImageSampling, QuadInstance, RendererCapabilities,
+};
 use crate::core::{DpiScale, Error, GlyphPageId, ImageHandle, Result, Size};
 use crate::media::{DecodedImage, ImageTextureUploader};
 use crate::text::GlyphContentType;
@@ -13,19 +14,40 @@ use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 
 const QUAD_SHADER: &str = r#"
-struct Viewport { size: vec2<f32> }
+struct Viewport { origin: vec2<f32>, size: vec2<f32> }
 @group(0) @binding(0) var<uniform> viewport: Viewport;
 struct Instance { rect: vec4<f32>, radii: vec4<f32>, color: vec4<f32>, opacity: f32 }
 struct VertexOutput { @builtin(position) position: vec4<f32>, @location(2) color: vec4<f32>, @location(3) opacity: f32 }
-@vertex fn vs(@builtin(vertex_index) vertex: u32, @location(0) rect: vec4<f32>, @location(1) radii: vec4<f32>, @location(2) color: vec4<f32>, @location(3) opacity: f32) -> VertexOutput {
+struct QuadOutput { @builtin(position) position: vec4<f32>, @location(2) color: vec4<f32>, @location(3) opacity: f32, @location(4) local: vec2<f32>, @location(5) size: vec2<f32>, @location(6) radii: vec4<f32> }
+@vertex fn vs(@builtin(vertex_index) vertex: u32, @location(0) rect: vec4<f32>, @location(1) radii: vec4<f32>, @location(2) color: vec4<f32>, @location(3) opacity: f32) -> QuadOutput {
     let corners = array<vec2<f32>, 6>(vec2(0.0,0.0), vec2(1.0,0.0), vec2(1.0,1.0), vec2(0.0,0.0), vec2(1.0,1.0), vec2(0.0,1.0));
     let p = rect.xy + corners[vertex] * rect.zw;
-    let ndc = vec2(p.x / viewport.size.x * 2.0 - 1.0, 1.0 - p.y / viewport.size.y * 2.0);
-    return VertexOutput(vec4(ndc, 0.0, 1.0), color, opacity);
+    let local = p - viewport.origin;
+    let ndc = vec2(local.x / viewport.size.x * 2.0 - 1.0, 1.0 - local.y / viewport.size.y * 2.0);
+    return QuadOutput(vec4(ndc, 0.0, 1.0), color, opacity, corners[vertex] * rect.zw, rect.zw, radii);
 }
-@fragment fn fs(@location(2) color: vec4<f32>, @location(3) opacity: f32) -> @location(0) vec4<f32> { return vec4(color.rgb, color.a * opacity); }
+fn rounded_coverage(local: vec2<f32>, size: vec2<f32>, radii: vec4<f32>) -> f32 {
+    let max_radius = min(size.x, size.y) * 0.5;
+    let r = clamp(radii, vec4(0.0), vec4(max_radius));
+    var distance_to_edge = -1.0;
+    if (local.x < r.x && local.y < r.x) {
+        distance_to_edge = distance(local, vec2(r.x, r.x)) - r.x;
+    } else if (local.x > size.x - r.y && local.y < r.y) {
+        distance_to_edge = distance(local, vec2(size.x - r.y, r.y)) - r.y;
+    } else if (local.x > size.x - r.z && local.y > size.y - r.z) {
+        distance_to_edge = distance(local, vec2(size.x - r.z, size.y - r.z)) - r.z;
+    } else if (local.x < r.w && local.y > size.y - r.w) {
+        distance_to_edge = distance(local, vec2(r.w, size.y - r.w)) - r.w;
+    }
+    return 1.0 - smoothstep(-0.5, 0.5, distance_to_edge);
+}
+@fragment fn fs(@location(2) color: vec4<f32>, @location(3) opacity: f32, @location(4) local: vec2<f32>, @location(5) size: vec2<f32>, @location(6) radii: vec4<f32>) -> @location(0) vec4<f32> {
+    let coverage = rounded_coverage(local, size, radii);
+    return vec4(color.rgb, color.a * opacity * coverage);
+}
 @vertex fn path_vs(@location(0) position: vec2<f32>, @location(1) color: vec4<f32>, @location(2) opacity: f32) -> VertexOutput {
-    let ndc = vec2(position.x / viewport.size.x * 2.0 - 1.0, 1.0 - position.y / viewport.size.y * 2.0);
+    let local = position - viewport.origin;
+    let ndc = vec2(local.x / viewport.size.x * 2.0 - 1.0, 1.0 - local.y / viewport.size.y * 2.0);
     return VertexOutput(vec4(ndc, 0.0, 1.0), color, opacity);
 }
 @fragment fn path_fs(@location(2) color: vec4<f32>, @location(3) opacity: f32) -> @location(0) vec4<f32> { return vec4(color.rgb, color.a * opacity); }
@@ -36,7 +58,8 @@ struct GlyphOutput { @builtin(position) position: vec4<f32>, @location(2) color:
     let corners = array<vec2<f32>, 6>(vec2(0.0,0.0), vec2(1.0,0.0), vec2(1.0,1.0), vec2(0.0,0.0), vec2(1.0,1.0), vec2(0.0,1.0));
     let corner = corners[vertex];
     let p = rect.xy + corner * rect.zw;
-    let ndc = vec2(p.x / viewport.size.x * 2.0 - 1.0, 1.0 - p.y / viewport.size.y * 2.0);
+    let local = p - viewport.origin;
+    let ndc = vec2(local.x / viewport.size.x * 2.0 - 1.0, 1.0 - local.y / viewport.size.y * 2.0);
     return GlyphOutput(vec4(ndc, 0.0, 1.0), color, opacity, uv_rect.xy + corner * uv_rect.zw);
 }
 @fragment fn glyph_mask_fs(@location(2) color: vec4<f32>, @location(3) opacity: f32, @location(4) uv: vec2<f32>) -> @location(0) vec4<f32> {
@@ -45,6 +68,20 @@ struct GlyphOutput { @builtin(position) position: vec4<f32>, @location(2) color:
 }
 @fragment fn glyph_color_fs(@location(2) color: vec4<f32>, @location(3) opacity: f32, @location(4) uv: vec2<f32>) -> @location(0) vec4<f32> {
     let sampled = textureSample(glyph_texture, glyph_sampler, uv);
+    return vec4(sampled.rgb * color.rgb, sampled.a * color.a * opacity);
+}
+@group(2) @binding(0) var image_texture: texture_2d<f32>;
+@group(2) @binding(1) var image_sampler: sampler;
+@vertex fn image_vs(@builtin(vertex_index) vertex: u32, @location(0) rect: vec4<f32>, @location(1) uv_rect: vec4<f32>, @location(2) color: vec4<f32>, @location(3) opacity: f32) -> GlyphOutput {
+    let corners = array<vec2<f32>, 6>(vec2(0.0,0.0), vec2(1.0,0.0), vec2(1.0,1.0), vec2(0.0,0.0), vec2(1.0,1.0), vec2(0.0,1.0));
+    let corner = corners[vertex];
+    let p = rect.xy + corner * rect.zw;
+    let local = p - viewport.origin;
+    let ndc = vec2(local.x / viewport.size.x * 2.0 - 1.0, 1.0 - local.y / viewport.size.y * 2.0);
+    return GlyphOutput(vec4(ndc, 0.0, 1.0), color, opacity, uv_rect.xy + corner * uv_rect.zw);
+}
+@fragment fn image_fs(@location(2) color: vec4<f32>, @location(3) opacity: f32, @location(4) uv: vec2<f32>) -> @location(0) vec4<f32> {
+    let sampled = textureSample(image_texture, image_sampler, uv);
     return vec4(sampled.rgb * color.rgb, sampled.a * color.a * opacity);
 }
 "#;
@@ -59,13 +96,45 @@ struct GlyphTexture {
     content_type: GlyphContentType,
 }
 
+struct ImageTexture {
+    // Keep the texture alive for the view and for cache users that retain the
+    // upload receipt.
+    _texture: Arc<wgpu::Texture>,
+    view: wgpu::TextureView,
+}
+
+#[derive(Clone)]
+struct ImageBackup {
+    width: u32,
+    height: u32,
+    rgba8: Arc<[u8]>,
+}
+
+struct OffscreenTarget {
+    texture: wgpu::Texture,
+    view: wgpu::TextureView,
+    width: u32,
+    height: u32,
+}
+
+struct PassViewport {
+    _buffer: wgpu::Buffer,
+    bind_group: wgpu::BindGroup,
+}
+
+enum RenderItem<'a> {
+    Batch(&'a super::Batch),
+    Composite(&'a super::RenderPass),
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TextureUpload {
     pub handle: ImageHandle,
     pub width: u32,
     pub height: u32,
     pub bytes: u64,
-    /// The uploaded object remains alive until this receipt is dropped.
+    /// The receipt retains one ownership reference to the uploaded object;
+    /// the renderer also keeps it registered for subsequent image batches.
     pub texture: Arc<wgpu::Texture>,
 }
 
@@ -123,11 +192,20 @@ pub struct WgpuRenderer<'window> {
     path_pipeline: wgpu::RenderPipeline,
     glyph_mask_pipeline: wgpu::RenderPipeline,
     glyph_color_pipeline: wgpu::RenderPipeline,
+    image_pipeline: wgpu::RenderPipeline,
     bind_group: wgpu::BindGroup,
+    viewport_bind_layout: wgpu::BindGroupLayout,
     glyph_bind_layout: wgpu::BindGroupLayout,
+    image_bind_layout: wgpu::BindGroupLayout,
     glyph_sampler: wgpu::Sampler,
+    image_sampler: wgpu::Sampler,
+    image_nearest_sampler: wgpu::Sampler,
     viewport_buffer: wgpu::Buffer,
     glyph_textures: HashMap<GlyphPageId, GlyphTexture>,
+    image_textures: HashMap<ImageHandle, ImageTexture>,
+    image_backups: HashMap<ImageHandle, ImageBackup>,
+    target_format: wgpu::TextureFormat,
+    offscreen_pool: HashMap<(u32, u32), Vec<wgpu::Texture>>,
     physical_size: (u32, u32),
     dpi_scale: DpiScale,
     submission: u64,
@@ -193,9 +271,14 @@ impl<'window> WgpuRenderer<'window> {
             path_pipeline,
             glyph_mask_pipeline,
             glyph_color_pipeline,
+            image_pipeline,
             bind_group,
+            viewport_bind_layout,
             glyph_bind_layout,
+            image_bind_layout,
             glyph_sampler,
+            image_sampler,
+            image_nearest_sampler,
             viewport_buffer,
         ) = create_pipeline(&device, format);
         let mut renderer = Self {
@@ -209,11 +292,20 @@ impl<'window> WgpuRenderer<'window> {
             path_pipeline,
             glyph_mask_pipeline,
             glyph_color_pipeline,
+            image_pipeline,
             bind_group,
+            viewport_bind_layout,
             glyph_bind_layout,
+            image_bind_layout,
             glyph_sampler,
+            image_sampler,
+            image_nearest_sampler,
             viewport_buffer,
             glyph_textures: HashMap::new(),
+            image_textures: HashMap::new(),
+            image_backups: HashMap::new(),
+            target_format: format,
+            offscreen_pool: HashMap::new(),
             physical_size: (1, 1),
             dpi_scale,
             submission: 0,
@@ -270,7 +362,12 @@ impl<'window> WgpuRenderer<'window> {
         self.queue.write_buffer(
             &self.viewport_buffer,
             0,
-            bytemuck::cast_slice(&[logical_size.width.max(1.0), logical_size.height.max(1.0)]),
+            bytemuck::cast_slice(&[
+                0.0,
+                0.0,
+                logical_size.width.max(1.0),
+                logical_size.height.max(1.0),
+            ]),
         );
         if let (Some(surface), Some(config)) = (&self.surface, &mut self.config) {
             config.width = width;
@@ -334,20 +431,35 @@ impl<'window> WgpuRenderer<'window> {
             path_pipeline,
             glyph_mask_pipeline,
             glyph_color_pipeline,
+            image_pipeline,
             bind_group,
+            viewport_bind_layout,
             glyph_bind_layout,
+            image_bind_layout,
             glyph_sampler,
+            image_sampler,
+            image_nearest_sampler,
             viewport_buffer,
         ) = create_pipeline(&self.device, format);
         self.pipeline = pipeline;
         self.path_pipeline = path_pipeline;
         self.glyph_mask_pipeline = glyph_mask_pipeline;
         self.glyph_color_pipeline = glyph_color_pipeline;
+        self.image_pipeline = image_pipeline;
         self.bind_group = bind_group;
+        self.viewport_bind_layout = viewport_bind_layout;
         self.glyph_bind_layout = glyph_bind_layout;
+        self.image_bind_layout = image_bind_layout;
         self.glyph_sampler = glyph_sampler;
+        self.image_sampler = image_sampler;
+        self.image_nearest_sampler = image_nearest_sampler;
         self.viewport_buffer = viewport_buffer;
         self.glyph_textures.clear();
+        self.image_textures.clear();
+        if self.target_format != format {
+            self.offscreen_pool.clear();
+        }
+        self.target_format = format;
         surface.configure(&self.device, &config);
         self.config = Some(config);
         self.prefer_transparent_surface = prefer_transparent;
@@ -444,14 +556,6 @@ impl<'window> WgpuRenderer<'window> {
     ) -> Result<wgpu::SubmissionIndex> {
         self.ensure_device_available()?;
         self.prepare_glyph_pages(&scene.glyph_page_uploads)?;
-        self.queue.write_buffer(
-            &self.viewport_buffer,
-            0,
-            bytemuck::cast_slice(&[
-                self.dpi_scale.physical_to_logical(self.physical_size.0),
-                self.dpi_scale.physical_to_logical(self.physical_size.1),
-            ]),
-        );
         let clear_color = if self.prefer_transparent_surface {
             wgpu::Color::TRANSPARENT
         } else {
@@ -467,50 +571,150 @@ impl<'window> WgpuRenderer<'window> {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("tgui frame"),
             });
-        {
-            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("tgui main pass"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view,
-                    depth_slice: None,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(clear_color),
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                depth_stencil_attachment: None,
-                timestamp_writes: None,
-                occlusion_query_set: None,
-            });
-            pass.set_bind_group(0, &self.bind_group, &[]);
-            for render_pass in &scene.passes {
-                for batch in &render_pass.batches {
+        let mut offscreens = HashMap::new();
+        for render_pass in scene.passes.iter().filter(|pass| pass.offscreen) {
+            offscreens.insert(
+                render_pass.index,
+                self.acquire_offscreen(render_pass.cost.width, render_pass.cost.height),
+            );
+        }
+        for render_pass in scene.passes.iter().filter(|pass| pass.offscreen).rev() {
+            let target = offscreens.get(&render_pass.index).ok_or_else(|| {
+                Error::compile("wgpu", "offscreen render target was not allocated")
+            })?;
+            let viewport = self.pass_viewport(render_pass.bounds)?;
+            let items = ordered_pass_items(scene, render_pass);
+            self.encode_pass(
+                scene,
+                &mut encoder,
+                &target.view,
+                target.width,
+                target.height,
+                render_pass
+                    .bounds
+                    .map_or([0.0, 0.0], |bounds| [bounds.origin.x, bounds.origin.y]),
+                &viewport.bind_group,
+                &items,
+                &offscreens,
+                wgpu::Color::TRANSPARENT,
+            )?;
+        }
+        let main = scene
+            .passes
+            .first()
+            .ok_or_else(|| Error::compile("wgpu", "compiled scene has no main pass"))?;
+        let main_viewport = self.pass_viewport(None)?;
+        let main_items = ordered_pass_items(scene, main);
+        self.encode_pass(
+            scene,
+            &mut encoder,
+            view,
+            self.physical_size.0,
+            self.physical_size.1,
+            [0.0, 0.0],
+            &main_viewport.bind_group,
+            &main_items,
+            &offscreens,
+            clear_color,
+        )?;
+        let submission = self.queue.submit(Some(encoder.finish()));
+        self.submission = self.submission.saturating_add(1);
+        for (_, target) in offscreens {
+            self.offscreen_pool
+                .entry((target.width, target.height))
+                .or_default()
+                .push(target.texture);
+        }
+        Ok(submission)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn encode_pass(
+        &self,
+        scene: &CompiledScene,
+        encoder: &mut wgpu::CommandEncoder,
+        view: &wgpu::TextureView,
+        target_width: u32,
+        target_height: u32,
+        viewport_origin: [f32; 2],
+        viewport_bind_group: &wgpu::BindGroup,
+        items: &[RenderItem<'_>],
+        offscreens: &HashMap<usize, OffscreenTarget>,
+        clear_color: wgpu::Color,
+    ) -> Result<()> {
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("tgui render pass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view,
+                depth_slice: None,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(clear_color),
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: None,
+            timestamp_writes: None,
+            occlusion_query_set: None,
+        });
+        pass.set_bind_group(0, viewport_bind_group, &[]);
+        for item in items {
+            match item {
+                RenderItem::Composite(layer) => {
+                    let target = offscreens.get(&layer.index).ok_or_else(|| {
+                        Error::compile("wgpu", "layer composite target is missing")
+                    })?;
+                    let bounds = layer
+                        .bounds
+                        .ok_or_else(|| Error::compile("wgpu", "layer composite has no bounds"))?;
+                    let bind_group = self.image_bind_group(&target.view, &self.image_sampler);
+                    let binding = super::TextureBinding {
+                        resource: crate::core::ResourceId::from_parts(layer.index as u32, 1),
+                        generation: 1,
+                        rect: [
+                            bounds.origin.x,
+                            bounds.origin.y,
+                            bounds.size.width,
+                            bounds.size.height,
+                        ],
+                        uv: [0.0, 0.0, 1.0, 1.0],
+                        color: [1.0; 4],
+                        opacity: layer.opacity,
+                        sampling: ImageSampling::Linear,
+                    };
+                    let bytes = gpu_texture_binding_bytes(&binding);
+                    let buffer = self.instance_buffer("tgui layer composite", &bytes);
+                    pass.set_pipeline(&self.image_pipeline);
+                    pass.set_bind_group(2, &bind_group, &[]);
+                    pass.set_vertex_buffer(0, buffer.slice(..));
+                    pass.draw(0..6, 0..1);
+                }
+                RenderItem::Batch(batch) => {
                     if let Some(clip) = batch.clip {
                         let x = self
                             .dpi_scale
-                            .logical_to_physical(clip.origin.x.max(0.0))
+                            .logical_to_physical((clip.origin.x - viewport_origin[0]).max(0.0))
                             .map_err(Error::from)?;
                         let y = self
                             .dpi_scale
-                            .logical_to_physical(clip.origin.y.max(0.0))
+                            .logical_to_physical((clip.origin.y - viewport_origin[1]).max(0.0))
                             .map_err(Error::from)?;
                         let width = self
                             .dpi_scale
                             .logical_to_physical(clip.size.width)
                             .map_err(Error::from)?
-                            .min(self.physical_size.0.saturating_sub(x));
+                            .min(target_width.saturating_sub(x));
                         let height = self
                             .dpi_scale
                             .logical_to_physical(clip.size.height)
                             .map_err(Error::from)?
-                            .min(self.physical_size.1.saturating_sub(y));
+                            .min(target_height.saturating_sub(y));
                         if width == 0 || height == 0 {
                             continue;
                         }
                         pass.set_scissor_rect(x, y, width, height);
                     } else {
-                        pass.set_scissor_rect(0, 0, self.physical_size.0, self.physical_size.1);
+                        pass.set_scissor_rect(0, 0, target_width, target_height);
                     }
                     match batch.kind {
                         BatchKind::Quad { instances } => {
@@ -605,7 +809,7 @@ impl<'window> WgpuRenderer<'window> {
                                             },
                                         ],
                                     });
-                                let bytes = gpu_glyph_bytes(binding);
+                                let bytes = gpu_texture_binding_bytes(binding);
                                 let buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
                                     label: Some("tgui glyph instance"),
                                     size: bytes.len().max(1) as u64,
@@ -623,9 +827,7 @@ impl<'window> WgpuRenderer<'window> {
                                 pass.draw(0..6, 0..1);
                             }
                         }
-                        BatchKind::Text { bindings }
-                        | BatchKind::Image { bindings }
-                        | BatchKind::NativeSurface { bindings } => {
+                        BatchKind::Text { bindings } | BatchKind::NativeSurface { bindings } => {
                             if bindings.count == 0 {
                                 continue;
                             }
@@ -653,13 +855,187 @@ impl<'window> WgpuRenderer<'window> {
                             pass.set_vertex_buffer(0, buffer.slice(..));
                             pass.draw(0..6, 0..u32::try_from(instances.len()).unwrap_or(u32::MAX));
                         }
+                        BatchKind::Image { bindings } => {
+                            for binding in &scene.texture_bindings[bindings.start..bindings.end()] {
+                                let handle = ImageHandle::from_parts(
+                                    binding.resource.slot(),
+                                    binding.resource.generation(),
+                                );
+                                let Some(texture) = self.image_textures.get(&handle) else {
+                                    // A scene may be committed before its asynchronous image
+                                    // upload arrives. Keep the established placeholder behavior
+                                    // for that frame instead of sampling an invalid bind group.
+                                    pass.set_pipeline(&self.pipeline);
+                                    let instance = QuadInstance {
+                                        rect: binding.rect,
+                                        radii: [0.0; 4],
+                                        color: [180.0 / 255.0, 180.0 / 255.0, 180.0 / 255.0, 1.0],
+                                        opacity: binding.opacity,
+                                    };
+                                    let bytes =
+                                        gpu_quad_bytes(&instance).into_iter().collect::<Vec<_>>();
+                                    let buffer =
+                                        self.device.create_buffer(&wgpu::BufferDescriptor {
+                                            label: Some("tgui image placeholder instance"),
+                                            size: bytes.len().max(1) as u64,
+                                            usage: wgpu::BufferUsages::VERTEX
+                                                | wgpu::BufferUsages::COPY_DST,
+                                            mapped_at_creation: false,
+                                        });
+                                    self.queue.write_buffer(&buffer, 0, &bytes);
+                                    pass.set_vertex_buffer(0, buffer.slice(..));
+                                    pass.draw(0..6, 0..1);
+                                    continue;
+                                };
+                                let bind_group =
+                                    self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                                        label: Some("tgui image bind group"),
+                                        layout: &self.image_bind_layout,
+                                        entries: &[
+                                            wgpu::BindGroupEntry {
+                                                binding: 0,
+                                                resource: wgpu::BindingResource::TextureView(
+                                                    &texture.view,
+                                                ),
+                                            },
+                                            wgpu::BindGroupEntry {
+                                                binding: 1,
+                                                resource: wgpu::BindingResource::Sampler(
+                                                    match binding.sampling {
+                                                        ImageSampling::Nearest => {
+                                                            &self.image_nearest_sampler
+                                                        }
+                                                        ImageSampling::Linear => {
+                                                            &self.image_sampler
+                                                        }
+                                                    },
+                                                ),
+                                            },
+                                        ],
+                                    });
+                                let bytes = gpu_texture_binding_bytes(binding);
+                                let buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
+                                    label: Some("tgui image instance"),
+                                    size: bytes.len().max(1) as u64,
+                                    usage: wgpu::BufferUsages::VERTEX
+                                        | wgpu::BufferUsages::COPY_DST,
+                                    mapped_at_creation: false,
+                                });
+                                self.queue.write_buffer(&buffer, 0, &bytes);
+                                pass.set_pipeline(&self.image_pipeline);
+                                pass.set_bind_group(2, &bind_group, &[]);
+                                pass.set_vertex_buffer(0, buffer.slice(..));
+                                pass.draw(0..6, 0..1);
+                            }
+                        }
                     }
                 }
             }
         }
-        let submission = self.queue.submit(Some(encoder.finish()));
-        self.submission = self.submission.saturating_add(1);
-        Ok(submission)
+        Ok(())
+    }
+
+    fn acquire_offscreen(&mut self, width: u32, height: u32) -> OffscreenTarget {
+        let width = width.max(1);
+        let height = height.max(1);
+        let texture = self
+            .offscreen_pool
+            .get_mut(&(width, height))
+            .and_then(Vec::pop)
+            .unwrap_or_else(|| {
+                self.device.create_texture(&wgpu::TextureDescriptor {
+                    label: Some("tgui offscreen layer"),
+                    size: wgpu::Extent3d {
+                        width,
+                        height,
+                        depth_or_array_layers: 1,
+                    },
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: self.target_format,
+                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                        | wgpu::TextureUsages::TEXTURE_BINDING,
+                    view_formats: &[],
+                })
+            });
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        OffscreenTarget {
+            texture,
+            view,
+            width,
+            height,
+        }
+    }
+
+    fn pass_viewport(&self, bounds: Option<crate::core::Rect>) -> Result<PassViewport> {
+        let values = if let Some(bounds) = bounds {
+            [
+                bounds.origin.x,
+                bounds.origin.y,
+                bounds.size.width.max(1.0),
+                bounds.size.height.max(1.0),
+            ]
+        } else {
+            [
+                0.0,
+                0.0,
+                self.dpi_scale.physical_to_logical(self.physical_size.0),
+                self.dpi_scale.physical_to_logical(self.physical_size.1),
+            ]
+        };
+        let buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("tgui pass viewport"),
+            size: 16,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        self.queue
+            .write_buffer(&buffer, 0, bytemuck::cast_slice(&values));
+        let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("tgui pass viewport bind group"),
+            layout: &self.viewport_bind_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: buffer.as_entire_binding(),
+            }],
+        });
+        Ok(PassViewport {
+            _buffer: buffer,
+            bind_group,
+        })
+    }
+
+    fn image_bind_group(
+        &self,
+        view: &wgpu::TextureView,
+        sampler: &wgpu::Sampler,
+    ) -> wgpu::BindGroup {
+        self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("tgui sampled image bind group"),
+            layout: &self.image_bind_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(sampler),
+                },
+            ],
+        })
+    }
+
+    fn instance_buffer(&self, label: &str, bytes: &[u8]) -> wgpu::Buffer {
+        let buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some(label),
+            size: bytes.len().max(1) as u64,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        self.queue.write_buffer(&buffer, 0, bytes);
+        buffer
     }
 
     pub fn render_surface(&mut self, scene: &CompiledScene) -> Result<()> {
@@ -668,9 +1044,7 @@ impl<'window> WgpuRenderer<'window> {
             .surface
             .as_ref()
             .ok_or_else(|| Error::platform("render_surface", "renderer has no surface", false))?;
-        let frame = surface
-            .get_current_texture()
-            .map_err(|error| Error::platform("acquire_surface", format!("{error:?}"), true))?;
+        let frame = surface.get_current_texture().map_err(surface_error)?;
         let view = frame
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
@@ -680,7 +1054,7 @@ impl<'window> WgpuRenderer<'window> {
     }
 
     pub fn upload_rgba8(
-        &self,
+        &mut self,
         handle: ImageHandle,
         width: u32,
         height: u32,
@@ -688,6 +1062,15 @@ impl<'window> WgpuRenderer<'window> {
     ) -> Result<TextureUpload> {
         self.ensure_device_available()?;
         let texture = Arc::new(self.create_rgba8_texture(width, height, bytes)?);
+        self.image_backups.insert(
+            handle,
+            ImageBackup {
+                width,
+                height,
+                rgba8: Arc::from(bytes),
+            },
+        );
+        self.register_image_texture(handle, texture.clone());
         Ok(TextureUpload {
             handle,
             width,
@@ -697,6 +1080,37 @@ impl<'window> WgpuRenderer<'window> {
                 .saturating_mul(4),
             texture,
         })
+    }
+
+    /// Registers an already-uploaded image texture for `DrawImage` bindings.
+    /// The caller retains ownership of the `Arc`; the renderer keeps a shared
+    /// reference so the texture remains available across submitted frames.
+    pub fn register_image_texture(&mut self, handle: ImageHandle, texture: Arc<wgpu::Texture>) {
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        self.image_textures.insert(
+            handle,
+            ImageTexture {
+                _texture: texture,
+                view,
+            },
+        );
+    }
+
+    pub fn remove_image_texture(&mut self, handle: ImageHandle) -> bool {
+        self.image_backups.remove(&handle);
+        self.image_textures.remove(&handle).is_some()
+    }
+
+    pub fn has_image_texture(&self, handle: ImageHandle) -> bool {
+        self.image_textures.contains_key(&handle)
+    }
+
+    pub fn image_texture_count(&self) -> usize {
+        self.image_textures.len()
+    }
+
+    pub fn pooled_offscreen_texture_count(&self) -> usize {
+        self.offscreen_pool.values().map(Vec::len).sum()
     }
 
     /// Creates an uploaded texture for ownership by a `GpuTextureCache`.
@@ -804,9 +1218,14 @@ impl<'window> WgpuRenderer<'window> {
             path_pipeline,
             glyph_mask_pipeline,
             glyph_color_pipeline,
+            image_pipeline,
             bind_group,
+            viewport_bind_layout,
             glyph_bind_layout,
+            image_bind_layout,
             glyph_sampler,
+            image_sampler,
+            image_nearest_sampler,
             viewport_buffer,
         ) = create_pipeline(&device, format);
         self.adapter = adapter;
@@ -816,14 +1235,32 @@ impl<'window> WgpuRenderer<'window> {
         self.path_pipeline = path_pipeline;
         self.glyph_mask_pipeline = glyph_mask_pipeline;
         self.glyph_color_pipeline = glyph_color_pipeline;
+        self.image_pipeline = image_pipeline;
         self.bind_group = bind_group;
+        self.viewport_bind_layout = viewport_bind_layout;
         self.glyph_bind_layout = glyph_bind_layout;
+        self.image_bind_layout = image_bind_layout;
         self.glyph_sampler = glyph_sampler;
+        self.image_sampler = image_sampler;
+        self.image_nearest_sampler = image_nearest_sampler;
         self.viewport_buffer = viewport_buffer;
         self.glyph_textures.clear();
+        self.image_textures.clear();
+        self.offscreen_pool.clear();
+        self.target_format = format;
         if self.surface.is_some() {
             self.config = None;
             self.configure_surface_with_alpha(self.prefer_transparent_surface)?;
+        }
+        let backups = self
+            .image_backups
+            .iter()
+            .map(|(handle, backup)| (*handle, backup.clone()))
+            .collect::<Vec<_>>();
+        for (handle, backup) in backups {
+            let texture =
+                Arc::new(self.create_rgba8_texture(backup.width, backup.height, &backup.rgba8)?);
+            self.register_image_texture(handle, texture);
         }
         self.device_lost = false;
         Ok(())
@@ -843,20 +1280,52 @@ impl<'window> WgpuRenderer<'window> {
 }
 
 impl ImageTextureUploader for WgpuRenderer<'_> {
-    type Texture = wgpu::Texture;
+    type Texture = Arc<wgpu::Texture>;
 
-    fn upload_image(
-        &mut self,
-        _handle: ImageHandle,
-        image: &DecodedImage,
-    ) -> Result<Self::Texture> {
+    fn upload_image(&mut self, handle: ImageHandle, image: &DecodedImage) -> Result<Self::Texture> {
         let size = image.size();
-        self.create_rgba8_texture(size.width, size.height, image.rgba8())
+        Ok(self
+            .upload_rgba8(handle, size.width, size.height, image.rgba8())?
+            .texture)
     }
+}
+
+fn ordered_pass_items<'a>(
+    scene: &'a CompiledScene,
+    render_pass: &'a super::RenderPass,
+) -> Vec<RenderItem<'a>> {
+    let mut items = render_pass
+        .batches
+        .iter()
+        .map(|batch| (batch.source_commands.start, 0_u8, RenderItem::Batch(batch)))
+        .collect::<Vec<_>>();
+    items.extend(
+        scene
+            .passes
+            .iter()
+            .filter(|pass| pass.parent == Some(render_pass.index))
+            .filter_map(|pass| {
+                pass.composite_command
+                    .map(|command| (command, 1_u8, RenderItem::Composite(pass)))
+            }),
+    );
+    items.sort_by_key(|(command, kind, _)| (*command, *kind));
+    items.into_iter().map(|(_, _, item)| item).collect()
 }
 
 fn make_instance() -> wgpu::Instance {
     wgpu::Instance::new(&wgpu::InstanceDescriptor::default())
+}
+
+fn surface_error(error: wgpu::SurfaceError) -> Error {
+    let (operation, recoverable) = match error {
+        wgpu::SurfaceError::Timeout => ("acquire_surface_timeout", true),
+        wgpu::SurfaceError::Outdated => ("acquire_surface_outdated", true),
+        wgpu::SurfaceError::Lost => ("acquire_surface_lost", true),
+        wgpu::SurfaceError::OutOfMemory => ("acquire_surface_out_of_memory", false),
+        wgpu::SurfaceError::Other => ("acquire_surface", true),
+    };
+    Error::platform(operation, error.to_string(), recoverable)
 }
 
 fn create_pipeline(
@@ -867,8 +1336,13 @@ fn create_pipeline(
     wgpu::RenderPipeline,
     wgpu::RenderPipeline,
     wgpu::RenderPipeline,
+    wgpu::RenderPipeline,
     wgpu::BindGroup,
     wgpu::BindGroupLayout,
+    wgpu::BindGroupLayout,
+    wgpu::BindGroupLayout,
+    wgpu::Sampler,
+    wgpu::Sampler,
     wgpu::Sampler,
     wgpu::Buffer,
 ) {
@@ -878,7 +1352,7 @@ fn create_pipeline(
     });
     let viewport_buffer = device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("tgui viewport"),
-        size: 8,
+        size: 16,
         usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         mapped_at_creation: false,
     });
@@ -924,6 +1398,27 @@ fn create_pipeline(
             },
         ],
     });
+    let image_bind_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        label: Some("tgui image texture"),
+        entries: &[
+            wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Texture {
+                    sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    view_dimension: wgpu::TextureViewDimension::D2,
+                    multisampled: false,
+                },
+                count: None,
+            },
+            wgpu::BindGroupLayoutEntry {
+                binding: 1,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                count: None,
+            },
+        ],
+    });
     let glyph_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
         label: Some("tgui glyph sampler"),
         address_mode_u: wgpu::AddressMode::ClampToEdge,
@@ -931,6 +1426,26 @@ fn create_pipeline(
         address_mode_w: wgpu::AddressMode::ClampToEdge,
         mag_filter: wgpu::FilterMode::Linear,
         min_filter: wgpu::FilterMode::Linear,
+        mipmap_filter: wgpu::FilterMode::Nearest,
+        ..Default::default()
+    });
+    let image_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+        label: Some("tgui image sampler"),
+        address_mode_u: wgpu::AddressMode::ClampToEdge,
+        address_mode_v: wgpu::AddressMode::ClampToEdge,
+        address_mode_w: wgpu::AddressMode::ClampToEdge,
+        mag_filter: wgpu::FilterMode::Linear,
+        min_filter: wgpu::FilterMode::Linear,
+        mipmap_filter: wgpu::FilterMode::Nearest,
+        ..Default::default()
+    });
+    let image_nearest_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+        label: Some("tgui image nearest sampler"),
+        address_mode_u: wgpu::AddressMode::ClampToEdge,
+        address_mode_v: wgpu::AddressMode::ClampToEdge,
+        address_mode_w: wgpu::AddressMode::ClampToEdge,
+        mag_filter: wgpu::FilterMode::Nearest,
+        min_filter: wgpu::FilterMode::Nearest,
         mipmap_filter: wgpu::FilterMode::Nearest,
         ..Default::default()
     });
@@ -1024,14 +1539,53 @@ fn create_pipeline(
         multiview: None,
         cache: None,
     });
+    let image_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some("tgui image pipeline layout"),
+        bind_group_layouts: &[&bind_layout, &glyph_bind_layout, &image_bind_layout],
+        push_constant_ranges: &[],
+    });
+    let image_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("tgui image pipeline"),
+        layout: Some(&image_pipeline_layout),
+        vertex: wgpu::VertexState {
+            module: &shader,
+            entry_point: Some("image_vs"),
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            buffers: &[wgpu::VertexBufferLayout {
+                array_stride: 52,
+                step_mode: wgpu::VertexStepMode::Instance,
+                attributes: &wgpu::vertex_attr_array![0 => Float32x4, 1 => Float32x4, 2 => Float32x4, 3 => Float32],
+            }],
+        },
+        fragment: Some(wgpu::FragmentState {
+            module: &shader,
+            entry_point: Some("image_fs"),
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            targets: &[Some(wgpu::ColorTargetState {
+                format,
+                blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+        }),
+        primitive: wgpu::PrimitiveState::default(),
+        depth_stencil: None,
+        multisample: wgpu::MultisampleState::default(),
+        multiview: None,
+        cache: None,
+    });
     (
         pipeline,
         path_pipeline,
         glyph_mask_pipeline,
         glyph_color_pipeline,
+        image_pipeline,
         bind_group,
+        bind_layout,
         glyph_bind_layout,
+        image_bind_layout,
         glyph_sampler,
+        image_sampler,
+        image_nearest_sampler,
         viewport_buffer,
     )
 }
@@ -1051,7 +1605,7 @@ fn gpu_quad_bytes(instance: &QuadInstance) -> impl IntoIterator<Item = u8> {
     bytes
 }
 
-fn gpu_glyph_bytes(binding: &super::TextureBinding) -> Vec<u8> {
+fn gpu_texture_binding_bytes(binding: &super::TextureBinding) -> Vec<u8> {
     let mut bytes = Vec::with_capacity(52);
     for value in binding
         .rect
@@ -1083,7 +1637,7 @@ fn gpu_path_vertex_bytes(vertex: &super::compiler::PathVertex) -> impl IntoItera
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::{Clip, Color, Point, Rect, SceneRevision};
+    use crate::core::{Clip, Color, ImageHandle, Point, Rect, SceneRevision};
     use crate::render::{
         CompileContext, FillRule, Paint, PaintCommand, Path, PathSegment, RenderCompiler,
     };
@@ -1160,6 +1714,7 @@ mod tests {
         assert!(renderer.render_to_view(&scene, &view).is_err());
         pollster::block_on(renderer.recover_device()).unwrap();
         assert!(!renderer.is_device_lost());
+        assert!(renderer.has_image_texture(ImageHandle::from_parts(1, 1)));
         let recovered_target = renderer.device.create_texture(&wgpu::TextureDescriptor {
             label: Some("tgui recovered test target"),
             size: wgpu::Extent3d {
@@ -1215,10 +1770,163 @@ mod tests {
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let view = target.create_view(&wgpu::TextureViewDescriptor::default());
+        renderer.render_to_view(&scene, &view).unwrap();
+    }
+
+    #[test]
+    fn headless_device_samples_registered_image_textures_when_available() {
+        let Ok(mut renderer) = pollster::block_on(WgpuRenderer::new_headless()) else {
+            return;
+        };
+        let image = ImageHandle::from_parts(4, 1);
+        renderer
+            .upload_rgba8(image, 2, 1, &[255, 0, 0, 255, 0, 0, 255, 255])
+            .unwrap();
+        assert!(renderer.has_image_texture(image));
+
+        let command = PaintCommand::DrawImage {
+            rect: Rect::from_xywh(0.0, 0.0, 2.0, 1.0),
+            image,
+            sampling: crate::render::ImageSampling::Linear,
+            opacity: 1.0,
+        };
+        let context = CompileContext::new(renderer.capabilities(), renderer.dpi_scale())
+            .with_scene_revision(SceneRevision::new(1));
+        let scene = RenderCompiler::default()
+            .compile(&[command], &context)
+            .unwrap();
+        let target = renderer.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("tgui image test target"),
+            size: wgpu::Extent3d {
+                width: 2,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let view = target.create_view(&wgpu::TextureViewDescriptor::default());
+        renderer.render_to_view(&scene, &view).unwrap();
+        let readback = renderer.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("tgui image test readback"),
+            size: 256,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+        let mut encoder = renderer
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("tgui image readback"),
+            });
+        encoder.copy_texture_to_buffer(
+            wgpu::TexelCopyTextureInfo {
+                texture: &target,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            wgpu::TexelCopyBufferInfo {
+                buffer: &readback,
+                layout: wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(256),
+                    rows_per_image: Some(1),
+                },
+            },
+            wgpu::Extent3d {
+                width: 2,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+        );
+        renderer.queue.submit(Some(encoder.finish()));
+        let (sender, receiver) = std::sync::mpsc::channel();
+        readback
+            .slice(..)
+            .map_async(wgpu::MapMode::Read, move |result| {
+                let _ = sender.send(result);
+            });
+        renderer.device.poll(wgpu::PollType::Wait).unwrap();
+        receiver.recv().unwrap().unwrap();
+        let pixels = readback.slice(..).get_mapped_range();
+        assert!(pixels[0] > 200 && pixels[1] < 40 && pixels[2] < 40);
+        assert!(pixels[4] < 40 && pixels[5] < 40 && pixels[6] > 200);
+    }
+
+    #[test]
+    fn surface_errors_keep_distinct_recovery_policies() {
+        let timeout = surface_error(wgpu::SurfaceError::Timeout);
+        let out_of_memory = surface_error(wgpu::SurfaceError::OutOfMemory);
+        assert!(timeout.is_recoverable());
+        assert!(!out_of_memory.is_recoverable());
+        assert!(timeout.to_string().contains("acquire_surface_timeout"));
+        assert!(
+            out_of_memory
+                .to_string()
+                .contains("acquire_surface_out_of_memory")
+        );
+    }
+
+    #[test]
+    fn headless_device_renders_nested_layers_into_offscreen_targets() {
+        let Ok(mut renderer) = pollster::block_on(WgpuRenderer::new_headless()) else {
+            return;
+        };
+        renderer
+            .resize(Size::new(16.0, 16.0), DpiScale::ONE)
+            .unwrap();
+        let commands = [
+            PaintCommand::FillRect {
+                rect: Rect::from_xywh(0.0, 0.0, 16.0, 16.0),
+                color: Color::WHITE,
+            },
+            PaintCommand::BeginLayer(
+                crate::render::LayerSpec::new(Rect::from_xywh(2.0, 2.0, 12.0, 12.0))
+                    .with_opacity(0.5),
+            ),
+            PaintCommand::FillRect {
+                rect: Rect::from_xywh(2.0, 2.0, 12.0, 12.0),
+                color: Color::rgba8(255, 0, 0, 255),
+            },
+            PaintCommand::BeginLayer(crate::render::LayerSpec::new(Rect::from_xywh(
+                4.0, 4.0, 4.0, 4.0,
+            ))),
+            PaintCommand::FillRect {
+                rect: Rect::from_xywh(4.0, 4.0, 4.0, 4.0),
+                color: Color::rgba8(0, 0, 255, 255),
+            },
+            PaintCommand::EndLayer,
+            PaintCommand::EndLayer,
+        ];
+        let context = CompileContext::new(renderer.capabilities(), renderer.dpi_scale());
+        let scene = RenderCompiler::default()
+            .compile(&commands, &context)
+            .unwrap();
+        assert_eq!(scene.pass_count(), 3);
+        let target = renderer.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("tgui layer test target"),
+            size: wgpu::Extent3d {
+                width: 16,
+                height: 16,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             view_formats: &[],
         });
         let view = target.create_view(&wgpu::TextureViewDescriptor::default());
         renderer.render_to_view(&scene, &view).unwrap();
+        assert_eq!(renderer.pooled_offscreen_texture_count(), 2);
     }
 }

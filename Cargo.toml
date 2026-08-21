@@ -56,6 +56,8 @@ image = { version = "0.25.6", default-features = false, features = [
     "webp",
 ], optional = true }
 resvg = { version = "0.45.1", default-features = false, optional = true }
+lyon_path = "1.0.19"
+lyon_tessellation = "1.0.20"
 accesskit = { version = "0.24.1", optional = true }
 winit = { version = "0.30.12", optional = true }
 
