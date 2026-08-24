@@ -1315,6 +1315,7 @@ mod tests {
     #[test]
     fn button_default_for_theme_uses_theme_tokens() {
         let mut theme = Theme::light();
+        theme.density = Density::Comfortable;
         theme.colors.primary = Color::hexa(0xCC3366FF);
         theme.radius.lg = dp(10.0);
         theme.typography.label.size = sp(13.0);
@@ -1363,6 +1364,7 @@ mod tests {
     #[test]
     fn input_and_select_defaults_use_theme_tokens() {
         let mut theme = Theme::dark();
+        theme.density = Density::Comfortable;
         theme.colors.surface = Color::hexa(0x102030FF);
         theme.colors.primary = Color::hexa(0x44DD99FF);
         theme.colors.selection = Color::hexa(0x44DD9966);
@@ -1530,10 +1532,10 @@ mod tests {
     }
 
     #[test]
-    fn theme_default_remains_dark_and_comfortable() {
+    fn theme_default_remains_dark_and_compact() {
         let theme = Theme::default();
         assert_eq!(theme, Theme::dark());
-        assert_eq!(theme.density, Density::Comfortable);
+        assert_eq!(theme.density, Density::Compact);
     }
 
     #[test]
@@ -1661,7 +1663,8 @@ mod tests {
 
     #[test]
     fn selection_controls_share_modern_geometry_and_interaction_states() {
-        let theme = Theme::light();
+        let mut theme = Theme::light();
+        theme.density = Density::Comfortable;
         let palette = palette_from_theme(&theme);
         let hovered = WidgetState {
             hovered: true,

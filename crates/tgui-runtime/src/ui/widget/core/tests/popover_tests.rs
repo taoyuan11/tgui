@@ -225,7 +225,8 @@ fn popover_style_defaults_match_expected_baseline() {
         }
     }
 
-    let theme = Theme::light();
+    let mut theme = Theme::light();
+    theme.density = crate::ui::theme::Density::Comfortable;
     let comfortable = PopoverStyle::default_for_theme(&theme);
     assert_eq!(comfortable.padding, Insets::all(theme.spacing.md));
     assert_eq!(comfortable.min_width, dp(220.0));

@@ -534,7 +534,8 @@ fn menu_glyph_icon_renders_when_present() {
 
 #[test]
 fn menu_svg_icon_renders_as_overlay_texture() {
-    let theme = Theme::default();
+    let mut theme = Theme::default();
+    theme.density = Density::Comfortable;
     let font_manager = FontManager::new(&FontCatalog::default());
     let media = test_media();
     let mut animations = AnimationEngine::default();

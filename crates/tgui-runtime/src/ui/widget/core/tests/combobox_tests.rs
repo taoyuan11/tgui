@@ -381,7 +381,8 @@ fn combobox_menu_uses_real_light_and_dark_surface_tokens() {
     let media = test_media();
     let viewport = Rect::new(0.0, 0.0, 640.0, 420.0);
 
-    for theme in [Theme::light(), Theme::dark()] {
+    for mut theme in [Theme::light(), Theme::dark()] {
+        theme.density = Density::Comfortable;
         let mut animations = AnimationEngine::default();
         let layout = build_layout(
             &tree,

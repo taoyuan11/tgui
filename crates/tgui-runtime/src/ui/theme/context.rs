@@ -4,8 +4,9 @@ use std::time::Duration;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum Density {
-    Compact,
+    /// The default density for built-in themes and components.
     #[default]
+    Compact,
     Comfortable,
     Spacious,
 }

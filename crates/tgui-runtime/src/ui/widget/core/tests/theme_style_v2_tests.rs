@@ -78,6 +78,7 @@ fn density_geometry_reaches_intrinsic_core_layout() {
 #[test]
 fn theme_tokens_drive_default_component_styles() {
     let mut theme = Theme::light();
+    theme.density = Density::Comfortable;
     theme.colors.primary = Color::hexa(0x2468ACFF);
     theme.colors.on_primary = Color::hexa(0xFEFEFEFF);
     theme.colors.surface = Color::hexa(0x102030FF);

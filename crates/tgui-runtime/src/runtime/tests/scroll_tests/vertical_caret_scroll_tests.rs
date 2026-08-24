@@ -6,7 +6,10 @@ fn textarea_mouse_wheel_reaches_last_line_with_tall_line_height() {
     let value = "line 0\nline 1\nline 2\nline 3\nline 4\nline 5";
     let tree = WidgetTree::new(Textarea::<TestVm>::new(value).height(dp(120.0)).style_full(
         |ctx| {
-            let mut style = crate::ui::widget::TextareaStyle::default_for_theme(ctx.theme);
+            let mut style = crate::ui::widget::TextareaStyle::default_for_density(
+                ctx.theme,
+                crate::ui::theme::Density::Comfortable,
+            );
             style.text_style.line_height = Some(crate::ui::unit::sp(40.0));
             style
         },

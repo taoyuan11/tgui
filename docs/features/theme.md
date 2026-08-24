@@ -59,7 +59,7 @@ Application::new()
 | `focus_ring(FocusRingStyle)` | 设置焦点环样式。 |
 | `elevation(ElevationScale)` | 设置阴影/elevation token。 |
 | `motion(MotionScale)` | 设置默认动效 token。 |
-| `density(Density)` | 调整控件密度。 |
+| `density(Density)` | 调整控件密度；默认使用 `Density::Compact`，也可显式选择 `Comfortable` 或 `Spacious`。 |
 | `components(ComponentThemes)` | 覆盖组件默认主题。 |
 
 ## 绑定主题模式

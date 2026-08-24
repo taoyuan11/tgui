@@ -567,6 +567,7 @@ fn tabs_selected_signal_switches_panel_hits_focus_and_visuals_on_the_same_tree()
     let font_manager = FontManager::new(&FontCatalog::default());
     let media = test_media();
     let mut theme = Theme::light();
+    theme.density = Density::Comfortable;
     theme.motion.fast_ms = 0;
     theme.motion.normal_ms = 0;
     let mut animations = AnimationEngine::default();

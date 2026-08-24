@@ -95,7 +95,8 @@ fn first_file_drop<VM>(element: &ResolvedElement<VM>) -> Option<ValueCommand<VM,
 
 #[test]
 fn calendar_renders_month_grid_and_today_action() {
-    let theme = Theme::default();
+    let mut theme = Theme::default();
+    theme.density = Density::Comfortable;
     let font_manager = FontManager::new(&FontCatalog::default());
     let media = test_media();
     let mut animations = AnimationEngine::default();
@@ -920,7 +921,8 @@ fn color_picker_open_renders_channel_sliders_and_swatches() {
 
 #[test]
 fn upload_renders_drop_handler_queue_progress_and_remove_action() {
-    let theme = Theme::default();
+    let mut theme = Theme::default();
+    theme.density = Density::Comfortable;
     let font_manager = FontManager::new(&FontCatalog::default());
     let media = test_media();
     let mut animations = AnimationEngine::default();

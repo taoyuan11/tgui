@@ -1149,7 +1149,8 @@ fn toast_kind_icon_is_centered_inside_circle() {
 }
 
 fn toast_kind_icon_is_centered_inside_circle_impl() {
-    let theme = Theme::default();
+    let mut theme = Theme::default();
+    theme.density = Density::Comfortable;
     let font_manager = FontManager::new(&FontCatalog::default());
     let media = test_media();
     let mut animations = AnimationEngine::default();

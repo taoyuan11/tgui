@@ -289,7 +289,8 @@ fn input_validation_invalid_uses_theme_error_border() {
 
 #[test]
 fn single_line_input_scroll_clips_text_to_inner_content_rect() {
-    let theme = Theme::default();
+    let mut theme = Theme::default();
+    theme.density = crate::ui::theme::Density::Comfortable;
     let font_manager = FontManager::new(&FontCatalog::default());
     let media = test_media();
     let mut animations = AnimationEngine::default();
