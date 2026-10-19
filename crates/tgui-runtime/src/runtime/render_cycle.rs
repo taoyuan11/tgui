@@ -208,6 +208,12 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 self.theme.colors.background
             };
 
+        super::binding_sync::sync_window_transparency(
+            window.as_ref(),
+            self.last_synced_clear_color,
+            clear_color,
+        );
+
         match Renderer::new(window.clone(), clear_color, self.config.msaa) {
             Ok(renderer) => {
                 self.gpu_scroll_supported = renderer.push_constants_supported();

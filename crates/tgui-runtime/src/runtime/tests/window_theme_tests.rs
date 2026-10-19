@@ -9,6 +9,7 @@ pub(super) struct BindingProbeWindow {
     pub(super) redraw_calls: AtomicUsize,
     title_calls: AtomicUsize,
     title: Mutex<String>,
+    transparency_calls: Mutex<Vec<bool>>,
     theme_calls: AtomicUsize,
     theme: Mutex<Option<crate::platform::window::Theme>>,
 }
@@ -19,6 +20,7 @@ impl BindingProbeWindow {
             redraw_calls: AtomicUsize::new(0),
             title_calls: AtomicUsize::new(0),
             title: Mutex::new(String::new()),
+            transparency_calls: Mutex::new(Vec::new()),
             theme_calls: AtomicUsize::new(0),
             theme: Mutex::new(theme),
         }
@@ -67,6 +69,13 @@ impl Window for BindingProbeWindow {
         true
     }
 
+    fn set_transparent(&self, transparent: bool) {
+        self.transparency_calls
+            .lock()
+            .expect("transparency lock poisoned")
+            .push(transparent);
+    }
+
     fn set_decorations(&self, _decorations: bool) {}
 
     fn has_focus(&self) -> bool {
@@ -108,6 +117,44 @@ impl Window for BindingProbeWindow {
 
     #[cfg(target_os = "windows")]
     fn set_enable(&self, _enabled: bool) {}
+}
+
+#[test]
+fn initial_window_transparency_matches_clear_color() {
+    use crate::runtime::binding_sync::sync_window_transparency;
+
+    for color in [Color::BLACK, Color::TRANSPARENT, Color::hexa(0x12345680)] {
+        let window = BindingProbeWindow::new(None);
+        sync_window_transparency(&window, None, color);
+        assert_eq!(
+            *window.transparency_calls.lock().unwrap(),
+            vec![color.a < 255],
+            "opaque windows must restore native chrome; transparent windows must retain alpha"
+        );
+    }
+}
+
+#[test]
+fn window_transparency_changes_only_when_crossing_opaque_boundary() {
+    use crate::runtime::binding_sync::sync_window_transparency;
+
+    let window = BindingProbeWindow::new(None);
+    let colors = [
+        Color::BLACK,
+        Color::WHITE,
+        Color::hexa(0xFFFFFFFE),
+        Color::TRANSPARENT,
+        Color::WHITE,
+    ];
+    let mut previous = None;
+    for color in colors {
+        sync_window_transparency(&window, previous, color);
+        previous = Some(color);
+    }
+    assert_eq!(
+        *window.transparency_calls.lock().unwrap(),
+        vec![false, true, false],
+    );
 }
 
 #[test]

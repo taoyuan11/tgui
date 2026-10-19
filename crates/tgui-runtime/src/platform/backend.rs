@@ -86,6 +86,7 @@ pub mod window_ext {
         }
         fn set_visible(&self, visible: bool);
         fn set_title(&self, title: &str);
+        fn set_transparent(&self, transparent: bool);
         fn is_decorated(&self) -> bool;
         fn set_decorations(&self, decorations: bool);
         fn has_focus(&self) -> bool;
@@ -139,6 +140,10 @@ pub mod window_ext {
 
         fn set_title(&self, title: &str) {
             winit::window::Window::set_title(self, title);
+        }
+
+        fn set_transparent(&self, transparent: bool) {
+            winit::window::Window::set_transparent(self, transparent);
         }
 
         fn is_decorated(&self) -> bool {

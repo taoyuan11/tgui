@@ -320,6 +320,8 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             return;
         }
 
+        // Reserve alpha support at creation for backends such as X11 that cannot
+        // enable it later. Apply the actual opacity before showing the window.
         let mut attributes = WindowAttributes::default()
             .with_transparent(true)
             .with_decorations(self.config.decorations)
@@ -393,6 +395,8 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             } else {
                 self.theme.colors.background
             };
+
+        super::binding_sync::sync_window_transparency(window.as_ref(), None, clear_color);
 
         let renderer = match Renderer::new(window.clone(), clear_color, self.config.msaa) {
             Ok(renderer) => renderer,

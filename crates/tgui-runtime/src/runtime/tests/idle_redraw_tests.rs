@@ -58,6 +58,8 @@ impl Window for RedrawProbeWindow {
 
     fn set_title(&self, _title: &str) {}
 
+    fn set_transparent(&self, _transparent: bool) {}
+
     fn is_decorated(&self) -> bool {
         true
     }

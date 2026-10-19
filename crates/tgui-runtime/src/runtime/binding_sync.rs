@@ -1,5 +1,18 @@
 use super::*;
 
+pub(super) fn sync_window_transparency(
+    window: &dyn Window,
+    previous_clear_color: Option<Color>,
+    clear_color: Color,
+) {
+    let transparent = clear_color.a < 255;
+    if previous_clear_color.map(|color| color.a < 255) != Some(transparent) {
+        // On macOS this also restores the native title bar's background when
+        // an alpha-capable window is displaying opaque content.
+        window.set_transparent(transparent);
+    }
+}
+
 impl<VM: 'static> BoundRuntimeHandler<VM> {
     pub(in crate::runtime) fn uses_system_theme(&self) -> bool {
         self.theme_store.mode() == ThemeMode::System
@@ -308,6 +321,13 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         {
             clear_color_changed = self.last_synced_clear_color != Some(next_clear_color);
             if clear_color_changed {
+                if let Some(window) = self.window.as_ref() {
+                    sync_window_transparency(
+                        window.as_ref(),
+                        self.last_synced_clear_color,
+                        next_clear_color,
+                    );
+                }
                 renderer.set_clear_color(next_clear_color);
                 self.last_synced_clear_color = Some(next_clear_color);
             }
