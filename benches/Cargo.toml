@@ -12,7 +12,6 @@ publish = false
 default = ["bench-support"]
 audio = ["tgui/audio"]
 video = ["audio", "tgui/video"]
-video-static = ["video", "tgui/video-static"]
 bench-support = ["tgui/bench-support"]
 collect-profile = ["bench-support", "tgui/collect-profile"]
 

@@ -119,7 +119,6 @@ rustdoc-args = ["--cfg", "docsrs"]
 default = []
 audio = ["tgui-runtime/audio"]
 video = ["tgui-runtime/video"]
-video-static = ["tgui-runtime/video-static"]
 bench-support = ["tgui-runtime/bench-support"]
 collect-profile = ["tgui-runtime/collect-profile"]
 # 可选：用 mimalloc 替换全局分配器。作为 facade feature 保留，由下游二进制

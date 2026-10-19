@@ -44,7 +44,6 @@ Root `cargo check` checks only `tgui` because `default-members = ["."]`. Use `ca
 - `crates/tgui-runtime/src/notification/mod.rs`: notifications, permissions, platform dispatch, and interactive action callbacks.
 - `crates/tgui-runtime/src/platform/mod.rs`: platform abstraction and selected winit backend.
 - `crates/tgui-runtime/src/video/`: `video` feature API and FFmpeg backend.
-- `crates/tgui-runtime/build.rs`: Windows `video` system-library link hints.
 
 ## Features
 
@@ -53,10 +52,11 @@ Root features are facade forwards:
 - `default = []`
 - `audio`: forwards to `tgui-runtime/audio`.
 - `video`: forwards to `tgui-runtime/video`.
-- `video-static`: forwards to `tgui-runtime/video-static`.
 - `bench-support`: forwards to `tgui-runtime/bench-support`.
 - `collect-profile`: forwards to `tgui-runtime/collect-profile`.
 - `mimalloc`: remains only on the public facade so downstream binary crates choose the global allocator.
+
+Audio/video support dynamic linking to FFmpeg only. Build with FFmpeg development libraries and provide the corresponding shared libraries at runtime.
 
 `tgui-benchmarks` mirrors benchmark-related feature forwards through its dependency on `tgui`. Desktop target dependencies live in `crates/tgui-runtime/Cargo.toml`.
 
@@ -98,7 +98,7 @@ Transparent windows are driven by clear color alpha. The renderer picks non-opaq
 ## Validation Targets
 
 - Metadata: `cargo metadata --no-deps --format-version 1`.
-- Facade compatibility: `cargo check -p tgui`, `cargo check -p tgui --no-default-features`, `cargo check -p tgui --features audio`, `cargo check -p tgui --features video`, `cargo check -p tgui --features video-static`.
+- Facade compatibility: `cargo check -p tgui`, `cargo check -p tgui --no-default-features`, `cargo check -p tgui --features audio`, `cargo check -p tgui --features video`.
 - Full workspace: `cargo check --workspace --all-targets`.
 - Runtime unit tests: `cargo test -p tgui-runtime --lib -- --test-threads=1`.
 - Boundary crate tests: run package checks/tests for `tgui-core`, `tgui-mvvm`, `tgui-media`, `tgui-ui`, `tgui-rendering`, `tgui-platform`, and `tgui-log` when their exports change.

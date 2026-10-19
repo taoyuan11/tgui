@@ -128,7 +128,8 @@ tgui = { version = "0.2.0", features = ["video"] }
 
 - `audio`：启用 FFmpeg + CPAL 音频播放能力
 - `video`：启用 FFmpeg 视频播放能力
-- `video-static`：在 `video` 基础上启用静态链接 FFmpeg 的音视频能力
+
+音视频功能仅支持动态链接 FFmpeg，构建时需要 FFmpeg 开发库，运行和分发时需要提供对应动态库。环境配置见 [开发环境说明](./docs/guide/environment.md)。
 
 性能优化已默认内置，无需配置 feature：
 
@@ -979,7 +980,7 @@ cargo check --workspace --all-targets
 - 修改 `crates/tgui-runtime/src/runtime/`、`crates/tgui-runtime/src/ui/widget/core/`、渲染 primitive、文本输入、媒体加载或窗口控制时，建议补充针对性的单元测试。
 - 新增示例时保持示例作为 workspace member 可运行，并同步更新 README 中的示例列表。
 - 音频相关改动需要考虑 `audio` feature、本机 FFmpeg 解码链路以及桌面端 `cpal` 播放行为。
-- 视频相关改动需要考虑 `video` / `video-static` feature，以及本机 FFmpeg 链接环境差异。
+- 视频相关改动需要考虑 `video` feature，以及本机 FFmpeg 动态链接环境差异。
 - 桌面平台相关改动请使用 `cfg` 明确隔离，避免影响其他平台构建。
 - 文档和示例同样重要；如果你发现某个 API 已经可用但缺少说明，欢迎直接补充。
 

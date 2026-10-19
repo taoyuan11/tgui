@@ -86,12 +86,6 @@ cargo check -p tgui --features video
 cargo bench -p tgui-benchmarks --no-run --features bench-support
 ```
 
-视频静态链接环境可用时再补：
-
-```sh
-cargo check -p tgui --features video-static
-```
-
 ## 排查顺序
 
 1. 复现：固定窗口大小、数据量、feature、系统电源模式。

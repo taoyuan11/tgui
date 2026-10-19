@@ -55,7 +55,6 @@ cargo check -p tgui
 cargo check -p tgui --no-default-features
 cargo check -p tgui --features audio
 cargo check -p tgui --features video
-cargo check -p tgui --features video-static
 cargo test -p tgui-runtime --lib -- --test-threads=1
 cargo check --workspace --all-targets
 ```

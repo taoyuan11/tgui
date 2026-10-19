@@ -2,6 +2,8 @@
 
 本文说明如何在 Windows、macOS 和 Linux 上配置 `tgui` 开发环境，并构建仓库示例。普通窗口、布局、组件和 Canvas 示例只需要 Rust 与平台编译工具；`examples/demo` 默认启用了 `audio` / `video`，还需要 FFmpeg 开发库和 `libclang`。
 
+`audio` / `video` 仅支持动态链接 FFmpeg。构建时需要对应的头文件和链接库，运行及分发应用时需要确保系统能找到 FFmpeg 动态库；不再提供静态链接支持。
+
 ## 通用要求
 
 - Rust stable。

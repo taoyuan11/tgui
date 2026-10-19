@@ -51,9 +51,10 @@ workspace / crate 信息：
 - `default = []`
 - `audio`：转发到 `tgui-runtime/audio`，启用 `ffmpeg-next` 音频解码能力。
 - `video`：转发到 `tgui-runtime/video`，在 `audio` 基础上启用视频能力。
-- `video-static`：转发到 `tgui-runtime/video-static`，在 `video` 基础上启用 `ffmpeg-next/static`。
 - `bench-support` / `collect-profile`：转发到 `tgui-runtime`，用于基准与相位画像探针，关闭时编译成零成本空操作。
 - `mimalloc`：可选全局分配器替换，继续留在公开 `tgui` facade，由下游二进制 crate 决定是否启用。
+
+音视频功能仅支持动态链接 FFmpeg；构建时需要 FFmpeg 开发库，运行及分发应用时需要提供对应动态库。
 
 细粒度响应式渲染管线已默认内置（详见下文「细粒度响应式渲染管线」一节），不再通过 Cargo feature 开关启用。
 
@@ -61,7 +62,7 @@ workspace / crate 信息：
 
 - Windows、macOS、Linux：桌面窗口、剪贴板、对话框、音频相关依赖。
 
-平台依赖现在位于 `crates/tgui-runtime/Cargo.toml`。Windows 下启用 `video` feature 时，`crates/tgui-runtime/build.rs` 会额外链接 `strmiids` 和 `mfuuid`。
+平台依赖现在位于 `crates/tgui-runtime/Cargo.toml`。FFmpeg 动态库的查找与链接由 `ffmpeg-sys-next` 处理。
 
 ## 公共 API 组织
 
@@ -139,7 +140,7 @@ Application::new()
 4. **纯滚动帧子树重收集。** 识别「本帧只有 `scroll_epoch` 变化、其余全不变」的纯滚动帧，只对发生偏移的滚动容器（嵌套时取最高根）调 `patch_cached_scene_for_roots` 重收集**滚动子树**（复用同一收集函数，逐项等价），绕开整树重收集。virtual 容器排除。锚点：`runtime/mod.rs` + `input/interaction.rs`（`scroll_dirty_widgets`）、`cache_support.rs`（`scene_cache_fields_match_ignoring_scroll`）、`scene_runtime.rs`（`try_pure_scroll_fast_path`）。
 5. **纯滚动帧 GPU 平移变体。** 在纯滚动子树重收集基础上，对满足严格前置的单一滚动容器保留离屏命令与命中 metadata，纯滚动帧只更新 scroll offset / hit regions，并通过 wgpu `IMMEDIATES` 给 tagged draw 下发 per-draw 平移。adapter 不支持、virtual、嵌套 scroll、overlay/portal、IME、可见 scrollbar、unsupported clip / composite 等任一前置不满足即回退到 CPU 子树重收集。锚点：`scene_primitives.rs`（GPU scroll command metadata / clipped-out 保留）、`layout_media.rs`（滚动内容收集作用域）、`scene_runtime.rs`（`try_pure_scroll_gpu_fast_path` / `gpu_scroll_deferred`）、`renderer/prepare.rs` + shader。
 
-> 改这一管线时务必同时跑：默认 / `--no-default-features` / `audio` / `video` / `video-static` 的 `cargo check`，并补「快路径结果 == 全量重收集」+「回退路径」两类单测。
+> 改这一管线时务必同时跑：默认 / `--no-default-features` / `audio` / `video` 的 `cargo check`，并补「快路径结果 == 全量重收集」+「回退路径」两类单测。
 
 ## 组件和样式约定
 
@@ -266,7 +267,6 @@ cargo test -p tgui-runtime --lib -- --test-threads=1
 cargo check -p tgui --no-default-features
 cargo check -p tgui --features audio
 cargo check -p tgui --features video
-cargo check -p tgui --features video-static
 cargo check --workspace --all-targets
 ```
 

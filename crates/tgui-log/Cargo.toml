@@ -13,7 +13,6 @@ publish = true
 default = []
 audio = ["tgui-runtime/audio"]
 video = ["tgui-runtime/video"]
-video-static = ["tgui-runtime/video-static"]
 bench-support = ["tgui-runtime/bench-support"]
 collect-profile = ["tgui-runtime/collect-profile"]
 

@@ -145,5 +145,5 @@ cargo bench -p tgui-benchmarks --features bench-support --bench scene_rendering 
 - 新增的订阅裁剪测试用 1,000 个无关文本节点验证媒体查询不解析其样式，并与全树遍历对照。
 - 新增 overlay 测试覆盖空场景、延迟分配前后的 cursor、delta/prefix 重合成和层内/层间顺序；
   全量测试同时覆盖纯滚动/属性拼接与从零重收集的等价性及回退路径。
-- `cargo check -p tgui` 的默认、`--no-default-features`、audio、video、video-static 均通过。
+- `cargo check -p tgui` 的默认、`--no-default-features`、audio、video 均通过。
 - `cargo fmt --all --check` 与 `git diff --check` 通过。

@@ -20,7 +20,6 @@ rustdoc-args = ["--cfg", "docsrs"]
 default = []
 audio = ["dep:ffmpeg-next", "dep:cpal"]
 video = ["audio"]
-video-static = ["video", "ffmpeg-next/static"]
 bench-support = []
 collect-profile = ["bench-support"]
 

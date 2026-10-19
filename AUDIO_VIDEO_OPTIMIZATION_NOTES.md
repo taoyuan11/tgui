@@ -4,7 +4,7 @@
 
 ## 当前状态
 
-- `audio`、`video`、`video-static` feature 在当前环境下均可编译通过。
+- `audio`、`video` feature 在当前环境下均可编译通过；音视频仅支持动态链接 FFmpeg。
 - 音频相关过滤测试通过 24 个，覆盖控制器命令转发、播放状态、循环、停止、HTTP header 校验、widget 挂载/卸载和媒体事件。
 - 视频相关过滤测试通过 47 个，覆盖控制器、播放器控件、seek/volume/mute、surface placeholder/texture、队列 generation、缓冲策略和部分 present/decode 状态机。
 - 当前音视频链路已经具备可用基础：音频由 FFmpeg 解码并经 CPAL 输出，视频由 decode/present 两类后台线程协作，将帧转为 `TextureFrame` 后接入渲染器。
@@ -15,7 +15,6 @@
 cargo check -p tgui --no-default-features
 cargo check -p tgui --features audio
 cargo check -p tgui --features video
-cargo check -p tgui --features video-static
 cargo test -p tgui-runtime --features audio audio --lib -- --test-threads=1
 cargo test -p tgui-runtime --features video video --lib -- --test-threads=1
 ```

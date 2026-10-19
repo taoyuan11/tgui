@@ -19,7 +19,6 @@ cargo test -p tgui-runtime <module>::    # 按模块跑
 ```bash
 cargo check -p tgui --features audio
 cargo check -p tgui --features video
-cargo check -p tgui --features video-static
 ```
 
 细粒度响应式渲染管线默认内置（见下方「细粒度响应式渲染管线」与根目录 `FINE_GRAINED_ROADMAP.md`）。改失效/场景拼接/顶点上传/滚动快路径时，至少跑默认、无默认 feature、音视频组合：
@@ -29,7 +28,6 @@ cargo check -p tgui
 cargo check -p tgui --no-default-features
 cargo check -p tgui --features audio
 cargo check -p tgui --features video
-cargo check -p tgui --features video-static
 ```
 
 Benchmarks 在 workspace package `tgui-benchmarks`（目录 `benches/`），需要 `bench-support` feature：
@@ -81,7 +79,7 @@ cargo run --manifest-path examples/frameless_window/Cargo.toml
 - 顶点脏区间增量上传：顶点池 flush 按字节 diff 只上传脏区间。triple-buffer 保证部分覆盖安全。锚点：`rendering/renderer/vertex_pool.rs`。
 - 纯滚动快路径：优先用 GPU per-draw 平移；adapter 不支持 IMMEDIATES 或场景前置不满足时回退到 CPU 子树重收集，再失败则整帧重收集。锚点：`runtime/mod.rs`、`input/interaction.rs`、`scene_runtime.rs`、`renderer/prepare.rs`。
 
-> 改这条管线务必跑 `cargo check -p tgui` / `--no-default-features` / `audio` / `video` / `video-static` 检查，并补两类单测。
+> 改这条管线务必跑 `cargo check -p tgui` / `--no-default-features` / `audio` / `video` 检查，并补两类单测。
 
 ## 启动模型
 
@@ -102,7 +100,7 @@ Application::new()
 
 ## 容易踩的坑
 
-- **Windows + `video` feature**：`crates/tgui-runtime/build.rs` 会额外链接 `strmiids` 和 `mfuuid`；本机要装好 FFmpeg 链接环境，否则 `cargo check -p tgui --features video` 也过不了。
+- **Windows 音视频 feature**：仅支持动态链接 FFmpeg；构建时需配置 FFmpeg 开发库，运行时需确保对应 DLL 可被找到。
 - **Windows 通知**：必须 `Application::app_id(...)`，否则通知身份初始化失败。
 - **透明 / 无边框窗口**：`decorations(false)` 通常要配 `clear_color(Color::TRANSPARENT)`；renderer 根据 clear color alpha 选 surface alpha mode（Windows 优先 DX12 / DXGI visual swapchain）。
 - **公共 API 变更**：同步改根 `src/lib.rs` facade、相关边界 crate re-export、`README.md`、相关示例。根 `Cargo.toml` 的 `exclude` 把 `examples/*`、`docs/*`、`crates/*`、`benches/*`、`*.png`、`.github/*`、`AGENTS.md`、`CLAUDE.md`、`FINE_GRAINED_ROADMAP.md`、`skills/*` 排除出公开 facade crate，发布前用 `cargo package -p <crate> --allow-dirty --list` 确认资源/文档不会进错包。
