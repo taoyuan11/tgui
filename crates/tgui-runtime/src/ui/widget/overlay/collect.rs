@@ -11,7 +11,7 @@
 //! 本轮内容模型限 `OverlayContent::Primitives`；Element 子树支持留待后续 PR。
 
 use crate::ui::unit::Dp;
-use crate::ui::widget::common::{ClipMask, ComputedScene, Point, RenderCommand, Rect};
+use crate::ui::widget::common::{ClipMask, ComputedScene, Point, Rect, RenderCommand};
 
 use super::close::OverlayCloseHandle;
 use super::overlay::{Overlay, OverlayContent, OverlayPrimitive};
@@ -60,7 +60,7 @@ pub(crate) fn emit_overlay<VM>(
 
     let origin = Point::new(solved.rect.x, solved.rect.y);
     let overlay_clip = Some(solved.clip_rect);
-    let bucket = &mut computed.overlay_layers[overlay.layer.index()];
+    let bucket = computed.overlay_layer_mut(overlay.layer.index());
 
     match content {
         OverlayContent::Primitives(prims) => {

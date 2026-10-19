@@ -58,6 +58,77 @@ fn texture(frame_local: Rect) -> OverlayPrimitive {
 }
 
 #[test]
+fn overlay_free_scene_cursors_and_merge_do_not_allocate_layer_buckets() {
+    let mut scene = ComputedScene::<()>::default();
+    let cursor = scene.cursor();
+    let prefix_cursor = scene.prefix_cursor();
+    scene
+        .scene
+        .push_shape(render_shape(viewport(), Color::BLACK));
+    let delta = scene.delta_since_cursor(&cursor);
+    let prefix = scene.prefix_at_cursor(&prefix_cursor);
+    assert!(delta.overlay_layers.is_empty());
+    assert!(prefix.overlay_layers.is_empty());
+    scene.extend(&delta);
+    scene.finalize_portals(viewport());
+    assert_eq!(scene.overlay_layers.capacity(), 0);
+    assert_eq!(scene.scene.shapes.len(), 2);
+}
+
+#[test]
+fn lazy_overlay_cursor_split_and_recompose_matches_eager_layers() {
+    fn append(scene: &mut ComputedScene<()>, layer: OverlayLayer, color: Color) {
+        let bucket = scene.overlay_layer_mut(layer.index());
+        let primitive = render_shape(viewport(), color);
+        bucket.shapes.push(primitive.clone());
+        bucket.push_command(RenderCommand::Shape(primitive), None);
+    }
+    fn fingerprint(scene: &mut ComputedScene<()>) -> (Vec<Color>, Vec<OverlayLayer>) {
+        scene.finalize_overlay_layers();
+        assert_eq!(
+            scene.scene.overlay_commands.len(),
+            scene.scene.overlay_shapes.len()
+        );
+        (
+            scene
+                .scene
+                .overlay_shapes
+                .iter()
+                .map(|shape| shape.color)
+                .collect(),
+            scene
+                .overlay_layer_graph
+                .layers
+                .iter()
+                .map(|entry| entry.layer)
+                .collect(),
+        )
+    }
+    let mut lazy = ComputedScene::<()>::default();
+    let empty_cursor = lazy.cursor();
+    // Reverse layer order, and two commands in one layer, exercise both ordering rules.
+    append(&mut lazy, OverlayLayer::Modal, Color::BLACK);
+    let split_cursor = lazy.cursor();
+    let split_prefix = lazy.prefix_cursor();
+    append(&mut lazy, OverlayLayer::Tooltip, Color::WHITE);
+    append(&mut lazy, OverlayLayer::Modal, Color::WHITE);
+
+    let mut eager = ComputedScene::<()>::default();
+    eager.ensure_overlay_layers();
+    append(&mut eager, OverlayLayer::Modal, Color::BLACK);
+    append(&mut eager, OverlayLayer::Tooltip, Color::WHITE);
+    append(&mut eager, OverlayLayer::Modal, Color::WHITE);
+    let expected = fingerprint(&mut eager);
+
+    let mut from_empty = lazy.delta_since_cursor(&empty_cursor);
+    assert_eq!(fingerprint(&mut from_empty), expected);
+    let mut recomposed = lazy.prefix_at_cursor(&split_prefix);
+    recomposed.extend(&lazy.delta_since_cursor(&split_cursor));
+    assert_eq!(fingerprint(&mut recomposed), expected);
+    assert_eq!(fingerprint(&mut lazy), expected);
+}
+
+#[test]
 fn emit_overlay_writes_to_overlay_scene_not_main() {
     let mut scene = ComputedScene::<()>::default();
     let anchor = Rect::new(dp(100.0), dp(100.0), dp(40.0), dp(40.0));

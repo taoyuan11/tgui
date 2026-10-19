@@ -388,7 +388,9 @@ impl<VM: 'static> WidgetTree<VM> {
         self.media_event_states_with_active_tooltip(media, theme, None)
     }
 
-    pub(crate) fn media_event_states_with_active_tooltip(
+    /// Unoptimized reference for subscription-plan equivalence tests.
+    #[cfg(test)]
+    pub(crate) fn media_event_states_full_walk(
         &self,
         media: &MediaManager,
         theme: &Theme,
@@ -402,6 +404,21 @@ impl<VM: 'static> WidgetTree<VM> {
                 active_tooltip,
                 &mut states,
             );
+            states
+        })
+    }
+
+    pub(crate) fn media_event_states_with_active_tooltip(
+        &self,
+        media: &MediaManager,
+        theme: &Theme,
+        active_tooltip: Option<WidgetId>,
+    ) -> Vec<MediaEventState<VM>> {
+        with_widget_stack(|| {
+            let mut states = Vec::new();
+            if let Some(subscriptions) = &self.media_subscriptions {
+                subscriptions.collect(media, theme, active_tooltip, &mut states);
+            }
             states
         })
     }

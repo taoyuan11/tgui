@@ -439,6 +439,7 @@ fn finalize_portal_entry<VM>(
         }
         _ => Some(solved.clip_rect),
     };
+    computed.ensure_overlay_layers();
     let bucket = &mut computed.overlay_layers[entry.layer.index()];
     let overlay_scope_path = entry.focus_scope.as_ref().map(|scope| scope.path.clone());
     if let Some(scope) = entry.focus_scope.clone() {

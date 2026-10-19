@@ -70,6 +70,7 @@ mod element;
 mod element_path;
 mod element_resolve;
 mod layout;
+mod media_events;
 mod render;
 mod resolved;
 #[cfg(all(test, feature = "bench-support"))]

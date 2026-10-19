@@ -39,6 +39,14 @@ members = ["crates/*", "examples/*", "benches"]
 default-members = ["."]
 resolver = "2"
 
+# Keep debug symbols and assertions while making interactive demos usable. Dependencies
+# change less often, so optimize their text/layout/GPU code more aggressively.
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3
+
 [workspace.package]
 version = "0.2.0"
 authors = ["a2542209451@gmail.com"]

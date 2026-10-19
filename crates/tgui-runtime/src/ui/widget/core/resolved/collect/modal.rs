@@ -43,7 +43,7 @@ impl<VM> ResolvedElement<VM> {
             .focus_scopes
             .retain(|scope| scope.options.hides_from_accessibility(scope.active));
         computed.ime_cursor_area = None;
-        computed.overlay_layers = crate::ui::widget::common::fresh_overlay_layers();
+        computed.overlay_layers.clear();
     }
 
     pub(super) fn emit_modal_close_overlay_if_open(

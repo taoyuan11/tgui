@@ -252,6 +252,8 @@ pub(crate) struct ComputedScene<VM> {
     /// `finalize_overlay_layers` 在 collect 收尾时按 layer 顺序合并到 `scene.overlay_*` /
     /// `overlay_hit_regions` / `overlay_close_handlers`，从而强制 z-order
     /// （Tooltip < Popover < Menu < Modal）。
+    /// Empty until an overlay is emitted. Each bucket contains substantial inline SmallVec
+    /// storage; defer that allocation for leaf/chunk scenes without overlays.
     pub overlay_layers: Vec<OverlayLayerBucket<VM>>,
     pub(crate) overlay_layer_graph: OverlayLayerGraph,
     pub scroll_regions: SmallVec<[ScrollRegion; 1]>,
@@ -861,7 +863,7 @@ impl<VM> Default for ComputedScene<VM> {
             overlay_anchors: HashMap::new(),
             portal_entries: SmallVec::new(),
             external_portal_requests: SmallVec::new(),
-            overlay_layers: fresh_overlay_layers(),
+            overlay_layers: Vec::new(),
             overlay_layer_graph: OverlayLayerGraph::default(),
             scroll_regions: SmallVec::new(),
             ime_cursor_area: None,
@@ -876,6 +878,18 @@ impl<VM> Default for ComputedScene<VM> {
 }
 
 impl<VM> ComputedScene<VM> {
+    pub(crate) fn overlay_layer_mut(&mut self, index: usize) -> &mut OverlayLayerBucket<VM> {
+        assert!(index < OVERLAY_LAYER_COUNT);
+        self.ensure_overlay_layers();
+        &mut self.overlay_layers[index]
+    }
+
+    pub(crate) fn ensure_overlay_layers(&mut self) {
+        if self.overlay_layers.is_empty() {
+            self.overlay_layers = fresh_overlay_layers();
+        }
+    }
+
     pub(crate) fn hit_test_index(&self) -> Option<&HitTestIndex> {
         if self.hit_regions.len() + self.overlay_hit_regions.len() < HIT_TEST_INDEX_MIN_REGIONS {
             return None;
@@ -1039,7 +1053,12 @@ impl<VM> ComputedScene<VM> {
             overlay_anchors: self.overlay_anchors.clone(),
             portal_entries: self.portal_entries.len(),
             external_portal_requests: self.external_portal_requests.len(),
-            overlay_layers: std::array::from_fn(|index| self.overlay_layers[index].cursor()),
+            overlay_layers: std::array::from_fn(|index| {
+                self.overlay_layers
+                    .get(index)
+                    .map(OverlayLayerBucket::cursor)
+                    .unwrap_or_default()
+            }),
             overlay_layer_graph: self.overlay_layer_graph.cursor(),
             scroll_regions: self.scroll_regions.len(),
             ime_cursor_area: self.ime_cursor_area,
@@ -1156,10 +1175,12 @@ impl<VM> ComputedScene<VM> {
             .portal_overlay_counts
             .accessibility_fragments
             .saturating_sub(base.portal_overlay_counts.accessibility_fragments);
-        for i in 0..OVERLAY_LAYER_COUNT {
-            delta.overlay_layers[i] =
-                self.overlay_layers[i].delta_since_cursor(&base.overlay_layers[i]);
-        }
+        delta.overlay_layers = self
+            .overlay_layers
+            .iter()
+            .enumerate()
+            .map(|(i, layer)| layer.delta_since_cursor(&base.overlay_layers[i]))
+            .collect();
         delta.overlay_layer_graph = self
             .overlay_layer_graph
             .delta_since_cursor(&base.overlay_layer_graph);
@@ -1245,10 +1266,12 @@ impl<VM> ComputedScene<VM> {
                 .take(cursor.external_portal_requests)
                 .cloned(),
         );
-        for i in 0..OVERLAY_LAYER_COUNT {
-            prefix.overlay_layers[i] =
-                self.overlay_layers[i].prefix_at_cursor(&cursor.overlay_layers[i]);
-        }
+        prefix.overlay_layers = self
+            .overlay_layers
+            .iter()
+            .enumerate()
+            .map(|(i, layer)| layer.prefix_at_cursor(&cursor.overlay_layers[i]))
+            .collect();
         prefix.scroll_regions.extend(
             self.scroll_regions
                 .iter()
@@ -1307,8 +1330,8 @@ impl<VM> ComputedScene<VM> {
         self.portal_overlay_counts.focus_scopes += other.portal_overlay_counts.focus_scopes;
         self.portal_overlay_counts.accessibility_fragments +=
             other.portal_overlay_counts.accessibility_fragments;
-        for i in 0..OVERLAY_LAYER_COUNT {
-            self.overlay_layers[i].extend_from(&other.overlay_layers[i]);
+        for (i, layer) in other.overlay_layers.iter().enumerate() {
+            self.overlay_layer_mut(i).extend_from(layer);
         }
         self.overlay_layer_graph
             .extend_from(&other.overlay_layer_graph, graph_offsets);
@@ -1338,7 +1361,10 @@ impl<VM> ComputedScene<VM> {
         }
         self.invalidate_hit_test_index();
         for layer in crate::runtime::overlay::OverlayLayer::ALL {
-            let bucket = std::mem::take(&mut self.overlay_layers[layer.index()]);
+            let Some(bucket) = self.overlay_layers.get_mut(layer.index()) else {
+                continue;
+            };
+            let bucket = std::mem::take(bucket);
             debug_assert_eq!(
                 bucket.commands.len(),
                 bucket.command_sources.len(),
@@ -1453,7 +1479,7 @@ impl<VM> ComputedScene<VM> {
             base_close_handlers,
             base_focus_scopes,
         );
-        self.overlay_layers = fresh_overlay_layers();
+        self.overlay_layers.clear();
         crate::runtime::overlay::collect::finalize_portal_entries(self, viewport);
         self.finalize_overlay_layers();
         self.portal_overlay_counts = PortalOverlayCounts {

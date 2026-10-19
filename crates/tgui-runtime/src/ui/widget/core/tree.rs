@@ -25,15 +25,7 @@ pub struct WidgetTree<VM> {
     /// 树内是否存在 Virtual 节点。无虚拟节点时全量重建可直接共享源树（Arc clone），
     /// 跳过整棵树的深拷贝。
     pub(super) has_virtual: bool,
-    /// Whether this tree can contain media event handlers.
-    ///
-    /// Static trees are classified exactly once at construction. Dynamic and
-    /// virtual child sources are conservatively classified as capable because
-    /// their resolved children can add or remove handlers at any revision.
-    /// This lets the runtime skip the otherwise O(n) resolve/event walk for the
-    /// overwhelmingly common static tree with no media callbacks, while never
-    /// hiding a callback introduced by a legacy structural update.
-    pub(super) may_have_media_event_handlers: bool,
+    pub(super) media_subscriptions: Option<super::media_events::MediaSubscriptions<VM>>,
     strict_reactive: bool,
 }
 
@@ -130,59 +122,15 @@ fn element_contains_dynamic_children<VM>(element: &Element<VM>) -> bool {
     }
 }
 
-fn element_may_have_media_event_handlers<VM>(element: &Element<VM>) -> bool {
-    if element.media_events.has_any() {
-        return true;
-    }
-    if element.tooltip.as_ref().is_some_and(|tooltip| {
-        matches!(
-            &tooltip.content,
-            crate::ui::widget::tooltip::TooltipContent::Element(content)
-                if element_may_have_media_event_handlers(content)
-        )
-    }) {
-        return true;
-    }
-
-    match &element.kind {
-        WidgetKind::Container { children, .. } => children.iter().any(|source| match source {
-            crate::ui::widget::common::ChildSource::Static(children) => {
-                children.iter().any(element_may_have_media_event_handlers)
-            }
-            // The resolved contents of these sources are revision-dependent.
-            // Treat them as capable even when their current value is empty so
-            // a later add/remove cannot leave a stale negative capability.
-            crate::ui::widget::common::ChildSource::Dynamic(_)
-            | crate::ui::widget::common::ChildSource::KeyedFor(_) => true,
-            crate::ui::widget::common::ChildSource::Switch {
-                cases, fallback, ..
-            } => {
-                cases.iter().any(element_may_have_media_event_handlers)
-                    || fallback
-                        .as_deref()
-                        .is_some_and(element_may_have_media_event_handlers)
-            }
-            crate::ui::widget::common::ChildSource::Show { child, .. } => {
-                element_may_have_media_event_handlers(child)
-            }
-        }),
-        // Virtual item sources resolve runtime-owned children, so their
-        // handler capability cannot be proven empty from the root element.
-        WidgetKind::Virtual { .. } => true,
-        WidgetKind::Portal { content, .. } => element_may_have_media_event_handlers(content),
-        _ => false,
-    }
-}
-
 impl<VM: 'static> WidgetTree<VM> {
     fn from_root(root: Element<VM>, strict_reactive: bool) -> Self {
         with_widget_stack(|| {
             let has_virtual = element_contains_virtual(&root);
-            let may_have_media_event_handlers = element_may_have_media_event_handlers(&root);
+            let media_subscriptions = super::media_events::MediaSubscriptions::new(&root);
             Self {
                 root: std::sync::Arc::new(root),
                 has_virtual,
-                may_have_media_event_handlers,
+                media_subscriptions,
                 strict_reactive,
             }
         })
@@ -237,7 +185,7 @@ impl<VM: 'static> WidgetTree<VM> {
     }
 
     pub(crate) fn may_have_media_event_handlers(&self) -> bool {
-        self.may_have_media_event_handlers
+        self.media_subscriptions.is_some()
     }
 
     pub(crate) fn is_strict_reactive(&self) -> bool {

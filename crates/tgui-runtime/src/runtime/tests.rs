@@ -212,7 +212,7 @@ fn media_dispatch_skips_static_tree_without_handlers() {
         .widget_tree
         .as_ref()
         .expect("widget tree should exist")
-        .media_event_states(&handler.media_manager, &handler.theme);
+        .media_event_states_full_walk(&handler.media_manager, &handler.theme, None);
     assert!(baseline.is_empty());
     assert_eq!(
         crate::ui::widget::media_event_walk_probe::visits(),
@@ -864,6 +864,7 @@ mod focus_selection_tests;
 mod gesture_tests;
 mod idle_redraw_tests;
 mod list_tests;
+mod media_subscription_tests;
 mod menu_tests;
 mod modal_tests;
 mod pointer_button_tests;

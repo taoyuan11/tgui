@@ -43,10 +43,8 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             return;
         };
 
-        // Resolving the root and recursively walking it is O(widget count),
-        // even when no widget can produce a media event. Static WidgetTrees
-        // cache that capability at construction; dynamic/virtual trees remain
-        // conservative and continue through the full revision-aware path.
+        // The source tree retains a sparse subscription plan. Only registered media and
+        // dynamic/virtual boundaries are queried; visual-only siblings are never resolved here.
         if !tree.may_have_media_event_handlers() {
             self.media_event_states.clear();
             return;

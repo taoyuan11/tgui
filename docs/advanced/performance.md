@@ -68,6 +68,32 @@ Application::new()
 
 设置 `TGUI_PROFILE_STARTUP=1` 后，第一帧渲染成功时会输出 `tgui-startup` 日志，用于观察事件循环恢复、renderer 初始化、binding 同步、scene 收集和首帧提交的耗时。
 
+## 开发模式与交互采样
+
+workspace 的 dev profile 对项目代码使用 `opt-level = 1`，对第三方依赖使用
+`opt-level = 3`，保留 debug symbols、debug assertions 和溢出检查。`cargo run -p demo`
+会自动使用该配置；首次构建依赖会更慢，优化后单步调试的变量与源码行也可能不完全对应。
+Cargo profile 由最终应用 workspace 决定，作为依赖使用 `tgui` 的应用需要在自己的根
+`Cargo.toml` 中配置。
+
+排查交互开销时可以运行：
+
+```sh
+TGUI_TEXT_PROFILE=1 TGUI_TEXT_PROFILE_MIN_MS=2 cargo run -p demo
+```
+
+`textarea_render` 中的 `media_ms`、`computed_scene_ms`、`render_ms` 是 CPU 阶段耗时。
+场景工作也可能在动画更新中提前发生，因此要同时看 `textarea_computed_scene`，尤其是
+`path=pure_scroll_patch`。这些日志不等于 GPU 帧时间或实际 FPS，阈值以下的事件不会输出。
+对照时使用相同页面、窗口尺寸和滚动序列，并停止后台编译/测试。
+
+需要恢复完全未优化的调试构建时，可以临时覆盖配置：
+
+```sh
+CARGO_PROFILE_DEV_OPT_LEVEL=0 cargo run -p demo \
+  --config 'profile.dev.package."*".opt-level=0'
+```
+
 ## 调优方向
 
 - 大量同质节点：优先使用虚拟列表、表格或 Canvas retained scene。
@@ -86,6 +112,12 @@ Application::new()
 | 顶点脏区间增量上传 | 逐帧顶点池只上传相对上次写入发生变化的字节区间（triple-buffer 下安全），完全相同则跳过上传。 | 默认内置；CPU 逻辑已单测，真机视觉验证已通过 |
 | 纯滚动 CPU 子树重收集 | 纯滚动帧（仅滚动偏移变化）只重收集滚动子树而非整树（嵌套滚动取最高根、排除虚拟列表）。 | 默认内置；与全量重收集逐项等价，已单测 |
 | 纯滚动 GPU 平移 | 对满足严格前置条件的纯滚动帧保留滚动内容的离屏命令，并用 wgpu IMMEDIATES 在 draw 阶段平移 tagged draw，绕开滚动子树 collect。 | 默认内置；adapter 不支持或场景前置不满足时回退到 CPU 子树重收集 |
+
+媒体事件轮询使用随源组件树构建的稀疏订阅树，只查询注册了回调的媒体和可能产生订阅的
+动态分支。Show、ViewSwitch、Portal、Tooltip 和 focus scope 的开关仍在查询时求值；
+虚拟容器边界保留原有解析回退，图片和音视频的异步状态仍由现有 snapshot 路径读取。
+普通场景 chunk 的 overlay buckets 在首次写入弹层时才分配，减少滚动子树重收集和祖先
+场景合成中的空容器分配与复制。
 
 运行时降级：
 
