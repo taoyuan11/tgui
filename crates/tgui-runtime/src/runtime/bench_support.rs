@@ -72,6 +72,10 @@ pub struct RuntimeScrollBenchmarkContext {
 }
 
 impl RuntimeScrollBenchmarkContext {
+    pub fn prepared_frame_cache_stats(&self) -> (usize, usize) {
+        self.renderer.clean_prepared_frame_cache_stats()
+    }
+
     pub fn new(tree: WidgetTree<RuntimeScrollBenchmarkVm>, viewport: Rect) -> Result<Self, String> {
         let width = viewport.width.get().max(1.0).ceil() as u32;
         let height = viewport.height.get().max(1.0).ceil() as u32;

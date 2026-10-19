@@ -678,7 +678,7 @@ struct CachedPreparedToastCard<VM> {
 
 struct PreparedToastCard<VM> {
     resolved: Arc<ResolvedElement<VM>>,
-    taffy: TaffyTree<MeasureContext>,
+    taffy: TaffyTree<Box<MeasureContext>>,
     layout_root: LayoutNode,
     size: (Dp, Dp),
     base_scene: OnceLock<Option<ToastBaseScene<VM>>>,
@@ -1236,6 +1236,7 @@ fn translate_toast_mask(mask: Option<ClipMask>, delta: Point) -> Option<ClipMask
 fn translate_toast_scroll_region(region: ScrollRegion, delta: Point) -> ScrollRegion {
     ScrollRegion {
         id: region.id,
+        frame: translate_toast_rect(region.frame, delta),
         content_viewport: translate_toast_rect(region.content_viewport, delta),
         visible_frame: translate_toast_derived_rect(region.visible_frame, delta),
         content_bounds: translate_toast_rect(region.content_bounds, delta),

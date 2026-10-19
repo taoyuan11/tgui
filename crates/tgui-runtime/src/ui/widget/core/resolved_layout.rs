@@ -1,6 +1,16 @@
 use super::*;
 
 impl<VM> ResolvedElement<VM> {
+    pub(super) fn layout_node_count(&self) -> usize {
+        1 + match &self.kind {
+            ResolvedWidgetKind::Container { children, .. }
+            | ResolvedWidgetKind::Virtual { children, .. } => {
+                children.iter().map(Self::layout_node_count).sum()
+            }
+            _ => 0,
+        }
+    }
+
     pub(super) fn measure_context(&self) -> MeasureContext {
         match &self.kind {
             ResolvedWidgetKind::Container { .. } => MeasureContext::None,
@@ -117,7 +127,7 @@ impl<VM> ResolvedElement<VM> {
 
     pub(super) fn build_layout_tree(
         &self,
-        taffy: &mut TaffyTree<MeasureContext>,
+        taffy: &mut TaffyTree<Box<MeasureContext>>,
         animations: &mut AnimationEngine,
         theme: &Theme,
         units: UnitContext,
@@ -145,7 +155,7 @@ impl<VM> ResolvedElement<VM> {
 
     fn build_layout_tree_tracked(
         &self,
-        taffy: &mut TaffyTree<MeasureContext>,
+        taffy: &mut TaffyTree<Box<MeasureContext>>,
         animations: &mut AnimationEngine,
         theme: &Theme,
         units: UnitContext,
@@ -195,7 +205,10 @@ impl<VM> ResolvedElement<VM> {
             now,
         );
         let node = if child_layouts.is_empty() {
-            taffy.new_leaf_with_context(style, self.measure_context())?
+            match self.measure_context() {
+                MeasureContext::None => taffy.new_leaf(style)?,
+                context => taffy.new_leaf_with_context(style, Box::new(context))?,
+            }
         } else {
             let child_ids = child_layouts
                 .iter()
@@ -207,6 +220,7 @@ impl<VM> ResolvedElement<VM> {
         Ok(LayoutNode {
             node,
             children: child_layouts,
+            collected_widget_count: std::cell::Cell::new(None),
             cached_child_content_bounds: std::sync::OnceLock::new(),
             cached_child_cull_index: std::sync::OnceLock::new(),
         })

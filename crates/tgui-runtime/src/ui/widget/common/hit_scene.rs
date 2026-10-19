@@ -218,6 +218,9 @@ pub(crate) enum MeasureContext {
 pub(crate) struct LayoutNode {
     pub node: TaffyNodeId,
     pub children: Vec<LayoutNode>,
+    /// Allocation hint only: clipping may materialize far fewer widgets than
+    /// the resolved subtree contains. Updated after each collection.
+    pub(crate) collected_widget_count: std::cell::Cell<Option<usize>>,
     /// Immediate-child content bounds in coordinates local to this node.
     ///
     /// Scene-only recollection keeps the Taffy layout stable, so scroll containers with

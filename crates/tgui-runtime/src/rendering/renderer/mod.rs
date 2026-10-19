@@ -279,6 +279,8 @@ pub struct Renderer {
     snapshot_target: Option<OffscreenTarget>,
     blur_target: Option<OffscreenTarget>,
     blur_scratch_target: Option<OffscreenTarget>,
+    /// Immutable bindings for the current offscreen targets, bounded by radius.
+    backdrop_bindings: Vec<(u32, targets::BackdropBindings)>,
     canvas_composite_targets: Vec<OffscreenTarget>,
     canvas_composite_mask_targets: Vec<OffscreenTarget>,
     present_resources: Option<PresentResources>,
@@ -820,7 +822,19 @@ impl Renderer {
         }
 
         let (command_buffers, overlay_buffers, used_clean_cache) =
-            if let Some((main, overlay)) = cached_prepared {
+            if let Some((mut main, mut overlay)) = cached_prepared {
+                main.refresh_scroll_translations(
+                    scene.command_gpu_scroll_containers(),
+                    scroll_regions,
+                    viewport,
+                    &mut self.scroll_translate_cache,
+                );
+                overlay.refresh_scroll_translations(
+                    scene.overlay_command_gpu_scroll_containers(),
+                    scroll_regions,
+                    viewport,
+                    &mut self.scroll_translate_cache,
+                );
                 (main, overlay, true)
             } else {
                 let main = self.prepare_commands(
@@ -1006,6 +1020,11 @@ impl Renderer {
         let whole_page_fast_path = self.text_atlas_whole_page_stale_release_enabled;
         #[cfg(not(any(test, feature = "bench-support")))]
         let whole_page_fast_path = true;
+        // HashMap iteration otherwise randomizes the order of free-rectangle
+        // coalescing, making partial replacement cost depend on the cache seed.
+        // Group spatial neighbors so release and subsequent packing are stable.
+        stale_atlas_allocations
+            .sort_unstable_by_key(|allocation| (allocation.page_id, allocation.y, allocation.x));
         let release_stats = self
             .text_atlas
             .release_many(&stale_atlas_allocations, whole_page_fast_path);
@@ -1418,6 +1437,10 @@ impl HeadlessBenchRenderer {
     pub(crate) fn set_transparent_shape_skip(&mut self, enabled: bool) {
         self.renderer.transparent_shape_skip_enabled = enabled;
         self.renderer.retained_prepare_cache.clear();
+    }
+
+    pub(crate) fn clear_backdrop_binding_cache(&mut self) {
+        self.renderer.backdrop_bindings.clear();
     }
 
     pub(crate) fn scene_draw_stats(

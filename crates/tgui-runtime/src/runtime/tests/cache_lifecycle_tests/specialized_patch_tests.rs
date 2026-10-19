@@ -9100,6 +9100,185 @@ fn scrollable_color_tree() -> WidgetTree<TestVm> {
 }
 
 #[test]
+fn gpu_scroll_nested_content_matches_full_recollect_and_falls_back_for_scrollbars() {
+    use crate::runtime::scene_runtime::scroll_fast_path_probe as probe;
+    use crate::ui::widget::RenderCommand;
+
+    for show_scrollbar in [false, true] {
+        let mut content = Flex::vertical()
+            .overflow_x(Overflow::Visible)
+            .overflow_y(Overflow::Visible);
+        for row in 0..80 {
+            content = content.child(
+                Flex::horizontal()
+                    .height(dp(24.0))
+                    .shrink(0.0)
+                    .overflow_x(Overflow::Visible)
+                    .overflow_y(Overflow::Visible)
+                    .child(Button::new(format!("行 {row}")).width(dp(70.0)))
+                    .child(Text::new(format!("value {row}"))),
+            );
+        }
+        let tree = WidgetTree::new(
+            Flex::vertical().child(
+                ScrollView::new()
+                    .size(dp(220.0), dp(100.0))
+                    .show_scrollbar(show_scrollbar)
+                    .child(content),
+            ),
+        );
+        let mut handler = test_handler(Some(tree), InvalidationSignal::new());
+        handler.gpu_scroll_supported = true;
+        let scroll_id = handler
+            .computed_scene()
+            .scroll_regions
+            .iter()
+            .find(|region| region.can_scroll_y())
+            .unwrap()
+            .id;
+        let region = handler
+            .computed_scene()
+            .scroll_regions
+            .iter()
+            .find(|region| region.id == scroll_id)
+            .unwrap();
+        assert_eq!(region.vertical_track.is_some(), show_scrollbar);
+
+        for y in [40.0, 700.0, 0.0] {
+            probe::reset();
+            handler.set_scroll_offset(scroll_id, Point::new(0.0, y));
+            let retained = handler.computed_scene().clone();
+            assert_eq!(probe::gpu_hits(), u64::from(!show_scrollbar));
+            assert_eq!(probe::patch_hits(), u64::from(show_scrollbar));
+            handler.invalidate_computed_scene();
+            let full = handler.computed_scene();
+            if !show_scrollbar {
+                let region = retained
+                    .scroll_regions
+                    .iter()
+                    .find(|r| r.id == scroll_id)
+                    .unwrap();
+                let delta = region.gpu_base_scroll_offset.y - region.scroll_offset.y;
+                assert_eq!(retained.scene.commands.len(), full.scene.commands.len());
+                for ((command, owner), expected) in retained
+                    .scene
+                    .commands
+                    .iter()
+                    .zip(retained.scene.command_gpu_scroll_containers())
+                    .zip(&full.scene.commands)
+                {
+                    let mut translated = command.clone();
+                    if *owner == Some(scroll_id) {
+                        match &mut translated {
+                            RenderCommand::Shape(shape) => shape.rect.y += delta,
+                            RenderCommand::Text(text) => text.frame.y += delta,
+                            _ => panic!("unexpected test primitive"),
+                        }
+                    }
+                    match (&translated, expected) {
+                        (RenderCommand::Shape(a), RenderCommand::Shape(b)) => {
+                            assert_eq!(
+                                (
+                                    a.rect,
+                                    a.color,
+                                    a.corner_radius,
+                                    a.stroke_width,
+                                    a.clip_rect,
+                                    a.clip_mask
+                                ),
+                                (
+                                    b.rect,
+                                    b.color,
+                                    b.corner_radius,
+                                    b.stroke_width,
+                                    b.clip_rect,
+                                    b.clip_mask
+                                )
+                            );
+                        }
+                        (RenderCommand::Text(a), RenderCommand::Text(b)) => {
+                            // Reassociation of f32 additions during GPU translation can differ
+                            // by a few ULPs from fresh CPU layout. All other fields are exact.
+                            assert!((a.frame.y - b.frame.y).abs() < dp(0.001));
+                            let mut normalized = a.clone();
+                            normalized.frame.y = b.frame.y;
+                            assert_eq!(&normalized, b);
+                        }
+                        _ => panic!("different primitive kinds"),
+                    }
+                }
+            } else {
+                assert_eq!(shape_fingerprints(&retained), shape_fingerprints(full));
+                assert_eq!(retained.scene.texts, full.scene.texts);
+            }
+            assert_eq!(retained.hit_regions.len(), full.hit_regions.len());
+            for (a, b) in retained.hit_regions.iter().zip(&full.hit_regions) {
+                assert_eq!(a.rect, b.rect);
+                assert_eq!(a.clip_rect, b.clip_rect);
+                assert_eq!(a.gpu_scroll_container, b.gpu_scroll_container);
+            }
+            assert_eq!(retained.scroll_regions.len(), full.scroll_regions.len());
+            for (a, b) in retained.scroll_regions.iter().zip(&full.scroll_regions) {
+                let mut a = *a;
+                if a.id == scroll_id {
+                    // Only the owning scroller keeps the original vertex origin.
+                    a.gpu_base_scroll_offset = b.gpu_base_scroll_offset;
+                }
+                assert_eq!(&a, b);
+            }
+        }
+    }
+}
+
+#[test]
+fn gpu_scroll_untagged_and_nested_scrollers_use_cpu_fallback() {
+    use crate::runtime::scene_runtime::scroll_fast_path_probe as probe;
+    for nested in [false, true] {
+        let content: Element<TestVm> = if nested {
+            Flex::vertical()
+                .child(
+                    ScrollView::new()
+                        .size(dp(80.0), dp(60.0))
+                        .show_scrollbar(false)
+                        .child(Text::new("nested").height(dp(200.0))),
+                )
+                .child(Text::new("tail").height(dp(400.0)))
+                .into()
+        } else {
+            Text::new("untagged").height(dp(400.0)).into()
+        };
+        let tree = WidgetTree::new(
+            ScrollView::new()
+                .size(dp(100.0), dp(100.0))
+                .show_scrollbar(false)
+                .child(content),
+        );
+        let mut handler = test_handler(Some(tree), InvalidationSignal::new());
+        handler.gpu_scroll_supported = nested;
+        let scroll_id = handler
+            .computed_scene()
+            .scroll_regions
+            .iter()
+            .find(|region| region.can_scroll_y())
+            .unwrap()
+            .id;
+        // Also test the vacuous-check case: a scene collected without GPU tags
+        // must be recollected even when adapter support becomes available.
+        handler.gpu_scroll_supported = true;
+        probe::reset();
+        handler.set_scroll_offset(scroll_id, Point::new(0.0, 30.0));
+        let retained = handler.computed_scene().clone();
+        assert_eq!(probe::gpu_hits(), 0);
+        assert_eq!(probe::patch_hits(), 1);
+        handler.gpu_scroll_supported = false;
+        handler.invalidate_computed_scene();
+        let full = handler.computed_scene();
+        assert_eq!(shape_fingerprints(&retained), shape_fingerprints(full));
+        assert_eq!(retained.scene.texts, full.scene.texts);
+    }
+}
+
+#[test]
 fn pure_scroll_patch_matches_full_recollect() {
     let invalidation = InvalidationSignal::new();
     let tree = scrollable_color_tree();

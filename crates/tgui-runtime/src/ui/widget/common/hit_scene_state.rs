@@ -190,6 +190,8 @@ impl ScrollRegionLookupIndex {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct ScrollRegion {
     pub id: WidgetId,
+    /// Unclipped frame retained so GPU scrolling can re-intersect descendants.
+    pub frame: Rect,
     pub content_viewport: Rect,
     pub visible_frame: Rect,
     pub content_bounds: Rect,

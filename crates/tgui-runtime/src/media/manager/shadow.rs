@@ -157,15 +157,32 @@ where
         return Ok(Some(texture));
     }
 
-    let mut cache = cache.lock().expect("shadow cache lock poisoned");
-    if let Some(entry) = cache.iter_mut().find(|entry| {
-        entry.cache_key() == cache_key && entry.width() == width && entry.height() == height
-    }) {
-        entry.set_last_used(entry.last_used().saturating_add(1));
-        return Ok(Some(entry.texture()));
+    {
+        let mut entries = cache.lock().expect("shadow cache lock poisoned");
+        let next_tick = entries
+            .iter()
+            .map(ShadowCacheEntry::last_used)
+            .max()
+            .unwrap_or(0)
+            .saturating_add(1);
+        if let Some(entry) = entries.iter_mut().find(|entry| {
+            entry.cache_key() == cache_key && entry.width() == width && entry.height() == height
+        }) {
+            entry.set_last_used(next_tick);
+            return Ok(Some(entry.texture()));
+        }
     }
 
+    // Rasterization/blur can be expensive. Other threads must still be able to
+    // read cached shadows while a miss is being rendered.
     let texture = Arc::new(render()?);
+    let mut cache = cache.lock().expect("shadow cache lock poisoned");
+    // A concurrent miss may have installed the same texture while we rendered.
+    if let Some(entry) = cache.iter().find(|entry| {
+        entry.cache_key() == cache_key && entry.width() == width && entry.height() == height
+    }) {
+        return Ok(Some(entry.texture()));
+    }
     let next_tick = cache
         .iter()
         .map(|entry| entry.last_used())
@@ -186,4 +203,35 @@ where
     }
 
     Ok(Some(texture))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn shadow_misses_render_outside_lock_and_hits_refresh_recency() {
+        let cache = Mutex::new(Vec::<WidgetShadowEntry>::new());
+        let get = |key| {
+            widget_shadow_texture(&cache, 2, key, 1, 1, || {
+                assert!(
+                    cache.try_lock().is_ok(),
+                    "rasterization must not hold the cache lock"
+                );
+                Ok(TextureFrame::new(1, 1, vec![255; 4]))
+            })
+            .unwrap()
+            .unwrap()
+        };
+        let first = get(1);
+        get(2);
+        assert_eq!(first.id(), get(1).id());
+        get(3);
+        assert_eq!(first.id(), get(1).id());
+        assert!(!cache
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|entry| entry.cache_key == 2));
+    }
 }

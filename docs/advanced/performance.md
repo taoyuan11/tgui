@@ -87,6 +87,9 @@ TGUI_TEXT_PROFILE=1 TGUI_TEXT_PROFILE_MIN_MS=2 cargo run -p demo
 `path=pure_scroll_patch`。这些日志不等于 GPU 帧时间或实际 FPS，阈值以下的事件不会输出。
 对照时使用相同页面、窗口尺寸和滚动序列，并停止后台编译/测试。
 
+文本缓存、全量布局和滚动路径的实现改进、同机测量及剩余限制见
+[Debug 性能优化记录](./debug-performance.md)。
+
 需要恢复完全未优化的调试构建时，可以临时覆盖配置：
 
 ```sh

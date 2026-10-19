@@ -353,7 +353,7 @@ pub(super) fn measure_node(
 }
 
 pub(super) fn compute_taffy_layout_with_measure(
-    taffy: &mut TaffyTree<MeasureContext>,
+    taffy: &mut TaffyTree<Box<MeasureContext>>,
     root: taffy::prelude::NodeId,
     viewport: Rect,
     font_manager: &FontManager,
@@ -369,7 +369,7 @@ pub(super) fn compute_taffy_layout_with_measure(
         },
         |known_dimensions, _, _, node_context, _| {
             measure_node(
-                node_context,
+                node_context.map(Box::as_mut),
                 known_dimensions,
                 font_manager,
                 theme,

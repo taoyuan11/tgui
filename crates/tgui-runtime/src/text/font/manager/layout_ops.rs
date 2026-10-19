@@ -129,9 +129,6 @@ impl FontManager {
             (size.0.max(0.0).ceil(), size.1.max(line_height).ceil())
         };
         let mut cache = self.measure_cache.borrow_mut();
-        if cache.len() > 4096 {
-            cache.clear();
-        }
         #[cfg(any(test, feature = "bench-support"))]
         self.text_key_owned_allocations
             .set(self.text_key_owned_allocations.get().saturating_add(1));
@@ -145,6 +142,7 @@ impl FontManager {
                 letter_spacing_bits: letter_spacing.to_bits(),
             },
             measured,
+            text.len() + preferred_font.map_or(0, str::len),
         );
         measured
     }
@@ -318,9 +316,7 @@ impl FontManager {
         );
 
         let mut cache = self.layout_cache.borrow_mut();
-        if cache.len() > 256 {
-            cache.clear();
-        }
+        let geometry_bytes = layout.geometry_bytes();
         #[cfg(any(test, feature = "bench-support"))]
         self.text_key_owned_allocations
             .set(self.text_key_owned_allocations.get().saturating_add(1));
@@ -335,6 +331,7 @@ impl FontManager {
                 wrap_width_bits: wrap_width.map(f32::to_bits),
             },
             layout.clone(),
+            text.len() + preferred_font.map_or(0, str::len) + geometry_bytes,
         );
         layout
     }

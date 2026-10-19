@@ -162,6 +162,31 @@ fn bench_text_layout(c: &mut Criterion) {
 }
 
 #[cfg(feature = "bench-support")]
+fn bench_text_layout_working_set(c: &mut Criterion) {
+    let mut group = c.benchmark_group("text_layout_working_set");
+    for count in [256, 257, 258, 512, 1024, 1025, 2048] {
+        let manager = BenchFontManager::new();
+        let texts: Vec<_> = (0..count)
+            .map(|index| format!("Text layout row {index}: 你好 cache"))
+            .collect();
+        for text in &texts {
+            black_box(manager.measure_layout(text, None));
+        }
+        group.bench_with_input(BenchmarkId::from_parameter(count), &texts, |b, texts| {
+            b.iter(|| {
+                for text in texts {
+                    black_box(manager.measure_layout(black_box(text), None));
+                }
+            });
+        });
+    }
+    group.finish();
+}
+
+#[cfg(not(feature = "bench-support"))]
+fn bench_text_layout_working_set(_c: &mut Criterion) {}
+
+#[cfg(feature = "bench-support")]
 fn bench_text_layout_cache_hit(c: &mut Criterion) {
     let mut group = c.benchmark_group("text_layout_cache_hit_key");
 
@@ -680,6 +705,7 @@ criterion_group!(
     bench_text_shaping,
     bench_text_layout,
     bench_text_layout_cache_hit,
+    bench_text_layout_working_set,
     bench_text_measure_only_vs_precise_layout,
     bench_text_widget_measure_route,
     bench_font_family_resolution,

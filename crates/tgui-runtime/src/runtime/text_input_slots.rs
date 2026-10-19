@@ -446,6 +446,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             );
             ScrollRegion {
                 id: widget_id,
+                frame: current.frame,
                 content_viewport,
                 visible_frame: current.visible_frame,
                 content_bounds,

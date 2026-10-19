@@ -11,7 +11,7 @@ use tgui::canvas::{Canvas, CanvasRecorder};
 #[cfg(feature = "bench-support")]
 use tgui::core::{dp, Color, Point, Rect};
 #[cfg(feature = "bench-support")]
-use tgui::layout::{Align, Axis, Insets, Justify};
+use tgui::layout::{Align, Axis, Insets, Justify, Overflow};
 #[cfg(feature = "bench-support")]
 use tgui::media::MediaSource;
 #[cfg(feature = "bench-support")]
@@ -302,6 +302,14 @@ fn deep_patch_tree(depth: usize) -> WidgetTree<()> {
 
 #[cfg(feature = "bench-support")]
 fn scroll_dashboard(rows: usize) -> WidgetTree<RuntimeScrollBenchmarkVm> {
+    scroll_dashboard_with_clips(rows, true)
+}
+
+#[cfg(feature = "bench-support")]
+fn scroll_dashboard_with_clips(
+    rows: usize,
+    child_clips: bool,
+) -> WidgetTree<RuntimeScrollBenchmarkVm> {
     let mut summary = Flex::new(Axis::Vertical)
         .width(dp(280.0))
         .height(dp(680.0))
@@ -314,11 +322,21 @@ fn scroll_dashboard(rows: usize) -> WidgetTree<RuntimeScrollBenchmarkVm> {
         );
     }
 
-    let mut content = Flex::new(Axis::Vertical).width(dp(900.0));
+    let overflow = if child_clips {
+        Overflow::Hidden
+    } else {
+        Overflow::Visible
+    };
+    let mut content = Flex::new(Axis::Vertical)
+        .width(dp(900.0))
+        .overflow_x(overflow)
+        .overflow_y(overflow);
     for row in 0..rows {
         content = content.child(
             Flex::new(Axis::Horizontal)
                 .height(dp(28.0))
+                .overflow_x(overflow)
+                .overflow_y(overflow)
                 .gap(dp(12.0))
                 .child(Text::new(format!("scroll row {row:04}")))
                 .child(Text::new(format!("metric {}", row % 31))),
@@ -827,6 +845,16 @@ fn bench_tooltip_effect_gpu(c: &mut Criterion) {
     let legacy_blur_scene = legacy_blur_context
         .render_cached_scene_to_headless_gpu(&legacy_blur_tree, Instant::now())
         .expect("legacy tooltip-like blur GPU validation");
+    let cached_pixels = legacy_blur_context.headless_output_rgba().unwrap();
+    legacy_blur_context.clear_headless_backdrop_binding_cache();
+    legacy_blur_context
+        .render_cached_scene_to_headless_gpu(&legacy_blur_tree, Instant::now())
+        .unwrap();
+    assert_eq!(
+        cached_pixels,
+        legacy_blur_context.headless_output_rgba().unwrap(),
+        "cached blur bindings must preserve exact pixels"
+    );
     assert_eq!(
         flat_scene, legacy_blur_scene,
         "tooltip effect fixtures must expose identical geometry, colors, text, and ordinary scene primitives",
@@ -875,6 +903,19 @@ fn bench_tooltip_effect_gpu(c: &mut Criterion) {
                         Instant::now(),
                     )
                     .expect("headless legacy tooltip-like blur frame"),
+            );
+        });
+    });
+    group.bench_function("blur_6dp_uncached_bindings_control", |b| {
+        b.iter(|| {
+            legacy_blur_context.clear_headless_backdrop_binding_cache();
+            black_box(
+                legacy_blur_context
+                    .render_cached_scene_to_headless_gpu(
+                        black_box(&legacy_blur_tree),
+                        Instant::now(),
+                    )
+                    .unwrap(),
             );
         });
     });
@@ -1715,6 +1756,60 @@ fn bench_runtime_gpu_pipeline(c: &mut Criterion) {
         });
     });
     scroll.finish();
+
+    // Exercise the GPU translation route separately from the default nested-clip fallback.
+    let mut gpu_scroll =
+        RuntimeScrollBenchmarkContext::new(scroll_dashboard_with_clips(600, false), viewport())
+            .expect("headless GPU scroll fixture");
+    let mut group = c.benchmark_group("runtime_gpu_scroll_retained_vertices");
+    let mut offset = 0.0;
+    for y in [180.0, 2000.0, 0.0] {
+        let stats = gpu_scroll
+            .render_scroll_frame(Point::new(0.0, y), false)
+            .unwrap();
+        if gpu_scroll.gpu_scroll_supported {
+            assert_eq!(stats.gpu_fast_path_hits, 1, "{stats:?}");
+        }
+        let retained = gpu_scroll.read_output_rgba().unwrap();
+        gpu_scroll
+            .render_scroll_frame(Point::new(0.0, y), true)
+            .unwrap();
+        assert_eq!(
+            retained,
+            gpu_scroll.read_output_rgba().unwrap(),
+            "GPU scroll pixels differ at {y}"
+        );
+    }
+    let mut scene_update = Duration::ZERO;
+    let mut prepare_upload = Duration::ZERO;
+    for index in 0..120 {
+        let y = if index % 2 == 0 { 180.0 } else { 0.0 };
+        let stats = gpu_scroll
+            .render_scroll_frame(Point::new(0.0, y), false)
+            .unwrap();
+        scene_update += stats.scene_update;
+        prepare_upload += stats.renderer_prepare_upload;
+    }
+    if gpu_scroll.gpu_scroll_supported {
+        assert!(gpu_scroll.prepared_frame_cache_stats().0 > 100);
+    }
+    eprintln!(
+        "gpu_scroll_retained_profile: scene={:?} prepare_upload={:?} prepared_cache={:?}",
+        scene_update / 120,
+        prepare_upload / 120,
+        gpu_scroll.prepared_frame_cache_stats()
+    );
+    group.bench_function("600_rows", |b| {
+        b.iter(|| {
+            offset = if offset == 0.0 { 180.0 } else { 0.0 };
+            black_box(
+                gpu_scroll
+                    .render_scroll_frame(Point::new(0.0, offset), false)
+                    .unwrap(),
+            );
+        })
+    });
+    group.finish();
 }
 
 #[cfg(not(feature = "bench-support"))]

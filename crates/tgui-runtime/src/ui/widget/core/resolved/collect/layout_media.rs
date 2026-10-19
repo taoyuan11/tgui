@@ -100,7 +100,7 @@ fn monotonic_visible_child_range<VM: 'static>(
 ) -> Option<std::ops::Range<usize>> {
     // GPU scroll retains clipped commands for later translation, so CPU-side omission is
     // forbidden both for an inherited tagged subtree and while building a new tagged subtree.
-    if context.gpu_scroll_container.is_some() || context.gpu_scroll_enabled {
+    if context.gpu_scroll_container.is_some() {
         return None;
     }
 
@@ -125,6 +125,39 @@ fn monotonic_visible_child_range<VM: 'static>(
 }
 
 impl<VM: 'static> ResolvedElement<VM> {
+    /// Reject subtrees whose clips or independent scrolling cannot be translated
+    /// with their enclosing scroll viewport. This also avoids retaining offscreen
+    /// commands when we already know the runtime will use CPU recollection.
+    fn supports_gpu_scroll_content(&self) -> bool {
+        if self.tooltip.is_some()
+            || self.popover.is_some()
+            || self.menu.is_some()
+            || self.context_menu.is_some()
+            || self.modal.is_some()
+            || self.drawer.is_some()
+            || !matches!(self.visual.background_blur, Value::Static(value) if value == Dp::ZERO)
+        {
+            return false;
+        }
+        match &self.kind {
+            ResolvedWidgetKind::Container {
+                layout, children, ..
+            } => {
+                layout.overflow_x == Overflow::Visible
+                    && layout.overflow_y == Overflow::Visible
+                    && children.iter().all(Self::supports_gpu_scroll_content)
+            }
+            ResolvedWidgetKind::Text { .. }
+            | ResolvedWidgetKind::Button { .. }
+            | ResolvedWidgetKind::Checkbox { .. }
+            | ResolvedWidgetKind::Radio { .. }
+            | ResolvedWidgetKind::Switch { .. }
+            | ResolvedWidgetKind::Image { .. }
+            | ResolvedWidgetKind::Icon { .. } => true,
+            _ => false,
+        }
+    }
+
     pub(super) fn collect_layout_media_kind(
         &self,
         layout_node: &LayoutNode,
@@ -188,25 +221,30 @@ impl<VM: 'static> ResolvedElement<VM> {
                     layout.overflow_x,
                     layout.overflow_y,
                 );
-                let scrollbar_geometry = compute_scrollbar_geometry(
-                    visual.background_frame,
-                    content_bounds,
-                    scroll_offset,
-                    layout,
-                    context.theme,
-                    context.units,
-                );
                 let show_scrollbar = layout
                     .scroll_view
                     .as_ref()
                     .map(|config| config.show_scrollbar.resolve())
                     .unwrap_or(true);
+                let scrollbar_geometry = if show_scrollbar {
+                    compute_scrollbar_geometry(
+                        visual.background_frame,
+                        content_bounds,
+                        scroll_offset,
+                        layout,
+                        context.theme,
+                        context.units,
+                    )
+                } else {
+                    ScrollbarGeometry::default()
+                };
                 let visible_frame = visual
                     .frame
                     .intersect(visual_context.clip_rect)
                     .unwrap_or(Rect::new(visual.frame.x, visual.frame.y, 0.0, 0.0));
                 computed.scroll_regions.push(ScrollRegion {
                     id: self.id,
+                    frame: visual.frame,
                     content_viewport: visual.background_frame,
                     visible_frame,
                     content_bounds,
@@ -224,6 +262,16 @@ impl<VM: 'static> ResolvedElement<VM> {
                     x: visual.frame.x - scroll_offset.x,
                     y: visual.frame.y - scroll_offset.y,
                 };
+                let previous_gpu_scroll_container = context.gpu_scroll_container;
+                if context.gpu_scroll_enabled
+                    && previous_gpu_scroll_container.is_none()
+                    && !show_scrollbar
+                    && (layout.overflow_x == Overflow::Scroll
+                        || layout.overflow_y == Overflow::Scroll)
+                    && children.iter().all(Self::supports_gpu_scroll_content)
+                {
+                    context.gpu_scroll_container = Some(self.id);
+                }
                 let fast_child_range = monotonic_visible_child_range(
                     layout,
                     children,
@@ -235,10 +283,6 @@ impl<VM: 'static> ResolvedElement<VM> {
                 let used_fast_child_range = fast_child_range.is_some();
                 let child_range =
                     fast_child_range.unwrap_or(0..children.len().min(layout_node.children.len()));
-                let previous_gpu_scroll_container = context.gpu_scroll_container;
-                if context.gpu_scroll_enabled {
-                    context.gpu_scroll_container = Some(self.id);
-                }
                 let track_portal_geometry = context.portal_accessibility_geometry.is_some();
                 for child_index in child_range {
                     let child = &children[child_index];
@@ -418,6 +462,7 @@ impl<VM: 'static> ResolvedElement<VM> {
                     .unwrap_or(Rect::new(visual.frame.x, visual.frame.y, 0.0, 0.0));
                 computed.scroll_regions.push(ScrollRegion {
                     id: self.id,
+                    frame: visual.frame,
                     content_viewport: visual.background_frame,
                     visible_frame,
                     content_bounds,

@@ -454,7 +454,6 @@ impl<VM: 'static> WidgetTree<VM> {
     ) -> ResolvedSceneLayout<VM> {
         let (mut layout, dependencies) = with_widget_stack(|| {
             with_dependency_collection(|| {
-                let mut taffy = TaffyTree::new();
                 let root = std::sync::Arc::clone(&self.root);
                 let resolved_root = root.resolve_with_runtime_state_and_style_sheet(
                     theme,
@@ -468,6 +467,9 @@ impl<VM: 'static> WidgetTree<VM> {
                     &style_context,
                     style_sheet,
                 );
+                // Reserve Taffy's node arenas once instead of growing and copying them
+                // repeatedly while constructing a full-layout fallback.
+                let mut taffy = TaffyTree::with_capacity(resolved_root.layout_node_count());
                 let root_layout = resolved_root
                     .build_layout_tree(
                         &mut taffy, animations, theme, units, None, viewport, true, now,
@@ -1016,7 +1018,11 @@ impl<VM: 'static> WidgetTree<VM> {
         let ((mut computed, lifecycle_states, chunks, chunk_parts, visual_contexts), dependencies) =
             with_widget_stack(|| {
                 with_dependency_collection(|| {
-                    let cap = layout.subtree_size(layout.root_id());
+                    let cap = layout
+                        .layout_root
+                        .collected_widget_count
+                        .get()
+                        .unwrap_or_else(|| layout.subtree_size(layout.root_id()));
                     let mut lifecycle_states = HashMap::with_capacity(cap / 4);
                     let mut chunks = HashMap::with_capacity(cap);
                     let mut chunk_parts = HashMap::with_capacity(cap / 2);

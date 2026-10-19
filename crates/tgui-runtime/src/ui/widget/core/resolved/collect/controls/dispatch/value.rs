@@ -1126,6 +1126,7 @@ impl<VM: 'static> ResolvedElement<VM> {
                 .unwrap_or(Rect::new(visual.frame.x, visual.frame.y, 0.0, 0.0));
             computed.scroll_regions.push(ScrollRegion {
                 id: self.id,
+                frame: visual.frame,
                 content_viewport,
                 visible_frame,
                 content_bounds,

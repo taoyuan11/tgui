@@ -18,7 +18,10 @@ pub(crate) struct ResolvedSceneLayout<VM> {
     pub(super) source_root: std::sync::Arc<Element<VM>>,
     pub(super) resolved_root: ResolvedElement<VM>,
     pub(super) layout_root: LayoutNode,
-    pub(super) taffy: TaffyTree<MeasureContext>,
+    // Context variants contain full widget styles. Keep the sparse Taffy arena
+    // pointer-sized instead of reserving the largest variant for every node,
+    // including containers that have no measurement context at all.
+    pub(super) taffy: TaffyTree<Box<MeasureContext>>,
     pub(super) units: UnitContext,
     pub(super) frame_clock: crate::animation::FrameClockSnapshot,
     pub(super) dependencies: DependencyGraph,
@@ -365,12 +368,23 @@ impl<VM: 'static> ResolvedSceneLayout<VM> {
     pub(crate) fn rebuild_indexes(&mut self) {
         self.root_id = self.resolved_root.id;
         let mut path = Vec::new();
-        let mut paths = HashMap::new();
-        let mut parents = HashMap::new();
-        let mut depths = HashMap::new();
-        let mut subtree_sizes = HashMap::new();
-        let mut scroll_view_controllers = HashMap::new();
-        let mut virtual_widgets = HashSet::new();
+        let count = self.taffy.total_node_count();
+        let mut paths = std::mem::take(&mut self.paths);
+        let mut parents = std::mem::take(&mut self.parents);
+        let mut depths = std::mem::take(&mut self.depths);
+        let mut subtree_sizes = std::mem::take(&mut self.subtree_sizes);
+        let mut scroll_view_controllers = std::mem::take(&mut self.scroll_view_controllers);
+        let mut virtual_widgets = std::mem::take(&mut self.virtual_widgets);
+        paths.clear();
+        parents.clear();
+        depths.clear();
+        subtree_sizes.clear();
+        scroll_view_controllers.clear();
+        virtual_widgets.clear();
+        paths.reserve(count);
+        parents.reserve(count);
+        depths.reserve(count);
+        subtree_sizes.reserve(count);
         collect_indexes(
             &self.resolved_root,
             None,
@@ -519,7 +533,8 @@ impl<VM: 'static> ResolvedSceneLayout<VM> {
             DependencyGraph,
         ) = with_widget_stack(|| {
             with_dependency_collection(|| {
-                let cap = self.subtree_size(widget_id);
+                let cap = self.layout_at_path(path).collected_widget_count.get()
+                    .unwrap_or_else(|| self.subtree_size(widget_id));
                 let mut lifecycle_states = HashMap::with_capacity(cap / 4);
                 let mut chunks = HashMap::with_capacity(cap);
                 let mut chunk_parts = HashMap::with_capacity(cap / 2);

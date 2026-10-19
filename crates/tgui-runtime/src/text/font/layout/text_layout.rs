@@ -31,6 +31,15 @@ pub(in crate::text::font) struct TextLineLayoutInfo {
 }
 
 impl TextLayoutInfo {
+    pub(in crate::text::font) fn geometry_bytes(&self) -> usize {
+        self.lines.capacity() * std::mem::size_of::<TextLineLayoutInfo>()
+            + self
+                .lines
+                .iter()
+                .map(|line| line.boundaries.capacity() * std::mem::size_of::<TextBoundary>())
+                .sum::<usize>()
+    }
+
     #[inline]
     pub(crate) fn x_for_index(&self, index: usize) -> f32 {
         self.line_for_index(index).x_for_index(index)

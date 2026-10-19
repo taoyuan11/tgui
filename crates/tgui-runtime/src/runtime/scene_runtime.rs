@@ -289,19 +289,28 @@ fn gpu_scroll_scene_supported(
     widget_id: WidgetId,
     region: ScrollRegion,
 ) -> bool {
+    // A CPU-collected subtree may have omitted offscreen content. Never accept
+    // the vacuous "all tagged commands supported" check for an untagged scene.
     scene
-        .commands
-        .iter()
-        .zip(scene.command_gpu_scroll_containers())
-        .all(|(command, owner)| {
-            *owner != Some(widget_id) || gpu_scroll_command_supported(command, region)
-        })
+        .command_gpu_scroll_containers()
+        .contains(&Some(widget_id))
+        && scene
+            .commands
+            .iter()
+            .zip(scene.command_gpu_scroll_containers())
+            .all(|(command, owner)| {
+                *owner != Some(widget_id) || gpu_scroll_command_supported(command, region)
+            })
 }
 
-fn translate_gpu_scroll_region(region: &mut ScrollRegion, delta: Point) {
-    translate_gpu_point(&mut region.gpu_base_scroll_offset, delta);
+fn translate_gpu_scroll_region(region: &mut ScrollRegion, delta: Point, clip: Rect) {
+    translate_gpu_rect(&mut region.frame, delta);
     translate_gpu_rect(&mut region.content_viewport, delta);
-    translate_gpu_rect(&mut region.visible_frame, delta);
+    region.visible_frame =
+        region
+            .frame
+            .intersect(clip)
+            .unwrap_or(Rect::new(region.frame.x, region.frame.y, 0.0, 0.0));
     translate_gpu_rect(&mut region.content_bounds, delta);
     if let Some(track) = &mut region.horizontal_track {
         translate_gpu_rect(track, delta);
@@ -402,13 +411,14 @@ fn translate_gpu_scroll_hits<VM>(
 }
 
 fn translate_descendant_scroll_regions(
-    descendant_ids: &[WidgetId],
+    descendant_ids: &HashSet<WidgetId>,
     regions: &mut [ScrollRegion],
     delta: Point,
+    clip: Rect,
 ) {
     for region in regions {
         if descendant_ids.contains(&region.id) {
-            translate_gpu_scroll_region(region, delta);
+            translate_gpu_scroll_region(region, delta, clip);
         }
     }
 }
@@ -482,7 +492,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         let Some(path) = layout.path_for(widget_id) else {
             return false;
         };
-        let mut descendant_scroll_ids = SmallVec::<[WidgetId; 8]>::new();
+        let mut descendant_scroll_ids = HashSet::new();
         for region in &cached.computed.scroll_regions {
             if region.id == widget_id {
                 continue;
@@ -492,7 +502,12 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 .map(|candidate| candidate.starts_with(path))
                 .unwrap_or(false)
             {
-                descendant_scroll_ids.push(region.id);
+                if region.overflow_x == crate::ui::layout::Overflow::Scroll
+                    || region.overflow_y == crate::ui::layout::Overflow::Scroll
+                {
+                    return false;
+                }
+                descendant_scroll_ids.insert(region.id);
             }
         }
         if !gpu_scroll_scene_supported(&cached.computed.scene, widget_id, old_region) {
@@ -544,11 +559,16 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
             old_region.scroll_offset.x - next_offset.x,
             old_region.scroll_offset.y - next_offset.y,
         );
+        let child_clip = old_region
+            .content_viewport
+            .intersect(old_region.visible_frame)
+            .unwrap_or(Rect::new(0.0, 0.0, 0.0, 0.0));
         cached.computed.scroll_regions[region_index].scroll_offset = next_offset;
         translate_descendant_scroll_regions(
             &descendant_scroll_ids,
             &mut cached.computed.scroll_regions,
             hit_delta,
+            child_clip,
         );
         // The retained GPU-scroll path updates hit rectangles in place. Drop the lazy spatial
         // candidate cache before translating so the next pointer query rebuilds from new bounds.
@@ -566,6 +586,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 &descendant_scroll_ids,
                 &mut chunk.scroll_regions,
                 hit_delta,
+                child_clip,
             );
             translate_gpu_scroll_hits(&mut chunk.hit_regions, widget_id, hit_delta);
         }

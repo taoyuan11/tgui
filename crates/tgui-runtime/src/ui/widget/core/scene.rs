@@ -35,7 +35,7 @@ pub(crate) struct PortalAccessibilityGeometryRecord {
 }
 
 pub(crate) struct CollectContext<'a, 'b> {
-    pub(crate) taffy: &'a TaffyTree<MeasureContext>,
+    pub(crate) taffy: &'a TaffyTree<Box<MeasureContext>>,
     pub(crate) font_manager: &'a FontManager,
     pub(crate) theme: &'a Theme,
     pub(crate) style_context: StyleContext<'a>,

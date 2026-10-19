@@ -6,6 +6,13 @@ use super::{surface, OffscreenTarget, PresentResources, Renderer, TextQuadSpec, 
 
 const BACKDROP_BLUR_TARGET_SCALE: u32 = 2;
 
+#[derive(Clone)]
+pub(super) struct BackdropBindings {
+    pub(super) horizontal: wgpu::BindGroup,
+    pub(super) vertical: wgpu::BindGroup,
+    pub(super) composite: wgpu::BindGroup,
+}
+
 pub(super) struct RendererTargets {
     pub(super) scene_target: Option<OffscreenTarget>,
 }
@@ -175,6 +182,7 @@ impl Renderer {
         self.snapshot_target = None;
         self.blur_target = None;
         self.blur_scratch_target = None;
+        self.backdrop_bindings.clear();
         self.canvas_composite_targets.clear();
         self.canvas_composite_mask_targets.clear();
         self.recreate_present_resources();

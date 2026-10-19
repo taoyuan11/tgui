@@ -5084,7 +5084,8 @@ impl<VM: 'static> ResolvedElement<VM> {
         chunk_parts: &mut HashMap<WidgetId, SceneChunkParts<VM>>,
         visual_contexts: &mut HashMap<WidgetId, VisualContextSnapshot>,
     ) -> WidgetId {
-        super::super::tree::with_widget_stack_frame(|| {
+        let previous_count = chunks.len();
+        let id = super::super::tree::with_widget_stack_frame(|| {
             let owner = self.id.dependency_owner(DependencyPhase::Scene);
             track_dependency_scope(owner, || {
                 self.collect_subtree_cache_tracked(
@@ -5097,7 +5098,11 @@ impl<VM: 'static> ResolvedElement<VM> {
                     visual_contexts,
                 )
             })
-        })
+        });
+        layout_node
+            .collected_widget_count
+            .set(Some(chunks.len().saturating_sub(previous_count)));
+        id
     }
 
     fn collect_subtree_cache_tracked(

@@ -640,6 +640,40 @@ pub(super) struct PreparedCommands {
     pub(super) stream: DrawStream,
     pub(super) commands: Vec<PreparedCommand>,
     pub(super) clean_frame_cacheable: bool,
+    pub(super) has_scroll_translation: bool,
+}
+
+impl PreparedCommands {
+    /// Vertex data and bindings stay in their validated rotation slot. A pure
+    /// scroll changes only per-draw immediates, so do not rebuild staging or diff
+    /// the entire vertex mirror on an otherwise clean prepared-frame hit.
+    pub(super) fn refresh_scroll_translations(
+        &mut self,
+        owners: &[Option<WidgetId>],
+        regions: &[crate::ui::widget::ScrollRegion],
+        viewport: VertexViewport,
+        cache: &mut ScrollTranslateCache,
+    ) {
+        if !self.has_scroll_translation {
+            return;
+        }
+        for command in &mut self.commands {
+            let owner = owners
+                .get(command.draw_id().command_index)
+                .copied()
+                .flatten();
+            let translate = cache.resolve(owner, regions, viewport);
+            match command {
+                PreparedCommand::Rect(draw) => draw.scroll_translate = translate,
+                PreparedCommand::Brush(draw) => draw.scroll_translate = translate,
+                PreparedCommand::Mesh(draw) => draw.scroll_translate = translate,
+                PreparedCommand::Sprite(draw) => draw.scroll_translate = translate,
+                PreparedCommand::BackdropBlur(_) | PreparedCommand::CanvasComposite(_) => {
+                    debug_assert!(false, "effects cannot enter the clean prepared cache");
+                }
+            }
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -1077,6 +1111,7 @@ impl Renderer {
             reuse: 0,
         };
         let mut clean_frame_cacheable = true;
+        let mut has_scroll_translation = false;
         let mut prepared = self
             .prepared_command_scratch
             .acquire(stream, commands.len());
@@ -1096,8 +1131,8 @@ impl Renderer {
                     viewport,
                 ),
             );
+            has_scroll_translation |= gpu_scroll_container.is_some();
             clean_frame_cacheable &= command_clean_frame_cacheable(command)
-                && gpu_scroll_container.is_none()
                 && command_transform_chains
                     .get(command_index)
                     .is_none_or(|chain| chain.is_empty());
@@ -1154,6 +1189,7 @@ impl Renderer {
             stream,
             commands: prepared,
             clean_frame_cacheable,
+            has_scroll_translation,
         })
     }
 
@@ -1531,6 +1567,7 @@ mod tests {
     ) -> ScrollRegion {
         ScrollRegion {
             id: WidgetId::from_raw(id),
+            frame: visible_frame,
             content_viewport: visible_frame,
             visible_frame,
             content_bounds: visible_frame,
@@ -1969,6 +2006,51 @@ mod tests {
     }
 
     #[test]
+    fn clean_scroll_frame_refreshes_immediates_without_changing_vertex_ranges() {
+        let viewport = make_viewport(800.0, 600.0, 2.0);
+        let scroll_id = WidgetId::from_raw(42);
+        // Prepared commands can omit transparent draws, so use the original draw
+        // index, not the position in the compacted prepared vector.
+        let mut prepared = PreparedCommands {
+            stream: DrawStream::Main,
+            commands: vec![PreparedCommand::Rect(PreparedRect {
+                draw_id: DrawId::new(DrawStream::Main, 1),
+                clip_rect: Some(Rect::new(0.0, 0.0, 200.0, 100.0)),
+                vertex_offset: 256,
+                vertex_count: 6,
+                scroll_translate: None,
+            })],
+            clean_frame_cacheable: true,
+            has_scroll_translation: true,
+        };
+        let mut cache = ScrollTranslateCache::default();
+        for offset in [30.0, 90.0, 0.0] {
+            let regions = [make_scroll_region(
+                42,
+                Rect::new(0.0, 0.0, 200.0, 100.0),
+                Point::ZERO,
+                Point::new(0.0, offset),
+            )];
+            cache.begin_frame();
+            prepared.refresh_scroll_translations(
+                &[None, Some(scroll_id)],
+                &regions,
+                viewport,
+                &mut cache,
+            );
+            let PreparedCommand::Rect(draw) = &prepared.commands[0] else {
+                panic!()
+            };
+            assert_eq!((draw.vertex_offset, draw.vertex_count), (256, 6));
+            assert_eq!(draw.clip_rect, Some(Rect::new(0.0, 0.0, 200.0, 100.0)));
+            assert_translate_eq(
+                draw.scroll_translate,
+                compute_scroll_translate(Some(scroll_id), &regions, viewport),
+            );
+        }
+    }
+
+    #[test]
     fn clean_prepared_frame_cache_requires_matching_slot_generation_and_signature() {
         let signature = CleanPreparedFrameSignature {
             scene_serial: 7,
@@ -1983,6 +2065,7 @@ mod tests {
             stream,
             commands: Vec::new(),
             clean_frame_cacheable: true,
+            has_scroll_translation: false,
         };
         let mut cache = CleanPreparedFrameCache::default();
         cache.store(

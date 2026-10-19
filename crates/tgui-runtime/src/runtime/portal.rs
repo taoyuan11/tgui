@@ -139,7 +139,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
         let caret_visible = self.caret_visible_at(now, focused_input);
         let next_tooltip_wakeup = Cell::new(None);
         let next_toast_wakeup = Cell::new(None);
-        let taffy: TaffyTree<MeasureContext> = TaffyTree::new();
+        let taffy: TaffyTree<Box<MeasureContext>> = TaffyTree::new();
         let style_context = crate::ui::theme::StyleContext::from_theme(&theme)
             .with_reduced_motion(self.reduced_motion)
             .with_text_scale(units.font_scale());

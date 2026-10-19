@@ -15,21 +15,24 @@ use super::platform::{
     contains_cjk, contains_non_cjk_alphanumeric, desktop_cjk_sans_candidates, first_matching_family,
 };
 
+mod cache;
 mod keys;
 mod layout_ops;
 
+use cache::TextCache;
 use keys::{TextLayoutKey, TextMeasureKey, TextResolveKey, TextResolveScript};
 
 static NEXT_FONT_SYSTEM_CACHE_IDENTITY: AtomicU64 = AtomicU64::new(1);
 const MAX_TEXT_RESOLVE_CACHE_ENTRIES: usize = 4096;
+pub(super) const MAX_TEXT_LAYOUT_CACHE_ENTRIES: usize = 1024;
 
 pub(crate) struct FontManager {
     pub(super) font_system: RefCell<FontSystem>,
     cache_identity: u64,
     aliases: Vec<(String, String)>,
     default_font: Option<String>,
-    measure_cache: RefCell<HashMap<TextMeasureKey, (f32, f32)>>,
-    layout_cache: RefCell<HashMap<TextLayoutKey, TextLayoutInfo>>,
+    measure_cache: RefCell<TextCache<TextMeasureKey, (f32, f32)>>,
+    layout_cache: RefCell<TextCache<TextLayoutKey, TextLayoutInfo>>,
     resolve_cache: RefCell<HashMap<TextResolveKey, ResolvedText>>,
     #[cfg(any(test, feature = "bench-support"))]
     resolve_query_count: Cell<u64>,
@@ -59,8 +62,11 @@ impl FontManager {
             cache_identity: NEXT_FONT_SYSTEM_CACHE_IDENTITY.fetch_add(1, Ordering::Relaxed),
             aliases,
             default_font: catalog.default_font.clone(),
-            measure_cache: RefCell::new(HashMap::new()),
-            layout_cache: RefCell::new(HashMap::new()),
+            measure_cache: RefCell::new(TextCache::new(4096, 4 * 1024 * 1024)),
+            layout_cache: RefCell::new(TextCache::new(
+                MAX_TEXT_LAYOUT_CACHE_ENTRIES,
+                16 * 1024 * 1024,
+            )),
             resolve_cache: RefCell::new(HashMap::new()),
             #[cfg(any(test, feature = "bench-support"))]
             resolve_query_count: Cell::new(0),

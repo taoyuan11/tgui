@@ -27,73 +27,119 @@ impl Renderer {
             self.config.height.max(1) as f32 / blur_scratch_target.height.max(1) as f32;
         let blur_scale = blur_scale_x.max(blur_scale_y).max(1.0);
         let blur_radius = blur.primitive.blur_radius.max(0.0) / blur_scale;
-        let horizontal_uniform =
-            self.device
-                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("tgui-backdrop-horizontal-uniform"),
-                    contents: bytemuck::bytes_of(&BlurUniform {
-                        direction: [1.0, 0.0],
-                        texel_size,
-                        radius: blur_radius,
-                        _pad: 0.0,
-                    }),
-                    usage: wgpu::BufferUsages::UNIFORM,
-                });
-        let vertical_uniform = self
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("tgui-backdrop-vertical-uniform"),
-                contents: bytemuck::bytes_of(&BlurUniform {
-                    direction: [0.0, 1.0],
-                    texel_size,
-                    radius: blur_radius,
-                    _pad: 0.0,
-                }),
-                usage: wgpu::BufferUsages::UNIFORM,
+        let radius_key = blur_radius.to_bits();
+        let bindings = if let Some((_, bindings)) = self
+            .backdrop_bindings
+            .iter()
+            .find(|(radius, _)| *radius == radius_key)
+        {
+            bindings.clone()
+        } else {
+            let horizontal_uniform =
+                self.device
+                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some("tgui-backdrop-horizontal-uniform"),
+                        contents: bytemuck::bytes_of(&BlurUniform {
+                            direction: [1.0, 0.0],
+                            texel_size,
+                            radius: blur_radius,
+                            _pad: 0.0,
+                        }),
+                        usage: wgpu::BufferUsages::UNIFORM,
+                    });
+            let vertical_uniform =
+                self.device
+                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some("tgui-backdrop-vertical-uniform"),
+                        contents: bytemuck::bytes_of(&BlurUniform {
+                            direction: [0.0, 1.0],
+                            texel_size,
+                            radius: blur_radius,
+                            _pad: 0.0,
+                        }),
+                        usage: wgpu::BufferUsages::UNIFORM,
+                    });
+
+            let horizontal_bind_group_entries = [
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&scene_snapshot_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&self.text_sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: horizontal_uniform.as_entire_binding(),
+                },
+            ];
+
+            let horizontal_bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("tgui-backdrop-horizontal-bind-group"),
+                layout: &self.backdrop_blur_bind_group_layout,
+                entries: &horizontal_bind_group_entries,
+            });
+            let vertical_bind_group_entries = [
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(
+                        self.offscreen_sampled_view(&blur_scratch_target),
+                    ),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&self.text_sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: vertical_uniform.as_entire_binding(),
+                },
+            ];
+
+            let vertical_bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("tgui-backdrop-vertical-bind-group"),
+                layout: &self.backdrop_blur_bind_group_layout,
+                entries: &vertical_bind_group_entries,
             });
 
-        let horizontal_bind_group_entries = [
-            wgpu::BindGroupEntry {
-                binding: 0,
-                resource: wgpu::BindingResource::TextureView(&scene_snapshot_view),
-            },
-            wgpu::BindGroupEntry {
-                binding: 1,
-                resource: wgpu::BindingResource::Sampler(&self.text_sampler),
-            },
-            wgpu::BindGroupEntry {
-                binding: 2,
-                resource: horizontal_uniform.as_entire_binding(),
-            },
-        ];
+            let composite_bind_group_entries = [
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(
+                        self.offscreen_sampled_view(&blur_target),
+                    ),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&scene_snapshot_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::Sampler(&self.text_sampler),
+                },
+            ];
 
-        let horizontal_bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("tgui-backdrop-horizontal-bind-group"),
-            layout: &self.backdrop_blur_bind_group_layout,
-            entries: &horizontal_bind_group_entries,
-        });
-        let vertical_bind_group_entries = [
-            wgpu::BindGroupEntry {
-                binding: 0,
-                resource: wgpu::BindingResource::TextureView(
-                    self.offscreen_sampled_view(&blur_scratch_target),
-                ),
-            },
-            wgpu::BindGroupEntry {
-                binding: 1,
-                resource: wgpu::BindingResource::Sampler(&self.text_sampler),
-            },
-            wgpu::BindGroupEntry {
-                binding: 2,
-                resource: vertical_uniform.as_entire_binding(),
-            },
-        ];
+            let composite_bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("tgui-backdrop-composite-bind-group"),
+                layout: &self.backdrop_composite_bind_group_layout,
+                entries: &composite_bind_group_entries,
+            });
 
-        let vertical_bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("tgui-backdrop-vertical-bind-group"),
-            layout: &self.backdrop_blur_bind_group_layout,
-            entries: &vertical_bind_group_entries,
-        });
+            let bindings = super::super::targets::BackdropBindings {
+                horizontal: horizontal_bind_group,
+                vertical: vertical_bind_group,
+                composite: composite_bind_group,
+            };
+            // Each entry owns immutable uniforms, so different radii in the same
+            // command encoder cannot overwrite one another through queue writes.
+            const MAX_BACKDROP_BINDINGS: usize = 8;
+            if self.backdrop_bindings.len() == MAX_BACKDROP_BINDINGS {
+                self.backdrop_bindings.remove(0);
+            }
+            self.backdrop_bindings.push((radius_key, bindings.clone()));
+            bindings
+        };
 
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -119,7 +165,7 @@ impl Renderer {
                     .current_buffer()
                     .slice(blur.fullscreen_offset..),
             );
-            pass.set_bind_group(0, &horizontal_bind_group, &[]);
+            pass.set_bind_group(0, &bindings.horizontal, &[]);
             pass.draw(0..blur.fullscreen_vertex_count, 0..1);
         }
 
@@ -147,32 +193,9 @@ impl Renderer {
                     .current_buffer()
                     .slice(blur.fullscreen_offset..),
             );
-            pass.set_bind_group(0, &vertical_bind_group, &[]);
+            pass.set_bind_group(0, &bindings.vertical, &[]);
             pass.draw(0..blur.fullscreen_vertex_count, 0..1);
         }
-
-        let composite_bind_group_entries = [
-            wgpu::BindGroupEntry {
-                binding: 0,
-                resource: wgpu::BindingResource::TextureView(
-                    self.offscreen_sampled_view(&blur_target),
-                ),
-            },
-            wgpu::BindGroupEntry {
-                binding: 1,
-                resource: wgpu::BindingResource::TextureView(&scene_snapshot_view),
-            },
-            wgpu::BindGroupEntry {
-                binding: 2,
-                resource: wgpu::BindingResource::Sampler(&self.text_sampler),
-            },
-        ];
-
-        let composite_bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("tgui-backdrop-composite-bind-group"),
-            layout: &self.backdrop_composite_bind_group_layout,
-            entries: &composite_bind_group_entries,
-        });
 
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -199,7 +222,7 @@ impl Renderer {
                         .current_buffer()
                         .slice(blur.composite_offset..),
                 );
-                pass.set_bind_group(0, &composite_bind_group, &[]);
+                pass.set_bind_group(0, &bindings.composite, &[]);
                 pass.draw(0..blur.composite_vertex_count, 0..1);
             }
         }

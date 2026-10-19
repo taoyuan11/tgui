@@ -1897,6 +1897,13 @@ impl WidgetBenchmarkContext {
             .map_err(|error| error.to_string())
     }
 
+    /// Isomorphic control for immutable backdrop uniform/binding reuse.
+    pub fn clear_headless_backdrop_binding_cache(&mut self) {
+        if let Some(renderer) = self.gpu_renderer.as_mut() {
+            renderer.clear_backdrop_binding_cache();
+        }
+    }
+
     #[allow(dead_code)]
     pub fn cached_texture_scene_stats(&self) -> Option<GpuTextureSceneStats> {
         let textures = &self.cached_scene.as_ref()?.scene.textures;

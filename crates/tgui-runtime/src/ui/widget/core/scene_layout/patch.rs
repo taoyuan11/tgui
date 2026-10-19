@@ -110,7 +110,7 @@ pub(super) fn patch_layout_at_path<VM>(
     layout_node: &mut LayoutNode,
     path: &[usize],
     next: ResolvedElement<VM>,
-    taffy: &mut TaffyTree<MeasureContext>,
+    taffy: &mut TaffyTree<Box<MeasureContext>>,
     animations: &mut AnimationEngine,
     theme: &Theme,
     units: UnitContext,
@@ -164,7 +164,7 @@ fn patch_layout_tree<VM>(
     current: &mut ResolvedElement<VM>,
     mut next: ResolvedElement<VM>,
     layout_node: &mut LayoutNode,
-    taffy: &mut TaffyTree<MeasureContext>,
+    taffy: &mut TaffyTree<Box<MeasureContext>>,
     animations: &mut AnimationEngine,
     theme: &Theme,
     units: UnitContext,
@@ -287,7 +287,11 @@ fn patch_layout_tree<VM>(
         )?;
         if patched_layout_children.is_empty() {
             taffy.set_children(layout_node.node, &[])?;
-            taffy.set_node_context(layout_node.node, Some(next.measure_context()))?;
+            let context = match next.measure_context() {
+                MeasureContext::None => None,
+                context => Some(Box::new(context)),
+            };
+            taffy.set_node_context(layout_node.node, context)?;
         } else {
             let child_nodes = patched_layout_children
                 .iter()
@@ -304,12 +308,16 @@ fn patch_layout_tree<VM>(
 }
 
 fn remove_layout_subtree(
-    taffy: &mut TaffyTree<MeasureContext>,
+    taffy: &mut TaffyTree<Box<MeasureContext>>,
     layout_node: &LayoutNode,
 ) -> Result<(), taffy::TaffyError> {
     for child in &layout_node.children {
         remove_layout_subtree(taffy, child)?;
     }
+    // Taffy 0.11 removes node slots without clearing its separate context map.
+    // Release owned styles/controllers immediately instead of retaining them
+    // until this slot is reused or the entire layout is dropped.
+    taffy.set_node_context(layout_node.node, None)?;
     taffy.remove(layout_node.node)?;
     Ok(())
 }

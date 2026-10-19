@@ -38,7 +38,7 @@ fn layout_cache_remains_bounded_and_distinguishes_changed_long_text() {
     for revision in 0..600 {
         let text = format!("revision {revision}: {}", "x".repeat(4096));
         let _ = manager.measure_text_layout(&text, request.clone(), 16.0, 24.0, 0.0);
-        assert!(manager.layout_cache_len() <= 257);
+        assert!(manager.layout_cache_len() <= super::manager::MAX_TEXT_LAYOUT_CACHE_ENTRIES);
     }
 
     let a = format!("{}a", "same-prefix".repeat(512));
@@ -46,6 +46,61 @@ fn layout_cache_remains_bounded_and_distinguishes_changed_long_text() {
     let a_layout = manager.measure_text_layout(&a, request.clone(), 16.0, 24.0, 0.0);
     let b_layout = manager.measure_text_layout(&b, request, 16.0, 24.0, 0.0);
     assert_ne!(a_layout.width, b_layout.width);
+}
+
+#[test]
+fn repeated_layout_working_set_survives_the_former_capacity_cliff() {
+    let manager = FontManager::new(&FontCatalog::default());
+    let request = TextFontRequest {
+        preferred_font: None,
+        weight: FontWeight::NORMAL,
+    };
+    let texts: Vec<_> = (0..512)
+        .map(|index| format!("row {index}: 你好 👋"))
+        .collect();
+    let first: Vec<_> = texts
+        .iter()
+        .map(|text| {
+            manager.measure_text_layout_wrapped(text, request.clone(), 16.0, 24.0, 0.0, 90.0)
+        })
+        .collect();
+    manager.reset_text_measure_activity();
+    manager.reset_text_key_activity();
+    for _ in 0..3 {
+        for (text, expected) in texts.iter().zip(&first) {
+            let cached =
+                manager.measure_text_layout_wrapped(text, request.clone(), 16.0, 24.0, 0.0, 90.0);
+            assert!(std::sync::Arc::ptr_eq(&cached.lines, &expected.lines));
+            assert_eq!(
+                (cached.width, cached.height),
+                (expected.width, expected.height)
+            );
+        }
+    }
+    assert_eq!(manager.text_measure_activity().3, 0);
+    assert_eq!(manager.text_key_activity().0, 0);
+}
+
+#[test]
+fn measurement_cache_overflow_keeps_most_of_the_working_set() {
+    let manager = FontManager::new(&FontCatalog::default());
+    let request = TextFontRequest {
+        preferred_font: None,
+        weight: FontWeight::NORMAL,
+    };
+    let texts: Vec<_> = (0..4097).map(|index| format!("measure {index}")).collect();
+    let expected: Vec<_> = texts
+        .iter()
+        .map(|text| manager.measure_text(text, request.clone(), 16.0, 24.0, 0.0))
+        .collect();
+    manager.reset_text_measure_activity();
+    for (text, expected) in texts.iter().zip(expected) {
+        assert_eq!(
+            manager.measure_text(text, request.clone(), 16.0, 24.0, 0.0),
+            expected
+        );
+    }
+    assert!(manager.text_measure_activity().1 < 100);
 }
 
 #[test]

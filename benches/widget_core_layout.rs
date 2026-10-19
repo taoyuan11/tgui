@@ -206,9 +206,9 @@ fn build_pagination_options_tree(
     for _ in 0..paginations {
         let pagination = Pagination::new(6usize, 12usize).page_size(25usize);
         body = body.child(if with_page_size_options {
-            pagination
+            pagination.page_size_options(vec![10, 25, 50, 100])
         } else {
-            pagination.page_size_options(Vec::new())
+            pagination
         });
     }
     WidgetTree::new(body)

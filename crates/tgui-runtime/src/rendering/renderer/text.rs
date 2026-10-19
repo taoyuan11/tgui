@@ -849,11 +849,11 @@ fn all_stale_allocation_metadata_is_valid(
     page_width: u32,
     page_height: u32,
 ) -> bool {
-    let mut pages_by_id = std::collections::HashMap::with_capacity(pages.len());
+    let mut pages_by_id = hashbrown::HashMap::with_capacity(pages.len());
     let mut expected_allocation_count = 0usize;
     for page in pages {
         if pages_by_id
-            .insert(page.page_id, (page.format, page.live_allocations))
+            .insert(page.page_id, (page.format, page.live_allocations, 0usize))
             .is_some()
         {
             return false;
@@ -869,11 +869,9 @@ fn all_stale_allocation_metadata_is_valid(
         return false;
     }
 
-    let mut seen_allocations = std::collections::HashSet::with_capacity(allocations.len());
-    let mut allocations_by_page =
-        std::collections::HashMap::<u64, usize>::with_capacity(pages.len());
+    let mut seen_allocations = hashbrown::HashSet::with_capacity(allocations.len());
     for allocation in allocations {
-        let Some((page_format, _)) = pages_by_id.get(&allocation.page_id) else {
+        let Some((page_format, _, released)) = pages_by_id.get_mut(&allocation.page_id) else {
             return false;
         };
         if allocation.format != *page_format
@@ -897,12 +895,12 @@ fn all_stale_allocation_metadata_is_valid(
         {
             return false;
         }
-        *allocations_by_page.entry(allocation.page_id).or_default() += 1;
+        *released += 1;
     }
 
-    pages.iter().all(|page| {
-        allocations_by_page.get(&page.page_id).copied().unwrap_or(0) == page.live_allocations
-    })
+    pages_by_id
+        .values()
+        .all(|(_, expected, released)| expected == released)
 }
 
 #[cfg(any(test, feature = "bench-support"))]

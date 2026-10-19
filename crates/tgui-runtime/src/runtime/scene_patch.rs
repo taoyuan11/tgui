@@ -1041,9 +1041,21 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     root_scroll_region_count = cached.computed.scroll_regions.len();
                 } else {
                     let root_clone_started_at = text_profile_enabled().then_some(Instant::now());
-                    let Some(mut root_chunk) = cached.scene_chunks.get(&layout.root_id()).cloned()
-                    else {
+                    let Some(source) = cached.scene_chunks.get(&layout.root_id()) else {
                         return false;
+                    };
+                    let mut root_chunk = if source.is_simple_for_splice()
+                        && cached.computed.is_simple_for_splice()
+                    {
+                        // A count-changing patch cannot overwrite stable ranges, but its
+                        // root output can still reuse the old command/hit storage. Avoid
+                        // allocating another complete flat scene on each scroll fallback.
+                        let mut output = std::mem::take(&mut cached.computed);
+                        output.clear_for_recompose(source);
+                        output.extend(source);
+                        output
+                    } else {
+                        source.clone()
                     };
                     root_chunk.finalize_portals(viewport);
                     root_chunk.assign_new_prepare_cache_serial();

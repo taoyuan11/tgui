@@ -310,6 +310,7 @@ fn translate_render_command(command: RenderCommand, origin: Point) -> RenderComm
 fn translate_scroll_region(region: ScrollRegion, origin: Point) -> ScrollRegion {
     ScrollRegion {
         id: region.id,
+        frame: translate_rect(region.frame, origin),
         content_viewport: translate_rect(region.content_viewport, origin),
         visible_frame: translate_rect(region.visible_frame, origin),
         content_bounds: translate_rect(region.content_bounds, origin),
