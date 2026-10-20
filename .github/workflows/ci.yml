@@ -6,10 +6,11 @@
 #   - fmt              :  cargo fmt --check  (Linux)
 #   - doc              :  cargo doc --all-features  (Linux)
 #   - clippy           :  矩阵 (Linux/Windows/macOS) × (default / audio+video+bench-support)
-#   - test             :  矩阵 (Linux/Windows/macOS) × (default / audio+video+bench-support)
-#   - workspace-check  :  cargo check --workspace --all-targets  (Linux)
+#   - test             :  runtime 单测矩阵 (Linux/Windows/macOS) × (default / audio / video / full)
+#                         full = audio+video+bench-support，另跑 strict reactive 测试组
+#   - workspace-check  :  workspace 全 feature 编译 + 集成测试，包含示例 (Linux)
 #   - msrv             :  Rust 1.89.0 默认 / 无默认功能 / audio / video / 完整 workspace (Linux)
-#   - bench-compile    :  cargo check --features bench-support --benches
+#   - bench-compile    :  cargo check -p tgui-benchmarks --features bench-support --benches
 #                         (Linux, Criterion target + bench-support 编译可达性)
 #   - deny             :  cargo-deny licenses/advisories/bans/sources  (Linux)
 #   - coverage         :  默认生成 summary/lcov artifact；Codecov 上传需要 secrets.CODECOV_TOKEN
@@ -66,7 +67,7 @@ jobs:
       - run: cargo doc --no-deps --all-features
 
   workspace-check:
-    name: workspace check (all targets)
+    name: workspace integration (all features)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -82,7 +83,11 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: workspace-check
-      - run: cargo check --workspace --all-targets --all-features
+      # 示例会统一启用 runtime 的音视频 feature，不能用来验证纯默认配置。
+      - name: Check all workspace targets
+        run: cargo check --workspace --all-targets --all-features
+      - name: Test workspace integration
+        run: cargo test --workspace --all-features
 
   msrv:
     name: msrv (Rust 1.89.0)
@@ -199,6 +204,10 @@ jobs:
         feature_set:
           - label: default
             features: ""
+          - label: audio
+            features: "audio"
+          - label: video
+            features: "video"
           - label: full
             features: "audio video bench-support"
     steps:
@@ -244,19 +253,27 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: ${{ matrix.feature_set.label }}
-      - name: Run tests
+      # 只选实现 crate，防止 workspace 示例或 benchmark 的 feature 污染此矩阵。
+      - name: Run runtime unit tests
         shell: bash
         run: |
           if [ -z "${{ matrix.feature_set.features }}" ]; then
-            cargo test --workspace
+            cargo test -p tgui-runtime --lib
           else
-            cargo test --workspace --features "${{ matrix.feature_set.features }}"
+            cargo test -p tgui-runtime --lib --features "${{ matrix.feature_set.features }}"
           fi
       - name: Run strict reactive no fallback group
         if: contains(matrix.feature_set.features, 'bench-support')
         shell: bash
         run: |
-          cargo test strict_reactive_no_fallback --features bench-support --quiet
+          strict_command=(cargo test -p tgui-runtime --lib --features bench-support strict_reactive_no_fallback)
+          strict_tests="$("${strict_command[@]}" -- --list)"
+          printf '%s\n' "$strict_tests"
+          if ! grep -q ': test$' <<< "$strict_tests"; then
+            echo "::error::No strict reactive no fallback tests matched"
+            exit 1
+          fi
+          "${strict_command[@]}"
 
   bench-compile:
     name: bench compile
@@ -267,7 +284,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: bench
-      - run: cargo check --features bench-support --benches
+      - run: cargo check -p tgui-benchmarks --features bench-support --benches
 
   deny:
     name: cargo-deny
@@ -339,6 +356,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
+            libasound2-dev \
             libavcodec-dev libavformat-dev libavdevice-dev \
             libavfilter-dev libavutil-dev libswscale-dev libswresample-dev \
             pkg-config
@@ -356,4 +374,4 @@ jobs:
             --testbed ubuntu-latest \
             --adapter rust_criterion \
             --err \
-            "cargo bench --all-features"
+            "cargo bench -p tgui-benchmarks --all-features"
