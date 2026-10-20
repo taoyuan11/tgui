@@ -1,0 +1,5 @@
+The icon is the tgui project logo, distributed under the project's MIT OR Apache-2.0 license.
+
+tone.wav and clip.mkv are generated test signals (sine wave and solid-color frames),
+created for this example and dedicated to the public domain under CC0-1.0.
+They contain no third-party recorded media.

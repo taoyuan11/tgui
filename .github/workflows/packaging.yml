@@ -1,0 +1,124 @@
+name: desktop-packaging
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [master]
+    paths:
+      - 'crates/cargo-tgui/**'
+      - 'crates/tgui-runtime/src/platform/**'
+      - 'examples/packaging/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/packaging.yml'
+      - '.github/scripts/packaging*'
+  pull_request:
+    paths:
+      - 'crates/cargo-tgui/**'
+      - 'crates/tgui-runtime/src/platform/**'
+      - 'examples/packaging/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/packaging.yml'
+      - '.github/scripts/packaging*'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-packaging-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  bundle:
+    name: ${{ matrix.platform.target }} / ${{ matrix.flavor }}
+    timeout-minutes: 90
+    runs-on: ${{ matrix.platform.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - runner: windows-2022
+            target: x86_64-pc-windows-msvc
+          - runner: macos-15
+            target: aarch64-apple-darwin
+          - runner: macos-15-intel
+            target: x86_64-apple-darwin
+          - runner: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+        flavor: [basic, media]
+    env:
+      CARGO_TERM_COLOR: always
+      RUST_BACKTRACE: '1'
+      # AppImage packaging tools must also work on runners without FUSE mounts.
+      APPIMAGE_EXTRACT_AND_RUN: '1'
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@1.89.0
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+      - uses: ilammy/msvc-dev-cmd@v1
+        if: runner.os == 'Windows'
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: packaging-${{ matrix.platform.target }}-${{ matrix.flavor }}
+      - name: Install Linux toolchain and FFmpeg
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libxkbcommon-dev libwayland-dev libasound2-dev \
+            patchelf squashfs-tools dpkg-dev libfuse2t64 \
+            libavcodec-dev libavformat-dev libavutil-dev libswscale-dev libswresample-dev \
+            libclang-dev pkg-config
+          mkdir -p target/packaging-ci
+          dpkg-query -W > target/packaging-ci/system-packages.txt
+      - name: Install macOS FFmpeg
+        if: runner.os == 'macOS' && matrix.flavor == 'media'
+        run: |
+          brew install ffmpeg pkg-config
+          mkdir -p target/packaging-ci
+          brew info --json=v2 --installed > target/packaging-ci/system-packages.json
+          echo "LIBCLANG_PATH=$(xcrun --find clang | xargs dirname)/../lib" >> "$GITHUB_ENV"
+      - name: Install Windows FFmpeg dynamically
+        if: runner.os == 'Windows' && matrix.flavor == 'media'
+        shell: pwsh
+        run: |
+          $root = $env:VCPKG_INSTALLATION_ROOT
+          & "$root/vcpkg.exe" install 'ffmpeg[avcodec,avformat,swresample,swscale]:x64-windows'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          "VCPKG_ROOT=$root" >> $env:GITHUB_ENV
+          'VCPKGRS_DYNAMIC=1' >> $env:GITHUB_ENV
+          'VCPKG_DEFAULT_TRIPLET=x64-windows' >> $env:GITHUB_ENV
+          'LIBCLANG_PATH=C:\Program Files\LLVM\bin' >> $env:GITHUB_ENV
+          "$root/installed/x64-windows/bin" >> $env:GITHUB_PATH
+          New-Item -ItemType Directory -Force target/packaging-ci | Out-Null
+          git -C $root rev-parse HEAD > target/packaging-ci/vcpkg-revision.txt
+          & "$root/vcpkg.exe" list > target/packaging-ci/system-packages.txt
+      - name: Verify native target
+        shell: bash
+        run: |
+          rustc -vV | grep 'host: ${{ matrix.platform.target }}'
+      - name: Test CLI and build it at MSRV
+        run: cargo test -p cargo-tgui --locked
+      - name: Build CLI
+        run: cargo build -p cargo-tgui --locked
+      - name: Build two versions and test installation lifecycle
+        run: python .github/scripts/packaging_ci.py --flavor ${{ matrix.flavor }}
+      - name: Upload installers and provenance
+        uses: actions/upload-artifact@v4
+        with:
+          name: packaging-${{ matrix.platform.target }}-${{ matrix.flavor }}
+          path: |
+            target/packaging-ci/**/*.exe
+            target/packaging-ci/**/*.dmg
+            target/packaging-ci/**/*.app.tar.gz
+            target/packaging-ci/**/*.deb
+            target/packaging-ci/**/*.AppImage
+            target/packaging-ci/**/SHA256SUMS
+            target/packaging-ci/**/bundle-manifest.json
+            target/packaging-ci/system-packages.*
+            target/packaging-ci/vcpkg-revision.txt
+          if-no-files-found: error
+          retention-days: 14
