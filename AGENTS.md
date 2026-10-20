@@ -11,7 +11,7 @@ workspace / crate 信息：
 - 包名：`tgui`
 - 当前版本：`0.2.0`
 - Rust edition：`2021`
-- Rust version：`1.85`
+- Rust version（MSRV）：`1.89`；CI 固定使用 `1.89.0` 检查。
 - License：MIT OR Apache-2.0
 - 主要依赖：`wgpu`、`winit-core` 及平台后端、`taffy`、`cosmic-text`、`image`、`resvg`、`reqwest`、`lyon`
 - 可选音视频依赖：`ffmpeg-next`

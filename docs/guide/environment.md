@@ -6,7 +6,7 @@
 
 ## 通用要求
 
-- Rust stable。
+- Rust **1.89 或更高版本**（最低支持版本 / MSRV 为 `1.89`，推荐使用最新 stable）。
 - Git。
 - 平台 C/C++ 编译工具。
 - 支持 `wgpu` 的显卡驱动。
@@ -17,6 +17,15 @@
 rustup show
 cargo --version
 rustc --version
+```
+
+仓库 CI 使用固定的 Rust `1.89.0` 和 `Cargo.lock` 检查默认功能、可选音视频功能及完整 workspace。需要本地复现最低版本检查时，先安装该工具链：
+
+```sh
+rustup toolchain install 1.89.0 --profile minimal
+cargo +1.89.0 check -p tgui --locked
+# 安装下文所列 FFmpeg 等系统依赖后，检查所有成员、targets 和 features：
+cargo +1.89.0 check --workspace --all-targets --all-features --locked
 ```
 
 基础示例可用于确认普通 GUI 链路：

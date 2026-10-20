@@ -4,7 +4,7 @@
 
 `tgui` is a Rust 2021 workspace for GPU-accelerated GUI applications. It combines `wgpu` rendering, `winit-core` platform backends, `taffy` layout, `cosmic-text`, a small MVVM layer, themes, animation, text input, media loading, native dialogs, custom window chrome/native window control, canvas drawing, and optional FFmpeg-backed audio/video.
 
-Workspace metadata: public package `tgui`, current version `0.2.0`, edition `2021`, rust-version `1.85`, license `MIT OR Apache-2.0`. Major dependencies include `wgpu`, `winit-core` plus platform backends, `taffy`, `cosmic-text`, `image`, `resvg`, `reqwest`, `lyon`, and optional `ffmpeg-next`.
+Workspace metadata: public package `tgui`, current version `0.2.0`, edition `2021`, rust-version `1.89` (MSRV; checked in CI with Rust `1.89.0`), license `MIT OR Apache-2.0`. Major dependencies include `wgpu`, `winit-core` plus platform backends, `taffy`, `cosmic-text`, `image`, `resvg`, `reqwest`, `lyon`, and optional `ffmpeg-next`.
 
 ## Workspace Layout
 

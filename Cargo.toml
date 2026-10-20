@@ -51,7 +51,7 @@ opt-level = 3
 version = "0.2.0"
 authors = ["a2542209451@gmail.com"]
 edition = "2021"
-rust-version = "1.85"
+rust-version = "1.89"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/nandebishitaoyuan/tgui.git"
 

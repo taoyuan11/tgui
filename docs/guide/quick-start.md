@@ -4,6 +4,8 @@
 
 ## 安装
 
+需要 Rust **1.89 或更高版本**。平台编译工具和音视频系统依赖见[环境配置](/guide/environment)。
+
 ```toml
 [dependencies]
 tgui = "0.2.0"

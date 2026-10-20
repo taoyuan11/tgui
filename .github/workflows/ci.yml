@@ -8,6 +8,7 @@
 #   - clippy           :  矩阵 (Linux/Windows/macOS) × (default / audio+video+bench-support)
 #   - test             :  矩阵 (Linux/Windows/macOS) × (default / audio+video+bench-support)
 #   - workspace-check  :  cargo check --workspace --all-targets  (Linux)
+#   - msrv             :  Rust 1.89.0 默认 / 无默认功能 / audio / video / 完整 workspace (Linux)
 #   - bench-compile    :  cargo check --features bench-support --benches
 #                         (Linux, Criterion target + bench-support 编译可达性)
 #   - deny             :  cargo-deny licenses/advisories/bans/sources  (Linux)
@@ -82,6 +83,35 @@ jobs:
         with:
           key: workspace-check
       - run: cargo check --workspace --all-targets --all-features
+
+  msrv:
+    name: msrv (Rust 1.89.0)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      # Keep this toolchain in sync with workspace.package.rust-version.
+      - uses: dtolnay/rust-toolchain@1.89.0
+      - name: Install platform and FFmpeg dev libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libasound2-dev libxkbcommon-dev libwayland-dev \
+            libavcodec-dev libavformat-dev libavdevice-dev \
+            libavfilter-dev libavutil-dev libswscale-dev libswresample-dev \
+            libclang-dev pkg-config
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: msrv-1.89.0
+      - name: Check default features at MSRV
+        run: cargo check -p tgui --locked
+      - name: Check without default features at MSRV
+        run: cargo check -p tgui --no-default-features --locked
+      - name: Check audio at MSRV
+        run: cargo check -p tgui --features audio --locked
+      - name: Check video at MSRV
+        run: cargo check -p tgui --features video --locked
+      - name: Check full workspace at MSRV
+        run: cargo check --workspace --all-targets --all-features --locked
 
   clippy:
     name: clippy (${{ matrix.os }} / ${{ matrix.feature_set.label }})

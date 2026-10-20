@@ -29,7 +29,9 @@
 
 ### MSRV
 
-最低支持 Rust 版本（MSRV）为 **`1.85`**。MSRV 提升被视为 minor-level 变更。
+最低支持 Rust 版本（MSRV）为 **`1.89`**，适用于默认功能和所有可选 Cargo features。当前依赖 `cosmic-text 0.19` 和 Linux 通知后端 `notify-rust 4.18` 均要求 Rust 1.89。MSRV 提升被视为 minor-level 变更。
+
+CI 使用固定的 Rust `1.89.0` 和仓库 `Cargo.lock`，检查默认功能、`--no-default-features`、`audio`、`video`，以及整个 workspace 的所有 targets / features。音视频所需的 FFmpeg 等系统依赖仍需按[开发环境说明](./docs/guide/environment.md)安装。
 
 ## 文档站开发
 
