@@ -50,7 +50,9 @@ def main():
     license_created = False
     binary = ROOT / ("target/debug/cargo-tgui.exe" if sys.platform == "win32" else "target/debug/cargo-tgui")
     output = ROOT / "target/packaging-ci"
-    configured = original.decode()
+    # Normalize checkout line endings before matching/inserting TOML lines.
+    # Keep the original bytes above for exact restoration in the finally block.
+    configured = original.decode("utf-8").replace("\r\n", "\n")
     if sys.platform == "win32" and options.flavor == "media":
         libs = str(Path(os.environ["VCPKG_ROOT"]) / "installed/x64-windows/bin")
         configured = configured.replace("[package.metadata.tgui.bundle]\n", "[package.metadata.tgui.bundle]\nlibrary-search-paths = [" + json.dumps(libs) + "]\n")
@@ -61,7 +63,8 @@ def main():
             license_created = True
             notices(license_dir)
         for version in ["0.1.0", "0.1.1"]:
-            manifest.write_text(configured.replace('version = "0.1.0"', 'version = "' + version + '"'))
+            # Binary output avoids platform newline translation (CRLF -> CRCRLF).
+            manifest.write_bytes(configured.replace('version = "0.1.0"', 'version = "' + version + '"').encode("utf-8"))
             if version != "0.1.0":
                 run(["cargo", "update", "-p", "packaging", "--offline"])
             command = [binary, "bundle", "--manifest-path", manifest, "--locked", "--out-dir", output / version]
