@@ -44,35 +44,6 @@ pub(super) fn validate_video_source(source: &VideoSource) -> Result<(), TguiErro
     }
 }
 
-#[cfg(test)]
-pub(super) fn http_input_options(
-    source: &VideoSource,
-) -> Result<ffmpeg::Dictionary<'static>, TguiError> {
-    match source {
-        VideoSource::File(_) | VideoSource::Bytes { .. } => Ok(ffmpeg::Dictionary::new()),
-        VideoSource::Url { headers, .. } => ffmpeg_http_input_options("video", headers),
-    }
-}
-
-pub(super) struct OpenedVideoInput {
-    pub(super) input: format::context::Input,
-    pub(super) resource: Option<TemporaryMediaFile>,
-}
-
-pub(super) fn open_input(source: &VideoSource) -> Result<OpenedVideoInput, TguiError> {
-    let (source_url, headers, resource) = match source {
-        VideoSource::File(path) => (media_path_to_url("video", path)?, None, None),
-        VideoSource::Url { url, headers } => (url.clone(), Some(headers.as_slice()), None),
-        VideoSource::Bytes { bytes, extension } => {
-            let file = create_temporary_media_file("video", bytes, extension.as_deref())?;
-            let source_url = media_path_to_url("video", file.path())?;
-            (source_url, None, Some(file))
-        }
-    };
-    let input = open_ffmpeg_input("video", &source_url, headers)?;
-    Ok(OpenedVideoInput { input, resource })
-}
-
 pub(super) fn open_video_decoder(
     stream: &format::stream::Stream<'_>,
 ) -> Result<OpenedVideoDecoder, TguiError> {

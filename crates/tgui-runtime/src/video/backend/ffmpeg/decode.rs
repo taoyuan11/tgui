@@ -32,8 +32,7 @@ struct DecodeSession {
     _reason: OpenReason,
     start_position: Duration,
     video_frame_duration: Duration,
-    input: format::context::Input,
-    _input_resource: Option<TemporaryMediaFile>,
+    input: super::input::VideoInput,
     video_stream_index: usize,
     audio_stream_index: Option<usize>,
     subtitle_stream_index: Option<usize>,
@@ -85,9 +84,7 @@ impl DecodeSession {
         playback_clock: SharedPlaybackClock,
     ) -> Result<(Self, StreamOpenedEvent, Duration), TguiError> {
         let buffering_profile = buffering_profile_for_source(&source);
-        let opened_input = open_input(&source)?;
-        let mut input = opened_input.input;
-        let input_resource = opened_input.resource;
+        let mut input = open_input(&source, shared_queue.clone(), generation)?;
         seek_input_to_start_position(&mut input, start_position)?;
 
         let video_stream = input
@@ -142,7 +139,6 @@ impl DecodeSession {
             start_position,
             video_frame_duration,
             input,
-            _input_resource: input_resource,
             video_stream_index,
             audio_stream_index,
             subtitle_stream_index,
@@ -205,11 +201,13 @@ impl DecodeSession {
                 return Ok(position);
             }
 
-            let next_packet = {
-                let mut packets = self.input.packets();
-                packets
-                    .next()
-                    .map(|(stream, packet)| (stream.index(), packet))
+            let next_packet = match self.input.read_packet()? {
+                PacketRead::Packet(packet) => Some((packet.stream(), packet)),
+                PacketRead::Retry => {
+                    thread::sleep(STEP_IDLE_SLEEP);
+                    continue;
+                }
+                PacketRead::Eof => None,
             };
             let Some((stream_index, packet)) = next_packet else {
                 self.eof_sent = true;
@@ -248,11 +246,17 @@ impl DecodeSession {
             return Ok(DecodeStepOutcome::Idle { snapshot_changed });
         }
 
-        let next_packet = {
-            let mut packets = self.input.packets();
-            packets
-                .next()
-                .map(|(stream, packet)| (stream.index(), packet))
+        let next_packet = if self.eof_sent {
+            None
+        } else {
+            match self.input.read_packet()? {
+                PacketRead::Packet(packet) => Some((packet.stream(), packet)),
+                PacketRead::Retry => {
+                    snapshot_changed |= self.update_snapshot_cache();
+                    return Ok(DecodeStepOutcome::Idle { snapshot_changed });
+                }
+                PacketRead::Eof => None,
+            }
         };
 
         match next_packet {
@@ -398,12 +402,6 @@ impl DecodeSession {
 
     fn drain_subtitle_bitmap_cues(&mut self) -> Vec<VideoSubtitleBitmapCue> {
         self.pending_subtitle_bitmap_cues.drain(..).collect()
-    }
-
-    fn set_playing(&mut self, playing: bool) {
-        if let Some(audio_output) = self.audio_output.as_ref() {
-            audio_output.set_playing(playing);
-        }
     }
 
     fn set_volume(&mut self, volume: f32) {

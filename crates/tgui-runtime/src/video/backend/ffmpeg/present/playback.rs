@@ -151,11 +151,15 @@ impl PresentWorker {
             return;
         }
 
-        if self.should_buffer() && !self.should_keep_draining_eof() {
-            self.set_decode_playing(false);
-            self.shared
-                .playback_state
-                .set(VideoPlaybackState::Buffering);
+        // Once playing, consume the reserve down to the low watermark. The
+        // higher startup/resume targets apply only while playback is stopped.
+        if self.decode_playing {
+            if self.should_buffer() && !self.should_keep_draining_eof() {
+                self.set_decode_playing(false);
+                self.shared
+                    .playback_state
+                    .set(VideoPlaybackState::Buffering);
+            }
             return;
         }
 
@@ -236,22 +240,27 @@ impl PresentWorker {
     }
 
     pub(super) fn should_buffer(&self) -> bool {
+        let memory_constrained = self.buffer_snapshot.buffering_constrained_by_memory_limit;
         let audio_starving = self
             .current_audio_clock
             .as_ref()
             .map(|clock| {
-                clock.buffered_duration() < self.current_buffering_profile.audio_starving_threshold
+                let buffered = clock.buffered_duration();
+                buffered < self.current_buffering_profile.audio_starving_threshold
+                    && (!memory_constrained || buffered.is_zero())
             })
             .unwrap_or(false);
         let video_starving = should_buffer_video(
             self.video_buffered_duration(),
-            VIDEO_REBUFFER_ENTER_THRESHOLD,
+            self.current_buffering_profile.video_starving_threshold,
             self.remaining_duration(),
         );
         should_buffer_for_rebuffer(
             audio_starving,
             video_starving,
-            self.buffer_snapshot.buffering_constrained_by_memory_limit,
+            // A stale memory snapshot must not suppress buffering after all
+            // frames were consumed while the decode thread was blocked in I/O.
+            memory_constrained && self.shared_queue.has_frames(self.current_generation),
         )
     }
 

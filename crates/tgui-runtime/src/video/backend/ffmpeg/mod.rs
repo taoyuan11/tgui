@@ -15,14 +15,12 @@ use ffmpeg::util::frame::video::Video as VideoFrame;
 use ffmpeg_next as ffmpeg;
 use parking_lot::Mutex;
 
-#[cfg(test)]
 use crate::audio::backend::shared::ffmpeg_http_input_options;
 use crate::audio::backend::shared::{
     create_temporary_media_file, ensure_ffmpeg_initialized,
     flush_audio_resampler_with_pending_and_buffer as flush_audio_resampler, media_path_to_url,
-    normalize_playback_rate, open_ffmpeg_input,
-    receive_audio_frames_with_pending_and_buffer as receive_audio_frames, validate_ffmpeg_headers,
-    ReusableAudioFrame, SharedAudioClock, TemporaryMediaFile,
+    normalize_playback_rate, receive_audio_frames_with_pending_and_buffer as receive_audio_frames,
+    validate_ffmpeg_headers, ReusableAudioFrame, SharedAudioClock, TemporaryMediaFile,
 };
 use crate::foundation::error::TguiError;
 use crate::foundation::threading::join_with_timeout;
@@ -40,6 +38,7 @@ use super::{
 
 mod decode;
 mod helpers;
+mod input;
 mod present;
 mod queue;
 
@@ -48,6 +47,9 @@ pub(crate) mod bench_support;
 
 use decode::decode_main;
 use helpers::*;
+#[cfg(test)]
+use input::http_input_options;
+use input::{open_input, PacketRead};
 use present::present_main;
 use queue::*;
 
@@ -95,8 +97,6 @@ const LOCAL_VIDEO_RESUME_BUFFER_TARGET: Duration = Duration::from_millis(800);
 const NETWORK_VIDEO_START_BUFFER_TARGET: Duration = Duration::from_secs(5);
 // 网络流从 Buffering 恢复时，视频侧需要的最小前置缓存。
 const NETWORK_VIDEO_RESUME_BUFFER_TARGET: Duration = Duration::from_secs(5);
-// 播放中如果视频前置缓存低于这个值，就主动暂停进入 Buffering。
-const VIDEO_REBUFFER_ENTER_THRESHOLD: Duration = Duration::from_secs(2);
 // Seek 后丢弃“明显还在目标位置之前”的视频帧时允许的误差。
 const VIDEO_SEEK_PREROLL_TOLERANCE: Duration = Duration::from_millis(50);
 
@@ -380,10 +380,6 @@ enum DecodeCommand {
         source: VideoSource,
         position: Duration,
     },
-    SetPlaying {
-        generation: u64,
-        playing: bool,
-    },
     SetVolume(f32),
     SetMuted(bool),
     SetPlaybackRate(f32),
@@ -469,6 +465,7 @@ struct BufferingProfile {
     rebuffer_target: Duration,
     video_start_buffer_target: Duration,
     video_resume_buffer_target: Duration,
+    video_starving_threshold: Duration,
     audio_starving_threshold: Duration,
 }
 
@@ -483,6 +480,7 @@ const LOCAL_BUFFERING_PROFILE: BufferingProfile = BufferingProfile {
     rebuffer_target: LOCAL_REBUFFER_TARGET,
     video_start_buffer_target: LOCAL_VIDEO_START_BUFFER_TARGET,
     video_resume_buffer_target: LOCAL_VIDEO_RESUME_BUFFER_TARGET,
+    video_starving_threshold: Duration::from_millis(120),
     audio_starving_threshold: LOCAL_AUDIO_STARVING_THRESHOLD,
 };
 
@@ -497,6 +495,7 @@ const NETWORK_BUFFERING_PROFILE: BufferingProfile = BufferingProfile {
     rebuffer_target: NETWORK_REBUFFER_TARGET,
     video_start_buffer_target: NETWORK_VIDEO_START_BUFFER_TARGET,
     video_resume_buffer_target: NETWORK_VIDEO_RESUME_BUFFER_TARGET,
+    video_starving_threshold: Duration::from_millis(250),
     audio_starving_threshold: NETWORK_AUDIO_STARVING_THRESHOLD,
 };
 
@@ -1041,7 +1040,13 @@ mod tests {
         assert_eq!(options.get("reconnect"), Some("1"));
         assert_eq!(options.get("reconnect_streamed"), Some("1"));
         assert_eq!(options.get("reconnect_on_network_error"), Some("1"));
-        assert_eq!(options.get("reconnect_on_http_error"), Some("4xx,5xx"));
+        assert_eq!(
+            options.get("reconnect_on_http_error"),
+            Some("408,429,500,502,503,504")
+        );
+        assert_eq!(options.get("reconnect_max_retries"), Some("4"));
+        assert_eq!(options.get("reconnect_delay_total_max"), Some("15"));
+        assert_eq!(options.get("reconnect_at_eof"), None);
         assert_eq!(options.get("timeout"), Some("15000000"));
         assert_eq!(options.get("rw_timeout"), Some("15000000"));
     }

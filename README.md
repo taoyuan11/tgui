@@ -798,6 +798,8 @@ let source = tgui::video::VideoSource::url("https://example.com/demo.mp4")
 controller.load(source)?;
 ```
 
+网络视频使用独立的起播、恢复与低水位阈值：播放中会消耗已有缓存，只有接近耗尽时才进入 `Buffering`，补足后自动续播。HTTP 临时错误和中途断连会有限重试；鉴权失败、资源不存在等错误直接反馈，网络读取失败不会被误判为播放结束。切换来源、seek、停止和关闭会取消旧请求，暂停音频不必等待网络读取返回。详见[视频弱网行为](./docs/features/media.md#弱网播放)。
+
 视频同样支持完整内存 bytes 来源：
 
 ```rust

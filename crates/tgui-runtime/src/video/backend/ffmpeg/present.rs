@@ -157,6 +157,8 @@ impl PresentWorker {
             }
         }
 
+        self.set_decode_playing(false);
+        self.shared_queue.replace_generation(u64::MAX);
         let _ = self.decode_tx.send(DecodeCommand::Shutdown);
     }
 
@@ -422,6 +424,10 @@ impl PresentWorker {
                     return;
                 }
                 self.set_decode_playing(false);
+                self.should_play = false;
+                self.stream_opened = false;
+                self.startup_pending = false;
+                self.shared_queue.clear_all();
                 self.shared.set_error(message);
             }
         }
@@ -632,10 +638,9 @@ impl PresentWorker {
             }
         }
 
-        let _ = self.decode_tx.send(DecodeCommand::SetPlaying {
-            generation: self.current_generation,
-            playing,
-        });
+        if let Some(clock) = self.current_audio_clock.as_ref() {
+            clock.set_playing(playing);
+        }
     }
 
     fn set_playback_rate(&mut self, rate: f32) {
@@ -833,6 +838,158 @@ mod tests {
         )
     }
 
+    fn set_video_reserve(worker: &PresentWorker, millis: u64) {
+        worker
+            .shared_queue
+            .replace_generation(worker.current_generation);
+        worker.shared_queue.push_frames(vec![QueuedVideoFrame {
+            generation: worker.current_generation,
+            position: Duration::ZERO,
+            end_position: worker.playback_position() + Duration::from_millis(millis),
+            frame: VideoRenderFrame::rgba(Arc::new(TextureFrame::new(1, 1, vec![255; 4]))),
+            compressed_bytes: 4,
+            decoded_bytes: 4,
+        }]);
+    }
+
+    #[test]
+    fn network_playback_consumes_reserve_and_refills_before_resuming() {
+        let (mut worker, _decode_rx) = test_worker();
+        worker.stream_opened = true;
+        worker.should_play = true;
+        worker.startup_pending = true;
+        worker.current_buffering_profile = NETWORK_BUFFERING_PROFILE;
+        set_video_reserve(&worker, 5_100);
+        worker.evaluate_playback_state();
+        assert!(worker.decode_playing);
+
+        for reserve in [4_900, 3_000, 500] {
+            set_video_reserve(&worker, reserve);
+            worker.evaluate_playback_state();
+            assert!(
+                worker.decode_playing,
+                "reserve {reserve}ms should be consumed"
+            );
+            assert_eq!(
+                worker.shared.playback_state.get(),
+                VideoPlaybackState::Playing
+            );
+        }
+
+        set_video_reserve(&worker, 100);
+        worker.evaluate_playback_state();
+        worker.present_due_frames();
+        assert!(!worker.decode_playing);
+        assert_eq!(
+            worker.shared.playback_state.get(),
+            VideoPlaybackState::Buffering
+        );
+        let paused_position = worker.playback_position();
+        set_video_reserve(&worker, 3_000);
+        worker.evaluate_playback_state();
+        assert!(!worker.decode_playing);
+        assert_eq!(worker.playback_position(), paused_position);
+
+        set_video_reserve(&worker, 5_100);
+        worker.evaluate_playback_state();
+        assert!(worker.decode_playing);
+    }
+
+    #[test]
+    fn local_startup_target_does_not_immediately_trigger_rebuffering() {
+        let (mut worker, _decode_rx) = test_worker();
+        worker.stream_opened = true;
+        worker.should_play = true;
+        worker.startup_pending = true;
+        set_video_reserve(&worker, 1_600);
+        worker.evaluate_playback_state();
+        worker.evaluate_playback_state();
+        assert!(worker.decode_playing);
+    }
+
+    #[test]
+    fn network_eof_and_memory_limit_allow_short_reserves_to_drain() {
+        for eof in [false, true] {
+            let (mut worker, _decode_rx) = test_worker();
+            worker.stream_opened = true;
+            worker.should_play = true;
+            worker.startup_pending = true;
+            worker.current_buffering_profile = NETWORK_BUFFERING_PROFILE;
+            worker.buffer_snapshot.eof_sent = eof;
+            worker.buffer_snapshot.buffering_constrained_by_memory_limit = !eof;
+            set_video_reserve(&worker, 100);
+            worker.evaluate_playback_state();
+            worker.evaluate_playback_state();
+            assert!(worker.decode_playing);
+        }
+    }
+
+    #[test]
+    fn stale_memory_limit_snapshot_does_not_hide_an_empty_video_queue() {
+        let (mut worker, _decode_rx) = test_worker();
+        worker.stream_opened = true;
+        worker.should_play = true;
+        worker.decode_playing = true;
+        worker.buffer_snapshot.buffering_constrained_by_memory_limit = true;
+        worker.evaluate_playback_state();
+        assert!(!worker.decode_playing);
+        assert_eq!(
+            worker.shared.playback_state.get(),
+            VideoPlaybackState::Buffering
+        );
+    }
+
+    #[test]
+    fn user_pause_is_preserved_when_network_buffer_refills() {
+        let (mut worker, _decode_rx) = test_worker();
+        worker.stream_opened = true;
+        worker.should_play = true;
+        worker.current_buffering_profile = NETWORK_BUFFERING_PROFILE;
+        worker.evaluate_playback_state();
+        assert_eq!(
+            worker.shared.playback_state.get(),
+            VideoPlaybackState::Buffering
+        );
+        worker.handle_backend_command(BackendCommand::Pause);
+        set_video_reserve(&worker, 6_000);
+        worker.evaluate_playback_state();
+        assert!(!worker.decode_playing);
+        assert_eq!(
+            worker.shared.playback_state.get(),
+            VideoPlaybackState::Paused
+        );
+    }
+
+    #[test]
+    fn terminal_network_error_is_not_overwritten_by_buffering_or_playing() {
+        let (mut worker, _decode_rx) = test_worker();
+        worker.stream_opened = true;
+        worker.should_play = true;
+        worker.decode_playing = true;
+        set_video_reserve(&worker, 6_000);
+        worker.handle_decode_event(DecodeEvent::FatalError {
+            generation: worker.current_generation,
+            message: "network timed out".into(),
+        });
+        worker.evaluate_playback_state();
+        assert!(!worker.decode_playing);
+        assert_eq!(
+            worker.shared.playback_state.get(),
+            VideoPlaybackState::Error("network timed out".into())
+        );
+        assert_eq!(
+            worker
+                .shared_queue
+                .ready_frame_count(worker.current_generation),
+            0
+        );
+        assert!(worker.shared.surface.get().error.is_some());
+        assert_eq!(
+            worker.shared.error.get().as_deref(),
+            Some("network timed out")
+        );
+    }
+
     #[test]
     fn sync_metrics_requests_redraw_while_playing_without_new_frame() {
         let (mut worker, _decode_rx) = test_worker();
@@ -877,15 +1034,7 @@ mod tests {
 
         assert!(worker.handle_backend_command(BackendCommand::Seek(Duration::from_secs(5))));
 
-        assert!(matches!(
-            decode_rx
-                .recv()
-                .expect("pause command should be sent first"),
-            DecodeCommand::SetPlaying {
-                generation: 7,
-                playing: false,
-            }
-        ));
+        assert!(!worker.decode_playing);
         assert!(matches!(
             decode_rx.recv().expect("seek command should follow pause"),
             DecodeCommand::Seek {
@@ -905,15 +1054,7 @@ mod tests {
 
         assert!(worker.handle_backend_command(BackendCommand::Load(source.clone())));
 
-        assert!(matches!(
-            decode_rx
-                .recv()
-                .expect("pause command should be sent first"),
-            DecodeCommand::SetPlaying {
-                generation: 3,
-                playing: false,
-            }
-        ));
+        assert!(!worker.decode_playing);
         assert!(matches!(
             decode_rx.recv().expect("load command should follow pause"),
             DecodeCommand::Load {
@@ -984,15 +1125,7 @@ mod tests {
         assert_eq!(worker.shared_queue.ready_frame_count(8), 0);
         assert_eq!(worker.playback_clock.position(), Duration::ZERO);
 
-        assert!(matches!(
-            decode_rx
-                .recv()
-                .expect("old generation should be paused first"),
-            DecodeCommand::SetPlaying {
-                generation: 7,
-                playing: false,
-            }
-        ));
+        assert!(!worker.decode_playing);
         assert!(matches!(
             decode_rx.recv().expect("decode session should be stopped"),
             DecodeCommand::Stop
@@ -1031,15 +1164,7 @@ mod tests {
             worker.shared.playback_state.get(),
             VideoPlaybackState::Buffering
         );
-        assert!(matches!(
-            decode_rx
-                .recv()
-                .expect("old generation should be paused first"),
-            DecodeCommand::SetPlaying {
-                generation: 7,
-                playing: false,
-            }
-        ));
+        assert!(!worker.decode_playing);
         assert!(matches!(
             decode_rx.recv().expect("loop should reopen from start"),
             DecodeCommand::Seek {
@@ -1117,13 +1242,7 @@ mod tests {
                 .expect("selection should be forwarded first"),
             DecodeCommand::SetAudioTrackSelection(VideoAudioTrackSelection::Disabled)
         ));
-        assert!(matches!(
-            decode_rx.recv().expect("old generation should be paused"),
-            DecodeCommand::SetPlaying {
-                generation: 7,
-                playing: false,
-            }
-        ));
+        assert!(!worker.decode_playing);
         assert!(matches!(
             decode_rx.recv().expect("source should reopen"),
             DecodeCommand::Seek {
@@ -1190,13 +1309,7 @@ mod tests {
                 .expect("selection should be forwarded first"),
             DecodeCommand::SetSubtitleTrackSelection(VideoSubtitleTrackSelection::Stream(6))
         ));
-        assert!(matches!(
-            decode_rx.recv().expect("old generation should be paused"),
-            DecodeCommand::SetPlaying {
-                generation: 7,
-                playing: false,
-            }
-        ));
+        assert!(!worker.decode_playing);
         assert!(matches!(
             decode_rx.recv().expect("source should reopen"),
             DecodeCommand::Seek {

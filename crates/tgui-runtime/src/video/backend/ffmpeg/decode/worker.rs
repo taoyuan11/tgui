@@ -143,16 +143,6 @@ impl DecodeWorker {
             } => {
                 self.open_session(OpenReason::Seek, generation, source, position);
             }
-            DecodeCommand::SetPlaying {
-                generation,
-                playing,
-            } => {
-                if let Some(session) = self.session.as_mut() {
-                    if session.generation == generation {
-                        session.set_playing(playing);
-                    }
-                }
-            }
             DecodeCommand::SetVolume(volume) => {
                 self.volume = volume.clamp(0.0, 1.0);
                 if let Some(session) = self.session.as_mut() {
@@ -207,7 +197,12 @@ impl DecodeWorker {
         source: VideoSource,
         position: Duration,
     ) {
-        self.shared_queue.replace_generation(generation);
+        // Only the presentation thread advances generations. A queued old load
+        // must never re-enable an input that a later seek/stop already cancelled.
+        if self.shared_queue.accepted_generation() != generation {
+            return;
+        }
+        self.session = None;
 
         match DecodeSession::open(
             reason,
@@ -256,6 +251,27 @@ mod tests {
     use crossbeam_channel::unbounded;
 
     use super::*;
+
+    #[test]
+    fn superseded_load_does_not_rewind_generation_or_open_source() {
+        let (_command_tx, command_rx) = unbounded();
+        let (event_tx, event_rx) = unbounded();
+        let queue = Arc::new(SharedVideoQueue::new());
+        queue.replace_generation(3);
+        let mut worker = DecodeWorker::new(
+            command_rx,
+            event_tx,
+            queue.clone(),
+            SharedPlaybackClock::default(),
+        );
+        worker.handle_command(DecodeCommand::Load {
+            generation: 2,
+            source: VideoSource::File("missing-video.mp4".into()),
+        });
+        assert_eq!(queue.accepted_generation(), 3);
+        assert!(worker.session.is_none());
+        assert!(event_rx.try_recv().is_err());
+    }
 
     #[test]
     fn stop_command_clears_queue_and_clock_without_exiting_worker() {

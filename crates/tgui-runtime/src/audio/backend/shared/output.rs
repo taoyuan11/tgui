@@ -99,6 +99,15 @@ pub(crate) struct SharedAudioClock {
 }
 
 impl SharedAudioClock {
+    // Playback must remain responsive while the decode thread is blocked in I/O.
+    #[cfg(feature = "video")]
+    pub(crate) fn set_playing(&self, playing: bool) {
+        self.shared.playing.store(playing, Ordering::Release);
+        if !playing {
+            self.shared.underflowing.store(false, Ordering::Relaxed);
+        }
+    }
+
     pub(crate) fn position(&self) -> Duration {
         let played_frames = self.shared.played_frames.load(Ordering::Relaxed);
         Duration::from_secs_f64(played_frames as f64 / self.sample_rate as f64)
@@ -812,6 +821,52 @@ fn decoded_audio_bytes(samples: &Vec<f32>) -> u64 {
         .saturating_mul(size_of::<f32>())
         .try_into()
         .unwrap_or(u64::MAX)
+}
+
+#[cfg(all(test, feature = "video"))]
+mod video_playback_tests {
+    use super::*;
+
+    #[test]
+    fn presentation_clock_pauses_audio_without_a_decode_command() {
+        let shared = Arc::new(SharedAudioOutput {
+            queue: Mutex::new(VecDeque::from([AudioSampleChunk {
+                samples: vec![0.5; 8],
+                offset: 0,
+                compressed_bytes: 0,
+                decoded_bytes: 32,
+            }])),
+            queued_samples: AtomicU64::new(8),
+            queued_compressed_bytes: AtomicU64::new(0),
+            queued_decoded_bytes: AtomicU64::new(32),
+            playing: AtomicBool::new(true),
+            muted: AtomicBool::new(false),
+            volume_bits: AtomicU32::new(1.0f32.to_bits()),
+            playback_rate_bits: AtomicU32::new(1.0f32.to_bits()),
+            source_frame_fraction_bits: AtomicU32::new(0.0f32.to_bits()),
+            played_frames: AtomicU64::new(0),
+            channels: 2,
+            underflowing: AtomicBool::new(true),
+        });
+        let clock = SharedAudioClock {
+            shared: shared.clone(),
+            channels: 2,
+            sample_rate: 48_000,
+        };
+        let mut output = [1.0f32; 4];
+        clock.set_playing(false);
+        write_audio_samples(&mut output, &shared);
+        assert_eq!(output, [0.0; 4]);
+        assert_eq!(clock.position(), Duration::ZERO);
+        assert_eq!(shared.queued_samples.load(Ordering::Relaxed), 8);
+        assert!(!shared.underflowing.load(Ordering::Relaxed));
+
+        clock.set_playing(true);
+        write_audio_samples(&mut output, &shared);
+        assert_eq!(output, [0.5; 4]);
+        assert_eq!(shared.played_frames.load(Ordering::Relaxed), 2);
+        assert_eq!(shared.queued_samples.load(Ordering::Relaxed), 4);
+    }
 }
 
 #[cfg(feature = "bench-support")]

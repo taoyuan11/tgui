@@ -7,7 +7,7 @@ mod source;
 mod tests;
 
 pub(crate) use init::ensure_ffmpeg_initialized;
-#[cfg(all(feature = "video", test))]
+#[cfg(feature = "video")]
 pub(crate) use network::ffmpeg_http_input_options;
 pub(crate) use network::{open_ffmpeg_input, validate_ffmpeg_headers};
 pub(crate) use output::{normalize_playback_rate, AudioOutput, AudioSampleBatch, SharedAudioClock};
