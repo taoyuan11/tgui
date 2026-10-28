@@ -725,3 +725,83 @@ fn emit_overlay_registers_focus_scope_and_rebases_hit_scope_path() {
         focus_scope.path
     );
 }
+
+#[test]
+fn nested_menu_matches_window_anchored_menu_and_escapes_parent_clip() {
+    let option_id = WidgetId::from_raw(902);
+    let menu = |anchor| {
+        Overlay::<()>::new(OverlayId::new(901), Anchor::Rect(anchor))
+            .placement(Placement::bottom())
+            .layer(OverlayLayer::Menu)
+            .close_on_escape(true)
+            .close_on_outside_click(true)
+    };
+    let content = || {
+        OverlayContent::Hits(vec![HitRegion {
+            rect: Rect::new(0.0, 0.0, 140.0, 220.0),
+            clip_rect: None,
+            geometry: HitGeometry::Rect,
+            transform_chain: Default::default(),
+            scope_path: Vec::new(),
+            focus: None,
+            interaction: HitInteraction::Disabled { id: option_id },
+            gpu_scroll_container: None,
+        }])
+    };
+    let mut parent_content = ComputedScene::<()>::default();
+    emit_overlay(
+        &mut parent_content,
+        viewport(),
+        menu(Rect::new(0.0, 70.0, 140.0, 30.0)),
+        (dp(140.0), dp(220.0)),
+        content(),
+    );
+    let mut nested = ComputedScene::<()>::default();
+    emit_overlay(
+        &mut nested,
+        viewport(),
+        Overlay::new(
+            OverlayId::new(900),
+            Anchor::Rect(Rect::new(100.0, 440.0, 140.0, 24.0)),
+        )
+        .placement(Placement::top())
+        .offset(dp(0.0))
+        .layer(OverlayLayer::Popover),
+        (dp(140.0), dp(100.0)),
+        OverlayContent::Scene(Box::new(parent_content)),
+    );
+    nested.finalize_portals(viewport());
+    let mut direct = ComputedScene::<()>::default();
+    emit_overlay(
+        &mut direct,
+        viewport(),
+        menu(Rect::new(100.0, 410.0, 140.0, 30.0)),
+        (dp(140.0), dp(220.0)),
+        content(),
+    );
+    direct.finalize_portals(viewport());
+    assert!(
+        nested.portal_entries.is_empty(),
+        "nested portals must finish in the same frame"
+    );
+    assert_eq!(nested.overlay_hit_regions.len(), 1);
+    assert_eq!(
+        nested.overlay_hit_regions[0].rect,
+        direct.overlay_hit_regions[0].rect
+    );
+    assert_eq!(
+        nested.overlay_hit_regions[0].clip_rect,
+        direct.overlay_hit_regions[0].clip_rect
+    );
+    assert!(
+        nested.overlay_hit_regions[0].rect.y < dp(340.0),
+        "menu may extend beyond parent bounds"
+    );
+    assert_eq!(nested.overlay_close_handlers.len(), 1);
+    assert_eq!(nested.overlay_close_handlers[0].layer, OverlayLayer::Menu);
+    assert!(nested.overlay_close_handlers[0].close_on_escape);
+    assert_eq!(
+        nested.overlay_close_handlers[0].rect,
+        direct.overlay_close_handlers[0].rect
+    );
+}

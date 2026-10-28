@@ -5,7 +5,7 @@ use crate::foundation::color::Color;
 use crate::foundation::view_model::{Command, ValueCommand};
 use crate::media::ContentFit;
 use crate::theme::{StyleContext, WidgetState};
-use crate::ui::layout::{pct, Align, Insets, Justify, LayoutStyle, Overflow, Value};
+use crate::ui::layout::{pct, Align, Insets, Justify, LayoutStyle, Overflow, Value, Wrap};
 use crate::ui::theme::StateValue;
 use crate::ui::unit::{dp, sp, Dp};
 use crate::video::{
@@ -25,23 +25,24 @@ use super::p3_support::{
     impl_p3_layout_api, merge_layout, resolve_component_style_with_sheet, with_visual_identity,
 };
 use super::style::{
-    ContainerStyle, IconStyle, ProgressBarStyle, SelectStyle, SliderStyle, StyleResolver,
-    StyleSheet, TextWidgetStyle, VideoStyle, VideoSurfaceStyle,
+    ContainerStyle, FocusRingOverride, IconStyle, ProgressBarStyle, SelectStyle, SliderStyle,
+    StyleResolver, StyleSheet, TextWidgetStyle, VideoStyle, VideoSurfaceStyle,
 };
 use super::{
-    Flex, For, IntoTextContent, ProgressBar, Select, SelectOption, Show, Slider, Stack, Text,
+    Flex, For, IntoTextContent, Popover, ProgressBar, Select, SelectOption, Show, Slider, Stack,
+    Text, Tooltip,
 };
 
 const PLAYBACK_RATE_OPTIONS: &[(i32, &str)] = &[
-    (25, "Speed: 0.25x"),
-    (50, "Speed: 0.5x"),
-    (75, "Speed: 0.75x"),
-    (100, "Speed: 1x"),
-    (125, "Speed: 1.25x"),
-    (150, "Speed: 1.5x"),
-    (175, "Speed: 1.75x"),
-    (200, "Speed: 2x"),
-    (400, "Speed: 4x"),
+    (25, "0.25×"),
+    (50, "0.5×"),
+    (75, "0.75×"),
+    (100, "1×"),
+    (125, "1.25×"),
+    (150, "1.5×"),
+    (175, "1.75×"),
+    (200, "2×"),
+    (400, "4×"),
 ];
 const DEFAULT_ASS_SUBTITLE_EFFECT_CENTI_PX: u16 = 100;
 
@@ -641,8 +642,8 @@ fn video_into_element<VM: 'static>(video: Video<VM>) -> Element<VM> {
         .inset(dp(0.0))
         .style(move |style, context| {
             style.fit = fit;
-            style.surface.background = Some(Color::hexa(0x000000FF).into());
             let resolved = resolve_video_style(surface_style.as_ref(), context);
+            style.surface.background = Some(resolved.background);
             style.surface.border_radius = Some(Value::Static(resolved.radius));
         })
         .into();
@@ -717,6 +718,7 @@ fn video_into_element<VM: 'static>(video: Video<VM>) -> Element<VM> {
         video.show_status,
         status_overlay(
             controller.clone(),
+            video.show_controls.clone(),
             video.style.clone(),
             video.visual.clone(),
         ),
@@ -834,7 +836,7 @@ fn video_controls<VM: 'static>(
             }
         })
         .disable(seek_disabled)
-        .style_full_with_style_sheet(video_slider_style(style.clone(), visual.clone()))
+        .style_full_with_style_sheet(video_slider_style(style.clone(), visual.clone(), true))
         .on_change(ValueCommand::new(move |_, fraction| {
             seek_to_fraction(&seek_controller, fraction);
         }))
@@ -864,7 +866,7 @@ fn video_controls<VM: 'static>(
                 .width(pct(100.0))
                 .style_full_with_style_sheet(video_progress_style(style.clone(), visual.clone())),
         )
-        .child(seek);
+        .child(label_control(seek.into(), "Seek".to_string().into()));
 
     let controls_style = style.clone();
     let mut controls = Flex::horizontal()
@@ -881,25 +883,10 @@ fn video_controls<VM: 'static>(
             );
             container.gap = Value::Static(crate::ui::layout::Length::Px(resolved.controls_gap));
         })
+        .wrap(Wrap::Wrap)
         .child(play_button)
-        .child(Show::new(
-            show_looping,
-            looping_button(controller.clone(), style.clone(), visual.clone()),
-        ))
         .child(time_text(controller.clone(), style.clone(), visual.clone()))
-        .child(Stack::<VM>::new().grow(1.0))
-        .child(Show::new(
-            show_playback_rate,
-            playback_rate_selector(controller.clone(), style.clone(), visual.clone()),
-        ))
-        .child(Show::new(
-            show_audio_tracks,
-            audio_track_selector(controller.clone(), style.clone(), visual.clone()),
-        ))
-        .child(Show::new(
-            show_subtitle_tracks,
-            subtitle_track_selector(controller.clone(), style.clone(), visual.clone()),
-        ));
+        .child(Stack::<VM>::new().grow(1.0));
 
     let mute_controller = controller.clone();
     let mute_icons = vec![
@@ -953,6 +940,13 @@ fn video_controls<VM: 'static>(
             mute_controller.set_muted(!muted);
         }),
     );
+    let mute = label_control(
+        mute,
+        controller
+            .muted()
+            .map(|muted| if muted { "Unmute" } else { "Mute" }.to_string())
+            .into(),
+    );
 
     let volume_controller = controller.clone();
     let volume_layout_style = style.clone();
@@ -977,23 +971,104 @@ fn video_controls<VM: 'static>(
                 )));
             }
         })
-        .style_full_with_style_sheet(video_slider_style(style.clone(), visual.clone()))
+        .style_full_with_style_sheet(video_slider_style(style.clone(), visual.clone(), false))
         .on_change(ValueCommand::new(move |_, volume| {
             volume_controller.set_volume(volume);
         }));
 
+    let settings_visible = {
+        let volume = show_volume.clone();
+        let looping = show_looping.clone();
+        let rate = show_playback_rate.clone();
+        let audio = show_audio_tracks.clone();
+        let subtitles = show_subtitle_tracks.clone();
+        let controller = controller.clone();
+        move || {
+            volume.resolve()
+                || looping.resolve()
+                || rate.resolve()
+                || (audio.resolve() && !controller.audio_tracks().get().is_empty())
+                || (subtitles.resolve() && !controller.subtitle_tracks().get().is_empty())
+        }
+    };
+    let settings = Flex::vertical()
+        .align(Align::Stretch)
+        .runtime_layout(|_, container, context, _, _| {
+            container.gap = Value::Static(crate::ui::layout::Length::Px(
+                context.theme.spacing.sm + context.theme.spacing.xs,
+            ));
+        })
+        .child(Text::new("Playback settings").style(|text, context| {
+            text.typography = context.theme.typography.label.clone();
+        }))
+        .child(Show::new(
+            show_volume.clone(),
+            setting_row(
+                "Volume",
+                label_control(volume.into(), "Volume".to_string().into()),
+            ),
+        ))
+        .child(Show::new(
+            show_looping,
+            setting_row(
+                "Loop",
+                looping_button(controller.clone(), style.clone(), visual.clone()),
+            ),
+        ))
+        .child(Show::new(
+            show_playback_rate,
+            setting_row(
+                "Speed",
+                playback_rate_selector(controller.clone(), style.clone(), visual.clone()),
+            ),
+        ))
+        .child(Show::new(
+            show_audio_tracks,
+            audio_track_selector(controller.clone(), style.clone(), visual.clone()),
+        ))
+        .child(Show::new(
+            show_subtitle_tracks,
+            subtitle_track_selector(controller.clone(), style.clone(), visual.clone()),
+        ));
+    let settings_trigger = label_control(
+        icon_button(
+            vec![video_icon(
+                SvgIconId::Settings,
+                style.clone(),
+                visual.clone(),
+                false,
+            )],
+            Value::Static(false),
+            style.clone(),
+            Command::new(|_| {}),
+        ),
+        "Playback settings".to_string().into(),
+    );
+    let settings_trigger_id = settings_trigger.id;
+    let settings = Popover::new(settings_trigger)
+        .placement(super::overlay::Placement::top().align(super::overlay::Alignment::End))
+        .return_focus_to(settings_trigger_id)
+        .style(|style, context| {
+            style.background = context.theme.colors.surface.into();
+        })
+        .content(settings);
     controls = controls
-        .child(Show::new(show_volume.clone(), mute))
-        .child(Show::new(show_volume, volume));
+        .child(Show::new(show_volume, mute))
+        .child(For::new_with_resolver(
+            move || settings_visible().then_some(()).into_iter().collect(),
+            |_| "__tgui_video_settings",
+            {
+                let settings: Element<VM> = settings.into();
+                move |_, _| settings.clone()
+            },
+        ));
 
     let overlay_style = style.clone();
     Flex::vertical()
-        .width(pct(100.0))
         .position_absolute()
         .left(dp(0.0))
         .right(dp(0.0))
         .bottom(dp(0.0))
-        .padding(crate::ui::layout::Insets::ZERO)
         .gap(crate::ui::unit::dp(0.0))
         .runtime_layout(move |layout, container, context, style_sheet, visual| {
             let resolved = resolve_video_style_with_sheet(
@@ -1003,14 +1078,11 @@ fn video_controls<VM: 'static>(
                 visual,
                 WidgetState::default(),
             );
-            layout.height = Some(Value::Static(crate::ui::layout::Length::Px(
-                resolved.control_button_size
-                    + resolved.progress_hit_height
-                    + resolved.overlay_gap
-                    + resolved.overlay_padding.top
-                    + resolved.overlay_padding.bottom,
-            )));
-            layout.padding = Some(Value::Static(resolved.overlay_padding));
+            let inset = Value::Static(crate::ui::layout::Length::Px(resolved.gap));
+            layout.left = Some(inset.clone());
+            layout.right = Some(inset.clone());
+            layout.bottom = Some(inset);
+            container.padding = Some(Value::Static(resolved.overlay_padding));
             container.gap = Value::Static(crate::ui::layout::Length::Px(resolved.overlay_gap));
         })
         .style_full_with_style_sheet(video_overlay_style(style.clone()))
@@ -1046,7 +1118,9 @@ fn video_play_button<VM: 'static>(
             playback_icon_opacity(controller.playback_state(), SvgIconId::Pause),
         ),
     ];
-    icon_button(
+    let accent_style = style.clone();
+    let accent_disabled = disabled.clone();
+    let mut button = icon_button(
         icons,
         disabled,
         style,
@@ -1058,6 +1132,41 @@ fn video_play_button<VM: 'static>(
             | VideoPlaybackState::Error(_) => {}
             _ => play_controller.play(),
         }),
+    );
+    if let WidgetKind::Container { style, .. } = &mut button.kind {
+        *style = Some(StyleResolver::full_with_style_sheet(
+            move |context, sheet, visual, state| {
+                let mut result =
+                    video_icon_button_style(accent_style.clone())(context, sheet, visual, state);
+                result.surface.background = Some(
+                    if accent_disabled.resolve() {
+                        context.theme.colors.disabled
+                    } else if state.pressed {
+                        context.theme.colors.surface_high
+                    } else if state.hovered {
+                        context.theme.colors.primary_container.darken(0.08)
+                    } else {
+                        context.theme.colors.primary_container
+                    }
+                    .into(),
+                );
+                result
+            },
+        ));
+    }
+    label_control(
+        button,
+        controller
+            .playback_state()
+            .map(|state| {
+                match state {
+                    VideoPlaybackState::Playing => "Pause",
+                    VideoPlaybackState::Ended => "Replay",
+                    _ => "Play",
+                }
+                .to_string()
+            })
+            .into(),
     )
 }
 
@@ -1105,7 +1214,8 @@ fn subtitle_overlay<VM: 'static>(
                         + resolved.progress_hit_height
                         + resolved.overlay_gap
                         + resolved.overlay_padding.top
-                        + resolved.overlay_padding.bottom;
+                        + resolved.overlay_padding.bottom
+                        + resolved.gap;
                     let bottom = if controls_visible {
                         controls_height + resolved.subtitle_bottom_offset
                     } else {
@@ -1119,7 +1229,7 @@ fn subtitle_overlay<VM: 'static>(
     let mut subtitle_box = Stack::new()
         .max_width(pct(100.0))
         .padding(Insets::ZERO)
-        .runtime_layout(move |layout, _container, context, style_sheet, visual| {
+        .runtime_layout(move |_layout, container, context, style_sheet, visual| {
             let resolved = resolve_video_style_with_sheet(
                 subtitle_box_layout_style.as_ref(),
                 context,
@@ -1127,7 +1237,7 @@ fn subtitle_overlay<VM: 'static>(
                 visual,
                 WidgetState::default(),
             );
-            layout.padding = Some(Value::Static(resolved.subtitle_padding));
+            container.padding = Some(Value::Static(resolved.subtitle_padding));
         })
         .style_full_with_style_sheet(video_subtitle_surface_style(style.clone()));
 
@@ -1264,46 +1374,89 @@ fn looping_button<VM: 'static>(
 ) -> Element<VM> {
     let loop_controller = controller.clone();
     let looping = controller.looping();
-    let initial_inactive_opacity =
-        VideoStyle::default_for_theme(&crate::ui::theme::Theme::default()).control_disabled_opacity;
-    let runtime_looping = looping.clone();
-    let runtime_style = style.clone();
-    let button_style = style.clone();
-    Stack::new()
-        .runtime_layout(move |layout, _container, context, style_sheet, visual| {
-            let resolved = resolve_video_style_with_sheet(
-                runtime_style.as_ref(),
-                context,
-                style_sheet,
-                visual,
-                WidgetState::default(),
-            );
-            layout.width = Some(Value::Static(crate::ui::layout::Length::Px(
-                resolved.control_button_size,
-            )));
-            layout.height = Some(Value::Static(crate::ui::layout::Length::Px(
-                resolved.control_button_size,
-            )));
-            visual.opacity =
-                looping_icon_opacity(runtime_looping.clone(), resolved.control_disabled_opacity);
+    let button = icon_button(
+        vec![video_icon(
+            SvgIconId::Repeat,
+            style.clone(),
+            visual_identity,
+            false,
+        )],
+        Value::Static(false),
+        style.clone(),
+        Command::new(move |_| loop_controller.set_looping(!loop_controller.looping().get())),
+    );
+    let mut button = label_control(
+        button,
+        looping
+            .clone()
+            .map(|on| if on { "Disable loop" } else { "Enable loop" }.to_string())
+            .into(),
+    );
+    button.visual.accessibility_selected = Some(looping.clone().into());
+    if let WidgetKind::Container {
+        style: button_style,
+        ..
+    } = &mut button.kind
+    {
+        *button_style = Some(StyleResolver::full_with_style_sheet(
+            move |context, sheet, visual, state| {
+                let mut result =
+                    video_icon_button_style(style.clone())(context, sheet, visual, state);
+                if looping.get() {
+                    result.surface.background = Some(context.theme.colors.primary_container.into());
+                    result.surface.border_color = Some(context.theme.colors.primary.into());
+                    result.surface.border_width = Some(
+                        if state.focus_visible {
+                            context.theme.border.thick
+                        } else {
+                            context.theme.border.thin
+                        }
+                        .into(),
+                    );
+                }
+                result
+            },
+        ));
+    }
+    button
+}
+
+fn setting_row<VM: 'static>(label: &'static str, control: Element<VM>) -> Element<VM> {
+    Flex::horizontal()
+        .align(Align::Center)
+        .justify(Justify::SpaceBetween)
+        .runtime_layout(|_, container, context, _, _| {
+            container.gap = Value::Static(crate::ui::layout::Length::Px(context.theme.spacing.md));
         })
-        .center()
-        .style_full_with_style_sheet(video_icon_button_style(button_style))
-        .opacity(looping_icon_opacity(
-            looping.clone(),
-            initial_inactive_opacity,
-        ))
-        .cursor(disabled_cursor(Value::Static(false)))
-        .child(video_icon(SvgIconId::Repeat, style, visual_identity, false))
-        .on_click(Command::new(move |_| {
-            let looping = loop_controller.looping().get();
-            loop_controller.set_looping(!looping);
+        .child(Text::new(label).style(|text, context| {
+            text.typography = context.theme.typography.label.clone();
         }))
+        .child(control)
         .into()
 }
 
-fn looping_icon_opacity(looping: Signal<bool>, inactive_opacity: f32) -> Value<f32> {
-    Value::Signal(looping.map_memo(move |looping| if looping { 1.0 } else { inactive_opacity }))
+fn label_control<VM>(mut element: Element<VM>, label: Value<String>) -> Element<VM> {
+    element.visual.accessibility_label = Some(label.clone());
+    element.tooltip = Some(Box::new(Tooltip::new(label)));
+    element
+}
+
+// Popovers resolve their contents independently of the main layout. Preserve the
+// complete selector subtree (including option IDs) while its option set is unchanged.
+fn retained_setting<VM, T: PartialEq>(
+    cache: &parking_lot::Mutex<Option<(T, Element<VM>)>>,
+    key: T,
+    build: impl FnOnce() -> Element<VM>,
+) -> Element<VM> {
+    let mut cached = cache.lock();
+    if let Some((previous, element)) = cached.as_ref() {
+        if *previous == key {
+            return element.clone();
+        }
+    }
+    let element = build();
+    *cached = Some((key, element.clone()));
+    element
 }
 
 fn playback_rate_selector<VM: 'static>(
@@ -1313,17 +1466,28 @@ fn playback_rate_selector<VM: 'static>(
 ) -> Element<VM> {
     let playback_rate = controller.playback_rate();
     let render_controller = controller.clone();
+    let cached = parking_lot::Mutex::new(None);
     Stack::new()
         .child(For::new_with_resolver(
             move || vec![playback_rate_key(playback_rate.get())],
             |_| "__tgui_video_playback_rate_selector",
             move |_index, current_key| {
-                playback_rate_select(
-                    render_controller.clone(),
-                    *current_key,
-                    style.clone(),
-                    visual_identity.clone(),
-                )
+                let options_key = if PLAYBACK_RATE_OPTIONS
+                    .iter()
+                    .any(|(key, _)| key == current_key)
+                {
+                    100
+                } else {
+                    *current_key
+                };
+                retained_setting(&cached, options_key, || {
+                    playback_rate_select(
+                        render_controller.clone(),
+                        *current_key,
+                        style.clone(),
+                        visual_identity.clone(),
+                    )
+                })
             },
         ))
         .into()
@@ -1399,13 +1563,13 @@ fn playback_rate_key(rate: f32) -> i32 {
 fn playback_rate_label(rate_key: i32) -> String {
     let rate = rate_key as f32 / 100.0;
     if rate.fract() == 0.0 {
-        format!("Speed: {}x", rate as i32)
+        format!("{}×", rate as i32)
     } else {
         let value = format!("{rate:.2}")
             .trim_end_matches('0')
             .trim_end_matches('.')
             .to_string();
-        format!("Speed: {value}x")
+        format!("{value}×")
     }
 }
 
@@ -1416,6 +1580,7 @@ fn audio_track_selector<VM: 'static>(
 ) -> Element<VM> {
     let tracks = controller.audio_tracks();
     let render_controller = controller.clone();
+    let cached = parking_lot::Mutex::new(None);
     Stack::new()
         .child(For::new_with_resolver(
             move || {
@@ -1424,12 +1589,17 @@ fn audio_track_selector<VM: 'static>(
             },
             |_| "__tgui_video_audio_track_selector",
             move |_index, tracks| {
-                audio_track_select(
-                    render_controller.clone(),
-                    tracks.clone(),
-                    style.clone(),
-                    visual_identity.clone(),
-                )
+                retained_setting(&cached, tracks.clone(), || {
+                    setting_row(
+                        "Audio",
+                        audio_track_select(
+                            render_controller.clone(),
+                            tracks.clone(),
+                            style.clone(),
+                            visual_identity.clone(),
+                        ),
+                    )
+                })
             },
         ))
         .into()
@@ -1444,11 +1614,11 @@ fn audio_track_select<VM: 'static>(
     let mut options = Vec::with_capacity(tracks.len() + 2);
     options.push(SelectOption::new(
         VideoAudioTrackSelection::Auto,
-        "Audio: Auto".to_string(),
+        "Auto".to_string(),
     ));
     options.push(SelectOption::new(
         VideoAudioTrackSelection::Disabled,
-        "Audio: Off".to_string(),
+        "Off".to_string(),
     ));
     options.extend(tracks.iter().enumerate().map(|(index, track)| {
         SelectOption::new(
@@ -1537,6 +1707,7 @@ fn subtitle_track_selector<VM: 'static>(
 ) -> Element<VM> {
     let tracks = controller.subtitle_tracks();
     let render_controller = controller.clone();
+    let cached = parking_lot::Mutex::new(None);
     Stack::new()
         .child(For::new_with_resolver(
             move || {
@@ -1545,12 +1716,17 @@ fn subtitle_track_selector<VM: 'static>(
             },
             |_| "__tgui_video_subtitle_track_selector",
             move |_index, tracks| {
-                subtitle_track_select(
-                    render_controller.clone(),
-                    tracks.clone(),
-                    style.clone(),
-                    visual_identity.clone(),
-                )
+                retained_setting(&cached, tracks.clone(), || {
+                    setting_row(
+                        "Subtitles",
+                        subtitle_track_select(
+                            render_controller.clone(),
+                            tracks.clone(),
+                            style.clone(),
+                            visual_identity.clone(),
+                        ),
+                    )
+                })
             },
         ))
         .into()
@@ -1565,7 +1741,7 @@ fn subtitle_track_select<VM: 'static>(
     let mut options = Vec::with_capacity(tracks.len() + 1);
     options.push(SelectOption::new(
         VideoSubtitleTrackSelection::Disabled,
-        "Subs: Off".to_string(),
+        "Off".to_string(),
     ));
     options.extend(tracks.iter().enumerate().map(|(index, track)| {
         SelectOption::new(
@@ -1673,28 +1849,145 @@ fn time_text<VM: 'static>(
 
 fn status_overlay<VM: 'static>(
     controller: VideoController,
+    controls_visible: Value<bool>,
     style: Option<StyleResolver<VideoStyle>>,
     visual_identity: VisualStyle,
 ) -> Element<VM> {
-    let text = status_text(controller, style.clone(), visual_identity);
-    let runtime_style = style.clone();
+    let playback = controller.playback_state();
     Stack::new()
         .position_absolute()
-        .left(dp(12.0))
-        .top(dp(12.0))
-        .padding(crate::ui::layout::Insets::ZERO)
-        .runtime_layout(move |layout, _container, context, style_sheet, visual| {
-            let resolved = resolve_video_style_with_sheet(
-                runtime_style.as_ref(),
-                context,
-                style_sheet,
-                visual,
-                WidgetState::default(),
-            );
-            layout.padding = Some(Value::Static(resolved.status_padding));
-        })
-        .style_full_with_style_sheet(video_status_style(style))
-        .child(text)
+        .inset(dp(0.0))
+        .child(For::new_with_resolver(
+            move || {
+                let state = playback.get();
+                if state == VideoPlaybackState::Playing {
+                    Vec::new()
+                } else {
+                    vec![state]
+                }
+            },
+            |_| "__tgui_video_status",
+            move |_, state| {
+                let empty = matches!(
+                    state,
+                    VideoPlaybackState::Idle
+                        | VideoPlaybackState::Loading
+                        | VideoPlaybackState::Error(_)
+                );
+                let runtime_style = style.clone();
+                let controls_visible = controls_visible.clone();
+                let surface_style = style.clone();
+                let mut panel = Flex::vertical()
+                    .position_absolute()
+                    .align(Align::Center)
+                    .justify(Justify::Center)
+                    .runtime_layout(move |layout, container, context, sheet, visual| {
+                        let resolved = resolve_video_style_with_sheet(
+                            runtime_style.as_ref(),
+                            context,
+                            sheet,
+                            visual,
+                            WidgetState::default(),
+                        );
+                        let inset = Value::Static(crate::ui::layout::Length::Px(resolved.gap));
+                        layout.left = Some(inset.clone());
+                        layout.top = Some(inset.clone());
+                        container.padding = Some(Value::Static(resolved.status_padding));
+                        container.gap =
+                            Value::Static(crate::ui::layout::Length::Px(context.theme.spacing.sm));
+                        if empty {
+                            layout.right = Some(inset);
+                            let bottom = if controls_visible.resolve() {
+                                resolved.control_button_size
+                                    + resolved.progress_hit_height
+                                    + resolved.overlay_gap
+                                    + resolved.overlay_padding.top
+                                    + resolved.overlay_padding.bottom
+                                    + resolved.gap
+                                    + resolved.gap
+                            } else {
+                                resolved.gap
+                            };
+                            layout.bottom =
+                                Some(Value::Static(crate::ui::layout::Length::Px(bottom)));
+                        }
+                    })
+                    .style_full_with_style_sheet(move |context, sheet, visual, state| {
+                        let mut result = video_status_style(surface_style.clone())(
+                            context, sheet, visual, state,
+                        );
+                        if empty {
+                            let resolved = resolve_video_style_with_sheet(
+                                surface_style.as_ref(),
+                                context,
+                                sheet,
+                                visual,
+                                state,
+                            );
+                            result.surface.background = Some(resolved.background);
+                        }
+                        result
+                    });
+                if empty {
+                    let icon = match state {
+                        VideoPlaybackState::Error(_) => SvgIconId::Warning,
+                        VideoPlaybackState::Loading => SvgIconId::Pending,
+                        _ => SvgIconId::PlayArrow,
+                    };
+                    panel = panel.child(Icon::internal(icon).style(|icon, context| {
+                        icon.size = context.theme.spacing.lg;
+                        icon.color = context.theme.colors.on_surface_muted.into();
+                    }));
+                    let title = match state {
+                        VideoPlaybackState::Error(_) => "Unable to play video",
+                        VideoPlaybackState::Loading => "Loading video…",
+                        _ => "No video loaded",
+                    };
+                    panel = panel.child(styled_video_text(
+                        title,
+                        style.clone(),
+                        visual_identity.clone(),
+                        |style| {
+                            (
+                                style.time_text_style.clone(),
+                                style.status_text_color.clone(),
+                            )
+                        },
+                    ));
+                    let detail = match state {
+                        VideoPlaybackState::Error(error) => {
+                            format!("Check the file or URL and load it again.\n{error}")
+                        }
+                        VideoPlaybackState::Loading => "Preparing picture and sound.".to_string(),
+                        _ => "Load a file or URL to start watching.".to_string(),
+                    };
+                    panel = panel.child(
+                        Flex::vertical()
+                            .max_width(pct(100.0))
+                            .max_height(dp(64.0))
+                            .overflow(Overflow::Scroll)
+                            .child(styled_video_text(
+                                detail,
+                                style.clone(),
+                                visual_identity.clone(),
+                                |style| {
+                                    (
+                                        style.status_text_style.clone(),
+                                        style.status_text_color.clone(),
+                                    )
+                                },
+                            )),
+                    );
+                } else {
+                    panel = panel.child(status_text(
+                        controller.clone(),
+                        style.clone(),
+                        visual_identity.clone(),
+                    ));
+                }
+                with_visual_identity(panel.into(), &visual_identity)
+            },
+        ))
         .into()
 }
 
@@ -1749,7 +2042,7 @@ fn icon_button<VM: 'static>(
         VideoStyle::default_for_theme(&crate::ui::theme::Theme::default()).control_disabled_opacity;
     let runtime_style = style.clone();
     let runtime_disabled = disabled.clone();
-    Stack::new()
+    let mut button: Element<VM> = Stack::new()
         .runtime_layout(move |layout, _container, context, style_sheet, visual| {
             let resolved = resolve_video_style_with_sheet(
                 runtime_style.as_ref(),
@@ -1767,13 +2060,18 @@ fn icon_button<VM: 'static>(
             visual.opacity =
                 disabled_opacity(runtime_disabled.clone(), resolved.control_disabled_opacity);
         })
+        .shrink(0.0)
+        .focusable(true)
         .center()
         .style_full_with_style_sheet(video_icon_button_style(style))
         .opacity(disabled_opacity(disabled.clone(), initial_disabled_opacity))
         .cursor(disabled_cursor(disabled.clone()))
         .child(icons)
-        .on_click(guard_disabled_command(disabled, command))
-        .into()
+        .on_click(guard_disabled_command(disabled.clone(), command))
+        .into();
+    button.visual.accessibility_role = Some(super::AccessibilityRole::Button);
+    button.visual.accessibility_disabled = Some(disabled);
+    button
 }
 
 fn video_icon_with_opacity<VM: 'static>(
@@ -1829,6 +2127,9 @@ fn video_overlay_style(
             resolve_video_style_with_sheet(style.as_ref(), context, style_sheet, visual, state);
         let mut container = ContainerStyle::default_for_theme(context.theme);
         container.surface.background = Some(resolved.overlay_background);
+        container.surface.border_radius = Some(resolved.radius.into());
+        container.surface.border_width = Some(context.theme.border.thin.into());
+        container.surface.border_color = Some(context.theme.colors.outline_muted.into());
         container
     }
 }
@@ -1844,7 +2145,7 @@ fn video_status_style(
             resolve_video_style_with_sheet(style.as_ref(), context, style_sheet, visual, state);
         let mut container = ContainerStyle::default_for_theme(context.theme);
         container.surface.background = Some(resolved.status_background);
-        container.surface.border_radius = Some(Value::Static(context.theme.radius.full));
+        container.surface.border_radius = Some(Value::Static(context.theme.radius.sm));
         container
     }
 }
@@ -1912,10 +2213,26 @@ fn video_icon_button_style(
     move |context, style_sheet, visual, state| {
         let _ = resolve_video_style_with_sheet(style.as_ref(), context, style_sheet, visual, state);
         let mut container = ContainerStyle::default_for_theme(context.theme);
-        if state.hovered || state.pressed {
-            container.surface.background = Some(Color::hexa(0xFFFFFF24).into());
-        }
-        container.surface.border_radius = Some(Value::Static(context.theme.radius.full));
+        container.surface.background = Some(
+            if state.pressed {
+                context.theme.colors.surface_high
+            } else if state.hovered || state.open {
+                context.theme.colors.surface_low
+            } else {
+                Color::TRANSPARENT
+            }
+            .into(),
+        );
+        container.surface.border_color = Some(
+            if state.focus_visible {
+                context.theme.colors.primary
+            } else {
+                Color::TRANSPARENT
+            }
+            .into(),
+        );
+        container.surface.border_width = Some(context.theme.border.thick.into());
+        container.surface.border_radius = Some(context.theme.radius.md.into());
         container
     }
 }
@@ -1947,6 +2264,7 @@ fn video_progress_style(
 fn video_slider_style(
     style: Option<StyleResolver<VideoStyle>>,
     visual_identity: VisualStyle,
+    buffered: bool,
 ) -> impl Fn(&StyleContext<'_>, &StyleSheet, &VisualStyle, WidgetState) -> SliderStyle
        + Send
        + Sync
@@ -1960,12 +2278,22 @@ fn video_slider_style(
             state,
         );
         let mut slider = SliderStyle::default_for_theme(context.theme);
-        slider.track = StateValue::new(resolved.progress_track_color.clone());
+        slider.track = StateValue::new(if buffered {
+            Color::TRANSPARENT.into()
+        } else {
+            resolved.progress_track_color.clone()
+        });
         slider.active_track = StateValue::new(resolved.progress_active_color.clone());
+        slider.active_track.disabled = context.theme.colors.disabled.into();
         slider.thumb = StateValue::new(resolved.progress_thumb_color.clone());
+        slider.thumb.disabled = context.theme.colors.on_disabled.into();
+        slider.focus_ring = Some(FocusRingOverride {
+            enabled: Some(true),
+            ..Default::default()
+        });
         slider.thumb_shadow = None;
         slider.track_height = resolved.progress_height;
-        slider.thumb_size = dp(12.0);
+        slider.thumb_size = context.theme.spacing.sm + context.theme.spacing.xs;
         slider.radius = Value::Static(context.theme.radius.full);
         slider.border_width = Value::Static(dp(0.0));
         slider.min_width = dp(0.0);
@@ -1981,16 +2309,10 @@ fn video_track_select_style(
     move |context| {
         let resolved = resolve_video_style(style.as_ref(), context);
         let mut select = SelectStyle::default_for_theme(context.theme);
-        select.background = StateValue::new(Value::Static(Color::hexa(0xFFFFFF1F)));
-        select.text = StateValue::new(resolved.time_text_color.clone());
-        select.placeholder = StateValue::new(resolved.time_text_color.clone());
-        select.arrow = StateValue::new(resolved.control_icon_color.clone());
-        select.border = StateValue::new(Value::Static(Color::hexa(0xFFFFFF33)));
-        select.menu_background = resolved.overlay_background.clone();
-        select.option_background = StateValue::new(Value::Static(Color::TRANSPARENT));
-        select.selected_option_background = Value::Static(Color::hexa(0xFFFFFF2E));
-        select.border_width = Value::Static(dp(0.0));
-        select.radius = Value::Static(context.theme.radius.full);
+        select.focus_ring = Some(FocusRingOverride {
+            enabled: Some(true),
+            ..Default::default()
+        });
         select.padding_x = context.theme.spacing.sm;
         select.padding_y = Dp::ZERO;
         select.min_height = resolved.control_button_size;
@@ -2107,7 +2429,10 @@ fn playback_icon_opacity(playback: Signal<VideoPlaybackState>, icon: SvgIconId) 
 fn playback_button_disabled(state: VideoPlaybackState) -> bool {
     matches!(
         state,
-        VideoPlaybackState::Loading | VideoPlaybackState::Buffering | VideoPlaybackState::Error(_)
+        VideoPlaybackState::Idle
+            | VideoPlaybackState::Loading
+            | VideoPlaybackState::Buffering
+            | VideoPlaybackState::Error(_)
     )
 }
 

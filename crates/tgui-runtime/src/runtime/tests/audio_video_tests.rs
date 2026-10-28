@@ -624,3 +624,150 @@ fn hover_path_keeps_video_surface_hit_testing_when_scene_is_cached() {
     assert_eq!(handler.hover_path(viewport).len(), 1);
     assert_eq!(handler.hover_path(viewport).len(), 1);
 }
+
+#[cfg(feature = "video")]
+#[test]
+fn video_settings_inside_scrolled_content_accept_pointer_input() {
+    let invalidation = InvalidationSignal::new();
+    let context = ViewModelContext::new(invalidation.clone(), AnimationCoordinator::default());
+    let controller = VideoController::new(&context);
+    let player: Element<TestVm> = crate::video::Video::new(controller.clone())
+        .size(dp(400.0), dp(270.0))
+        .shrink(0.0)
+        .show_looping(true)
+        .show_playback_rate(true)
+        .into();
+    let root: Element<TestVm> = Flex::vertical()
+        .size(dp(640.0), dp(360.0))
+        .overflow(Overflow::Scroll)
+        .child(Stack::<TestVm>::new().height(dp(600.0)).shrink(0.0))
+        .child(player)
+        .into();
+    let scroll_id = root.id;
+    let mut handler = test_handler_with_config(
+        TestVm,
+        Some(WidgetTree::new(root)),
+        invalidation,
+        test_config_with_size(640.0, 360.0),
+    );
+    handler.reduced_motion = true;
+    let max_offset = handler
+        .computed_scene()
+        .scroll_regions
+        .iter()
+        .find(|region| region.id == scroll_id)
+        .unwrap()
+        .max_offset();
+    handler.set_scroll_offset(scroll_id, max_offset);
+    let _ = handler.computed_scene();
+    let layout = handler
+        .cached_scene
+        .as_ref()
+        .unwrap()
+        .layout
+        .as_ref()
+        .unwrap();
+    let trigger_id = layout
+        .all_widget_ids()
+        .find(|id| {
+            layout.resolved_widget(*id).is_some_and(|widget| {
+                widget
+                    .visual
+                    .accessibility_label
+                    .as_ref()
+                    .is_some_and(|label| label.resolve() == "Playback settings")
+            })
+        })
+        .expect("settings trigger");
+    let rect = handler
+        .computed_scene()
+        .hit_regions
+        .iter()
+        .find(|hit| hit.interaction.widget_id() == trigger_id)
+        .unwrap()
+        .rect;
+    let click = |handler: &mut BoundRuntimeHandler<TestVm>, rect: Rect| {
+        handler.cursor_position = Some(Point::new(
+            rect.x + rect.width * 0.5,
+            rect.y + rect.height * 0.5,
+        ));
+        let viewport = handler.viewport_rect();
+        handler.handle_mouse_press(viewport, Instant::now(), CanvasMouseButton::Left);
+    };
+    assert!(
+        rect.y >= 0.0 && rect.y + rect.height <= 360.0,
+        "trigger must be visible: {rect:?}"
+    );
+    click(&mut handler, rect);
+    assert!(
+        handler
+            .computed_scene()
+            .overlay_close_handlers
+            .iter()
+            .any(|handle| handle.close_on_escape),
+        "settings must open after pointer activation"
+    );
+    let loop_rect = handler
+        .computed_scene()
+        .overlay_hit_regions
+        .iter()
+        .find(|hit| hit.interaction.keyboard_activation().is_some())
+        .expect("loop button")
+        .rect;
+    click(&mut handler, loop_rect);
+    assert!(controller.looping().get());
+    let (rate_id, rate_rect) = handler
+        .computed_scene()
+        .overlay_hit_regions
+        .iter()
+        .find_map(|hit| match hit.interaction {
+            HitInteraction::SelectTrigger { id, .. } => Some((id, hit.rect)),
+            _ => None,
+        })
+        .expect("speed selector");
+    click(&mut handler, rate_rect);
+    // Recollection must preserve the actual Select ID, not just its wrapper.
+    assert_eq!(handler.resolved_select_open_state(rate_id), Some(true));
+    let option = handler
+        .computed_scene()
+        .overlay_hit_regions
+        .iter()
+        .find_map(|hit| match hit.interaction {
+            HitInteraction::SelectOption {
+                id,
+                option_index: 1,
+                ..
+            } if id == rate_id => Some(hit.rect),
+            _ => None,
+        })
+        .unwrap_or_else(|| {
+            panic!(
+                "0.5x option must be interactive; overlay targets: {:?}",
+                handler
+                    .computed_scene()
+                    .overlay_hit_regions
+                    .iter()
+                    .map(|hit| hit.interaction.target_id())
+                    .collect::<Vec<_>>()
+            )
+        });
+    click(&mut handler, option);
+    assert_eq!(controller.playback_rate().get(), 0.5);
+    assert_eq!(handler.focused_widget_id(), Some(rate_id));
+    assert!(
+        handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::ArrowDown)))
+    );
+    handler.invalidate_computed_scene();
+    let _ = handler.computed_scene();
+    assert!(
+        handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::ArrowDown)))
+    );
+    assert!(
+        handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::ArrowDown)))
+    );
+    assert!(handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::Enter))));
+    assert_eq!(controller.playback_rate().get(), 0.75);
+    assert_eq!(handler.focused_widget_id(), Some(rate_id));
+    assert!(handler.handle_keyboard_input(&pressed_key_event(PhysicalKey::Code(KeyCode::Escape))));
+    assert_eq!(handler.focused_widget_id(), Some(trigger_id));
+}

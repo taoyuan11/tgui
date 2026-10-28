@@ -27,7 +27,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 .map(|resolved| &resolved.kind),
             Some(ResolvedWidgetKind::Select { .. })
         ) {
-            focused_id
+            Some(focused_id)
         } else {
             layout.all_widget_ids().find(|owner_id| {
                 layout
@@ -38,7 +38,33 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                         }
                         _ => false,
                     })
-            })?
+            })
+        };
+        let Some(owner_id) = owner_id else {
+            // Popover contents are collected separately and do not appear in the
+            // main layout index. Their retained Select options still own focus.
+            return layout.all_widget_ids().find_map(|id| {
+                let popover = layout.resolved_widget(id)?.popover.as_ref()?;
+                if !popover.is_open() || popover.disabled.resolve() {
+                    return None;
+                }
+                let (owner_id, options, on_open_change) =
+                    popover.content.select_for_focus(focused_id)?;
+                Some(SelectKeyboardSnapshot {
+                    owner_id,
+                    on_open_change,
+                    options: options
+                        .iter()
+                        .enumerate()
+                        .map(|(option_index, option)| SelectKeyboardOption {
+                            widget_id: option.widget_id,
+                            option_index,
+                            disabled: option.disabled.resolve(),
+                            on_select: option.on_select.clone(),
+                        })
+                        .collect(),
+                })
+            });
         };
         let resolved = layout.resolved_widget(owner_id)?;
         let ResolvedWidgetKind::Select {

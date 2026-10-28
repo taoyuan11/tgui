@@ -344,7 +344,10 @@ fn build_popover_scene<VM: 'static>(
                         .accessibility_fragments
                         .push(accessibility_fragment);
                 }
-                computed.finalize_portals(context.viewport);
+                // Keep nested portals deferred: the parent overlay collector rebases
+                // their anchors into window coordinates before solving placement.
+                // Flattening here clips dropdown hits to the popover's content box
+                // and loses their close handlers and independent overlay layer.
                 Some((computed, size))
             })
         });

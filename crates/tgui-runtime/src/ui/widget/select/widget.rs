@@ -465,3 +465,44 @@ where
             .into(),
     }
 }
+
+/// A select in independently collected popover content is absent from the main
+/// resolved layout. Query its retained element tree for keyboard navigation.
+impl<VM> Element<VM> {
+    pub(crate) fn select_for_focus(
+        &self,
+        focused_id: WidgetId,
+    ) -> Option<(
+        WidgetId,
+        Vec<SelectOptionState<VM>>,
+        Option<ValueCommand<VM, bool>>,
+    )> {
+        if let WidgetKind::Select {
+            options,
+            on_open_change,
+            disabled,
+            ..
+        } = &self.kind
+        {
+            if !disabled.resolve()
+                && (self.id == focused_id
+                    || options.iter().any(|option| option.widget_id == focused_id))
+            {
+                return Some((self.id, options.clone(), on_open_change.clone()));
+            }
+        }
+        if let WidgetKind::Container { children, .. } = &self.kind {
+            for source in children {
+                for child in source.resolve(Some(self.id)) {
+                    if let Some(select) = child.select_for_focus(focused_id) {
+                        return Some(select);
+                    }
+                }
+            }
+        }
+        self.popover
+            .as_ref()
+            .filter(|popover| popover.is_open() && !popover.disabled.resolve())
+            .and_then(|popover| popover.content.select_for_focus(focused_id))
+    }
+}

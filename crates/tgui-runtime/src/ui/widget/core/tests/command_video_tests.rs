@@ -472,6 +472,10 @@ fn collect_clickable_elements<VM>(element: &Element<VM>, out: &mut Vec<Element<V
             }
         }
     }
+    // Inspect settings content as well as the always-visible transport controls.
+    if let Some(popover) = &element.popover {
+        collect_clickable_elements(&popover.content, out);
+    }
 }
 
 #[cfg(feature = "video")]
@@ -504,6 +508,10 @@ fn collect_icon_sources<VM>(element: &Element<VM>, out: &mut Vec<SvgIconId>) {
             }
         }
     }
+    // Inspect settings content as well as the always-visible transport controls.
+    if let Some(popover) = &element.popover {
+        collect_icon_sources(&popover.content, out);
+    }
 }
 
 #[cfg(feature = "video")]
@@ -520,6 +528,10 @@ fn collect_visible_icon_sources<VM>(element: &Element<VM>, out: &mut Vec<SvgIcon
             }
         }
     }
+    // Inspect settings content as well as the always-visible transport controls.
+    if let Some(popover) = &element.popover {
+        collect_visible_icon_sources(&popover.content, out);
+    }
 }
 
 #[cfg(feature = "video")]
@@ -533,6 +545,10 @@ fn collect_slider_elements<VM>(element: &Element<VM>, out: &mut Vec<Element<VM>>
                 collect_slider_elements(&resolved, out);
             }
         }
+    }
+    // Inspect settings content as well as the always-visible transport controls.
+    if let Some(popover) = &element.popover {
+        collect_slider_elements(&popover.content, out);
     }
 }
 
@@ -548,6 +564,10 @@ fn collect_select_elements<VM>(element: &Element<VM>, out: &mut Vec<Element<VM>>
             }
         }
     }
+    // Inspect settings content as well as the always-visible transport controls.
+    if let Some(popover) = &element.popover {
+        collect_select_elements(&popover.content, out);
+    }
 }
 
 #[cfg(feature = "video")]
@@ -561,6 +581,10 @@ fn collect_text_contents<VM>(element: &Element<VM>, out: &mut Vec<String>) {
                 collect_text_contents(&resolved, out);
             }
         }
+    }
+    // Inspect settings content as well as the always-visible transport controls.
+    if let Some(popover) = &element.popover {
+        collect_text_contents(&popover.content, out);
     }
 }
 
@@ -748,7 +772,9 @@ fn video_track_lists_update_and_clear_on_the_existing_tree() {
     shared.audio_tracks.set(Vec::new());
     let options = select_options();
     assert_eq!(options.len(), 1);
-    assert!(options[0].iter().all(|label| label.starts_with("Subs:")));
+    assert!(options[0]
+        .iter()
+        .all(|label| label == "Off" || label.starts_with("Subs:")));
     shared.subtitle_tracks.set(Vec::new());
     assert!(select_options().is_empty());
 }
@@ -1013,9 +1039,9 @@ fn video_player_play_button_forwards_by_state() {
     let cases = [
         (
             VideoPlaybackState::Idle,
-            (1, 0, 0),
+            (0, 0, 0),
             SvgIconId::PlayArrow,
-            false,
+            true,
         ),
         (
             VideoPlaybackState::Ready,
@@ -1217,8 +1243,19 @@ fn video_player_looping_toggle_forwards_changes() {
 
     let mut clickables = Vec::new();
     collect_clickable_elements(&tree.root, &mut clickables);
-    assert_eq!(clickables.len(), 2);
-    let command = clickables[1]
+    assert_eq!(clickables.len(), 3);
+    let command = clickables
+        .iter()
+        .find(|element| {
+            element
+                .visual
+                .accessibility_label
+                .as_ref()
+                .map(Value::resolve)
+                .as_deref()
+                == Some("Enable loop")
+        })
+        .expect("loop control")
         .interactions
         .on_click
         .clone()
@@ -1273,10 +1310,10 @@ fn video_player_playback_rate_selector_forwards_selection() {
     else {
         panic!("playback rate selector should be a Select");
     };
-    assert_eq!(selected_label.resolve(), Some("Speed: 1x".to_string()));
+    assert_eq!(selected_label.resolve(), Some("1×".to_string()));
     assert_eq!(options.len(), 9);
-    assert_eq!(options[0].label.resolve(), "Speed: 0.25x");
-    assert_eq!(options[5].label.resolve(), "Speed: 1.5x");
+    assert_eq!(options[0].label.resolve(), "0.25×");
+    assert_eq!(options[5].label.resolve(), "1.5×");
 
     options[5]
         .on_select
@@ -1323,10 +1360,10 @@ fn video_player_playback_rate_selector_tracks_external_custom_rates() {
     else {
         panic!("playback rate selector should be a Select");
     };
-    assert_eq!(selected_label.resolve(), Some("Speed: 1.33x".to_string()));
+    assert_eq!(selected_label.resolve(), Some("1.33×".to_string()));
     assert!(options
         .iter()
-        .any(|option| option.label.resolve() == "Speed: 1.33x"));
+        .any(|option| option.label.resolve() == "1.33×"));
 }
 
 #[cfg(feature = "video")]
@@ -1367,10 +1404,10 @@ fn video_player_audio_track_selector_forwards_selection() {
     else {
         panic!("audio track selector should be a Select");
     };
-    assert_eq!(selected_label.resolve(), Some("Audio: Auto".to_string()));
+    assert_eq!(selected_label.resolve(), Some("Auto".to_string()));
     assert_eq!(options.len(), 4);
-    assert_eq!(options[0].label.resolve(), "Audio: Auto");
-    assert_eq!(options[1].label.resolve(), "Audio: Off");
+    assert_eq!(options[0].label.resolve(), "Auto");
+    assert_eq!(options[1].label.resolve(), "Off");
     assert_eq!(options[2].label.resolve(), "Main (EN, 2ch, 48kHz)");
     assert_eq!(options[3].label.resolve(), "Commentary (FR, 6ch, 48kHz)");
 
@@ -1455,9 +1492,9 @@ fn video_player_subtitle_track_selector_forwards_selection() {
     else {
         panic!("subtitle track selector should be a Select");
     };
-    assert_eq!(selected_label.resolve(), Some("Subs: Off".to_string()));
+    assert_eq!(selected_label.resolve(), Some("Off".to_string()));
     assert_eq!(options.len(), 3);
-    assert_eq!(options[0].label.resolve(), "Subs: Off");
+    assert_eq!(options[0].label.resolve(), "Off");
     assert_eq!(options[1].label.resolve(), "Subs: English CC (EN, subrip)");
     assert_eq!(options[2].label.resolve(), "Subs: FR (ass)");
 
@@ -1992,6 +2029,13 @@ fn video_runtime_geometry_tracks_custom_style_on_the_same_tree() {
             })
             .size(dp(333.0), dp(187.0)),
     );
+    let mut controls = Vec::new();
+    collect_clickable_elements(&tree.root, &mut controls);
+    let settings = controls
+        .iter()
+        .find_map(|control| control.popover.as_ref())
+        .unwrap();
+    settings.internal_open.as_ref().unwrap().set(true);
     let font_manager = FontManager::new(&FontCatalog::default());
     let media = test_media();
     for (density, hit, volume, button, controls_gap) in [
@@ -2034,6 +2078,18 @@ fn video_runtime_geometry_tracks_custom_style_on_the_same_tree() {
         let mut layouts = Vec::new();
         let mut gaps = Vec::new();
         collect(&layout.resolved_root, &mut layouts, &mut gaps);
+        let settings_tree = WidgetTree::new((*settings.content).clone());
+        let settings_layout = settings_tree.build_scene_layout(
+            &font_manager,
+            &theme,
+            &media,
+            &mut animations,
+            UnitContext::default(),
+            &HashMap::new(),
+            &HashMap::new(),
+            Rect::new(0.0, 0.0, 400.0, 400.0),
+        );
+        collect(&settings_layout.resolved_root, &mut layouts, &mut gaps);
         assert!(layouts
             .iter()
             .any(|item| item.height == Some(Value::Static(crate::ui::layout::Length::Px(hit)))));
@@ -2566,4 +2622,176 @@ fn binding_driven_children_can_switch_component_types() {
         false,
     );
     assert!(!button_render.primitives.shapes.is_empty());
+}
+
+#[cfg(feature = "video")]
+#[test]
+fn video_compact_transport_keeps_controls_inside_frame_and_supports_keyboard() {
+    let (controller, _) = recorded_video_controller(
+        VideoPlaybackState::Ready,
+        Some(Duration::from_secs(3_726)),
+        false,
+    );
+    let tree: WidgetTree<()> = WidgetTree::new(
+        Video::new(controller)
+            .size(dp(280.0), dp(220.0))
+            .show_looping(true)
+            .show_playback_rate(true),
+    );
+    let mut controls = Vec::new();
+    collect_clickable_elements(&tree.root, &mut controls);
+    let transport = controls
+        .iter()
+        .filter(|control| {
+            control
+                .visual
+                .accessibility_label
+                .as_ref()
+                .map(Value::resolve)
+                .is_some_and(|label| {
+                    matches!(label.as_str(), "Play" | "Mute" | "Playback settings")
+                })
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(transport.len(), 3);
+    let fonts = FontManager::new(&FontCatalog::default());
+    let media = test_media();
+    for theme in [Theme::light(), Theme::dark()] {
+        let scene = tree.compute_scene(
+            &fonts,
+            &theme,
+            &media,
+            &mut AnimationEngine::default(),
+            None,
+            None,
+            &HashMap::new(),
+            Rect::new(0.0, 0.0, 280.0, 220.0),
+            None,
+            None,
+            None,
+            None,
+            false,
+        );
+        for control in &transport {
+            assert_eq!(control.focus.focusable, Some(true));
+            let hit = scene
+                .hit_regions
+                .iter()
+                .find(|hit| {
+                    hit.interaction
+                        .keyboard_activation()
+                        .is_some_and(|(id, enter, space)| id == control.id && enter && space)
+                })
+                .expect("transport control must support Enter and Space");
+            assert!(
+                hit.rect.x >= 0.0 && hit.rect.x + hit.rect.width <= 280.0,
+                "{:?}",
+                hit.rect
+            );
+            assert!(
+                hit.rect.y >= 0.0 && hit.rect.y + hit.rect.height <= 220.0,
+                "{:?}",
+                hit.rect
+            );
+        }
+        let time = scene
+            .scene
+            .texts
+            .iter()
+            .find(|text| text.content.contains("1:02:06"))
+            .unwrap();
+        assert!(time.frame.x + time.frame.width <= 280.0);
+        let style = VideoStyle::default_for_theme(&theme);
+        assert!(
+            time.frame.x
+                >= (style.gap + style.overlay_padding.left + style.control_button_size).get(),
+            "dock padding must reach the actual layout"
+        );
+        // Settings selectors and the volume slider must not add hidden tab stops.
+        assert_eq!(
+            scene
+                .hit_regions
+                .iter()
+                .filter(|hit| matches!(hit.interaction, HitInteraction::Slider { .. }))
+                .count(),
+            1
+        );
+    }
+}
+
+#[cfg(feature = "video")]
+#[test]
+fn video_settings_use_shared_close_and_focus_behavior_and_update_in_place() {
+    let (controller, shared, _) = recorded_video_controller_with_tracks_subtitle_and_placement(
+        VideoPlaybackState::Ready,
+        Some(Duration::from_secs(30)),
+        false,
+        Vec::new(),
+        VideoAudioTrackSelection::Auto,
+        Vec::new(),
+        VideoSubtitleTrackSelection::Disabled,
+        None,
+        None,
+        None,
+    );
+    let tree: WidgetTree<()> = WidgetTree::new(Video::new(controller).show_volume(false));
+    let settings = || {
+        let mut controls = Vec::new();
+        collect_clickable_elements(&tree.root, &mut controls);
+        controls
+            .into_iter()
+            .find(|control| control.popover.is_some())
+    };
+    assert!(settings().is_none(), "no empty settings panel");
+    shared.audio_tracks.set(vec![VideoAudioTrack {
+        stream_index: 1,
+        title: Some("中文 / English commentary".into()),
+        language: Some("zh".into()),
+        channels: 2,
+        sample_rate: 48_000,
+    }]);
+    let trigger = settings().expect("track discovery reveals settings");
+    let popover = trigger.popover.as_ref().unwrap();
+    assert!(popover.close_on_escape && popover.close_on_outside_click);
+    assert_eq!(popover.return_focus_to, Some(trigger.id));
+    assert!(!popover.is_open());
+    let selector_ids = || {
+        let mut selectors = Vec::new();
+        collect_select_elements(&popover.content, &mut selectors);
+        selectors
+            .into_iter()
+            .map(|selector| {
+                let WidgetKind::Select { options, .. } = selector.kind else {
+                    unreachable!()
+                };
+                (
+                    selector.id,
+                    options
+                        .into_iter()
+                        .map(|option| option.widget_id)
+                        .collect::<Vec<_>>(),
+                )
+            })
+            .collect::<Vec<_>>()
+    };
+    let initial_ids = selector_ids();
+    assert!(!initial_ids.is_empty());
+    assert_eq!(
+        selector_ids(),
+        initial_ids,
+        "popover recollection preserves select and option identities"
+    );
+    shared
+        .audio_track_selection
+        .set(VideoAudioTrackSelection::Disabled);
+    assert_eq!(
+        selector_ids(),
+        initial_ids,
+        "selection changes preserve selector focus targets"
+    );
+    shared.audio_tracks.set(Vec::new());
+    assert!(
+        settings().is_none(),
+        "clearing tracks removes the empty panel"
+    );
 }

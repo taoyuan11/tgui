@@ -351,6 +351,21 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                     }
                     continue;
                 }
+                // Selects inside popovers live outside the main layout index.
+                // They still own their arrow keys and activation on the Menu layer.
+                if let Some(is_open) = cached.computed.overlay_hit_regions.iter().find_map(|hit| {
+                    match &hit.interaction {
+                        HitInteraction::SelectTrigger { id, is_open, .. } if *id == source_id => {
+                            Some(*is_open)
+                        }
+                        _ => None,
+                    }
+                }) {
+                    if is_open {
+                        return None;
+                    }
+                    continue;
+                }
                 let source_is_open = resolved_source
                     .map(|resolved| {
                         if resolved.menu.is_some() {

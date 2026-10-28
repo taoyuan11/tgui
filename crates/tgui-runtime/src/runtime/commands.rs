@@ -302,6 +302,7 @@ impl<VM: 'static> BoundRuntimeHandler<VM> {
                 let Some(command) = command else { return };
                 self.execute_command(command);
                 let _ = self.set_select_open_state(*widget_id, false, on_open_change.as_ref());
+                let _ = self.restore_overlay_focus_if_needed(*widget_id);
             }
             ClickHandler::Canvas(command, context, button) => {
                 if let Some(position) = position {

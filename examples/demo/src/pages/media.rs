@@ -56,7 +56,9 @@ Button::new("加载").on_click(Command::new(|app: &mut App| {
 
 const CODE_VIDEO_PLAYER: &str = r#"Video::new(app.video_player.controller.clone())
     .width(pct(100.0))
-    .max_width(dp(400.0))
+    .max_width(dp(640.0))
+    .show_looping(true)
+    .show_playback_rate(true)
     .fit(ContentFit::Contain)"#;
 
 pub(crate) fn page(app: &App) -> Element<App> {
@@ -204,7 +206,7 @@ fn video_component(app: &App) -> Element<App> {
     demo_section::component_doc(
         app,
         "Video",
-        "Video 是浏览器式内置控制栏播放器；默认不加载任何本机资源，用户显式输入后再加载。",
+        "Video 将画面、进度与播放设置分层组织，控制面板随浅色／深色主题切换。",
         vec![
             UsageDemo::new(
                 "video/safe-load",
@@ -224,13 +226,28 @@ fn video_component(app: &App) -> Element<App> {
             ),
             UsageDemo::new(
                 "video/player",
-                "浏览器式播放器",
-                "Video 在画面底部覆盖 SVG 图标控制栏，组合播放、seek、缓冲、时间、音量和状态文本。",
+                "主题化播放器",
+                "底部面板保留播放、时间与静音；通过设置调整音量、循环、倍速、音轨与字幕。支持 Tab、Enter / Space、滑块方向键和 Esc 关闭设置。",
                 Video::new(app.video_player.controller.clone())
                     .width(pct(100.0))
-                    .max_width(dp(400.0))
+                    .max_width(dp(640.0))
+                    .show_looping(true)
+                    .show_playback_rate(true)
                     .fit(ContentFit::Contain),
                 CODE_VIDEO_PLAYER,
+            ),
+            UsageDemo::new(
+                "video/compact",
+                "紧凑播放器",
+                "280dp 宽度下保持主要操作可见；次要设置使用相同浮层，不挤占播放进度。",
+                Video::new(app.video_player.controller.clone())
+                    .size(dp(280.0), dp(220.0))
+                    .show_looping(true)
+                    .show_playback_rate(true),
+                r#"Video::new(app.video_player.controller.clone())
+    .size(dp(280.0), dp(220.0))
+    .show_looping(true)
+    .show_playback_rate(true)"#,
             ),
         ],
     )

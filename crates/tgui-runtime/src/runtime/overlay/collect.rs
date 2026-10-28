@@ -403,9 +403,13 @@ pub(crate) fn emit_overlay<VM>(
 }
 
 pub(crate) fn finalize_portal_entries<VM>(computed: &mut ComputedScene<VM>, viewport: Rect) {
-    let entries = std::mem::take(&mut computed.portal_entries);
-    for entry in entries {
-        finalize_portal_entry(computed, viewport, entry);
+    // A parent scene may enqueue nested portals after rebasing their anchors.
+    // Drain those in the same frame, preserving each portal's own layer and clip.
+    while !computed.portal_entries.is_empty() {
+        let entries = std::mem::take(&mut computed.portal_entries);
+        for entry in entries {
+            finalize_portal_entry(computed, viewport, entry);
+        }
     }
 }
 
