@@ -25,7 +25,6 @@ cargo run --manifest-path examples/basic_window/Cargo.toml
 | 示例 | 关注点 | 可搭配阅读 |
 | --- | --- | --- |
 | `basic_window` | 最基础窗口启动、标题、窗口大小和根视图。 | [快速开始](/guide/quick-start)、[应用与窗口](/guide/application) |
-| `packaging` | 安装器、资源路径、用户数据和可选音视频分发；开发运行需指定 `--resource-dir`。 | [应用打包与安装器](/guide/packaging) |
 | `mvvm_counter` | MVVM 状态和命令，最小可交互应用。 | [MVVM 状态模型](/guide/mvvm) |
 | `animation_showcase` | 声明式属性动画、主题变化过渡。 | [主题与样式](/features/theme) |
 | `timeline_controller` | 时间线动画控制、keyframes 和播放控制。 | [MVVM 状态模型](/guide/mvvm) |

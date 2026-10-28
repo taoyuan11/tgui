@@ -28,7 +28,6 @@ export default defineConfig({
         items: [
           { text: '快速开始', link: '/guide/quick-start' },
           { text: '环境配置', link: '/guide/environment' },
-          { text: '应用打包与安装器', link: '/guide/packaging' },
           { text: '应用与窗口', link: '/guide/application' },
           { text: 'MVVM 状态模型', link: '/guide/mvvm' }
         ]

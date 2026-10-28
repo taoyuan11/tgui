@@ -34,18 +34,6 @@ cargo run --manifest-path examples/mvvm_counter/Cargo.toml
 
 ## 桌面示例说明
 
-### `packaging`
-
-桌面安装包示例，演示 `AppPaths`、外部资源、用户数据与日志目录，以及可选 `media` feature 的音视频分发。
-
-```sh
-cargo run -p packaging -- --resource-dir "$PWD/examples/packaging"
-cargo run -p packaging --features media -- --resource-dir "$PWD/examples/packaging" --smoke-test
-cargo tgui bundle -p packaging --locked
-```
-
-完整配置和平台要求见[打包指南](../docs/guide/packaging.md)。
-
 ### `basic_window`
 
 最小完整窗口示例。演示 `Application`、窗口大小、主题设置和最基本的组件树结构。

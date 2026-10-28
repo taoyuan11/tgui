@@ -1,8 +1,5 @@
 //! 平台抽象层，统一导出 winit 相关基础类型与后端封装。
 
-mod app_paths;
-pub use app_paths::AppPaths;
-
 pub mod dpi {
     pub use dpi::*;
 }

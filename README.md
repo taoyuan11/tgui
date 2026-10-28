@@ -144,18 +144,6 @@ tgui = { version = "0.2.0", features = ["video"] }
 
 移动端支持说明：当前版本暂时放弃 Android、HarmonyOS / OpenHarmony 等移动端支持，相关入口、feature、示例和平台依赖已经移除。`tgui` 目前聚焦 Windows、macOS 与 Linux 桌面端。
 
-## 应用打包与安装器
-
-独立工具 `cargo-tgui` 为应用提供原生桌面打包：Windows x64 的 NSIS EXE、macOS x64/arm64 的 APP/DMG，以及 Linux x64 的 DEB/AppImage。支持资源映射、FFmpeg 动态依赖收集、覆盖升级与卸载，并输出依赖清单和 SHA-256。
-
-```sh
-cargo install --path crates/cargo-tgui --locked
-cargo tgui doctor --manifest-path examples/packaging/Cargo.toml
-cargo tgui bundle --manifest-path examples/packaging/Cargo.toml --locked
-```
-
-应用在 `[package.metadata.tgui.bundle]` 配置打包信息，通过 `tgui::platform::AppPaths` 读取安装后资源及用户数据/日志目录。首版产出本地和 CI 安装包，不执行发布签名、公证、自动更新或 GitHub Release 上传。完整配置、平台依赖与 CI 使用见[打包指南](./docs/guide/packaging.md)。
-
 ## 仓库结构
 
 仓库现在是多成员 Cargo workspace。根包仍是公开 crate `tgui`，`src/lib.rs` 只作为兼容门面保留稳定的 `tgui::...` API 路径；主要实现位于 `crates/tgui-runtime/`，内部边界 crate 位于 `crates/tgui-core`、`crates/tgui-platform`、`crates/tgui-log`、`crates/tgui-mvvm`、`crates/tgui-media`、`crates/tgui-ui`、`crates/tgui-rendering`。

@@ -1,1 +1,0 @@
-Packaged resources are available — 安装后的资源读取正常。
