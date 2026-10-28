@@ -58,6 +58,8 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: '3.13'
+      - name: Test packaging CI manifest handling
+        run: python .github/scripts/packaging_ci_test.py
       - uses: ilammy/msvc-dev-cmd@v1
         if: runner.os == 'Windows'
       - uses: Swatinem/rust-cache@v2
